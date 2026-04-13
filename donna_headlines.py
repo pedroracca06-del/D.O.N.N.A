@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import os
-import time
 import requests
+import json
 
 print("HEADLINES FILE LOADED")
 
@@ -19,26 +19,17 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not NEWSAPI_KEY:
-    raise RuntimeError("Missing NEWSAPI_KEY in .env")
-
-if not TELEGRAM_BOT_TOKEN:
-    raise RuntimeError("Missing TELEGRAM_BOT_TOKEN in .env")
-
-if not TELEGRAM_CHAT_ID:
-    raise RuntimeError("Missing TELEGRAM_CHAT_ID in .env")
+RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
 
 # =========================
 # SETTINGS
 # =========================
-POLL_SECONDS = 900          # 15 minutes
 PAGE_SIZE = 20
 MIN_SEVERITY_TO_ALERT = 3
 REQUEST_TIMEOUT = 25
 
 seen_urls: set[str] = set()
 
-# Broad macro / geopolitical / policy scan
 NEWS_QUERY = (
     '("Trump" OR "Donald Trump" OR "White House" OR tariff OR sanctions '
     'OR Iran OR Israel OR missile OR airstrike OR war OR ceasefire OR oil '
@@ -63,14 +54,18 @@ HIGH_RISK_TERMS = [
 ]
 
 HEADERS = {
-    "X-Api-Key": NEWSAPI_KEY,
+    "X-Api-Key": NEWSAPI_KEY or "",
     "User-Agent": "DonnaHeadlineGuard/1.0",
 }
+
 
 # =========================
 # TELEGRAM
 # =========================
 def send_telegram_message(text: str) -> dict:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return {"error": "Missing Telegram credentials"}
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -81,16 +76,66 @@ def send_telegram_message(text: str) -> dict:
     response.raise_for_status()
     return response.json()
 
+
+# =========================
+# RISK STATE
+# =========================
+def load_risk_state() -> dict:
+    default_state = {
+        "macro_risk": "low",
+        "headline_risk": "low",
+        "active_warnings": [],
+        "next_event": "",
+        "minutes_to_event": None,
+        "last_headline": "",
+        "last_updated": "",
+    }
+
+    try:
+        if not RISK_STATE_FILE.exists():
+            return default_state
+
+        with open(RISK_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return default_state
+
+        merged = {**default_state, **data}
+        if not isinstance(merged.get("active_warnings"), list):
+            merged["active_warnings"] = []
+
+        return merged
+    except Exception:
+        return default_state
+
+
+def save_risk_state_headline(headline_risk: str, active_warnings: list[str], last_headline: str) -> None:
+    state = load_risk_state()
+
+    macro_warnings = [
+        w for w in state.get("active_warnings", [])
+        if not str(w).startswith("HEADLINE:")
+    ]
+
+    headline_prefixed = [f"HEADLINE: {w}" for w in active_warnings]
+
+    state["headline_risk"] = headline_risk
+    state["active_warnings"] = macro_warnings + headline_prefixed
+    state["last_headline"] = last_headline
+    state["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+    with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
 # =========================
 # NEWSAPI
 # =========================
 def fetch_newsapi_headlines() -> list[dict]:
-    """
-    NewsAPI Everything endpoint:
-    - boolean / phrase search in q
-    - sort by publishedAt
-    - english only
-    """
+    if not NEWSAPI_KEY:
+        raise RuntimeError("Missing NEWSAPI_KEY")
+
     base_url = "https://newsapi.org/v2/everything"
 
     now_utc = datetime.now(timezone.utc)
@@ -121,6 +166,7 @@ def fetch_newsapi_headlines() -> list[dict]:
         return []
 
     return articles
+
 
 # =========================
 # SCORING
@@ -200,12 +246,45 @@ def build_message(article: dict, score: int) -> str:
         f"{url}"
     )
 
+
+def derive_headline_risk(articles: list[dict]) -> tuple[str, list[str], str]:
+    best_score = 0
+    best_title = ""
+    warnings: list[str] = []
+
+    for article in articles:
+        title = str(article.get("title", "")).strip()
+        description = str(article.get("description", "")).strip()
+        source_name = str(article.get("source", {}).get("name", "")).strip()
+
+        if not title:
+            continue
+
+        score = score_headline(title, description, source_name)
+        if score > best_score:
+            best_score = score
+            best_title = title
+
+    if best_score >= 6:
+        warnings.append("High-risk macro/geopolitical headline environment")
+        return "high", warnings, best_title
+
+    if best_score >= 3:
+        warnings.append("Moderate headline risk in market backdrop")
+        return "medium", warnings, best_title
+
+    return "low", [], ""
+
+
 # =========================
 # MAIN PROCESS
 # =========================
-def process_headlines() -> None:
+def process_headlines_cycle() -> None:
     print("Checking headlines...")
     articles = fetch_newsapi_headlines()
+
+    headline_risk, warnings, last_headline = derive_headline_risk(articles)
+    save_risk_state_headline(headline_risk, warnings, last_headline)
 
     if not articles:
         print("Donna Headline Guard: no matching headlines.")
@@ -238,26 +317,6 @@ def process_headlines() -> None:
 
     if sent_count == 0:
         print("Donna Headline Guard: nothing severe enough to alert.")
-
-
-def main() -> None:
-    print("Donna Headline Guard started.")
-    while True:
-        try:
-            process_headlines()
-            time.sleep(POLL_SECONDS)
-
-        except Exception as e:
-            msg = str(e)
-            print("Donna Headline Guard error:", msg)
-
-            if "429" in msg:
-                print("NewsAPI rate limited. Sleeping 30 minutes...")
-                time.sleep(1800)
-            else:
-                print("Generic headline guard error. Sleeping 15 minutes...")
-                time.sleep(900)
-
 
 if __name__ == "__main__":
     main()
