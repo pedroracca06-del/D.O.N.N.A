@@ -15,7 +15,8 @@ from donna_finnhub import process_finnhub_cycle
 # ==================================================
 # ENV
 # ==================================================
-env_path = Path(__file__).parent / ".env"
+BASE_DIR = Path(__file__).parent
+env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -25,10 +26,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY")
-
 if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError("Missing TELEGRAM_BOT_TOKEN")
-
 if not TELEGRAM_CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_CHAT_ID")
 
@@ -38,7 +37,6 @@ app = FastAPI(title="DONNA MASTER CORE")
 # ==================================================
 # FILES
 # ==================================================
-BASE_DIR = Path(__file__).parent
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 
 # ==================================================
@@ -62,7 +60,8 @@ Analyze ES/NQ futures alerts and return a decisive execution briefing.
 
 Rules:
 - Consider setup quality, score, market state, bias, session, liquidity, and live risk conditions.
-- Respect fusion-adjusted verdict guidance.
+- Respect the fusion-adjusted verdict guidance.
+- Respect confidence guidance.
 - High risk conditions should reduce confidence or downgrade verdicts.
 - Keep responses tight.
 - No fluff.
@@ -84,7 +83,6 @@ Summary: 1 hard-hitting line
 # ==================================================
 def send_telegram_message(text: str) -> dict:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text
@@ -233,38 +231,27 @@ def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
     is_nq = "NQ" in ticker or "MNQ" in ticker or "NASDAQ" in ticker
     is_es = "ES" in ticker or "MES" in ticker or "SPX" in ticker or "SPY" in ticker
 
-    # -------------------------
-    # NQ LOGIC
-    # -------------------------
+    # NQ = tech + macro sensitive
     if is_nq:
         if macro == "high":
             return "SKIP"
-
         if market == "high" and base_verdict == "TAKE":
             return "CAUTION"
-
         if macro == "medium" and base_verdict == "TAKE":
             return "CAUTION"
-
         if headline == "high":
             return "CAUTION" if base_verdict == "TAKE" else "SKIP"
 
-    # -------------------------
-    # ES LOGIC
-    # -------------------------
+    # ES = macro first
     if is_es:
         if macro == "high":
             return "SKIP"
-
         if macro == "medium" and base_verdict == "TAKE":
             return "CAUTION"
-
         if headline == "high" and base_verdict == "TAKE":
             return "CAUTION"
 
-    # -------------------------
     # General fallback
-    # -------------------------
     high_count = sum(x == "high" for x in [macro, headline, market])
 
     if base_verdict == "TAKE" and high_count >= 1:
@@ -274,6 +261,44 @@ def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
         return "SKIP"
 
     return base_verdict
+
+
+def confidence_bias(risk: dict, data: dict) -> str:
+    macro = str(risk.get("macro_risk", "low")).lower()
+    headline = str(risk.get("headline_risk", "low")).lower()
+    market = str(risk.get("market_news_risk", "low")).lower()
+    ticker = str(data.get("ticker", "")).upper()
+
+    penalty = 0
+
+    if macro == "high":
+        penalty += 25
+    elif macro == "medium":
+        penalty += 12
+
+    if headline == "high":
+        penalty += 18
+    elif headline == "medium":
+        penalty += 8
+
+    if market == "high":
+        penalty += 15
+    elif market == "medium":
+        penalty += 6
+
+    if ("NQ" in ticker or "MNQ" in ticker) and market in ["medium", "high"]:
+        penalty += 5
+
+    if ("ES" in ticker or "MES" in ticker) and macro in ["medium", "high"]:
+        penalty += 5
+
+    if penalty >= 30:
+        return "Strongly reduce confidence."
+    elif penalty >= 15:
+        return "Reduce confidence."
+    elif penalty > 0:
+        return "Slightly reduce confidence."
+    return "Normal confidence."
 
 # ==================================================
 # PARSER
@@ -309,6 +334,7 @@ def build_prompt(data: dict) -> str:
     risk = load_risk_state()
     base_verdict = pre_verdict_engine(data)
     fusion = apply_fusion_overlay(base_verdict, risk, data)
+    confidence_note = confidence_bias(risk, data)
 
     warnings = ", ".join(risk["active_warnings"]) if risk["active_warnings"] else "none"
 
@@ -342,7 +368,9 @@ Minutes To Event: {risk["minutes_to_event"]}
 
 Deterministic Verdict: {base_verdict}
 Fusion Verdict: {fusion}
+Confidence Guidance: {confidence_note}
 """.strip()
+
 # ==================================================
 # FORMATTER
 # ==================================================
@@ -394,7 +422,6 @@ async def news_loop():
             await asyncio.to_thread(process_news_guard_cycle)
         except Exception as e:
             print("Donna News loop error:", str(e))
-
         await asyncio.sleep(NEWS_POLL_SECONDS)
 
 
@@ -404,7 +431,6 @@ async def headline_loop():
             await asyncio.to_thread(process_headlines_cycle)
         except Exception as e:
             print("Headline loop error:", str(e))
-
         await asyncio.sleep(HEADLINE_POLL_SECONDS)
 
 
@@ -414,7 +440,6 @@ async def finnhub_loop():
             await asyncio.to_thread(process_finnhub_cycle)
         except Exception as e:
             print("Finnhub loop error:", str(e))
-
         await asyncio.sleep(FINNHUB_POLL_SECONDS)
 
 # ==================================================
@@ -466,7 +491,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             raise HTTPException(status_code=400, detail="Empty body")
 
         payload = json.loads(text)
-
         background_tasks.add_task(process_signal, payload)
 
         return {
