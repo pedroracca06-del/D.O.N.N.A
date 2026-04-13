@@ -20,12 +20,42 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 BASE_DIR = Path(__file__).parent
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 
+# =========================
+# SETTINGS
+# =========================
 WATCHLIST = [
     "NVDA", "AAPL", "MSFT", "AMZN", "META",
     "TSLA", "GOOGL", "SPY", "QQQ"
 ]
 
-seen_news: set[str] = set()
+REQUEST_TIMEOUT = 25
+MIN_ALERT_SCORE = 6
+MAX_ALERTS_PER_CYCLE = 1
+
+HIGH_IMPACT_TERMS = [
+    "earnings",
+    "guidance",
+    "downgrade",
+    "upgrade",
+    "misses",
+    "beats",
+    "lawsuit",
+    "sec",
+    "investigation",
+    "bankruptcy",
+    "layoffs",
+    "ai",
+    "chips",
+    "forecast",
+    "warning",
+    "surges",
+    "plunges",
+]
+
+TOP_WEIGHT_SYMBOLS = {"NVDA", "AAPL", "MSFT", "AMZN", "META", "TSLA", "QQQ"}
+
+seen_urls: set[str] = set()
+seen_headlines: set[str] = set()
 
 # =========================
 # TELEGRAM
@@ -35,7 +65,6 @@ def send_telegram_message(text: str) -> dict:
         return {"error": "Missing Telegram credentials"}
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
@@ -114,15 +143,14 @@ def fetch_company_news(symbol: str) -> list[dict]:
     from_date = today - timedelta(days=2)
 
     url = "https://finnhub.io/api/v1/company-news"
-
     params = {
         "symbol": symbol,
         "from": from_date.isoformat(),
         "to": today.isoformat(),
-        "token": FINNHUB_API_KEY
+        "token": FINNHUB_API_KEY,
     }
 
-    response = requests.get(url, params=params, timeout=25)
+    response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
 
     data = response.json()
@@ -131,24 +159,11 @@ def fetch_company_news(symbol: str) -> list[dict]:
 # =========================
 # SCORING
 # =========================
-HIGH_IMPACT_TERMS = [
-    "earnings",
-    "guidance",
-    "downgrade",
-    "upgrade",
-    "misses",
-    "beats",
-    "lawsuit",
-    "sec",
-    "investigation",
-    "bankruptcy",
-    "layoffs",
-    "ai",
-    "chips",
-]
+def normalize_headline(text: str) -> str:
+    return " ".join(str(text).lower().split())
 
 
-def score_market_news(headline: str, summary: str = "") -> int:
+def score_market_news(symbol: str, headline: str, summary: str = "") -> int:
     text = f"{headline} {summary}".lower()
     score = 0
 
@@ -156,16 +171,25 @@ def score_market_news(headline: str, summary: str = "") -> int:
         if term in text:
             score += 2
 
-    if any(word in text for word in ["nvda", "apple", "microsoft", "tesla"]):
+    if any(word in text for word in ["federal reserve", "fed", "rates", "yield", "cpi", "inflation"]):
         score += 2
+
+    if any(word in text for word in ["nvda", "nvidia", "apple", "microsoft", "tesla", "amazon", "meta", "google"]):
+        score += 2
+
+    if symbol in TOP_WEIGHT_SYMBOLS:
+        score += 1
+
+    if any(word in text for word in ["sector update", "market today", "live coverage", "no contest"]):
+        score -= 2
 
     return score
 
 
 def severity_label(score: int) -> str:
-    if score >= 6:
+    if score >= 8:
         return "HIGH"
-    if score >= 3:
+    if score >= 6:
         return "MEDIUM"
     return "LOW"
 
@@ -180,17 +204,31 @@ def build_message(symbol: str, article: dict, score: int) -> str:
         f"Symbol: {symbol}\n"
         f"Severity: {severity}\n"
         f"Headline: {headline}\n\n"
-        f"Donna Guidance: Market-moving catalyst detected. Expect reaction in index flow.\n\n"
+        f"Donna Guidance: High-conviction company or sector catalyst detected. Expect index reaction.\n\n"
         f"{url}"
     )
+
+
+def derive_market_risk(best_score: int, best_headline: str) -> tuple[str, list[str], str]:
+    warnings: list[str] = []
+
+    if best_score >= 8:
+        warnings.append("High-impact company catalyst affecting index flow")
+        return "high", warnings, best_headline
+
+    if best_score >= 4:
+        warnings.append("Moderate market-moving company news")
+        return "medium", warnings, best_headline
+
+    return "low", [], best_headline
 
 # =========================
 # MAIN CYCLE
 # =========================
 def process_finnhub_cycle() -> None:
+    candidate_alerts: list[tuple[int, str, dict]] = []
     best_score = 0
     best_headline = ""
-    warnings = []
 
     for symbol in WATCHLIST:
         try:
@@ -199,7 +237,7 @@ def process_finnhub_cycle() -> None:
             print("Finnhub fetch error:", symbol, str(e))
             continue
 
-        for article in news[:3]:
+        for article in news[:5]:
             headline = str(article.get("headline", "")).strip()
             summary = str(article.get("summary", "")).strip()
             url = str(article.get("url", "")).strip()
@@ -207,26 +245,44 @@ def process_finnhub_cycle() -> None:
             if not headline or not url:
                 continue
 
-            uid = f"{symbol}|{url}"
-            score = score_market_news(headline, summary)
+            normalized = normalize_headline(headline)
+            score = score_market_news(symbol, headline, summary)
 
             if score > best_score:
                 best_score = score
                 best_headline = headline
 
-            if score >= 4  and uid not in seen_news:
-                msg = build_message(symbol, article, score)
-                result = send_telegram_message(msg)
-                print("Finnhub alert sent:", result)
-                seen_news.add(uid)
+            if url in seen_urls or normalized in seen_headlines:
+                continue
 
-    if best_score >= 6:
-        warnings.append("High-impact company catalyst affecting market")
-        risk = "high"
-    elif best_score >= 3:
-        warnings.append("Moderate market-moving company news")
-        risk = "medium"
-    else:
-        risk = "low"
+            if score >= MIN_ALERT_SCORE:
+                candidate_alerts.append((score, symbol, article))
 
-    save_market_state(risk, warnings, best_headline)
+    risk, warnings, last_headline = derive_market_risk(best_score, best_headline)
+    save_market_state(risk, warnings, last_headline)
+
+    if not candidate_alerts:
+        print("Donna Finnhub Guard: nothing strong enough to alert.")
+        return
+
+    candidate_alerts.sort(key=lambda x: x[0], reverse=True)
+
+    alerts_sent = 0
+    for score, symbol, article in candidate_alerts:
+        if alerts_sent >= MAX_ALERTS_PER_CYCLE:
+            break
+
+        headline = str(article.get("headline", "")).strip()
+        url = str(article.get("url", "")).strip()
+        normalized = normalize_headline(headline)
+
+        if url in seen_urls or normalized in seen_headlines:
+            continue
+
+        msg = build_message(symbol, article, score)
+        result = send_telegram_message(msg)
+        print("Finnhub alert sent:", result)
+
+        seen_urls.add(url)
+        seen_headlines.add(normalized)
+        alerts_sent += 1
