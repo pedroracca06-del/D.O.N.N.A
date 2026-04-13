@@ -223,23 +223,55 @@ def pre_verdict_engine(data: dict) -> str:
     return "SKIP"
 
 
-def apply_fusion_overlay(base_verdict: str, risk: dict) -> str:
-    macro = risk["macro_risk"]
-    headline = risk["headline_risk"]
-    market = risk["market_news_risk"]
+def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
+    macro = str(risk.get("macro_risk", "low")).lower()
+    headline = str(risk.get("headline_risk", "low")).lower()
+    market = str(risk.get("market_news_risk", "low")).lower()
 
-    high_count = sum(x == "high" for x in [macro, headline, market])
-    med_count = sum(x == "medium" for x in [macro, headline, market])
+    ticker = str(data.get("ticker", "")).upper()
 
-    if base_verdict == "TAKE":
-        if high_count >= 1:
-            return "CAUTION"
-        if med_count >= 2:
-            return "CAUTION"
+    is_nq = "NQ" in ticker or "MNQ" in ticker or "NASDAQ" in ticker
+    is_es = "ES" in ticker or "MES" in ticker or "SPX" in ticker or "SPY" in ticker
 
-    if base_verdict == "CAUTION":
-        if high_count >= 2:
+    # -------------------------
+    # NQ LOGIC
+    # -------------------------
+    if is_nq:
+        if macro == "high":
             return "SKIP"
+
+        if market == "high" and base_verdict == "TAKE":
+            return "CAUTION"
+
+        if macro == "medium" and base_verdict == "TAKE":
+            return "CAUTION"
+
+        if headline == "high":
+            return "CAUTION" if base_verdict == "TAKE" else "SKIP"
+
+    # -------------------------
+    # ES LOGIC
+    # -------------------------
+    if is_es:
+        if macro == "high":
+            return "SKIP"
+
+        if macro == "medium" and base_verdict == "TAKE":
+            return "CAUTION"
+
+        if headline == "high" and base_verdict == "TAKE":
+            return "CAUTION"
+
+    # -------------------------
+    # General fallback
+    # -------------------------
+    high_count = sum(x == "high" for x in [macro, headline, market])
+
+    if base_verdict == "TAKE" and high_count >= 1:
+        return "CAUTION"
+
+    if base_verdict == "CAUTION" and high_count >= 2:
+        return "SKIP"
 
     return base_verdict
 
