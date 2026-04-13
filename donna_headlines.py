@@ -25,7 +25,7 @@ RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
 # SETTINGS
 # =========================
 PAGE_SIZE = 20
-MIN_SEVERITY_TO_ALERT = 3
+MIN_SEVERITY_TO_ALERT = 2
 REQUEST_TIMEOUT = 25
 
 seen_urls: set[str] = set()
