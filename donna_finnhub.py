@@ -214,7 +214,7 @@ def process_finnhub_cycle() -> None:
                 best_score = score
                 best_headline = headline
 
-            if score >= 5 and uid not in seen_news:
+            if score >= 4  and uid not in seen_news:
                 msg = build_message(symbol, article, score)
                 result = send_telegram_message(msg)
                 print("Finnhub alert sent:", result)
