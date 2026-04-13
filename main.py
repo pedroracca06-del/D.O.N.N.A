@@ -4,20 +4,19 @@ from dotenv import load_dotenv
 from pathlib import Path
 import asyncio
 import os
-import requests
 import json
 import re
+import requests
 
 from donna_news import process_news_guard_cycle
 from donna_headlines import process_headlines_cycle
+from donna_finnhub import process_finnhub_cycle
 
-# =========================
-# ENV LOAD
-# =========================
+# ==================================================
+# ENV
+# ==================================================
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
-
-app = FastAPI(title="Donna Jarvis Core")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -34,44 +33,43 @@ if not TELEGRAM_CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_CHAT_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+app = FastAPI(title="DONNA MASTER CORE")
 
-# =========================
-# FILE PATHS
-# =========================
-RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
+# ==================================================
+# FILES
+# ==================================================
+BASE_DIR = Path(__file__).parent
+RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 
-# =========================
-# POLL SETTINGS
-# =========================
+# ==================================================
+# LOOP TIMERS
+# ==================================================
 NEWS_POLL_SECONDS = 60
 HEADLINE_POLL_SECONDS = 900
+FINNHUB_POLL_SECONDS = 600
 
-# =========================
-# DONNA SYSTEM PROMPT
-# =========================
+# ==================================================
+# SYSTEM PROMPT
+# ==================================================
 DONNA_SYSTEM_PROMPT = """
 You are Donna, an elite futures execution assistant.
 
-Your tone is cold, sharp, aggressive, and concise.
-You sound like a high-level execution desk assistant.
-You do not ramble. You do not hedge unnecessarily. You do not sound friendly or chatty.
+Tone:
+Cold. Sharp. Precise. Professional.
 
-Your job is to analyze ES/NQ futures alerts and issue a fast execution briefing.
+Job:
+Analyze ES/NQ futures alerts and return a decisive execution briefing.
 
 Rules:
-- Be decisive.
-- Prioritize structure, liquidity, session, market state, context strength, score, quality, and live risk conditions.
-- If alignment is strong, say TAKE.
-- If mixed, say CAUTION.
-- If weak, conflicting, poor quality, or risk-heavy, say SKIP.
-- Respect macro event proximity and breaking headline risk.
-- Keep every section tight.
+- Consider setup quality, score, market state, bias, session, liquidity, and live risk conditions.
+- Respect fusion-adjusted verdict guidance.
+- High risk conditions should reduce confidence or downgrade verdicts.
+- Keep responses tight.
 - No fluff.
-- No emojis inside the briefing.
-- Do not mention AI.
-- Do not restate raw JSON.
+- No emojis.
+- No AI disclaimers.
 
-Output format exactly:
+Format exactly:
 
 Verdict: TAKE / CAUTION / SKIP
 Confidence: X%
@@ -81,42 +79,30 @@ Execution: 1 short sentence
 Summary: 1 hard-hitting line
 """.strip()
 
-
-# =========================
+# ==================================================
 # TELEGRAM
-# =========================
+# ==================================================
 def send_telegram_message(text: str) -> dict:
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    if not bot_token or not chat_id:
-        print("Telegram credentials missing")
-        return {"error": "Telegram bot token or chat id missing"}
-
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
-        "chat_id": chat_id,
-        "text": text,
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text
     }
 
     try:
-        print("Sending Telegram message...")
-        response = requests.post(url, json=payload, timeout=15)
-        print("Telegram status:", response.status_code)
-        print("Telegram response:", response.text)
+        response = requests.post(url, json=payload, timeout=20)
         return response.json()
     except Exception as e:
-        print("Telegram error:", str(e))
         return {"error": str(e)}
 
-
-# =========================
+# ==================================================
 # HELPERS
-# =========================
-def safe_float(value, default: float = 0.0) -> float:
+# ==================================================
+def safe_float(value, default=0.0):
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except:
         return default
 
 
@@ -136,7 +122,7 @@ def normalize_payload(payload: dict) -> dict:
         "liquidity": str(payload.get("liquidity", "unknown")),
         "bias": str(payload.get("bias", "neutral")),
         "score": str(payload.get("score", "0")),
-        "quality": str(payload.get("quality", "NA")).upper(),
+        "quality": str(payload.get("quality", "NA")).upper()
     }
 
 
@@ -144,11 +130,13 @@ def load_risk_state() -> dict:
     default_state = {
         "macro_risk": "low",
         "headline_risk": "low",
+        "market_news_risk": "low",
         "active_warnings": [],
         "next_event": "",
         "minutes_to_event": None,
         "last_headline": "",
-        "last_updated": "",
+        "last_market_headline": "",
+        "last_updated": ""
     }
 
     try:
@@ -167,19 +155,21 @@ def load_risk_state() -> dict:
             merged["active_warnings"] = []
 
         return merged
-    except Exception as e:
-        print("Risk state load error:", str(e))
+
+    except:
         return default_state
 
-
+# ==================================================
+# VERDICT ENGINE
+# ==================================================
 def pre_verdict_engine(data: dict) -> str:
-    score = safe_float(data.get("score", 0))
-    quality = str(data.get("quality", "NA")).upper()
-    context = str(data.get("context_strength", "")).lower()
-    session = str(data.get("session", ""))
-    market_state = str(data.get("market_state", "")).lower()
-    bias = str(data.get("bias", "")).lower()
-    signal = str(data.get("signal", "")).upper()
+    score = safe_float(data["score"])
+    quality = data["quality"]
+    context = data["context_strength"].lower()
+    session = data["session"]
+    market_state = data["market_state"].lower()
+    bias = data["bias"].lower()
+    signal = data["signal"]
 
     points = 0
 
@@ -207,15 +197,13 @@ def pre_verdict_engine(data: dict) -> str:
         points += 3
     elif context == "moderate":
         points += 1
-    elif context == "light":
+    else:
         points -= 1
 
-    if session in ["NY", "London", "NY_PRE"]:
+    if session in ["NY", "NY_PRE", "London"]:
         points += 2
     elif session == "Asia":
         points -= 1
-    else:
-        points -= 2
 
     aligned = (
         (signal == "LONG" and market_state != "bearish" and bias != "bearish")
@@ -232,263 +220,144 @@ def pre_verdict_engine(data: dict) -> str:
         return "TAKE"
     elif points >= 5:
         return "CAUTION"
-    else:
-        return "SKIP"
+    return "SKIP"
 
 
-def apply_fusion_overlay(pre_verdict: str, risk_state: dict) -> str:
-    macro_risk = str(risk_state.get("macro_risk", "low")).lower()
-    headline_risk = str(risk_state.get("headline_risk", "low")).lower()
+def apply_fusion_overlay(base_verdict: str, risk: dict) -> str:
+    macro = risk["macro_risk"]
+    headline = risk["headline_risk"]
+    market = risk["market_news_risk"]
 
-    high_macro = macro_risk == "high"
-    high_headline = headline_risk == "high"
-    medium_macro = macro_risk == "medium"
-    medium_headline = headline_risk == "medium"
+    high_count = sum(x == "high" for x in [macro, headline, market])
+    med_count = sum(x == "medium" for x in [macro, headline, market])
 
-    if pre_verdict == "TAKE":
-        if high_macro or high_headline:
+    if base_verdict == "TAKE":
+        if high_count >= 1:
             return "CAUTION"
-        if medium_macro and medium_headline:
+        if med_count >= 2:
             return "CAUTION"
 
-    if pre_verdict == "CAUTION":
-        if high_macro and high_headline:
+    if base_verdict == "CAUTION":
+        if high_count >= 2:
             return "SKIP"
 
-    return pre_verdict
+    return base_verdict
 
-
-def build_precheck(data: dict) -> str:
-    signal = data["signal"]
-    session = data["session"]
-    context_strength = data["context_strength"].lower()
-    market_state = data["market_state"].lower()
-    bias = data["bias"].lower()
-    quality = data["quality"].upper()
-    score = safe_float(data["score"])
-    signal_priority = data["signal_priority"].lower()
-
-    alignment_good = (
-        (signal == "LONG" and market_state != "bearish" and bias != "bearish")
-        or
-        (signal == "SHORT" and market_state != "bullish" and bias != "bullish")
-    )
-
-    strong_session = session in {"London", "NY_PRE", "NY"}
-    weak_session = session in {"Asia", "OffHours", "unknown"}
-
-    notes = []
-
-    if quality == "A":
-        notes.append("high_quality")
-    elif quality == "B":
-        notes.append("decent_quality")
-    elif quality == "C":
-        notes.append("lower_quality")
-    else:
-        notes.append("unknown_quality")
-
-    if context_strength == "strong":
-        notes.append("strong_context")
-    elif context_strength == "moderate":
-        notes.append("moderate_context")
-    else:
-        notes.append("light_context")
-
-    if alignment_good:
-        notes.append("aligned_state")
-    else:
-        notes.append("conflicting_state")
-
-    if strong_session:
-        notes.append("good_session")
-    elif weak_session:
-        notes.append("weaker_session")
-
-    if signal_priority in {"continuation", "reversal"}:
-        notes.append("strong_signal_family")
-    elif signal_priority in {"liquidity", "liquidity_reaction", "fail", "failed_retrace"}:
-        notes.append("secondary_signal_family")
-    else:
-        notes.append("unknown_signal_family")
-
-    if score >= 75:
-        notes.append("high_score")
-    elif score >= 60:
-        notes.append("good_score")
-    elif score < 45:
-        notes.append("weak_score")
-
-    return ", ".join(notes)
-
-
-def extract_briefing_fields(raw_reply: str) -> dict:
-    if raw_reply is None:
+# ==================================================
+# PARSER
+# ==================================================
+def extract_fields(text: str) -> dict:
+    if not text:
         return {
             "verdict": "UNKNOWN",
             "confidence": "N/A",
-            "why": "No response returned from AI.",
+            "why": "No response.",
             "risk": "Unknown.",
             "execution": "Stand by.",
-            "summary": "No valid output.",
+            "summary": "No summary."
         }
 
-    text = str(raw_reply).strip()
-    text = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE).strip()
-    text = text.replace("```", "").strip()
-
-    json_match = re.search(r"\{[\s\S]*\}", text)
-    if json_match:
-        json_text = json_match.group(0).strip()
-        try:
-            data = json.loads(json_text)
-            return {
-                "verdict": str(data.get("verdict", "UNKNOWN")).strip().upper(),
-                "confidence": str(data.get("confidence", "N/A")).strip(),
-                "why": str(data.get("why", data.get("reason", "No reason provided."))).strip(),
-                "risk": str(data.get("risk", "Unknown.")).strip(),
-                "execution": str(data.get("execution", "Stand by.")).strip(),
-                "summary": str(data.get("summary", "No summary provided.")).strip(),
-            }
-        except Exception as e:
-            print("Primary JSON parse failed:", str(e))
-
-    verdict_match = re.search(r"Verdict:\s*(.+)", text, re.IGNORECASE)
-    confidence_match = re.search(r"Confidence:\s*(.+)", text, re.IGNORECASE)
-    why_match = re.search(r"Why:\s*(.+)", text, re.IGNORECASE)
-    risk_match = re.search(r"Risk:\s*(.+)", text, re.IGNORECASE)
-    execution_match = re.search(r"Execution:\s*(.+)", text, re.IGNORECASE)
-    summary_match = re.search(r"Summary:\s*(.+)", text, re.IGNORECASE)
+    def grab(label, default):
+        m = re.search(rf"{label}:\s*(.+)", text, re.IGNORECASE)
+        return m.group(1).strip() if m else default
 
     return {
-        "verdict": verdict_match.group(1).strip().upper() if verdict_match else "UNKNOWN",
-        "confidence": confidence_match.group(1).strip() if confidence_match else "N/A",
-        "why": why_match.group(1).strip() if why_match else "No reason provided.",
-        "risk": risk_match.group(1).strip() if risk_match else "Unknown.",
-        "execution": execution_match.group(1).strip() if execution_match else "Stand by.",
-        "summary": summary_match.group(1).strip() if summary_match else text,
+        "verdict": grab("Verdict", "UNKNOWN").upper(),
+        "confidence": grab("Confidence", "N/A"),
+        "why": grab("Why", "No reason."),
+        "risk": grab("Risk", "Unknown."),
+        "execution": grab("Execution", "Stand by."),
+        "summary": grab("Summary", text.strip())
     }
 
+# ==================================================
+# PROMPT BUILDER
+# ==================================================
+def build_prompt(data: dict) -> str:
+    risk = load_risk_state()
+    base_verdict = pre_verdict_engine(data)
+    fusion = apply_fusion_overlay(base_verdict, risk)
 
-def build_user_prompt(data: dict) -> str:
-    risk_state = load_risk_state()
-    precheck = build_precheck(data)
-    pre_verdict = pre_verdict_engine(data)
-    fusion_pre_verdict = apply_fusion_overlay(pre_verdict, risk_state)
-
-    warnings_text = ", ".join(risk_state["active_warnings"]) if risk_state["active_warnings"] else "none"
+    warnings = ", ".join(risk["active_warnings"]) if risk["active_warnings"] else "none"
 
     return f"""
-Analyze this futures trading alert and return the required execution briefing.
+Analyze this futures trading alert.
 
-Alert data:
-- Ticker: {data["ticker"]}
-- Price: {data["price"]}
-- Signal: {data["signal"]}
-- Timeframe: {data["timeframe"]}
-- Session: {data["session"]}
-- Setup type: {data["setup_type"]}
-- Signal priority: {data["signal_priority"]}
-- Context strength: {data["context_strength"]}
-- Market state: {data["market_state"]}
-- Scenario: {data["scenario"]}
-- Fib zone: {data["fib_zone"]}
-- Liquidity: {data["liquidity"]}
-- Bias: {data["bias"]}
-- Score: {data["score"]}
-- Quality: {data["quality"]}
+Alert:
+Ticker: {data["ticker"]}
+Price: {data["price"]}
+Signal: {data["signal"]}
+Timeframe: {data["timeframe"]}
+Session: {data["session"]}
+Setup: {data["setup_type"]}
+Priority: {data["signal_priority"]}
+Context: {data["context_strength"]}
+Market State: {data["market_state"]}
+Scenario: {data["scenario"]}
+Fib Zone: {data["fib_zone"]}
+Liquidity: {data["liquidity"]}
+Bias: {data["bias"]}
+Score: {data["score"]}
+Quality: {data["quality"]}
 
-Deterministic precheck:
-- {precheck}
+Risk Layer:
+Macro Risk: {risk["macro_risk"]}
+Headline Risk: {risk["headline_risk"]}
+Market News Risk: {risk["market_news_risk"]}
+Warnings: {warnings}
+Next Event: {risk["next_event"]}
+Minutes To Event: {risk["minutes_to_event"]}
 
-Deterministic pre-verdict:
-- {pre_verdict}
-
-Fusion-adjusted pre-verdict:
-- {fusion_pre_verdict}
-
-Fusion risk layer:
-- Macro risk: {risk_state["macro_risk"]}
-- Headline risk: {risk_state["headline_risk"]}
-- Active warnings: {warnings_text}
-- Next event: {risk_state["next_event"] or "none"}
-- Minutes to event: {risk_state["minutes_to_event"]}
-- Last headline: {risk_state["last_headline"] or "none"}
-- Risk state updated: {risk_state["last_updated"] or "unknown"}
-
-Interpretation goals:
-- Reward alignment between signal, bias, market state, and session.
-- Be stricter on low-quality, weak-context, Asia, or off-hours alerts.
-- If setup is continuation/reversal with strong context and alignment, lean TAKE.
-- If mixed, lean CAUTION.
-- If conflicting, weak, or poor quality, lean SKIP.
-- If macro risk is elevated, downgrade aggressive execution.
-- If headline risk is elevated, reduce confidence.
-- If both setup quality and risk conditions are poor, lean SKIP.
-- Respect the fusion-adjusted pre-verdict unless the broader context strongly justifies a tighter downgrade.
-- Execution should be brief and practical.
+Deterministic Verdict: {base_verdict}
+Fusion Verdict: {fusion}
 """.strip()
 
+# ==================================================
+# FORMATTER
+# ==================================================
+def format_message(data: dict, result: dict) -> str:
+    return f"""DONNA // {data['ticker']} // {data['signal']}
+{data['session']} | TF {data['timeframe']} | Price {data['price']}
 
-def format_telegram_message(data: dict, parsed: dict) -> str:
-    header = f"DONNA // {data['ticker']} // {data['signal']}"
-    meta = f"{data['session']} | TF {data['timeframe']} | Price {data['price']}"
+Verdict: {result['verdict']}
+Confidence: {result['confidence']}
+Why: {result['why']}
+Risk: {result['risk']}
+Execution: {result['execution']}
+Summary: {result['summary']}"""
 
-    return f"""{header}
-{meta}
-
-Verdict: {parsed['verdict']}
-Confidence: {parsed['confidence']}
-Why: {parsed['why']}
-Risk: {parsed['risk']}
-Execution: {parsed['execution']}
-Summary: {parsed['summary']}"""
-
-
-# =========================
-# CORE SIGNAL PROCESSOR
-# =========================
-def process_signal(payload: dict) -> None:
+# ==================================================
+# SIGNAL PROCESSOR
+# ==================================================
+def process_signal(payload: dict):
     try:
-        print("Processing payload in background:", payload)
-
         data = normalize_payload(payload)
-        print("Normalized payload:", data)
 
         if data["signal"] == "NONE":
-            print("Signal is NONE, skipping.")
             return
 
-        prompt = build_user_prompt(data)
-        print("Prompt built successfully.")
+        prompt = build_prompt(data)
 
         response = client.responses.create(
             model=OPENAI_MODEL,
             instructions=DONNA_SYSTEM_PROMPT,
             input=prompt,
-            max_output_tokens=220,
+            max_output_tokens=220
         )
 
-        raw_reply = response.output_text
-        print("Raw reply repr:", repr(raw_reply))
+        raw = response.output_text
+        parsed = extract_fields(raw)
 
-        parsed = extract_briefing_fields(raw_reply)
-        print("Parsed reply:", parsed)
-
-        message = format_telegram_message(data, parsed)
-        print("Final Telegram message:", message)
-
-        telegram_result = send_telegram_message(message)
-        print("Telegram result:", telegram_result)
+        msg = format_message(data, parsed)
+        send_telegram_message(msg)
 
     except Exception as e:
-        print("Processing error:", str(e))
+        print("Signal error:", str(e))
 
-
-# =========================
-# BACKGROUND LOOPS
-# =========================
-async def news_loop() -> None:
+# ==================================================
+# LOOPS
+# ==================================================
+async def news_loop():
     while True:
         try:
             await asyncio.to_thread(process_news_guard_cycle)
@@ -498,47 +367,40 @@ async def news_loop() -> None:
         await asyncio.sleep(NEWS_POLL_SECONDS)
 
 
-async def headline_loop() -> None:
+async def headline_loop():
     while True:
         try:
             await asyncio.to_thread(process_headlines_cycle)
         except Exception as e:
-            msg = str(e)
-            print("Donna Headline loop error:", msg)
-
-            if "429" in msg:
-                await asyncio.sleep(1800)
-                continue
+            print("Headline loop error:", str(e))
 
         await asyncio.sleep(HEADLINE_POLL_SECONDS)
 
 
+async def finnhub_loop():
+    while True:
+        try:
+            await asyncio.to_thread(process_finnhub_cycle)
+        except Exception as e:
+            print("Finnhub loop error:", str(e))
+
+        await asyncio.sleep(FINNHUB_POLL_SECONDS)
+
+# ==================================================
+# STARTUP
+# ==================================================
 @app.on_event("startup")
-async def startup_event():
+async def startup():
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
+    asyncio.create_task(finnhub_loop())
 
-
-# =========================
+# ==================================================
 # ROUTES
-# =========================
+# ==================================================
 @app.get("/")
 async def root():
     return {"status": "Donna is online"}
-
-
-@app.get("/check-env")
-async def check_env():
-    return {
-        "env_file_exists": env_path.exists(),
-        "risk_state_file_exists": RISK_STATE_FILE.exists(),
-        "openai_key_found": bool(os.getenv("OPENAI_API_KEY")),
-        "telegram_bot_found": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
-        "telegram_chat_found": bool(os.getenv("TELEGRAM_CHAT_ID")),
-        "te_api_key_found": bool(os.getenv("TE_API_KEY")),
-        "newsapi_key_found": bool(os.getenv("NEWSAPI_KEY")),
-        "openai_model": OPENAI_MODEL,
-    }
 
 
 @app.get("/risk-state")
@@ -546,40 +408,44 @@ async def risk_state():
     return load_risk_state()
 
 
+@app.get("/check-env")
+async def check_env():
+    return {
+        "openai_key_found": bool(OPENAI_API_KEY),
+        "telegram_found": bool(TELEGRAM_BOT_TOKEN),
+        "newsapi_found": bool(os.getenv("NEWSAPI_KEY")),
+        "finnhub_found": bool(os.getenv("FINNHUB_API_KEY")),
+        "risk_file_exists": RISK_STATE_FILE.exists(),
+        "model": OPENAI_MODEL
+    }
+
+
 @app.get("/test-telegram")
 async def test_telegram():
-    result = send_telegram_message("DONNA TEST — Telegram path is working")
-    return {"result": result}
+    return send_telegram_message("DONNA TEST MESSAGE")
 
 
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
-        raw_body = await request.body()
-        body_text = raw_body.decode("utf-8", errors="ignore").strip()
+        body = await request.body()
+        text = body.decode("utf-8").strip()
 
-        print("Raw webhook body:", repr(body_text))
+        if not text:
+            raise HTTPException(status_code=400, detail="Empty body")
 
-        if not body_text:
-            raise HTTPException(status_code=400, detail="Empty webhook body")
-
-        try:
-            payload = json.loads(body_text)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {str(e)}")
-
-        print("Received payload:", payload)
+        payload = json.loads(text)
 
         background_tasks.add_task(process_signal, payload)
 
         return {
             "status": "received",
-            "signal": payload.get("signal", "UNKNOWN"),
             "ticker": payload.get("ticker", "UNKNOWN"),
+            "signal": payload.get("signal", "UNKNOWN")
         }
 
-    except HTTPException:
-        raise
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
     except Exception as e:
-        print("Webhook error:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
