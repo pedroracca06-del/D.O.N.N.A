@@ -32,6 +32,11 @@ if not TELEGRAM_CHAT_ID:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =========================
+# FILE PATHS
+# =========================
+RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
+
+# =========================
 # DONNA SYSTEM PROMPT
 # =========================
 DONNA_SYSTEM_PROMPT = """
@@ -45,10 +50,11 @@ Your job is to analyze ES/NQ futures alerts and issue a fast execution briefing.
 
 Rules:
 - Be decisive.
-- Prioritize structure, liquidity, session, market state, context strength, score, and quality.
+- Prioritize structure, liquidity, session, market state, context strength, score, quality, and live risk conditions.
 - If alignment is strong, say TAKE.
 - If mixed, say CAUTION.
-- If weak, conflicting, or poor quality, say SKIP.
+- If weak, conflicting, poor quality, or risk-heavy, say SKIP.
+- Respect macro event proximity and breaking headline risk.
 - Keep every section tight.
 - No fluff.
 - No emojis inside the briefing.
@@ -122,6 +128,38 @@ def normalize_payload(payload: dict) -> dict:
     }
 
 
+def load_risk_state() -> dict:
+    default_state = {
+        "macro_risk": "low",
+        "headline_risk": "low",
+        "active_warnings": [],
+        "next_event": "",
+        "minutes_to_event": None,
+        "last_headline": "",
+        "last_updated": "",
+    }
+
+    try:
+        if not RISK_STATE_FILE.exists():
+            return default_state
+
+        with open(RISK_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return default_state
+
+        merged = {**default_state, **data}
+
+        if not isinstance(merged.get("active_warnings"), list):
+            merged["active_warnings"] = []
+
+        return merged
+    except Exception as e:
+        print("Risk state load error:", str(e))
+        return default_state
+
+
 def pre_verdict_engine(data: dict) -> str:
     score = safe_float(data.get("score", 0))
     quality = str(data.get("quality", "NA")).upper()
@@ -133,7 +171,6 @@ def pre_verdict_engine(data: dict) -> str:
 
     points = 0
 
-    # Base score
     if score >= 80:
         points += 4
     elif score >= 70:
@@ -145,7 +182,6 @@ def pre_verdict_engine(data: dict) -> str:
     else:
         points -= 2
 
-    # Quality
     if quality == "A":
         points += 3
     elif quality == "B":
@@ -155,7 +191,6 @@ def pre_verdict_engine(data: dict) -> str:
     else:
         points -= 1
 
-    # Context
     if context == "strong":
         points += 3
     elif context == "moderate":
@@ -163,7 +198,6 @@ def pre_verdict_engine(data: dict) -> str:
     elif context == "light":
         points -= 1
 
-    # Session
     if session in ["NY", "London", "NY_PRE"]:
         points += 2
     elif session == "Asia":
@@ -171,7 +205,6 @@ def pre_verdict_engine(data: dict) -> str:
     else:
         points -= 2
 
-    # Alignment
     aligned = (
         (signal == "LONG" and market_state != "bearish" and bias != "bearish")
         or
@@ -183,13 +216,34 @@ def pre_verdict_engine(data: dict) -> str:
     else:
         points -= 3
 
-    # Final verdict
     if points >= 10:
         return "TAKE"
     elif points >= 5:
         return "CAUTION"
     else:
         return "SKIP"
+
+
+def apply_fusion_overlay(pre_verdict: str, risk_state: dict) -> str:
+    macro_risk = str(risk_state.get("macro_risk", "low")).lower()
+    headline_risk = str(risk_state.get("headline_risk", "low")).lower()
+
+    high_macro = macro_risk == "high"
+    high_headline = headline_risk == "high"
+    medium_macro = macro_risk == "medium"
+    medium_headline = headline_risk == "medium"
+
+    if pre_verdict == "TAKE":
+        if high_macro or high_headline:
+            return "CAUTION"
+        if medium_macro and medium_headline:
+            return "CAUTION"
+
+    if pre_verdict == "CAUTION":
+        if high_macro and high_headline:
+            return "SKIP"
+
+    return pre_verdict
 
 
 def build_precheck(data: dict) -> str:
@@ -305,8 +359,12 @@ def extract_briefing_fields(raw_reply: str) -> dict:
 
 
 def build_user_prompt(data: dict) -> str:
+    risk_state = load_risk_state()
     precheck = build_precheck(data)
     pre_verdict = pre_verdict_engine(data)
+    fusion_pre_verdict = apply_fusion_overlay(pre_verdict, risk_state)
+
+    warnings_text = ", ".join(risk_state["active_warnings"]) if risk_state["active_warnings"] else "none"
 
     return f"""
 Analyze this futures trading alert and return the required execution briefing.
@@ -334,12 +392,28 @@ Deterministic precheck:
 Deterministic pre-verdict:
 - {pre_verdict}
 
+Fusion-adjusted pre-verdict:
+- {fusion_pre_verdict}
+
+Fusion risk layer:
+- Macro risk: {risk_state["macro_risk"]}
+- Headline risk: {risk_state["headline_risk"]}
+- Active warnings: {warnings_text}
+- Next event: {risk_state["next_event"] or "none"}
+- Minutes to event: {risk_state["minutes_to_event"]}
+- Last headline: {risk_state["last_headline"] or "none"}
+- Risk state updated: {risk_state["last_updated"] or "unknown"}
+
 Interpretation goals:
 - Reward alignment between signal, bias, market state, and session.
 - Be stricter on low-quality, weak-context, Asia, or off-hours alerts.
 - If setup is continuation/reversal with strong context and alignment, lean TAKE.
 - If mixed, lean CAUTION.
 - If conflicting, weak, or poor quality, lean SKIP.
+- If macro risk is elevated, downgrade aggressive execution.
+- If headline risk is elevated, reduce confidence.
+- If both setup quality and risk conditions are poor, lean SKIP.
+- Respect the fusion-adjusted pre-verdict unless the broader context strongly justifies a tighter downgrade.
 - Execution should be brief and practical.
 """.strip()
 
@@ -411,6 +485,7 @@ async def root():
 async def check_env():
     return {
         "env_file_exists": env_path.exists(),
+        "risk_state_file_exists": RISK_STATE_FILE.exists(),
         "openai_key_found": bool(os.getenv("OPENAI_API_KEY")),
         "telegram_bot_found": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
         "telegram_chat_found": bool(os.getenv("TELEGRAM_CHAT_ID")),
@@ -422,6 +497,11 @@ async def check_env():
 async def test_telegram():
     result = send_telegram_message("DONNA TEST — Telegram path is working")
     return {"result": result}
+
+
+@app.get("/risk-state")
+async def risk_state():
+    return load_risk_state()
 
 
 @app.post("/webhook")
