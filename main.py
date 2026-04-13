@@ -276,7 +276,8 @@ def extract_fields(text: str) -> dict:
 def build_prompt(data: dict) -> str:
     risk = load_risk_state()
     base_verdict = pre_verdict_engine(data)
-    fusion = apply_fusion_overlay(base_verdict, risk)
+   fusion = apply_fusion_overlay(base_verdict, risk, data)
+
 
     warnings = ", ".join(risk["active_warnings"]) if risk["active_warnings"] else "none"
 
