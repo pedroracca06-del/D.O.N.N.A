@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
+from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
@@ -85,7 +86,7 @@ def send_telegram_message(text: str) -> dict:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": text
+        "text": text,
     }
 
     try:
@@ -100,7 +101,7 @@ def send_telegram_message(text: str) -> dict:
 def safe_float(value, default=0.0):
     try:
         return float(value)
-    except:
+    except Exception:
         return default
 
 
@@ -120,7 +121,7 @@ def normalize_payload(payload: dict) -> dict:
         "liquidity": str(payload.get("liquidity", "unknown")),
         "bias": str(payload.get("bias", "neutral")),
         "score": str(payload.get("score", "0")),
-        "quality": str(payload.get("quality", "NA")).upper()
+        "quality": str(payload.get("quality", "NA")).upper(),
     }
 
 
@@ -134,7 +135,7 @@ def load_risk_state() -> dict:
         "minutes_to_event": None,
         "last_headline": "",
         "last_market_headline": "",
-        "last_updated": ""
+        "last_updated": "",
     }
 
     try:
@@ -148,13 +149,11 @@ def load_risk_state() -> dict:
             return default_state
 
         merged = {**default_state, **data}
-
         if not isinstance(merged.get("active_warnings"), list):
             merged["active_warnings"] = []
 
         return merged
-
-    except:
+    except Exception:
         return default_state
 
 # ==================================================
@@ -231,7 +230,6 @@ def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
     is_nq = "NQ" in ticker or "MNQ" in ticker or "NASDAQ" in ticker
     is_es = "ES" in ticker or "MES" in ticker or "SPX" in ticker or "SPY" in ticker
 
-    # NQ = tech + macro sensitive
     if is_nq:
         if macro == "high":
             return "SKIP"
@@ -242,7 +240,6 @@ def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
         if headline == "high":
             return "CAUTION" if base_verdict == "TAKE" else "SKIP"
 
-    # ES = macro first
     if is_es:
         if macro == "high":
             return "SKIP"
@@ -251,7 +248,6 @@ def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
         if headline == "high" and base_verdict == "TAKE":
             return "CAUTION"
 
-    # General fallback
     high_count = sum(x == "high" for x in [macro, headline, market])
 
     if base_verdict == "TAKE" and high_count >= 1:
@@ -311,7 +307,7 @@ def extract_fields(text: str) -> dict:
             "why": "No response.",
             "risk": "Unknown.",
             "execution": "Stand by.",
-            "summary": "No summary."
+            "summary": "No summary.",
         }
 
     def grab(label, default):
@@ -324,7 +320,7 @@ def extract_fields(text: str) -> dict:
         "why": grab("Why", "No reason."),
         "risk": grab("Risk", "Unknown."),
         "execution": grab("Execution", "Stand by."),
-        "summary": grab("Summary", text.strip())
+        "summary": grab("Summary", text.strip()),
     }
 
 # ==================================================
@@ -365,6 +361,8 @@ Market News Risk: {risk["market_news_risk"]}
 Warnings: {warnings}
 Next Event: {risk["next_event"]}
 Minutes To Event: {risk["minutes_to_event"]}
+Last Headline: {risk["last_headline"]}
+Last Market Headline: {risk["last_market_headline"]}
 
 Deterministic Verdict: {base_verdict}
 Fusion Verdict: {fusion}
@@ -401,7 +399,7 @@ def process_signal(payload: dict):
             model=OPENAI_MODEL,
             instructions=DONNA_SYSTEM_PROMPT,
             input=prompt,
-            max_output_tokens=220
+            max_output_tokens=220,
         )
 
         raw = response.output_text
@@ -472,13 +470,147 @@ async def check_env():
         "newsapi_found": bool(os.getenv("NEWSAPI_KEY")),
         "finnhub_found": bool(os.getenv("FINNHUB_API_KEY")),
         "risk_file_exists": RISK_STATE_FILE.exists(),
-        "model": OPENAI_MODEL
+        "model": OPENAI_MODEL,
     }
 
 
 @app.get("/test-telegram")
 async def test_telegram():
     return send_telegram_message("DONNA TEST MESSAGE")
+
+
+@app.get("/dashboard-data")
+async def dashboard_data():
+    state = load_risk_state()
+    return {
+        "status": "online",
+        "macro_risk": state.get("macro_risk", "low"),
+        "headline_risk": state.get("headline_risk", "low"),
+        "market_news_risk": state.get("market_news_risk", "low"),
+        "active_warnings": state.get("active_warnings", []),
+        "next_event": state.get("next_event", ""),
+        "minutes_to_event": state.get("minutes_to_event", None),
+        "last_headline": state.get("last_headline", ""),
+        "last_market_headline": state.get("last_market_headline", ""),
+        "last_updated": state.get("last_updated", ""),
+    }
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    return """
+<!DOCTYPE html>
+<html>
+<head>
+<title>DONNA Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {
+    background: #0b0f14;
+    color: white;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+}
+.card {
+    background: #121923;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 12px;
+}
+h1 {
+    margin-bottom: 20px;
+}
+.label {
+    color: #8fa3bf;
+    font-size: 14px;
+}
+.value {
+    font-size: 20px;
+    font-weight: bold;
+}
+.small {
+    font-size: 14px;
+    margin-top: 6px;
+    color: #c7d2e0;
+}
+</style>
+</head>
+<body>
+
+<h1>DONNA LIVE DASHBOARD</h1>
+
+<div class="card">
+    <div class="label">System Status</div>
+    <div class="value" id="status">Loading...</div>
+</div>
+
+<div class="card">
+    <div class="label">Macro Risk</div>
+    <div class="value" id="macro_risk">-</div>
+</div>
+
+<div class="card">
+    <div class="label">Headline Risk</div>
+    <div class="value" id="headline_risk">-</div>
+</div>
+
+<div class="card">
+    <div class="label">Market News Risk</div>
+    <div class="value" id="market_news_risk">-</div>
+</div>
+
+<div class="card">
+    <div class="label">Next Event</div>
+    <div class="value" id="next_event">-</div>
+    <div class="small" id="minutes_to_event"></div>
+</div>
+
+<div class="card">
+    <div class="label">Warnings</div>
+    <div class="small" id="warnings">-</div>
+</div>
+
+<div class="card">
+    <div class="label">Last Headline</div>
+    <div class="small" id="last_headline">-</div>
+</div>
+
+<div class="card">
+    <div class="label">Last Market Headline</div>
+    <div class="small" id="last_market_headline">-</div>
+</div>
+
+<div class="card">
+    <div class="label">Last Updated</div>
+    <div class="small" id="last_updated">-</div>
+</div>
+
+<script>
+async function refreshDashboard() {
+    const res = await fetch('/dashboard-data');
+    const data = await res.json();
+
+    document.getElementById('status').innerText = data.status;
+    document.getElementById('macro_risk').innerText = data.macro_risk;
+    document.getElementById('headline_risk').innerText = data.headline_risk;
+    document.getElementById('market_news_risk').innerText = data.market_news_risk;
+    document.getElementById('next_event').innerText = data.next_event || '-';
+    document.getElementById('minutes_to_event').innerText =
+        data.minutes_to_event !== null ? data.minutes_to_event + ' minutes remaining' : '';
+    document.getElementById('warnings').innerText =
+        data.active_warnings.length ? data.active_warnings.join(' | ') : 'None';
+    document.getElementById('last_headline').innerText = data.last_headline || '-';
+    document.getElementById('last_market_headline').innerText = data.last_market_headline || '-';
+    document.getElementById('last_updated').innerText = data.last_updated || '-';
+}
+
+refreshDashboard();
+setInterval(refreshDashboard, 5000);
+</script>
+
+</body>
+</html>
+"""
 
 
 @app.post("/webhook")
@@ -496,11 +628,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return {
             "status": "received",
             "ticker": payload.get("ticker", "UNKNOWN"),
-            "signal": payload.get("signal", "UNKNOWN")
+            "signal": payload.get("signal", "UNKNOWN"),
         }
 
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
