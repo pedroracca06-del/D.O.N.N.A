@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import os
-import time
 import requests
+import json
 
 # =========================
 # ENV LOAD
@@ -20,23 +20,14 @@ TE_COUNTRY = "united%20states"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not TE_API_KEY:
-    raise RuntimeError("Missing TE_API_KEY in .env")
-
-if not TELEGRAM_BOT_TOKEN:
-    raise RuntimeError("Missing TELEGRAM_BOT_TOKEN in .env")
-
-if not TELEGRAM_CHAT_ID:
-    raise RuntimeError("Missing TELEGRAM_CHAT_ID in .env")
+RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
 
 # =========================
 # SETTINGS
 # =========================
-POLL_SECONDS = 60
 LOOKAHEAD_HOURS = 24
 ALERT_WINDOWS_MINUTES = [30, 10, 2]
 
-# Keep this tight at first
 WATCHLIST_KEYWORDS = [
     "Consumer Price Index",
     "Core Consumer Prices",
@@ -54,13 +45,16 @@ WATCHLIST_KEYWORDS = [
     "Powell",
 ]
 
-# Prevent duplicate warning spam for same event/window
 sent_alerts: set[str] = set()
+
 
 # =========================
 # TELEGRAM
 # =========================
 def send_telegram_message(text: str) -> dict:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return {"error": "Missing Telegram credentials"}
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -73,14 +67,65 @@ def send_telegram_message(text: str) -> dict:
 
 
 # =========================
+# RISK STATE
+# =========================
+def load_risk_state() -> dict:
+    default_state = {
+        "macro_risk": "low",
+        "headline_risk": "low",
+        "active_warnings": [],
+        "next_event": "",
+        "minutes_to_event": None,
+        "last_headline": "",
+        "last_updated": "",
+    }
+
+    try:
+        if not RISK_STATE_FILE.exists():
+            return default_state
+
+        with open(RISK_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return default_state
+
+        merged = {**default_state, **data}
+        if not isinstance(merged.get("active_warnings"), list):
+            merged["active_warnings"] = []
+
+        return merged
+    except Exception:
+        return default_state
+
+
+def save_risk_state_macro(macro_risk: str, active_warnings: list[str], next_event: str, minutes_to_event: int | None) -> None:
+    state = load_risk_state()
+
+    headline_warnings = [
+        w for w in state.get("active_warnings", [])
+        if not str(w).startswith("MACRO:")
+    ]
+
+    macro_prefixed = [f"MACRO: {w}" for w in active_warnings]
+
+    state["macro_risk"] = macro_risk
+    state["active_warnings"] = headline_warnings + macro_prefixed
+    state["next_event"] = next_event
+    state["minutes_to_event"] = minutes_to_event
+    state["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+    with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+# =========================
 # ECONOMIC CALENDAR
 # =========================
 def fetch_us_calendar() -> list[dict]:
-    """
-    Trading Economics country calendar endpoint.
-    Docs example:
-    /calendar/country/united%20states?c=YOUR_API_KEY
-    """
+    if not TE_API_KEY:
+        raise RuntimeError("Missing TE_API_KEY")
+
     url = f"{TE_BASE_URL}/calendar/country/{TE_COUNTRY}?c={TE_API_KEY}"
     response = requests.get(url, timeout=30)
     response.raise_for_status()
@@ -96,8 +141,6 @@ def parse_utc_datetime(value: str) -> datetime | None:
     if not value:
         return None
 
-    # TE returns UTC timestamps like 2016-12-02T13:30:00
-    # Docs specify Date is UTC.
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
@@ -131,13 +174,9 @@ def format_event_message(event: dict, event_time_utc: datetime, minutes_left: in
     reference = str(event.get("Reference", ""))
     source = str(event.get("Source", ""))
 
-    # Show both UTC and local machine time
     local_time = event_time_utc.astimezone()
 
-    if minutes_left <= 0:
-        timing_line = "NOW"
-    else:
-        timing_line = f"in {minutes_left}m"
+    timing_line = "NOW" if minutes_left <= 0 else f"in {minutes_left}m"
 
     return (
         f"⚠️ DONNA NEWS GUARD\n\n"
@@ -188,9 +227,33 @@ def upcoming_relevant_events(calendar: list[dict]) -> list[tuple[dict, datetime,
     return matches
 
 
-def process_news_guard() -> None:
+def derive_macro_risk(matches: list[tuple[dict, datetime, int]]) -> tuple[str, list[str], str, int | None]:
+    if not matches:
+        return "low", [], "", None
+
+    event, _, minutes_left = matches[0]
+    event_name = str(event.get("Event", "Unknown Event"))
+
+    warnings: list[str] = []
+
+    if minutes_left <= 15:
+        warnings.append(f"{event_name} within {minutes_left}m")
+        return "high", warnings, event_name, minutes_left
+
+    if minutes_left <= 60:
+        warnings.append(f"{event_name} within {minutes_left}m")
+        return "medium", warnings, event_name, minutes_left
+
+    warnings.append(f"High-impact event later today: {event_name}")
+    return "low", warnings, event_name, minutes_left
+
+
+def process_news_guard_cycle() -> None:
     calendar = fetch_us_calendar()
     matches = upcoming_relevant_events(calendar)
+
+    macro_risk, warnings, next_event, minutes_to_event = derive_macro_risk(matches)
+    save_risk_state_macro(macro_risk, warnings, next_event, minutes_to_event)
 
     if not matches:
         print("Donna News Guard: no relevant high-impact US events in window.")
@@ -209,18 +272,3 @@ def process_news_guard() -> None:
                 result = send_telegram_message(message)
                 print("News alert sent:", result)
                 sent_alerts.add(key)
-
-
-def main() -> None:
-    print("Donna News Guard started.")
-    while True:
-        try:
-            process_news_guard()
-        except Exception as e:
-            print("Donna News Guard error:", str(e))
-
-        time.sleep(POLL_SECONDS)
-
-
-if __name__ == "__main__":
-    main()
