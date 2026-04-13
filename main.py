@@ -134,7 +134,6 @@ signal = str(data.get("signal", "")).upper()
 ```
 points = 0
 
-# Base score from TradingView score
 if score >= 80:
     points += 4
 elif score >= 70:
@@ -146,7 +145,6 @@ elif score >= 50:
 else:
     points -= 2
 
-# Quality
 if quality == "A":
     points += 3
 elif quality == "B":
@@ -156,7 +154,6 @@ elif quality == "C":
 else:
     points -= 1
 
-# Context
 if context == "strong":
     points += 3
 elif context == "moderate":
@@ -164,7 +161,6 @@ elif context == "moderate":
 elif context == "light":
     points -= 1
 
-# Session
 if session in ["NY", "London", "NY_PRE"]:
     points += 2
 elif session == "Asia":
@@ -172,7 +168,6 @@ elif session == "Asia":
 else:
     points -= 2
 
-# Alignment
 aligned = (
     (signal == "LONG" and market_state != "bearish" and bias != "bearish")
     or
@@ -184,7 +179,6 @@ if aligned:
 else:
     points -= 3
 
-# Final Verdict
 if points >= 10:
     return "TAKE"
 elif points >= 5:
@@ -192,6 +186,7 @@ elif points >= 5:
 else:
     return "SKIP"
 ```
+
 
 
 def build_precheck(data: dict):
