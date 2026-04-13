@@ -123,29 +123,75 @@ def normalize_payload(payload: dict):
 
 
 def pre_verdict_engine(data: dict):
-    score = safe_float(data.get("score", 0))
-    quality = str(data.get("quality", "NA")).upper()
-    context = str(data.get("context_strength", "")).lower()
-    session = str(data.get("session", ""))
-    market_state = str(data.get("market_state", "")).lower()
-    bias = str(data.get("bias", "")).lower()
-    signal = str(data.get("signal", "")).upper()
+score = safe_float(data.get("score", 0))
+quality = str(data.get("quality", "NA")).upper()
+context = str(data.get("context_strength", "")).lower()
+session = str(data.get("session", ""))
+market_state = str(data.get("market_state", "")).lower()
+bias = str(data.get("bias", "")).lower()
+signal = str(data.get("signal", "")).upper()
 
-    aligned = (
-        (signal == "LONG" and market_state != "bearish" and bias != "bearish")
-        or
-        (signal == "SHORT" and market_state != "bullish" and bias != "bullish")
-    )
+```
+points = 0
 
-    strong_session = session in ["NY", "London", "NY_PRE"]
+# Base score from TradingView score
+if score >= 80:
+    points += 4
+elif score >= 70:
+    points += 3
+elif score >= 60:
+    points += 2
+elif score >= 50:
+    points += 1
+else:
+    points -= 2
 
-    if score >= 75 and quality == "A" and context == "strong" and aligned and strong_session:
-        return "TAKE"
+# Quality
+if quality == "A":
+    points += 3
+elif quality == "B":
+    points += 2
+elif quality == "C":
+    points += 0
+else:
+    points -= 1
 
-    if score < 45 or context == "light" or not aligned:
-        return "SKIP"
+# Context
+if context == "strong":
+    points += 3
+elif context == "moderate":
+    points += 1
+elif context == "light":
+    points -= 1
 
+# Session
+if session in ["NY", "London", "NY_PRE"]:
+    points += 2
+elif session == "Asia":
+    points -= 1
+else:
+    points -= 2
+
+# Alignment
+aligned = (
+    (signal == "LONG" and market_state != "bearish" and bias != "bearish")
+    or
+    (signal == "SHORT" and market_state != "bullish" and bias != "bullish")
+)
+
+if aligned:
+    points += 2
+else:
+    points -= 3
+
+# Final Verdict
+if points >= 10:
+    return "TAKE"
+elif points >= 5:
     return "CAUTION"
+else:
+    return "SKIP"
+```
 
 
 def build_precheck(data: dict):
