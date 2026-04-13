@@ -2,10 +2,14 @@ from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
+import asyncio
 import os
 import requests
 import json
 import re
+
+from donna_news import process_news_guard_cycle
+from donna_headlines import process_headlines_cycle
 
 # =========================
 # ENV LOAD
@@ -35,6 +39,12 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # FILE PATHS
 # =========================
 RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
+
+# =========================
+# POLL SETTINGS
+# =========================
+NEWS_POLL_SECONDS = 60
+HEADLINE_POLL_SECONDS = 900
 
 # =========================
 # DONNA SYSTEM PROMPT
@@ -71,6 +81,7 @@ Execution: 1 short sentence
 Summary: 1 hard-hitting line
 """.strip()
 
+
 # =========================
 # TELEGRAM
 # =========================
@@ -97,6 +108,7 @@ def send_telegram_message(text: str) -> dict:
     except Exception as e:
         print("Telegram error:", str(e))
         return {"error": str(e)}
+
 
 # =========================
 # HELPERS
@@ -474,6 +486,40 @@ def process_signal(payload: dict) -> None:
 
 
 # =========================
+# BACKGROUND LOOPS
+# =========================
+async def news_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(process_news_guard_cycle)
+        except Exception as e:
+            print("Donna News loop error:", str(e))
+
+        await asyncio.sleep(NEWS_POLL_SECONDS)
+
+
+async def headline_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(process_headlines_cycle)
+        except Exception as e:
+            msg = str(e)
+            print("Donna Headline loop error:", msg)
+
+            if "429" in msg:
+                await asyncio.sleep(1800)
+                continue
+
+        await asyncio.sleep(HEADLINE_POLL_SECONDS)
+
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(news_loop())
+    asyncio.create_task(headline_loop())
+
+
+# =========================
 # ROUTES
 # =========================
 @app.get("/")
@@ -489,19 +535,21 @@ async def check_env():
         "openai_key_found": bool(os.getenv("OPENAI_API_KEY")),
         "telegram_bot_found": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
         "telegram_chat_found": bool(os.getenv("TELEGRAM_CHAT_ID")),
+        "te_api_key_found": bool(os.getenv("TE_API_KEY")),
+        "newsapi_key_found": bool(os.getenv("NEWSAPI_KEY")),
         "openai_model": OPENAI_MODEL,
     }
+
+
+@app.get("/risk-state")
+async def risk_state():
+    return load_risk_state()
 
 
 @app.get("/test-telegram")
 async def test_telegram():
     result = send_telegram_message("DONNA TEST — Telegram path is working")
     return {"result": result}
-
-
-@app.get("/risk-state")
-async def risk_state():
-    return load_risk_state()
 
 
 @app.post("/webhook")
