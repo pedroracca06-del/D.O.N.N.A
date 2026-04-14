@@ -34,7 +34,7 @@ if not TELEGRAM_CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_CHAT_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-app = FastAPI(title="DONNA MASTER CORE")
+app = FastAPI(title="DONNA MASTER CORE V2")
 
 # ==================================================
 # FILES
@@ -59,7 +59,7 @@ FINNHUB_POLL_SECONDS = 600
 TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower()
 
 # ==================================================
-# SYSTEM PROMPT
+# SYSTEM PROMPTS
 # ==================================================
 DONNA_SYSTEM_PROMPT = """
 You are Donna, an elite futures execution assistant.
@@ -88,6 +88,31 @@ Why: 1 sentence
 Risk: 1 short sentence
 Execution: 1 short sentence
 Summary: 1 hard-hitting line
+""".strip()
+
+DONNA_ASSISTANT_PROMPT = """
+You are Donna, the command center AI assistant inside a trading and productivity dashboard.
+
+Tone:
+Cold. Sharp. Helpful. Professional. Brief.
+
+You can do two things:
+1. Answer questions about current system state.
+2. Trigger one assistant action if the user clearly asks for it.
+
+You must return ONLY valid JSON in this exact shape:
+{
+  "action": "none | set_focus | add_task | add_reminder | clear_tasks | clear_reminders",
+  "value": "string value or empty string",
+  "reply": "short direct response to the user"
+}
+
+Rules:
+- If the user is asking a question, use action = "none".
+- If the user clearly wants a focus/task/reminder action, choose the correct action.
+- For clear actions, value can be empty string.
+- Never return markdown.
+- Never return extra text outside JSON.
 """.strip()
 
 # ==================================================
@@ -159,6 +184,36 @@ def normalize_payload(payload: dict) -> dict:
         "score": str(payload.get("score", "0")),
         "quality": str(payload.get("quality", "NA")).upper(),
     }
+
+
+def parse_json_loose(text: str, fallback: dict) -> dict:
+    if not text:
+        return fallback
+
+    text = text.strip()
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+
+    return fallback
+
+
+def format_timestamp(iso_str: str) -> str:
+    if not iso_str:
+        return "-"
+    try:
+        return iso_str.replace("T", " ").replace("+00:00", " UTC")
+    except Exception:
+        return iso_str
 
 # ==================================================
 # STATE LOAD / SAVE
@@ -492,7 +547,7 @@ Confidence Guidance: {confidence_note}
 """.strip()
 
 # ==================================================
-# FORMATTER
+# FORMATTERS
 # ==================================================
 def format_message(data: dict, result: dict) -> str:
     return f"""DONNA // {data['ticker']} // {data['signal']}
@@ -504,6 +559,72 @@ Why: {result['why']}
 Risk: {result['risk']}
 Execution: {result['execution']}
 Summary: {result['summary']}"""
+
+
+def summarize_system_context() -> str:
+    risk = load_risk_state()
+    alerts = load_alert_history()[:5]
+    assistant = load_assistant_state()
+
+    alerts_text = []
+    for a in alerts:
+        alerts_text.append(
+            f"{a.get('ticker', 'UNK')} {a.get('signal', '')} {a.get('verdict', '')} "
+            f"{a.get('confidence', '')} @ {a.get('price', '')}"
+        )
+
+    return f"""
+Current Donna state:
+
+Risk:
+- Macro Risk: {risk.get("macro_risk", "low")}
+- Headline Risk: {risk.get("headline_risk", "low")}
+- Market News Risk: {risk.get("market_news_risk", "low")}
+- Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
+- Next Event: {risk.get("next_event", "none")}
+- Minutes To Event: {risk.get("minutes_to_event", "unknown")}
+- Last Headline: {risk.get("last_headline", "none")}
+- Last Market Headline: {risk.get("last_market_headline", "none")}
+
+Assistant:
+- Daily Focus: {assistant.get("daily_focus", "")}
+- Tasks: {assistant.get("tasks", [])}
+- Reminders: {assistant.get("reminders", [])}
+
+Recent Alerts:
+- {" | ".join(alerts_text) if alerts_text else "No recent alerts"}
+""".strip()
+
+
+def apply_assistant_action(action: str, value: str) -> dict:
+    state = load_assistant_state()
+
+    action = str(action or "none").strip().lower()
+    value = str(value or "").strip()
+
+    if action == "set_focus" and value:
+        state["daily_focus"] = value
+        save_assistant_state(state)
+
+    elif action == "add_task" and value:
+        state["tasks"].append(value)
+        state["tasks"] = state["tasks"][:20]
+        save_assistant_state(state)
+
+    elif action == "add_reminder" and value:
+        state["reminders"].append(value)
+        state["reminders"] = state["reminders"][:20]
+        save_assistant_state(state)
+
+    elif action == "clear_tasks":
+        state["tasks"] = []
+        save_assistant_state(state)
+
+    elif action == "clear_reminders":
+        state["reminders"] = []
+        save_assistant_state(state)
+
+    return state
 
 # ==================================================
 # SIGNAL PROCESSOR
@@ -596,6 +717,28 @@ async def alerts_data():
 @app.get("/assistant-data")
 async def assistant_data():
     return load_assistant_state()
+
+
+@app.get("/dashboard-data")
+async def dashboard_data():
+    state = load_risk_state()
+    alerts = load_alert_history()
+    assistant = load_assistant_state()
+
+    return {
+        "status": "online",
+        "macro_risk": state.get("macro_risk", "low"),
+        "headline_risk": state.get("headline_risk", "low"),
+        "market_news_risk": state.get("market_news_risk", "low"),
+        "active_warnings": state.get("active_warnings", []),
+        "next_event": state.get("next_event", ""),
+        "minutes_to_event": state.get("minutes_to_event", None),
+        "last_headline": state.get("last_headline", ""),
+        "last_market_headline": state.get("last_market_headline", ""),
+        "last_updated": state.get("last_updated", ""),
+        "alerts": alerts[:10],
+        "assistant": assistant,
+    }
 
 
 @app.get("/check-env")
@@ -730,26 +873,63 @@ async def assistant_clear_reminders():
     save_assistant_state(state)
     return {"status": "ok", "assistant": state}
 
+
+@app.post("/assistant/chat")
+async def assistant_chat(request: Request):
+    body = await request.json()
+    message = str(body.get("message", "")).strip()
+
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    context = summarize_system_context()
+
+    fallback = {
+        "action": "none",
+        "value": "",
+        "reply": "Command received. State check complete.",
+    }
+
+    try:
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            instructions=DONNA_ASSISTANT_PROMPT,
+            input=f"User message:\n{message}\n\nSystem context:\n{context}",
+            max_output_tokens=220,
+        )
+
+        parsed = parse_json_loose(response.output_text, fallback)
+
+        action = str(parsed.get("action", "none")).strip().lower()
+        value = str(parsed.get("value", "")).strip()
+        reply = str(parsed.get("reply", "Done.")).strip()
+
+        updated_state = apply_assistant_action(action, value)
+
+        return {
+            "status": "ok",
+            "action": action,
+            "value": value,
+            "reply": reply,
+            "assistant": updated_state,
+            "risk": load_risk_state(),
+            "alerts": load_alert_history()[:10],
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "action": "none",
+            "value": "",
+            "reply": f"Assistant error: {str(e)}",
+            "assistant": load_assistant_state(),
+            "risk": load_risk_state(),
+            "alerts": load_alert_history()[:10],
+        }
+
 # ==================================================
 # ROUTES - DASHBOARD
 # ==================================================
-@app.get("/dashboard-data")
-async def dashboard_data():
-    state = load_risk_state()
-    return {
-        "status": "online",
-        "macro_risk": state.get("macro_risk", "low"),
-        "headline_risk": state.get("headline_risk", "low"),
-        "market_news_risk": state.get("market_news_risk", "low"),
-        "active_warnings": state.get("active_warnings", []),
-        "next_event": state.get("next_event", ""),
-        "minutes_to_event": state.get("minutes_to_event", None),
-        "last_headline": state.get("last_headline", ""),
-        "last_market_headline": state.get("last_market_headline", ""),
-        "last_updated": state.get("last_updated", ""),
-    }
-
-
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return """
@@ -758,295 +938,759 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A Command Center</title>
-
+<title>D.O.N.N.A V2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
-    --bg:#060a10;
+    --bg:#060912;
     --bg2:#0b1220;
+    --bg3:#0f1728;
     --panel:rgba(14,21,34,.82);
-    --panel-2:rgba(18,27,42,.92);
-    --line:rgba(255,255,255,.06);
-    --text:#f2f6fc;
-    --muted:#8ca0bf;
-    --low:#47ff9c;
-    --medium:#ffd24d;
-    --high:#ff5e74;
-    --glow:0 0 30px rgba(89,167,255,.08);
+    --panel2:rgba(18,27,42,.95);
+    --line:rgba(255,255,255,.07);
+    --text:#eef4ff;
+    --muted:#8ea4c5;
+    --low:#4dffab;
+    --medium:#ffd24f;
+    --high:#ff637d;
+    --blue:#4f8cff;
+    --blue2:#2b5fd9;
+    --chip:rgba(255,255,255,.04);
+    --shadow:0 10px 35px rgba(0,0,0,.28);
 }
 body{
-    font-family: Inter, Arial, sans-serif;
-    background:
-        radial-gradient(circle at top right, rgba(46,113,255,.16), transparent 25%),
-        radial-gradient(circle at bottom left, rgba(0,255,153,.08), transparent 20%),
-        linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+    font-family:Inter,Arial,sans-serif;
     color:var(--text);
-    padding:24px;
+    background:
+        radial-gradient(circle at top right, rgba(79,140,255,.18), transparent 24%),
+        radial-gradient(circle at bottom left, rgba(77,255,171,.08), transparent 22%),
+        linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);
+    min-height:100vh;
+    padding:22px;
 }
-.wrapper{max-width:1380px;margin:0 auto;}
+.wrapper{max-width:1480px;margin:0 auto;}
 .topbar{
-    display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:22px;
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:18px;
+    flex-wrap:wrap;
+    margin-bottom:18px;
 }
-.brand h1{font-size:38px;letter-spacing:4px;font-weight:900;}
-.brand p{margin-top:6px;color:var(--muted);font-size:14px;letter-spacing:.4px;}
-.status-wrap{display:flex;align-items:center;gap:12px;}
+.brand h1{
+    font-size:40px;
+    letter-spacing:4px;
+    font-weight:900;
+}
+.brand p{
+    margin-top:7px;
+    color:var(--muted);
+    font-size:14px;
+    letter-spacing:.4px;
+}
+.top-right{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:12px;
+}
+.status-strip{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:10px 16px;
+    border-radius:999px;
+    background:rgba(77,255,171,.08);
+    border:1px solid rgba(77,255,171,.22);
+}
 .pulse-dot{
-    width:12px;height:12px;border-radius:50%;background:var(--low);
-    box-shadow:0 0 18px rgba(71,255,156,.85);animation:pulse 1.6s infinite;
+    width:11px;
+    height:11px;
+    border-radius:50%;
+    background:var(--low);
+    box-shadow:0 0 16px rgba(77,255,171,.8);
+    animation:pulse 1.6s infinite;
 }
 @keyframes pulse{
     0%{transform:scale(.9);opacity:.9;}
-    70%{transform:scale(1.25);opacity:.35;}
+    70%{transform:scale(1.22);opacity:.35;}
     100%{transform:scale(.95);opacity:.9;}
 }
-.status-pill{
-    padding:10px 18px;border-radius:999px;background:rgba(71,255,156,.08);
-    border:1px solid rgba(71,255,156,.28);color:#9cffc7;font-size:14px;font-weight:800;letter-spacing:.6px;
+.status-text{
+    font-weight:800;
+    font-size:13px;
+    letter-spacing:.8px;
+    color:#a5ffc8;
 }
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px;}
-.card,.panel{
-    background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;
-    box-shadow:var(--glow);backdrop-filter:blur(10px);
+.navbar{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
 }
-.panel{background:var(--panel-2);}
+.nav-btn{
+    border:none;
+    cursor:pointer;
+    border-radius:14px;
+    padding:12px 16px;
+    font-weight:800;
+    font-size:13px;
+    color:#d6e4fb;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.06);
+    transition:.18s ease;
+}
+.nav-btn:hover{
+    background:rgba(255,255,255,.08);
+}
+.nav-btn.active{
+    background:linear-gradient(135deg,var(--blue),var(--blue2));
+    color:white;
+    box-shadow:var(--shadow);
+}
+.hero{
+    display:grid;
+    grid-template-columns:1.45fr .95fr;
+    gap:16px;
+    margin-bottom:18px;
+}
+.card, .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:22px;
+    padding:20px;
+    box-shadow:var(--shadow);
+    backdrop-filter:blur(10px);
+}
+.panel{background:var(--panel2);}
+.hero-main{
+    min-height:160px;
+}
+.hero-title{
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:1.8px;
+    color:var(--muted);
+    margin-bottom:14px;
+}
+.hero-headline{
+    font-size:34px;
+    font-weight:900;
+    line-height:1.08;
+    margin-bottom:12px;
+}
+.hero-sub{
+    color:var(--muted);
+    line-height:1.55;
+    font-size:15px;
+}
+.hero-side{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+.stat-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:16px;
+    margin-bottom:18px;
+}
+.stat-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:22px;
+    padding:20px;
+    box-shadow:var(--shadow);
+}
 .label{
-    font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;
+    font-size:12px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:1.6px;
+    margin-bottom:14px;
 }
-.value{font-size:40px;font-weight:900;line-height:1;}
+.value{
+    font-size:40px;
+    font-weight:900;
+    line-height:1;
+}
 .value.low{color:var(--low);}
 .value.medium{color:var(--medium);}
 .value.high{color:var(--high);}
-.value.event{font-size:26px;color:#ffffff;}
-.sub{margin-top:10px;color:var(--muted);font-size:14px;}
-.layout{display:grid;grid-template-columns:1.65fr .95fr;gap:16px;align-items:start;}
+.value.event{
+    font-size:24px;
+    color:#fff;
+    line-height:1.15;
+}
+.sub{
+    margin-top:10px;
+    color:var(--muted);
+    font-size:14px;
+}
+.section{
+    display:none;
+}
+.section.active{
+    display:block;
+}
+.grid-2{
+    display:grid;
+    grid-template-columns:1.3fr 1fr;
+    gap:16px;
+}
 .section-title{
-    font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;
+    font-size:13px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:1.6px;
+    margin-bottom:14px;
 }
 .feed-item{
-    padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);color:#e6edf7;font-size:15px;line-height:1.45;
+    padding:13px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    color:#e9f1fe;
+    font-size:15px;
+    line-height:1.45;
 }
-.feed-item:last-child{border-bottom:none;padding-bottom:0;}
-.feed-label{color:#ffffff;font-weight:700;}
-.warning-badge{
-    display:inline-block;padding:7px 11px;border-radius:999px;font-size:12px;font-weight:700;
-    margin:0 8px 8px 0;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:#d8e4f7;
+.feed-item:last-child{
+    border-bottom:none;
+    padding-bottom:0;
 }
-.assistant-box{display:flex;flex-direction:column;gap:12px;}
-.assistant-item{
-    padding:14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);
-    color:#dde6f3;font-size:14px;line-height:1.45;
+.feed-label{
+    color:white;
+    font-weight:800;
 }
-.history-row{
-    display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px;
+.badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 12px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:800;
+    background:var(--chip);
+    border:1px solid rgba(255,255,255,.06);
+    margin:0 8px 8px 0;
+    color:#deebff;
 }
-.history-row:last-child{border-bottom:none;}
-.history-label{color:#dfe8f5;}
-.history-value{color:var(--muted);text-align:right;}
-.alert-box{padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.badge.high{color:#ffc0cc;border-color:rgba(255,99,125,.25);background:rgba(255,99,125,.09);}
+.badge.medium{color:#ffe08c;border-color:rgba(255,210,79,.25);background:rgba(255,210,79,.09);}
+.badge.low{color:#baffdc;border-color:rgba(77,255,171,.25);background:rgba(77,255,171,.09);}
+.alert-box{
+    padding:14px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+}
 .alert-box:last-child{border-bottom:none;}
-.alert-top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-weight:700;color:#eef4fd;}
-.alert-meta{margin-top:6px;color:var(--muted);font-size:13px;}
-.alert-summary{margin-top:6px;color:#d8e4f4;font-size:14px;line-height:1.4;}
-.small{color:var(--muted);font-size:13px;margin-top:6px;}
-.input{
-    width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.08);
-    background:rgba(255,255,255,.04);color:white;outline:none;margin-top:10px;
+.alert-top{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    font-weight:800;
+    color:#f2f7ff;
 }
-.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+.alert-meta{
+    margin-top:7px;
+    color:var(--muted);
+    font-size:13px;
+}
+.alert-summary{
+    margin-top:7px;
+    color:#d8e5f8;
+    line-height:1.45;
+    font-size:14px;
+}
+.kv{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    padding:13px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    font-size:14px;
+}
+.kv:last-child{border-bottom:none;}
+.kv-label{color:#dce7f9;}
+.kv-value{color:var(--muted);text-align:right;}
+.input, .textarea{
+    width:100%;
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.04);
+    color:white;
+    outline:none;
+    padding:13px 14px;
+    margin-top:10px;
+    font-size:14px;
+}
+.textarea{
+    min-height:110px;
+    resize:vertical;
+}
+.btn-row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-top:12px;
+}
 .btn{
-    padding:10px 14px;border:none;border-radius:12px;cursor:pointer;font-weight:700;
-    background:#1d3557;color:white;
+    padding:11px 15px;
+    border:none;
+    border-radius:13px;
+    cursor:pointer;
+    font-weight:800;
+    font-size:13px;
+    color:white;
+    background:#1f3c67;
+    transition:.18s ease;
 }
-.btn.secondary{background:#243b55;}
+.btn:hover{transform:translateY(-1px);}
+.btn.primary{
+    background:linear-gradient(135deg,var(--blue),var(--blue2));
+}
+.btn.secondary{
+    background:#253754;
+}
+.btn.ghost{
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.08);
+}
 .item-row{
     display:flex;
     justify-content:space-between;
-    gap:10px;
+    gap:12px;
     align-items:center;
     padding:12px 0;
     border-bottom:1px solid rgba(255,255,255,.06);
 }
 .item-row:last-child{border-bottom:none;}
 .item-text{
-    color:#e6edf7;
-    font-size:14px;
-    line-height:1.4;
     flex:1;
+    color:#e6eefb;
+    font-size:14px;
+    line-height:1.45;
 }
 .item-actions{
     display:flex;
     gap:8px;
     flex-shrink:0;
 }
+.quick-actions{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-top:12px;
+}
+.quick-chip{
+    padding:10px 12px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.07);
+    background:rgba(255,255,255,.04);
+    color:#deebff;
+    cursor:pointer;
+    font-size:13px;
+    font-weight:700;
+}
+.quick-chip:hover{
+    background:rgba(255,255,255,.07);
+}
+.chat-shell{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+.chat-output{
+    min-height:220px;
+    max-height:460px;
+    overflow:auto;
+    border-radius:18px;
+    background:rgba(0,0,0,.16);
+    border:1px solid rgba(255,255,255,.06);
+    padding:14px;
+}
+.chat-msg{
+    margin-bottom:12px;
+    padding:12px 13px;
+    border-radius:14px;
+    line-height:1.5;
+    font-size:14px;
+}
+.chat-msg.user{
+    background:rgba(79,140,255,.13);
+    border:1px solid rgba(79,140,255,.2);
+}
+.chat-msg.assistant{
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.06);
+}
+.chat-role{
+    display:block;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1.1px;
+    color:var(--muted);
+    margin-bottom:6px;
+}
 .footer{
-    margin-top:16px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;
+    margin-top:18px;
+    display:flex;
+    justify-content:space-between;
+    gap:14px;
+    flex-wrap:wrap;
+    color:var(--muted);
+    font-size:13px;
 }
-@media(max-width:1100px){
-    .grid{grid-template-columns:repeat(2,1fr);}
-    .layout{grid-template-columns:1fr;}
+.mono{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-@media(max-width:680px){
+@media(max-width:1180px){
+    .hero{grid-template-columns:1fr;}
+    .stat-grid{grid-template-columns:repeat(2,1fr);}
+    .grid-2{grid-template-columns:1fr;}
+}
+@media(max-width:760px){
     body{padding:14px;}
-    .brand h1{font-size:28px;}
-    .grid{grid-template-columns:1fr;}
-    .value{font-size:34px;}
+    .brand h1{font-size:30px;}
+    .hero-headline{font-size:26px;}
+    .stat-grid{grid-template-columns:1fr;}
     .item-row{flex-direction:column;align-items:flex-start;}
     .item-actions{width:100%;}
 }
 </style>
 </head>
-
 <body>
 <div class="wrapper">
 
     <div class="topbar">
         <div class="brand">
             <h1>D.O.N.N.A</h1>
-            <p>Dynamic Operational Neural Network Assistant</p>
+            <p>Dynamic Operational Neural Network Assistant // Command Center V2</p>
         </div>
 
-        <div class="status-wrap">
-            <div class="pulse-dot"></div>
-            <div class="status-pill" id="status">ONLINE</div>
+        <div class="top-right">
+            <div class="status-strip">
+                <div class="pulse-dot"></div>
+                <div class="status-text" id="status_text">ONLINE</div>
+            </div>
+
+            <div class="navbar">
+                <button class="nav-btn active" onclick="showSection('dashboard', this)">Dashboard</button>
+                <button class="nav-btn" onclick="showSection('trading', this)">Trading</button>
+                <button class="nav-btn" onclick="showSection('news', this)">News</button>
+                <button class="nav-btn" onclick="showSection('assistant', this)">Assistant</button>
+            </div>
         </div>
     </div>
 
-    <div class="grid">
-        <div class="card">
+    <div class="hero">
+        <div class="panel hero-main">
+            <div class="hero-title">Donna Overview</div>
+            <div class="hero-headline" id="hero_headline">System online. Monitoring risk, alerts, and assistant state.</div>
+            <div class="hero-sub" id="hero_sub">
+                Donna is running as the command center for trading intelligence, news pressure, and operator support.
+            </div>
+        </div>
+
+        <div class="panel hero-side">
+            <div>
+                <div class="hero-title">Daily Focus</div>
+                <div style="font-size:20px;font-weight:800;line-height:1.35;" id="daily_focus_hero">Loading...</div>
+            </div>
+            <div>
+                <div class="hero-title">Next Event Window</div>
+                <div style="font-size:18px;font-weight:800;" id="next_event_hero">Loading...</div>
+                <div class="sub" id="next_event_hero_sub">Waiting for data...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-card">
             <div class="label">Macro Risk</div>
             <div class="value" id="macro_risk">-</div>
             <div class="sub">Scheduled event pressure</div>
         </div>
 
-        <div class="card">
+        <div class="stat-card">
             <div class="label">Headline Risk</div>
             <div class="value" id="headline_risk">-</div>
-            <div class="sub">Breaking macro / geopolitical flow</div>
+            <div class="sub">Breaking macro and geopolitical flow</div>
         </div>
 
-        <div class="card">
+        <div class="stat-card">
             <div class="label">Market Risk</div>
             <div class="value" id="market_news_risk">-</div>
-            <div class="sub">Company / sector catalyst pressure</div>
+            <div class="sub">Company and sector catalyst pressure</div>
         </div>
 
-        <div class="card">
+        <div class="stat-card">
             <div class="label">Next Event</div>
             <div class="value event" id="next_event">-</div>
-            <div class="sub" id="minutes_to_event"></div>
+            <div class="sub" id="minutes_to_event">No timed event loaded</div>
         </div>
     </div>
 
-    <div class="layout">
-        <div>
-            <div class="panel">
-                <div class="section-title">Active Warnings</div>
-                <div id="warnings"></div>
-            </div>
-
-            <div class="panel" style="margin-top:16px;">
-                <div class="section-title">Live Intelligence Feed</div>
-
-                <div class="feed-item">
-                    <span class="feed-label">News Feed:</span>
-                    <span id="last_headline">No recent headline</span>
+    <!-- DASHBOARD -->
+    <div class="section active" id="section-dashboard">
+        <div class="grid-2">
+            <div>
+                <div class="panel">
+                    <div class="section-title">Active Warnings</div>
+                    <div id="warnings"></div>
                 </div>
 
-                <div class="feed-item">
-                    <span class="feed-label">Market Feed:</span>
-                    <span id="last_market_headline">No recent market headline</span>
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">System Snapshot</div>
+
+                    <div class="kv">
+                        <div class="kv-label">Status</div>
+                        <div class="kv-value" id="status_2">ONLINE</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Next Event</div>
+                        <div class="kv-value" id="next_event_2">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Minutes Remaining</div>
+                        <div class="kv-value" id="minutes_to_event_2">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Last Updated</div>
+                        <div class="kv-value mono" id="last_updated">-</div>
+                    </div>
                 </div>
             </div>
 
-            <div class="panel" style="margin-top:16px;">
-                <div class="section-title">Recent Donna Alerts</div>
-                <div id="alerts_feed">
-                    <div class="feed-item">No alerts yet</div>
+            <div>
+                <div class="panel">
+                    <div class="section-title">Recent Donna Alerts</div>
+                    <div id="alerts_feed_dashboard">
+                        <div class="feed-item">No alerts yet</div>
+                    </div>
                 </div>
             </div>
         </div>
+    </div>
 
-        <div>
-            <div class="panel">
-                <div class="section-title">Assistant Panel</div>
+    <!-- TRADING -->
+    <div class="section" id="section-trading">
+        <div class="grid-2">
+            <div>
+                <div class="panel">
+                    <div class="section-title">Trade Alert Feed</div>
+                    <div id="alerts_feed_trading">
+                        <div class="feed-item">No alerts yet</div>
+                    </div>
+                </div>
+            </div>
 
-                <div class="assistant-box">
-                    <div class="assistant-item">
-                        <strong>Daily Focus</strong>
-                        <div class="small" id="daily_focus">Loading...</div>
-                        <input class="input" id="focus_input" placeholder="Set daily focus..." />
-                        <div class="btn-row">
-                            <button class="btn" onclick="saveFocus()">Save Focus</button>
-                        </div>
+            <div>
+                <div class="panel">
+                    <div class="section-title">Trading Command Snapshot</div>
+
+                    <div class="kv">
+                        <div class="kv-label">Telegram Mode</div>
+                        <div class="kv-value" id="telegram_mode">-</div>
                     </div>
 
-                    <div class="assistant-item">
-                        <strong>Today's Tasks</strong>
-                        <div id="tasks_list" class="small">Loading...</div>
-                        <input class="input" id="task_input" placeholder="Add task..." />
-                        <div class="btn-row">
-                            <button class="btn secondary" onclick="addTask()">Add Task</button>
-                            <button class="btn" onclick="clearTasks()">Clear All</button>
-                        </div>
+                    <div class="kv">
+                        <div class="kv-label">Latest Signal Count</div>
+                        <div class="kv-value" id="alert_count">-</div>
                     </div>
 
-                    <div class="assistant-item">
-                        <strong>Reminders</strong>
-                        <div id="reminders_list" class="small">Loading...</div>
-                        <input class="input" id="reminder_input" placeholder="Add reminder..." />
+                    <div class="kv">
+                        <div class="kv-label">Macro Risk Bias</div>
+                        <div class="kv-value" id="macro_bias_trading">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Market Risk Bias</div>
+                        <div class="kv-value" id="market_bias_trading">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEWS -->
+    <div class="section" id="section-news">
+        <div class="grid-2">
+            <div>
+                <div class="panel">
+                    <div class="section-title">Live Intelligence Feed</div>
+
+                    <div class="feed-item">
+                        <span class="feed-label">News Feed:</span>
+                        <span id="last_headline">No recent headline</span>
+                    </div>
+
+                    <div class="feed-item">
+                        <span class="feed-label">Market Feed:</span>
+                        <span id="last_market_headline">No recent market headline</span>
+                    </div>
+                </div>
+
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">Warning Pressure</div>
+                    <div id="warning_pressure_news"></div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel">
+                    <div class="section-title">News Risk Snapshot</div>
+
+                    <div class="kv">
+                        <div class="kv-label">Macro Risk</div>
+                        <div class="kv-value" id="macro_news">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Headline Risk</div>
+                        <div class="kv-value" id="headline_news">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Market Risk</div>
+                        <div class="kv-value" id="market_news">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Next Event</div>
+                        <div class="kv-value" id="next_event_news">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ASSISTANT -->
+    <div class="section" id="section-assistant">
+        <div class="grid-2">
+            <div>
+                <div class="panel">
+                    <div class="section-title">Donna AI Assistant</div>
+
+                    <div class="chat-shell">
+                        <div class="chat-output" id="chat_output">
+                            <div class="chat-msg assistant">
+                                <span class="chat-role">Donna</span>
+                                Donna online. Ask for a state readout or give a command.
+                            </div>
+                        </div>
+
+                        <textarea class="textarea" id="chat_input" placeholder="Ask Donna something or give a command..."></textarea>
+
                         <div class="btn-row">
-                            <button class="btn secondary" onclick="addReminder()">Add Reminder</button>
-                            <button class="btn" onclick="clearReminders()">Clear All</button>
+                            <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
+                            <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
+                            <button class="btn ghost" onclick="quickAsk('Summarize recent alerts.')">Recent Alerts</button>
+                        </div>
+
+                        <div class="quick-actions">
+                            <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
+                            <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
+                            <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
+                            <button class="quick-chip" onclick="quickAsk('Clear tasks.')">Clear Tasks</button>
+                            <button class="quick-chip" onclick="quickAsk('Clear reminders.')">Clear Reminders</button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="panel" style="margin-top:16px;">
-                <div class="section-title">System Snapshot</div>
+            <div>
+                <div class="panel">
+                    <div class="section-title">Assistant Control Panel</div>
 
-                <div class="history-row">
-                    <div class="history-label">Status</div>
-                    <div class="history-value" id="status_2">ONLINE</div>
-                </div>
+                    <div class="assistant-item">
+                        <strong>Daily Focus</strong>
+                        <div class="sub" id="daily_focus">Loading...</div>
+                        <input class="input" id="focus_input" placeholder="Set daily focus..." />
+                        <div class="btn-row">
+                            <button class="btn primary" onclick="saveFocus()">Save Focus</button>
+                        </div>
+                    </div>
 
-                <div class="history-row">
-                    <div class="history-label">Next Event</div>
-                    <div class="history-value" id="next_event_2">-</div>
-                </div>
+                    <div style="height:14px;"></div>
 
-                <div class="history-row">
-                    <div class="history-label">Minutes Remaining</div>
-                    <div class="history-value" id="minutes_to_event_2">-</div>
-                </div>
+                    <div class="assistant-item">
+                        <strong>Tasks</strong>
+                        <div id="tasks_list" class="sub">Loading...</div>
+                        <input class="input" id="task_input" placeholder="Add task..." />
+                        <div class="btn-row">
+                            <button class="btn secondary" onclick="addTask()">Add Task</button>
+                            <button class="btn ghost" onclick="clearTasks()">Clear All</button>
+                        </div>
+                    </div>
 
-                <div class="history-row">
-                    <div class="history-label">Last Updated</div>
-                    <div class="history-value" id="last_updated">-</div>
+                    <div style="height:14px;"></div>
+
+                    <div class="assistant-item">
+                        <strong>Reminders</strong>
+                        <div id="reminders_list" class="sub">Loading...</div>
+                        <input class="input" id="reminder_input" placeholder="Add reminder..." />
+                        <div class="btn-row">
+                            <button class="btn secondary" onclick="addReminder()">Add Reminder</button>
+                            <button class="btn ghost" onclick="clearReminders()">Clear All</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A Interface</div>
-        <div>Dashboard Primary / Telegram Secondary</div>
+        <div>D.O.N.N.A V2</div>
+        <div>Dashboard Primary // Telegram Secondary // Assistant Layer Live</div>
     </div>
 </div>
 
 <script>
 function riskClass(v){
-    const x = String(v).toLowerCase();
-    if (x.includes("high")) return "high";
-    if (x.includes("medium")) return "medium";
-    return "low";
+    const x = String(v || '').toLowerCase();
+    if (x.includes('high')) return 'high';
+    if (x.includes('medium')) return 'medium';
+    return 'low';
 }
 
 function applyRisk(id, val){
     const el = document.getElementById(id);
-    el.className = "value " + riskClass(val);
-    el.innerText = String(val).toUpperCase();
+    el.className = 'value ' + riskClass(val);
+    el.innerText = String(val || '-').toUpperCase();
+}
+
+function escapeHtml(value){
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function showSection(sectionName, btn){
+    document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('section-' + sectionName).classList.add('active');
+    btn.classList.add('active');
+}
+
+function addChatMessage(role, text){
+    const output = document.getElementById('chat_output');
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + role;
+    div.innerHTML = `
+        <span class="chat-role">${role === 'user' ? 'You' : 'Donna'}</span>
+        ${escapeHtml(text)}
+    `;
+    output.appendChild(div);
+    output.scrollTop = output.scrollHeight;
+}
+
+function formatTimeText(mins){
+    if (mins === null || mins === undefined) return 'No timed event loaded';
+    return mins + ' minutes remaining';
 }
 
 async function saveFocus(){
@@ -1097,7 +1741,6 @@ async function deleteTask(index){
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({index:index})
     });
-
     refreshDashboard();
 }
 
@@ -1107,24 +1750,125 @@ async function deleteReminder(index){
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({index:index})
     });
-
     refreshDashboard();
 }
 
 async function clearTasks(){
-    await fetch('/assistant/clear-tasks', {
-        method:'POST'
-    });
-
+    await fetch('/assistant/clear-tasks', {method:'POST'});
     refreshDashboard();
 }
 
 async function clearReminders(){
-    await fetch('/assistant/clear-reminders', {
-        method:'POST'
-    });
-
+    await fetch('/assistant/clear-reminders', {method:'POST'});
     refreshDashboard();
+}
+
+async function quickAsk(text){
+    document.getElementById('chat_input').value = text;
+    await sendDonnaChat();
+}
+
+async function sendDonnaChat(){
+    const input = document.getElementById('chat_input');
+    const message = input.value.trim();
+    if(!message) return;
+
+    addChatMessage('user', message);
+    input.value = '';
+
+    try{
+        const res = await fetch('/assistant/chat', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({message})
+        });
+
+        const data = await res.json();
+        addChatMessage('assistant', data.reply || 'Command complete.');
+        refreshDashboard();
+    }catch(err){
+        addChatMessage('assistant', 'Assistant route error.');
+        console.log(err);
+    }
+}
+
+function renderWarnings(warnings, targetId){
+    const box = document.getElementById(targetId);
+    if (warnings && warnings.length){
+        box.innerHTML = warnings.map(x => {
+            const cls = String(x).toLowerCase().includes('high')
+                ? 'high'
+                : String(x).toLowerCase().includes('medium')
+                    ? 'medium'
+                    : 'low';
+            return '<span class="badge ' + cls + '">' + escapeHtml(x) + '</span>';
+        }).join('');
+    } else {
+        box.innerHTML = '<span class="badge low">No active warnings</span>';
+    }
+}
+
+function renderAlerts(alerts, targetId){
+    const box = document.getElementById(targetId);
+
+    if (!alerts || !alerts.length){
+        box.innerHTML = '<div class="feed-item">No alerts yet</div>';
+        return;
+    }
+
+    box.innerHTML = alerts.map(a => `
+        <div class="alert-box">
+            <div class="alert-top">
+                <span>${escapeHtml(a.ticker)} | ${escapeHtml(a.signal)} | ${escapeHtml(a.verdict)}</span>
+                <span>${escapeHtml(a.confidence)}</span>
+            </div>
+            <div class="alert-meta">
+                TF: ${escapeHtml(a.timeframe)} | Session: ${escapeHtml(a.session)} | Price: ${escapeHtml(a.price)}
+            </div>
+            <div class="alert-summary">
+                ${escapeHtml(a.summary || '')}
+            </div>
+            <div class="alert-meta mono">
+                ${escapeHtml(a.timestamp || '')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderTasks(tasks){
+    const box = document.getElementById('tasks_list');
+
+    if (!tasks || !tasks.length){
+        box.innerHTML = '<div class="feed-item">No tasks</div>';
+        return;
+    }
+
+    box.innerHTML = tasks.map((x, i) => `
+        <div class="item-row">
+            <div class="item-text">${escapeHtml(x)}</div>
+            <div class="item-actions">
+                <button class="btn ghost" onclick="deleteTask(${i})">Delete</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderReminders(reminders){
+    const box = document.getElementById('reminders_list');
+
+    if (!reminders || !reminders.length){
+        box.innerHTML = '<div class="feed-item">No reminders</div>';
+        return;
+    }
+
+    box.innerHTML = reminders.map((x, i) => `
+        <div class="item-row">
+            <div class="item-text">${escapeHtml(x)}</div>
+            <div class="item-actions">
+                <button class="btn ghost" onclick="deleteReminder(${i})">Delete</button>
+            </div>
+        </div>
+    `).join('');
 }
 
 async function refreshDashboard(){
@@ -1132,104 +1876,73 @@ async function refreshDashboard(){
         const res = await fetch('/dashboard-data');
         const data = await res.json();
 
-        const status = (data.status || "online").toUpperCase();
-        document.getElementById('status').innerText = status;
+        const status = String(data.status || 'online').toUpperCase();
+        const assistant = data.assistant || {};
+        const alerts = data.alerts || [];
+
+        document.getElementById('status_text').innerText = status;
         document.getElementById('status_2').innerText = status;
 
         applyRisk('macro_risk', data.macro_risk);
         applyRisk('headline_risk', data.headline_risk);
         applyRisk('market_news_risk', data.market_news_risk);
 
-        const nextEvent = data.next_event || "NONE";
+        document.getElementById('macro_news').innerText = String(data.macro_risk || '-').toUpperCase();
+        document.getElementById('headline_news').innerText = String(data.headline_risk || '-').toUpperCase();
+        document.getElementById('market_news').innerText = String(data.market_news_risk || '-').toUpperCase();
+
+        const nextEvent = data.next_event || 'NONE';
+        const mins = data.minutes_to_event;
+
         document.getElementById('next_event').innerText = nextEvent;
         document.getElementById('next_event_2').innerText = nextEvent;
+        document.getElementById('next_event_news').innerText = nextEvent;
+        document.getElementById('next_event_hero').innerText = nextEvent;
 
-        const mins = data.minutes_to_event;
-        document.getElementById('minutes_to_event').innerText =
-            mins !== null ? mins + " minutes remaining" : "No timed event loaded";
-        document.getElementById('minutes_to_event_2').innerText =
-            mins !== null ? mins : "-";
+        document.getElementById('minutes_to_event').innerText = formatTimeText(mins);
+        document.getElementById('minutes_to_event_2').innerText = mins !== null && mins !== undefined ? mins : '-';
+        document.getElementById('next_event_hero_sub').innerText = formatTimeText(mins);
 
-        const warnBox = document.getElementById('warnings');
-        if (data.active_warnings && data.active_warnings.length){
-            warnBox.innerHTML = data.active_warnings
-                .map(x => '<span class="warning-badge">' + x + '</span>')
-                .join('');
-        } else {
-            warnBox.innerHTML = '<span class="warning-badge">No active warnings</span>';
-        }
+        document.getElementById('last_updated').innerText = data.last_updated || '-';
+        document.getElementById('last_headline').innerText = data.last_headline || 'No recent headline';
+        document.getElementById('last_market_headline').innerText = data.last_market_headline || 'No recent market headline';
 
-        document.getElementById('last_headline').innerText =
-            data.last_headline || "No recent headline";
+        document.getElementById('hero_headline').innerText =
+            `System online. ${String(data.macro_risk).toUpperCase()} macro risk, ${String(data.headline_risk).toUpperCase()} headline risk, ${String(data.market_news_risk).toUpperCase()} market risk.`;
 
-        document.getElementById('last_market_headline').innerText =
-            data.last_market_headline || "No recent market headline";
+        document.getElementById('hero_sub').innerText =
+            data.active_warnings && data.active_warnings.length
+                ? 'Active warnings are live. Donna is monitoring pressure across macro, headlines, and market catalysts.'
+                : 'No major live warning pressure. Donna is monitoring risk, signals, and operator state.';
 
-        document.getElementById('last_updated').innerText =
-            data.last_updated || "-";
+        document.getElementById('daily_focus').innerText = assistant.daily_focus || 'No focus set';
+        document.getElementById('daily_focus_hero').innerText = assistant.daily_focus || 'No focus set';
 
-        const alertsRes = await fetch('/alerts-data');
-        const alertsJson = await alertsRes.json();
-        const alerts = alertsJson.alerts || [];
+        renderWarnings(data.active_warnings || [], 'warnings');
+        renderWarnings(data.active_warnings || [], 'warning_pressure_news');
 
-        const alertsFeed = document.getElementById('alerts_feed');
+        renderAlerts(alerts, 'alerts_feed_dashboard');
+        renderAlerts(alerts, 'alerts_feed_trading');
 
-        if (alerts.length) {
-            alertsFeed.innerHTML = alerts.map(a => `
-                <div class="alert-box">
-                    <div class="alert-top">
-                        <span>${a.ticker} | ${a.signal} | ${a.verdict}</span>
-                        <span>${a.confidence}</span>
-                    </div>
-                    <div class="alert-meta">
-                        TF: ${a.timeframe} | Session: ${a.session} | Price: ${a.price}
-                    </div>
-                    <div class="alert-summary">
-                        ${a.summary || ""}
-                    </div>
-                    <div class="alert-meta">
-                        ${a.timestamp}
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            alertsFeed.innerHTML = '<div class="feed-item">No alerts yet</div>';
-        }
+        renderTasks(assistant.tasks || []);
+        renderReminders(assistant.reminders || []);
 
-        const assistantRes = await fetch('/assistant-data');
-        const assistant = await assistantRes.json();
+        document.getElementById('telegram_mode').innerText = 'LIVE';
+        document.getElementById('alert_count').innerText = String(alerts.length || 0);
+        document.getElementById('macro_bias_trading').innerText = String(data.macro_risk || '-').toUpperCase();
+        document.getElementById('market_bias_trading').innerText = String(data.market_news_risk || '-').toUpperCase();
 
-        document.getElementById('daily_focus').innerText =
-            assistant.daily_focus || "No focus set";
-
-        document.getElementById('tasks_list').innerHTML =
-            assistant.tasks && assistant.tasks.length
-                ? assistant.tasks.map((x, i) => `
-                    <div class="item-row">
-                        <div class="item-text">${x}</div>
-                        <div class="item-actions">
-                            <button class="btn secondary" onclick="deleteTask(${i})">Delete</button>
-                        </div>
-                    </div>
-                `).join('')
-                : '<div class="feed-item">No tasks</div>';
-
-        document.getElementById('reminders_list').innerHTML =
-            assistant.reminders && assistant.reminders.length
-                ? assistant.reminders.map((x, i) => `
-                    <div class="item-row">
-                        <div class="item-text">${x}</div>
-                        <div class="item-actions">
-                            <button class="btn secondary" onclick="deleteReminder(${i})">Delete</button>
-                        </div>
-                    </div>
-                `).join('')
-                : '<div class="feed-item">No reminders</div>';
-
-    } catch(err){
+    }catch(err){
         console.log(err);
     }
 }
+
+document.getElementById('chat_input').addEventListener('keydown', async function(e){
+    if(e.key === 'Enter' && !e.shiftKey){
+        e.preventDefault();
+        await sendDonnaChat();
+    }
+});
 
 refreshDashboard();
 setInterval(refreshDashboard, 5000);
@@ -1238,7 +1951,9 @@ setInterval(refreshDashboard, 5000);
 </html>
 """
 
-
+# ==================================================
+# WEBHOOK
+# ==================================================
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
