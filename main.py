@@ -41,6 +41,7 @@ app = FastAPI(title="DONNA MASTER CORE")
 # ==================================================
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 ALERTS_FILE = BASE_DIR / "donna_alert_history.json"
+ASSISTANT_FILE = BASE_DIR / "donna_assistant_state.json"
 
 # ==================================================
 # LOOP TIMERS
@@ -52,7 +53,7 @@ FINNHUB_POLL_SECONDS = 600
 # ==================================================
 # TELEGRAM MODE
 # all = send every trade alert
-# critical = only send TAKE / high conviction
+# critical = only strong alerts
 # off = dashboard only
 # ==================================================
 TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower()
@@ -228,6 +229,50 @@ def add_alert_to_history(data: dict, parsed: dict) -> None:
     alerts.insert(0, entry)
     alerts = alerts[:30]
     save_alert_history(alerts)
+
+
+def load_assistant_state() -> dict:
+    default_state = {
+        "daily_focus": "Stay sharp. Protect focus. Execute well.",
+        "tasks": [
+            "Review market conditions",
+            "Check Donna dashboard",
+            "Handle top priority task"
+        ],
+        "reminders": [
+            "Check next macro event",
+            "Review active warnings"
+        ],
+        "last_updated": utc_now_iso()
+    }
+
+    try:
+        if not ASSISTANT_FILE.exists():
+            return default_state
+
+        with open(ASSISTANT_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return default_state
+
+        merged = {**default_state, **data}
+
+        if not isinstance(merged.get("tasks"), list):
+            merged["tasks"] = default_state["tasks"]
+
+        if not isinstance(merged.get("reminders"), list):
+            merged["reminders"] = default_state["reminders"]
+
+        return merged
+    except Exception:
+        return default_state
+
+
+def save_assistant_state(state: dict) -> None:
+    state["last_updated"] = utc_now_iso()
+    with open(ASSISTANT_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
 
 # ==================================================
 # VERDICT ENGINE
@@ -544,6 +589,11 @@ async def alerts_data():
     return {"alerts": load_alert_history()}
 
 
+@app.get("/assistant-data")
+async def assistant_data():
+    return load_assistant_state()
+
+
 @app.get("/check-env")
 async def check_env():
     return {
@@ -553,6 +603,7 @@ async def check_env():
         "finnhub_found": bool(os.getenv("FINNHUB_API_KEY")),
         "risk_file_exists": RISK_STATE_FILE.exists(),
         "alerts_file_exists": ALERTS_FILE.exists(),
+        "assistant_file_exists": ASSISTANT_FILE.exists(),
         "telegram_alert_mode": TELEGRAM_ALERT_MODE,
         "model": OPENAI_MODEL,
     }
@@ -588,7 +639,7 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A Command Center V2</title>
+<title>D.O.N.N.A Command Center</title>
 
 <style>
 *{
@@ -777,10 +828,6 @@ body{
     font-weight:700;
 }
 
-.muted{
-    color:var(--muted);
-}
-
 .warning-badge{
     display:inline-block;
     padding:7px 11px;
@@ -870,6 +917,12 @@ body{
     color:#d8e4f4;
     font-size:14px;
     line-height:1.4;
+}
+
+.small{
+    color:var(--muted);
+    font-size:13px;
+    margin-top:6px;
 }
 
 @media(max-width:1100px){
@@ -971,15 +1024,21 @@ body{
         <div>
             <div class="panel">
                 <div class="section-title">Assistant Panel</div>
+
                 <div class="assistant-box">
                     <div class="assistant-item">
-                        Donna is online and monitoring macro, headlines, and market catalysts.
+                        <strong>Daily Focus</strong>
+                        <div class="small" id="daily_focus">Loading...</div>
                     </div>
+
                     <div class="assistant-item">
-                        Dashboard is now the primary home for alerts. Telegram is a secondary push layer.
+                        <strong>Today's Tasks</strong>
+                        <div id="tasks_list" class="small">Loading...</div>
                     </div>
+
                     <div class="assistant-item">
-                        Next step: tasks, reminders, routines, and daily operating widgets.
+                        <strong>Reminders</strong>
+                        <div id="reminders_list" class="small">Loading...</div>
                     </div>
                 </div>
             </div>
@@ -1011,8 +1070,8 @@ body{
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A Interface v2</div>
-        <div>Hybrid Command Center</div>
+        <div>D.O.N.N.A Interface</div>
+        <div>Dashboard Primary / Telegram Secondary</div>
     </div>
 </div>
 
@@ -1098,6 +1157,22 @@ async function refreshDashboard(){
         } else {
             alertsFeed.innerHTML = '<div class="feed-item">No alerts yet</div>';
         }
+
+        const assistantRes = await fetch('/assistant-data');
+        const assistant = await assistantRes.json();
+
+        document.getElementById('daily_focus').innerText =
+            assistant.daily_focus || "No focus set";
+
+        document.getElementById('tasks_list').innerHTML =
+            assistant.tasks && assistant.tasks.length
+                ? assistant.tasks.map(x => `<div class="feed-item">${x}</div>`).join('')
+                : '<div class="feed-item">No tasks</div>';
+
+        document.getElementById('reminders_list').innerHTML =
+            assistant.reminders && assistant.reminders.length
+                ? assistant.reminders.map(x => `<div class="feed-item">${x}</div>`).join('')
+                : '<div class="feed-item">No reminders</div>';
 
     } catch(err){
         console.log(err);
