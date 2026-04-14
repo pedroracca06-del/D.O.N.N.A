@@ -2,83 +2,73 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import os
-import requests
 import json
+import requests
+import xml.etree.ElementTree as ET
 
-# =========================
-# ENV LOAD
-# =========================
-env_path = Path(__file__).parent / ".env"
+# ==================================================
+# ENV / PATHS
+# ==================================================
+BASE_DIR = Path(__file__).parent
+env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-# =========================
-# FILE PATHS
-# =========================
-BASE_DIR = Path(__file__).parent
-MACRO_FILE = BASE_DIR / "donna_macro_calendar.json"
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 
-# Prevent duplicate alerts
-sent_alerts: set[str] = set()
+NY_TZ = ZoneInfo("America/New_York")
+UTC_TZ = ZoneInfo("UTC")
 
-# =========================
-# TELEGRAM
-# =========================
-def send_telegram_message(text: str) -> dict:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return {"error": "Missing Telegram credentials"}
+FOREX_FACTORY_XML = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-    }
+# ==================================================
+# RED FOLDER FILTERS
+# ==================================================
+HIGH_IMPACT_KEYWORDS = [
+    "cpi",
+    "core cpi",
+    "ppi",
+    "core ppi",
+    "nfp",
+    "non-farm",
+    "powell",
+    "fomc",
+    "fed",
+    "interest rate",
+    "rate decision",
+    "gdp",
+    "retail sales",
+    "unemployment",
+    "jobless claims",
+    "ism",
+    "pce",
+    "core pce",
+    "minutes",
+]
 
-    response = requests.post(url, json=payload, timeout=20)
-    response.raise_for_status()
-    return response.json()
-
-# =========================
+# ==================================================
 # HELPERS
-# =========================
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+# ==================================================
+def now_ny() -> datetime:
+    return datetime.now(NY_TZ)
 
 
-def parse_utc(value: str) -> datetime | None:
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
+def now_iso() -> str:
+    return datetime.now(UTC_TZ).isoformat()
 
 
-def load_macro_calendar() -> list[dict]:
-    if not MACRO_FILE.exists():
-        return []
-
-    with open(MACRO_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    events = data.get("events", [])
-    return events if isinstance(events, list) else []
-
-
-def load_risk_state() -> dict:
+def load_state() -> dict:
     default_state = {
         "macro_risk": "low",
         "headline_risk": "low",
+        "market_news_risk": "low",
         "active_warnings": [],
         "next_event": "",
         "minutes_to_event": None,
         "last_headline": "",
+        "last_market_headline": "",
         "last_updated": "",
     }
 
@@ -98,132 +88,190 @@ def load_risk_state() -> dict:
             merged["active_warnings"] = []
 
         return merged
+
     except Exception:
         return default_state
 
 
-def save_macro_state(risk: str, warnings: list[str], next_event: str, minutes_left: int | None) -> None:
-    state = load_risk_state()
-
-    non_macro = [
-        w for w in state.get("active_warnings", [])
-        if not str(w).startswith("MACRO:")
-    ]
-
-    macro_warnings = [f"MACRO: {w}" for w in warnings]
-
-    state["macro_risk"] = risk
-    state["active_warnings"] = non_macro + macro_warnings
-    state["next_event"] = next_event
-    state["minutes_to_event"] = minutes_left
-    state["last_updated"] = now_utc().isoformat()
+def save_state(state: dict) -> None:
+    state["last_updated"] = now_iso()
 
     with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
-# =========================
-# CORE LOGIC
-# =========================
-def upcoming_events() -> list[tuple[dict, datetime, int]]:
-    current = now_utc()
-    matches = []
 
-    for event in load_macro_calendar():
-        dt = parse_utc(str(event.get("datetime_utc", "")))
-        if not dt:
-            continue
-
-        minutes_left = int((dt - current).total_seconds() // 60)
-
-        if minutes_left < 0:
-            continue
-
-        matches.append((event, dt, minutes_left))
-
-    matches.sort(key=lambda x: x[1])
-    return matches
+def contains_high_impact(title: str) -> bool:
+    text = title.lower()
+    return any(word in text for word in HIGH_IMPACT_KEYWORDS)
 
 
-def derive_macro_risk(events: list[tuple[dict, datetime, int]]) -> tuple[str, list[str], str, int | None]:
-    if not events:
-        return "low", [], "", None
+# ==================================================
+# FOREX FACTORY FETCH
+# ==================================================
+def fetch_calendar_events() -> list[dict]:
+    response = requests.get(FOREX_FACTORY_XML, timeout=20)
+    response.raise_for_status()
 
-    event, _, minutes_left = events[0]
+    root = ET.fromstring(response.content)
 
-    name = str(event.get("name", "Unknown Event"))
-    importance = str(event.get("importance", "low")).lower()
+    events = []
 
-    warnings = []
-
-    if importance == "high":
-        if minutes_left <= 15:
-            warnings.append(f"{name} within {minutes_left}m")
-            return "high", warnings, name, minutes_left
-        if minutes_left <= 60:
-            warnings.append(f"{name} within {minutes_left}m")
-            return "medium", warnings, name, minutes_left
-
-    if importance == "medium":
-        if minutes_left <= 30:
-            warnings.append(f"{name} within {minutes_left}m")
-            return "medium", warnings, name, minutes_left
-
-    warnings.append(f"Upcoming event: {name}")
-    return "low", warnings, name, minutes_left
-
-
-def build_alert_key(name: str, minutes: int) -> str:
-    return f"{name}|{minutes}"
-
-
-def format_event_message(event: dict, minutes_left: int) -> str:
-    name = str(event.get("name", "Unknown Event"))
-    category = str(event.get("category", "general"))
-    importance = str(event.get("importance", "low")).upper()
-
-    timing = "NOW" if minutes_left <= 0 else f"in {minutes_left}m"
-
-    return (
-        f"⚠️ DONNA NEWS GUARD\n\n"
-        f"Event: {name}\n"
-        f"Category: {category}\n"
-        f"Importance: {importance}\n"
-        f"Timing: {timing}\n\n"
-        f"Donna Guidance: Major macro event near market. Expect volatility and lower setup reliability."
-    )
-
-
-def process_news_guard_cycle() -> None:
-    events = upcoming_events()
-
-    risk, warnings, next_event, minutes_left = derive_macro_risk(events)
-    save_macro_state(risk, warnings, next_event, minutes_left)
-
-    if not events:
-        print("Donna News Guard: no upcoming events.")
-        return
-
-    event, _, mins = events[0]
-    name = str(event.get("name", "Unknown Event"))
-    windows = event.get("warning_minutes", [])
-
-    if not isinstance(windows, list):
-        windows = []
-
-    for window in windows:
+    for item in root.findall("event"):
         try:
-            window = int(window)
+            title = (item.findtext("title") or "").strip()
+            country = (item.findtext("country") or "").strip()
+            impact = (item.findtext("impact") or "").strip().lower()
+            date_text = (item.findtext("date") or "").strip()
+            time_text = (item.findtext("time") or "").strip()
+
+            if not title or not date_text:
+                continue
+
+            # Example date format can vary slightly, so keep robust
+            dt_raw = f"{date_text} {time_text}".strip()
+
+            event_dt = parse_event_datetime(dt_raw)
+            if not event_dt:
+                continue
+
+            events.append({
+                "title": title,
+                "country": country,
+                "impact": impact,
+                "datetime": event_dt,
+            })
+
         except Exception:
             continue
 
-        if mins <= window and mins >= max(0, window - 1):
-            key = build_alert_key(name, window)
+    return events
 
-            if key in sent_alerts:
-                continue
 
-            msg = format_event_message(event, mins)
-            result = send_telegram_message(msg)
-            print("Macro alert sent:", result)
+def parse_event_datetime(raw: str):
+    formats = [
+        "%m-%d-%Y %I:%M%p",
+        "%m-%d-%Y %H:%M",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %I:%M%p",
+    ]
 
-            sent_alerts.add(key)
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.replace(tzinfo=NY_TZ)
+        except Exception:
+            pass
+
+    return None
+
+# ==================================================
+# EVENT ENGINE
+# ==================================================
+def get_priority_events(events: list[dict]) -> list[dict]:
+    out = []
+
+    for e in events:
+        title = e["title"]
+        impact = e["impact"]
+
+        if impact == "high" or contains_high_impact(title):
+            out.append(e)
+
+    return sorted(out, key=lambda x: x["datetime"])
+
+
+def find_next_event(events: list[dict]):
+    now = now_ny()
+
+    future = [e for e in events if e["datetime"] >= now]
+
+    if not future:
+        return None
+
+    return future[0]
+
+
+def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int | None]:
+    now = now_ny()
+
+    if not next_event:
+        return "low", [], "", None
+
+    event_name = next_event["title"]
+    event_time = next_event["datetime"]
+
+    minutes = int((event_time - now).total_seconds() / 60)
+
+    warnings = []
+
+    # Live event window
+    if -5 <= minutes <= 5:
+        risk = "high"
+        warnings.append("Macro event live now — volatility elevated")
+        warnings.append(f"{event_name} active")
+        return risk, warnings, event_name, 0
+
+    # Immediate pre-event
+    if 0 < minutes <= 15:
+        risk = "high"
+        warnings.append("High-impact event approaching — reduce size")
+        warnings.append(f"{event_name} in {minutes}m")
+        return risk, warnings, event_name, minutes
+
+    # Pre-event caution
+    if 15 < minutes <= 60:
+        risk = "medium"
+        warnings.append("High-impact macro event approaching")
+        warnings.append(f"{event_name} in {minutes}m")
+        return risk, warnings, event_name, minutes
+
+    # Post-event cool down
+    if -30 <= minutes < -5:
+        risk = "medium"
+        warnings.append("Post-event volatility window active")
+        warnings.append(f"{event_name} recently released")
+        return risk, warnings, event_name, 0
+
+    # Normal
+    return "low", [], event_name, max(minutes, 0)
+
+# ==================================================
+# MAIN CYCLE
+# ==================================================
+def process_news_guard_cycle() -> None:
+    try:
+        raw_events = fetch_calendar_events()
+        priority_events = get_priority_events(raw_events)
+        next_event = find_next_event(priority_events)
+
+        macro_risk, warnings, event_name, mins = build_macro_state(next_event)
+
+        state = load_state()
+
+        # preserve non-macro warnings
+        existing = state.get("active_warnings", [])
+        keep = [
+            w for w in existing
+            if not str(w).startswith("MACRO:")
+        ]
+
+        macro_warns = [f"MACRO: {w}" for w in warnings]
+
+        state["macro_risk"] = macro_risk
+        state["active_warnings"] = keep + macro_warns
+        state["next_event"] = event_name
+        state["minutes_to_event"] = mins
+
+        save_state(state)
+
+        print(
+            "Donna News Guard:",
+            macro_risk,
+            "|",
+            event_name if event_name else "No major event",
+            "|",
+            mins
+        )
+
+    except Exception as e:
+        print("Donna News Guard error:", str(e))
