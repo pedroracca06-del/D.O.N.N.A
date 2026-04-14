@@ -25,6 +25,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower()
 
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY")
@@ -34,7 +35,7 @@ if not TELEGRAM_CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_CHAT_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-app = FastAPI(title="DONNA MASTER CORE V2")
+app = FastAPI(title="DONNA MASTER CORE V3")
 
 # ==================================================
 # FILES
@@ -49,14 +50,6 @@ ASSISTANT_FILE = BASE_DIR / "donna_assistant_state.json"
 NEWS_POLL_SECONDS = 60
 HEADLINE_POLL_SECONDS = 900
 FINNHUB_POLL_SECONDS = 600
-
-# ==================================================
-# TELEGRAM MODE
-# all = send every trade alert
-# critical = only strong alerts
-# off = dashboard only
-# ==================================================
-TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower()
 
 # ==================================================
 # SYSTEM PROMPTS
@@ -206,15 +199,6 @@ def parse_json_loose(text: str, fallback: dict) -> dict:
 
     return fallback
 
-
-def format_timestamp(iso_str: str) -> str:
-    if not iso_str:
-        return "-"
-    try:
-        return iso_str.replace("T", " ").replace("+00:00", " UTC")
-    except Exception:
-        return iso_str
-
 # ==================================================
 # STATE LOAD / SAVE
 # ==================================================
@@ -229,6 +213,13 @@ def load_risk_state() -> dict:
         "last_headline": "",
         "last_market_headline": "",
         "last_updated": "",
+        "headline_severity": "",
+        "headline_guidance": "",
+        "headline_source": "",
+        "last_market_symbol": "",
+        "last_market_severity": "",
+        "last_market_guidance": "",
+        "last_market_url": "",
     }
 
     try:
@@ -501,7 +492,7 @@ def extract_fields(text: str) -> dict:
     }
 
 # ==================================================
-# PROMPT BUILDER
+# PROMPT BUILDERS
 # ==================================================
 def build_prompt(data: dict) -> str:
     risk = load_risk_state()
@@ -539,26 +530,17 @@ Warnings: {warnings}
 Next Event: {risk["next_event"]}
 Minutes To Event: {risk["minutes_to_event"]}
 Last Headline: {risk["last_headline"]}
+Headline Severity: {risk.get("headline_severity", "")}
+Headline Guidance: {risk.get("headline_guidance", "")}
 Last Market Headline: {risk["last_market_headline"]}
+Market Symbol: {risk.get("last_market_symbol", "")}
+Market Severity: {risk.get("last_market_severity", "")}
+Market Guidance: {risk.get("last_market_guidance", "")}
 
 Deterministic Verdict: {base_verdict}
 Fusion Verdict: {fusion}
 Confidence Guidance: {confidence_note}
 """.strip()
-
-# ==================================================
-# FORMATTERS
-# ==================================================
-def format_message(data: dict, result: dict) -> str:
-    return f"""DONNA // {data['ticker']} // {data['signal']}
-{data['session']} | TF {data['timeframe']} | Price {data['price']}
-
-Verdict: {result['verdict']}
-Confidence: {result['confidence']}
-Why: {result['why']}
-Risk: {result['risk']}
-Execution: {result['execution']}
-Summary: {result['summary']}"""
 
 
 def summarize_system_context() -> str:
@@ -584,7 +566,12 @@ Risk:
 - Next Event: {risk.get("next_event", "none")}
 - Minutes To Event: {risk.get("minutes_to_event", "unknown")}
 - Last Headline: {risk.get("last_headline", "none")}
+- Headline Severity: {risk.get("headline_severity", "none")}
+- Headline Guidance: {risk.get("headline_guidance", "none")}
 - Last Market Headline: {risk.get("last_market_headline", "none")}
+- Market Symbol: {risk.get("last_market_symbol", "none")}
+- Market Severity: {risk.get("last_market_severity", "none")}
+- Market Guidance: {risk.get("last_market_guidance", "none")}
 
 Assistant:
 - Daily Focus: {assistant.get("daily_focus", "")}
@@ -594,6 +581,20 @@ Assistant:
 Recent Alerts:
 - {" | ".join(alerts_text) if alerts_text else "No recent alerts"}
 """.strip()
+
+# ==================================================
+# FORMATTERS / ACTIONS
+# ==================================================
+def format_message(data: dict, result: dict) -> str:
+    return f"""DONNA // {data['ticker']} // {data['signal']}
+{data['session']} | TF {data['timeframe']} | Price {data['price']}
+
+Verdict: {result['verdict']}
+Confidence: {result['confidence']}
+Why: {result['why']}
+Risk: {result['risk']}
+Execution: {result['execution']}
+Summary: {result['summary']}"""
 
 
 def apply_assistant_action(action: str, value: str) -> dict:
@@ -736,6 +737,13 @@ async def dashboard_data():
         "last_headline": state.get("last_headline", ""),
         "last_market_headline": state.get("last_market_headline", ""),
         "last_updated": state.get("last_updated", ""),
+        "headline_severity": state.get("headline_severity", ""),
+        "headline_guidance": state.get("headline_guidance", ""),
+        "headline_source": state.get("headline_source", ""),
+        "last_market_symbol": state.get("last_market_symbol", ""),
+        "last_market_severity": state.get("last_market_severity", ""),
+        "last_market_guidance": state.get("last_market_guidance", ""),
+        "last_market_url": state.get("last_market_url", ""),
         "alerts": alerts[:10],
         "assistant": assistant,
     }
@@ -938,15 +946,15 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A V2</title>
+<title>D.O.N.N.A V3</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
     --bg:#060912;
     --bg2:#0b1220;
     --bg3:#0f1728;
-    --panel:rgba(14,21,34,.82);
-    --panel2:rgba(18,27,42,.95);
+    --panel:rgba(14,21,34,.84);
+    --panel2:rgba(18,27,42,.96);
     --line:rgba(255,255,255,.07);
     --text:#eef4ff;
     --muted:#8ea4c5;
@@ -968,7 +976,7 @@ body{
     min-height:100vh;
     padding:22px;
 }
-.wrapper{max-width:1480px;margin:0 auto;}
+.wrapper{max-width:1520px;margin:0 auto;}
 .topbar{
     display:flex;
     justify-content:space-between;
@@ -1049,11 +1057,11 @@ body{
 }
 .hero{
     display:grid;
-    grid-template-columns:1.45fr .95fr;
+    grid-template-columns:1.42fr .98fr;
     gap:16px;
     margin-bottom:18px;
 }
-.card, .panel{
+.card,.panel{
     background:var(--panel);
     border:1px solid var(--line);
     border-radius:22px;
@@ -1062,9 +1070,7 @@ body{
     backdrop-filter:blur(10px);
 }
 .panel{background:var(--panel2);}
-.hero-main{
-    min-height:160px;
-}
+.hero-main{min-height:170px;}
 .hero-title{
     font-size:13px;
     text-transform:uppercase;
@@ -1087,6 +1093,11 @@ body{
     display:flex;
     flex-direction:column;
     gap:12px;
+}
+.hero-focus{
+    font-size:20px;
+    font-weight:800;
+    line-height:1.35;
 }
 .stat-grid{
     display:grid;
@@ -1126,15 +1137,16 @@ body{
     color:var(--muted);
     font-size:14px;
 }
-.section{
-    display:none;
-}
-.section.active{
-    display:block;
-}
+.section{display:none;}
+.section.active{display:block;}
 .grid-2{
     display:grid;
     grid-template-columns:1.3fr 1fr;
+    gap:16px;
+}
+.grid-3{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
     gap:16px;
 }
 .section-title{
@@ -1210,7 +1222,7 @@ body{
 .kv:last-child{border-bottom:none;}
 .kv-label{color:#dce7f9;}
 .kv-value{color:var(--muted);text-align:right;}
-.input, .textarea{
+.input,.textarea{
     width:100%;
     border-radius:14px;
     border:1px solid rgba(255,255,255,.08);
@@ -1329,6 +1341,29 @@ body{
     color:var(--muted);
     margin-bottom:6px;
 }
+.console-card{
+    min-height:170px;
+}
+.console-head{
+    font-size:15px;
+    font-weight:800;
+    color:#f4f8ff;
+    line-height:1.45;
+}
+.console-note{
+    margin-top:10px;
+    color:var(--muted);
+    line-height:1.55;
+    font-size:14px;
+}
+.link-out{
+    display:inline-block;
+    margin-top:10px;
+    color:#9ec2ff;
+    text-decoration:none;
+    font-size:13px;
+    font-weight:700;
+}
 .footer{
     margin-top:18px;
     display:flex;
@@ -1344,7 +1379,7 @@ body{
 @media(max-width:1180px){
     .hero{grid-template-columns:1fr;}
     .stat-grid{grid-template-columns:repeat(2,1fr);}
-    .grid-2{grid-template-columns:1fr;}
+    .grid-2,.grid-3{grid-template-columns:1fr;}
 }
 @media(max-width:760px){
     body{padding:14px;}
@@ -1362,7 +1397,7 @@ body{
     <div class="topbar">
         <div class="brand">
             <h1>D.O.N.N.A</h1>
-            <p>Dynamic Operational Neural Network Assistant // Command Center V2</p>
+            <p>Dynamic Operational Neural Network Assistant // News Engine 2.0</p>
         </div>
 
         <div class="top-right">
@@ -1383,16 +1418,16 @@ body{
     <div class="hero">
         <div class="panel hero-main">
             <div class="hero-title">Donna Overview</div>
-            <div class="hero-headline" id="hero_headline">System online. Monitoring risk, alerts, and assistant state.</div>
+            <div class="hero-headline" id="hero_headline">System online. Monitoring macro, global headlines, market catalysts, and alerts.</div>
             <div class="hero-sub" id="hero_sub">
-                Donna is running as the command center for trading intelligence, news pressure, and operator support.
+                Donna is running as the command center for trading intelligence, event risk, headline pressure, and operator support.
             </div>
         </div>
 
         <div class="panel hero-side">
             <div>
                 <div class="hero-title">Daily Focus</div>
-                <div style="font-size:20px;font-weight:800;line-height:1.35;" id="daily_focus_hero">Loading...</div>
+                <div class="hero-focus" id="daily_focus_hero">Loading...</div>
             </div>
             <div>
                 <div class="hero-title">Next Event Window</div>
@@ -1406,13 +1441,13 @@ body{
         <div class="stat-card">
             <div class="label">Macro Risk</div>
             <div class="value" id="macro_risk">-</div>
-            <div class="sub">Scheduled event pressure</div>
+            <div class="sub">Red-folder and macro event pressure</div>
         </div>
 
         <div class="stat-card">
             <div class="label">Headline Risk</div>
             <div class="value" id="headline_risk">-</div>
-            <div class="sub">Breaking macro and geopolitical flow</div>
+            <div class="sub">Global market-moving headline pressure</div>
         </div>
 
         <div class="stat-card">
@@ -1428,7 +1463,6 @@ body{
         </div>
     </div>
 
-    <!-- DASHBOARD -->
     <div class="section active" id="section-dashboard">
         <div class="grid-2">
             <div>
@@ -1438,7 +1472,7 @@ body{
                 </div>
 
                 <div class="panel" style="margin-top:16px;">
-                    <div class="section-title">System Snapshot</div>
+                    <div class="section-title">Risk Radar</div>
 
                     <div class="kv">
                         <div class="kv-label">Status</div>
@@ -1453,6 +1487,16 @@ body{
                     <div class="kv">
                         <div class="kv-label">Minutes Remaining</div>
                         <div class="kv-value" id="minutes_to_event_2">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Headline Severity</div>
+                        <div class="kv-value" id="headline_severity_dash">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Market Severity</div>
+                        <div class="kv-value" id="market_severity_dash">-</div>
                     </div>
 
                     <div class="kv">
@@ -1473,7 +1517,6 @@ body{
         </div>
     </div>
 
-    <!-- TRADING -->
     <div class="section" id="section-trading">
         <div class="grid-2">
             <div>
@@ -1505,6 +1548,11 @@ body{
                     </div>
 
                     <div class="kv">
+                        <div class="kv-label">Headline Risk Bias</div>
+                        <div class="kv-value" id="headline_bias_trading">-</div>
+                    </div>
+
+                    <div class="kv">
                         <div class="kv-label">Market Risk Bias</div>
                         <div class="kv-value" id="market_bias_trading">-</div>
                     </div>
@@ -1513,20 +1561,41 @@ body{
         </div>
     </div>
 
-    <!-- NEWS -->
     <div class="section" id="section-news">
-        <div class="grid-2">
+        <div class="grid-3">
+            <div class="panel console-card">
+                <div class="section-title">Macro Console</div>
+                <div class="console-head" id="news_macro_title">No major event loaded</div>
+                <div class="console-note" id="news_macro_note">Donna is monitoring upcoming macro volatility windows.</div>
+            </div>
+
+            <div class="panel console-card">
+                <div class="section-title">Headline Console</div>
+                <div class="console-head" id="headline_title">No major headline detected</div>
+                <div class="console-note" id="headline_note">Headline guidance unavailable.</div>
+                <div class="sub" id="headline_source">Source: -</div>
+            </div>
+
+            <div class="panel console-card">
+                <div class="section-title">Market Catalyst Console</div>
+                <div class="console-head" id="market_title">No major market catalyst detected</div>
+                <div class="console-note" id="market_note">Market guidance unavailable.</div>
+                <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Open source</a>
+            </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:16px;">
             <div>
                 <div class="panel">
                     <div class="section-title">Live Intelligence Feed</div>
 
                     <div class="feed-item">
-                        <span class="feed-label">News Feed:</span>
+                        <span class="feed-label">Headline:</span>
                         <span id="last_headline">No recent headline</span>
                     </div>
 
                     <div class="feed-item">
-                        <span class="feed-label">Market Feed:</span>
+                        <span class="feed-label">Market Headline:</span>
                         <span id="last_market_headline">No recent market headline</span>
                     </div>
                 </div>
@@ -1557,15 +1626,24 @@ body{
                     </div>
 
                     <div class="kv">
-                        <div class="kv-label">Next Event</div>
-                        <div class="kv-value" id="next_event_news">-</div>
+                        <div class="kv-label">Headline Severity</div>
+                        <div class="kv-value" id="headline_severity_news">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Market Severity</div>
+                        <div class="kv-value" id="market_severity_news">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Market Symbol</div>
+                        <div class="kv-value" id="market_symbol_news">-</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- ASSISTANT -->
     <div class="section" id="section-assistant">
         <div class="grid-2">
             <div>
@@ -1576,7 +1654,7 @@ body{
                         <div class="chat-output" id="chat_output">
                             <div class="chat-msg assistant">
                                 <span class="chat-role">Donna</span>
-                                Donna online. Ask for a state readout or give a command.
+                                Donna online. Ask for risk, news, event timing, alerts, or give a command.
                             </div>
                         </div>
 
@@ -1585,10 +1663,12 @@ body{
                         <div class="btn-row">
                             <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
                             <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
-                            <button class="btn ghost" onclick="quickAsk('Summarize recent alerts.')">Recent Alerts</button>
+                            <button class="btn ghost" onclick="quickAsk('What matters right now?')">What Matters</button>
                         </div>
 
                         <div class="quick-actions">
+                            <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
+                            <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
                             <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
                             <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
                             <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
@@ -1641,8 +1721,8 @@ body{
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A V2</div>
-        <div>Dashboard Primary // Telegram Secondary // Assistant Layer Live</div>
+        <div>D.O.N.N.A V3</div>
+        <div>Dashboard Primary // Telegram Secondary // News Engine 2.0 Live</div>
     </div>
 </div>
 
@@ -1690,6 +1770,7 @@ function addChatMessage(role, text){
 
 function formatTimeText(mins){
     if (mins === null || mins === undefined) return 'No timed event loaded';
+    if (mins === 0) return 'Live or immediate event window';
     return mins + ' minutes remaining';
 }
 
@@ -1796,9 +1877,10 @@ function renderWarnings(warnings, targetId){
     const box = document.getElementById(targetId);
     if (warnings && warnings.length){
         box.innerHTML = warnings.map(x => {
-            const cls = String(x).toLowerCase().includes('high')
+            const low = String(x).toLowerCase();
+            const cls = low.includes('high') || low.includes('critical')
                 ? 'high'
-                : String(x).toLowerCase().includes('medium')
+                : low.includes('medium')
                     ? 'medium'
                     : 'low';
             return '<span class="badge ' + cls + '">' + escapeHtml(x) + '</span>';
@@ -1871,6 +1953,16 @@ function renderReminders(reminders){
     `).join('');
 }
 
+function setText(id, value, fallback='-'){
+    const el = document.getElementById(id);
+    if (el) el.innerText = value || fallback;
+}
+
+function setHtml(id, value){
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = value;
+}
+
 async function refreshDashboard(){
     try{
         const res = await fetch('/dashboard-data');
@@ -1880,43 +1972,40 @@ async function refreshDashboard(){
         const assistant = data.assistant || {};
         const alerts = data.alerts || [];
 
-        document.getElementById('status_text').innerText = status;
-        document.getElementById('status_2').innerText = status;
+        setText('status_text', status);
+        setText('status_2', status);
 
         applyRisk('macro_risk', data.macro_risk);
         applyRisk('headline_risk', data.headline_risk);
         applyRisk('market_news_risk', data.market_news_risk);
 
-        document.getElementById('macro_news').innerText = String(data.macro_risk || '-').toUpperCase();
-        document.getElementById('headline_news').innerText = String(data.headline_risk || '-').toUpperCase();
-        document.getElementById('market_news').innerText = String(data.market_news_risk || '-').toUpperCase();
+        setText('macro_news', String(data.macro_risk || '-').toUpperCase());
+        setText('headline_news', String(data.headline_risk || '-').toUpperCase());
+        setText('market_news', String(data.market_news_risk || '-').toUpperCase());
 
         const nextEvent = data.next_event || 'NONE';
         const mins = data.minutes_to_event;
 
-        document.getElementById('next_event').innerText = nextEvent;
-        document.getElementById('next_event_2').innerText = nextEvent;
-        document.getElementById('next_event_news').innerText = nextEvent;
-        document.getElementById('next_event_hero').innerText = nextEvent;
+        setText('next_event', nextEvent);
+        setText('next_event_2', nextEvent);
+        setText('next_event_hero', nextEvent);
 
-        document.getElementById('minutes_to_event').innerText = formatTimeText(mins);
-        document.getElementById('minutes_to_event_2').innerText = mins !== null && mins !== undefined ? mins : '-';
-        document.getElementById('next_event_hero_sub').innerText = formatTimeText(mins);
+        setText('minutes_to_event', formatTimeText(mins));
+        setText('minutes_to_event_2', mins !== null && mins !== undefined ? String(mins) : '-');
+        setText('next_event_hero_sub', formatTimeText(mins));
+        setText('last_updated', data.last_updated || '-');
 
-        document.getElementById('last_updated').innerText = data.last_updated || '-';
-        document.getElementById('last_headline').innerText = data.last_headline || 'No recent headline';
-        document.getElementById('last_market_headline').innerText = data.last_market_headline || 'No recent market headline';
+        setText('daily_focus', assistant.daily_focus || 'No focus set');
+        setText('daily_focus_hero', assistant.daily_focus || 'No focus set');
 
-        document.getElementById('hero_headline').innerText =
-            `System online. ${String(data.macro_risk).toUpperCase()} macro risk, ${String(data.headline_risk).toUpperCase()} headline risk, ${String(data.market_news_risk).toUpperCase()} market risk.`;
+        const heroHead = `System online. ${String(data.macro_risk || 'low').toUpperCase()} macro risk, ${String(data.headline_risk || 'low').toUpperCase()} headline risk, ${String(data.market_news_risk || 'low').toUpperCase()} market risk.`;
+        setText('hero_headline', heroHead);
 
-        document.getElementById('hero_sub').innerText =
-            data.active_warnings && data.active_warnings.length
-                ? 'Active warnings are live. Donna is monitoring pressure across macro, headlines, and market catalysts.'
-                : 'No major live warning pressure. Donna is monitoring risk, signals, and operator state.';
-
-        document.getElementById('daily_focus').innerText = assistant.daily_focus || 'No focus set';
-        document.getElementById('daily_focus_hero').innerText = assistant.daily_focus || 'No focus set';
+        const hasWarnings = data.active_warnings && data.active_warnings.length;
+        const heroSub = hasWarnings
+            ? 'Active warnings are live. Donna is monitoring macro timing, headline shock, and market catalyst pressure.'
+            : 'No major live warning pressure. Donna is monitoring events, signals, and operator state.';
+        setText('hero_sub', heroSub);
 
         renderWarnings(data.active_warnings || [], 'warnings');
         renderWarnings(data.active_warnings || [], 'warning_pressure_news');
@@ -1927,10 +2016,46 @@ async function refreshDashboard(){
         renderTasks(assistant.tasks || []);
         renderReminders(assistant.reminders || []);
 
-        document.getElementById('telegram_mode').innerText = 'LIVE';
-        document.getElementById('alert_count').innerText = String(alerts.length || 0);
-        document.getElementById('macro_bias_trading').innerText = String(data.macro_risk || '-').toUpperCase();
-        document.getElementById('market_bias_trading').innerText = String(data.market_news_risk || '-').toUpperCase();
+        setText('telegram_mode', 'LIVE');
+        setText('alert_count', String(alerts.length || 0));
+        setText('macro_bias_trading', String(data.macro_risk || '-').toUpperCase());
+        setText('headline_bias_trading', String(data.headline_risk || '-').toUpperCase());
+        setText('market_bias_trading', String(data.market_news_risk || '-').toUpperCase());
+
+        setText('headline_severity_dash', data.headline_severity || '-');
+        setText('market_severity_dash', data.last_market_severity || '-');
+        setText('headline_severity_news', data.headline_severity || '-');
+        setText('market_severity_news', data.last_market_severity || '-');
+        setText('market_symbol_news', data.last_market_symbol || '-');
+
+        setText('last_headline', data.last_headline || 'No recent headline');
+        setText('last_market_headline', data.last_market_headline || 'No recent market headline');
+
+        setText('headline_title', data.last_headline || 'No major headline detected');
+        setText('headline_note', data.headline_guidance || 'Headline guidance unavailable.');
+        setText('headline_source', 'Source: ' + (data.headline_source || '-'));
+
+        setText('market_title', data.last_market_headline || 'No major market catalyst detected');
+        setText('market_note', data.last_market_guidance || 'Market guidance unavailable.');
+
+        const marketLink = document.getElementById('market_link');
+        if (data.last_market_url){
+            marketLink.style.display = 'inline-block';
+            marketLink.href = data.last_market_url;
+        } else {
+            marketLink.style.display = 'none';
+            marketLink.href = '#';
+        }
+
+        const macroTitle = data.next_event || 'No major event loaded';
+        let macroNote = 'Donna is monitoring upcoming macro volatility windows.';
+        if (mins === 0){
+            macroNote = 'Macro event live or immediate. Volatility sensitivity elevated.';
+        } else if (mins !== null && mins !== undefined){
+            macroNote = `${mins} minutes to next major event.`;
+        }
+        setText('news_macro_title', macroTitle);
+        setText('news_macro_note', macroNote);
 
     }catch(err){
         console.log(err);
