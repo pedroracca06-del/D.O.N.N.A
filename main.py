@@ -666,6 +666,70 @@ async def assistant_add_reminder(request: Request):
 
     return {"status": "ok", "assistant": state}
 
+
+@app.post("/assistant/delete-task")
+async def assistant_delete_task(request: Request):
+    body = await request.json()
+    index = body.get("index", None)
+
+    if index is None:
+        raise HTTPException(status_code=400, detail="index is required")
+
+    state = load_assistant_state()
+
+    try:
+        index = int(index)
+    except Exception:
+        raise HTTPException(status_code=400, detail="index must be integer")
+
+    if index < 0 or index >= len(state["tasks"]):
+        raise HTTPException(status_code=400, detail="invalid task index")
+
+    state["tasks"].pop(index)
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+
+@app.post("/assistant/delete-reminder")
+async def assistant_delete_reminder(request: Request):
+    body = await request.json()
+    index = body.get("index", None)
+
+    if index is None:
+        raise HTTPException(status_code=400, detail="index is required")
+
+    state = load_assistant_state()
+
+    try:
+        index = int(index)
+    except Exception:
+        raise HTTPException(status_code=400, detail="index must be integer")
+
+    if index < 0 or index >= len(state["reminders"]):
+        raise HTTPException(status_code=400, detail="invalid reminder index")
+
+    state["reminders"].pop(index)
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+
+@app.post("/assistant/clear-tasks")
+async def assistant_clear_tasks():
+    state = load_assistant_state()
+    state["tasks"] = []
+    save_assistant_state(state)
+    return {"status": "ok", "assistant": state}
+
+
+@app.post("/assistant/clear-reminders")
+async def assistant_clear_reminders():
+    state = load_assistant_state()
+    state["reminders"] = []
+    save_assistant_state(state)
+    return {"status": "ok", "assistant": state}
+
 # ==================================================
 # ROUTES - DASHBOARD
 # ==================================================
@@ -795,6 +859,26 @@ body{
     background:#1d3557;color:white;
 }
 .btn.secondary{background:#243b55;}
+.item-row{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+    padding:12px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+}
+.item-row:last-child{border-bottom:none;}
+.item-text{
+    color:#e6edf7;
+    font-size:14px;
+    line-height:1.4;
+    flex:1;
+}
+.item-actions{
+    display:flex;
+    gap:8px;
+    flex-shrink:0;
+}
 .footer{
     margin-top:16px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;
 }
@@ -807,6 +891,8 @@ body{
     .brand h1{font-size:28px;}
     .grid{grid-template-columns:1fr;}
     .value{font-size:34px;}
+    .item-row{flex-direction:column;align-items:flex-start;}
+    .item-actions{width:100%;}
 }
 </style>
 </head>
@@ -901,6 +987,7 @@ body{
                         <input class="input" id="task_input" placeholder="Add task..." />
                         <div class="btn-row">
                             <button class="btn secondary" onclick="addTask()">Add Task</button>
+                            <button class="btn" onclick="clearTasks()">Clear All</button>
                         </div>
                     </div>
 
@@ -910,6 +997,7 @@ body{
                         <input class="input" id="reminder_input" placeholder="Add reminder..." />
                         <div class="btn-row">
                             <button class="btn secondary" onclick="addReminder()">Add Reminder</button>
+                            <button class="btn" onclick="clearReminders()">Clear All</button>
                         </div>
                     </div>
                 </div>
@@ -1003,6 +1091,42 @@ async function addReminder(){
     refreshDashboard();
 }
 
+async function deleteTask(index){
+    await fetch('/assistant/delete-task', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({index:index})
+    });
+
+    refreshDashboard();
+}
+
+async function deleteReminder(index){
+    await fetch('/assistant/delete-reminder', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({index:index})
+    });
+
+    refreshDashboard();
+}
+
+async function clearTasks(){
+    await fetch('/assistant/clear-tasks', {
+        method:'POST'
+    });
+
+    refreshDashboard();
+}
+
+async function clearReminders(){
+    await fetch('/assistant/clear-reminders', {
+        method:'POST'
+    });
+
+    refreshDashboard();
+}
+
 async function refreshDashboard(){
     try{
         const res = await fetch('/dashboard-data');
@@ -1080,12 +1204,26 @@ async function refreshDashboard(){
 
         document.getElementById('tasks_list').innerHTML =
             assistant.tasks && assistant.tasks.length
-                ? assistant.tasks.map(x => `<div class="feed-item">${x}</div>`).join('')
+                ? assistant.tasks.map((x, i) => `
+                    <div class="item-row">
+                        <div class="item-text">${x}</div>
+                        <div class="item-actions">
+                            <button class="btn secondary" onclick="deleteTask(${i})">Delete</button>
+                        </div>
+                    </div>
+                `).join('')
                 : '<div class="feed-item">No tasks</div>';
 
         document.getElementById('reminders_list').innerHTML =
             assistant.reminders && assistant.reminders.length
-                ? assistant.reminders.map(x => `<div class="feed-item">${x}</div>`).join('')
+                ? assistant.reminders.map((x, i) => `
+                    <div class="item-row">
+                        <div class="item-text">${x}</div>
+                        <div class="item-actions">
+                            <button class="btn secondary" onclick="deleteReminder(${i})">Delete</button>
+                        </div>
+                    </div>
+                `).join('')
                 : '<div class="feed-item">No reminders</div>';
 
     } catch(err){
