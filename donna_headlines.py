@@ -15,14 +15,13 @@ env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 
 # ==================================================
 # SETTINGS
 # ==================================================
 REQUEST_TIMEOUT = 20
-MAX_HEADLINES = 12
+MAX_HEADLINES = 15
 
 NEWS_URL = "https://newsapi.org/v2/top-headlines"
 
@@ -33,65 +32,124 @@ TRUSTED_SOURCES = {
     "cnbc",
     "financial-times",
     "the-wall-street-journal",
-    "business-insider",
     "marketwatch",
     "yahoo-finance",
 }
 
+# In-memory dedupe for current runtime
 seen_titles: set[str] = set()
 
 # ==================================================
 # KEYWORD MAP
 # ==================================================
-CRITICAL_KEYWORDS = [
+CRITICAL_SHOCK_KEYWORDS = [
     "war",
     "missile",
     "attack",
     "strike",
     "invasion",
     "nuclear",
-    "sanction",
     "blockade",
-    "shipping lane",
-    "strait",
+    "strait of hormuz",
     "hormuz",
-    "terror",
+    "shipping lane",
+    "oil supply disruption",
     "emergency fed",
     "bank collapse",
+    "bank failure",
     "default",
+    "debt default",
+    "terror attack",
+    "martial law",
 ]
 
-HIGH_KEYWORDS = [
+HIGH_MACRO_POLICY_KEYWORDS = [
     "powell",
-    "fomc",
     "federal reserve",
-    "rate cut",
+    "fomc",
+    "rate decision",
     "rate hike",
+    "rate cut",
     "inflation",
     "cpi",
     "ppi",
+    "pce",
     "jobs report",
-    "yield surge",
-    "treasury yields",
+    "nonfarm payrolls",
     "tariff",
-    "trump",
     "white house",
     "treasury secretary",
-    "oil jumps",
+    "executive order",
     "opec",
+    "oil jumps",
+    "oil surges",
+    "sanctions",
 ]
 
-MEDIUM_KEYWORDS = [
+MEDIUM_MARKET_KEYWORDS = [
+    "treasury yields",
+    "yield surge",
+    "yield spike",
+    "big tech",
+    "chips",
+    "ai spending",
+    "ai capex",
+    "bank earnings",
     "earnings",
     "guidance",
     "downgrade",
     "upgrade",
-    "ai spending",
-    "chips",
-    "big tech",
     "merger",
     "acquisition",
     "recession",
+]
+
+LOW_SIGNAL_TERMS = [
+    "opinion",
+    "analysis:",
+    "what to know",
+    "live updates",
+    "live coverage",
+    "roundup",
+    "market recap",
+    "watch these stocks",
+    "top stocks to watch",
+]
+
+BROAD_MARKET_TERMS = [
+    "wall street",
+    "global markets",
+    "stocks fall",
+    "stocks rally",
+    "markets tumble",
+    "markets rise",
+    "nasdaq",
+    "s&p 500",
+    "dow jones",
+    "risk-off",
+    "risk appetite",
+]
+
+URGENCY_TERMS = [
+    "unexpected",
+    "surge",
+    "spike",
+    "jumps",
+    "slumps",
+    "crashes",
+    "plunges",
+    "shocks",
+    "emergency",
+]
+
+ROUTINE_FINANCE_TERMS = [
+    "record quarter",
+    "quarterly profit",
+    "quarterly results",
+    "revenue beat",
+    "analyst expectations",
+    "private credit",
+    "fund flows",
 ]
 
 # ==================================================
@@ -99,6 +157,14 @@ MEDIUM_KEYWORDS = [
 # ==================================================
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def normalize(text: str) -> str:
+    return " ".join(str(text).lower().split())
+
+
+def contains_any(text: str, words: list[str]) -> bool:
+    return any(word in text for word in words)
 
 
 def load_state() -> dict:
@@ -128,29 +194,18 @@ def load_state() -> dict:
             return default_state
 
         merged = {**default_state, **data}
-
         if not isinstance(merged.get("active_warnings"), list):
             merged["active_warnings"] = []
 
         return merged
-
     except Exception:
         return default_state
 
 
 def save_state(state: dict) -> None:
     state["last_updated"] = now_iso()
-
     with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
-
-
-def normalize(text: str) -> str:
-    return " ".join(str(text).lower().split())
-
-
-def contains_any(text: str, words: list[str]) -> bool:
-    return any(word in text for word in words)
 
 # ==================================================
 # FETCH
@@ -170,115 +225,119 @@ def fetch_headlines() -> list[dict]:
     response.raise_for_status()
 
     data = response.json()
-
     if data.get("status") != "ok":
-        raise RuntimeError("NewsAPI bad response")
+        raise RuntimeError(f"NewsAPI bad response: {data}")
 
-    return data.get("articles", [])
+    articles = data.get("articles", [])
+    return articles if isinstance(articles, list) else []
 
 # ==================================================
-# SCORING
+# SOURCE / SCORING
 # ==================================================
 def source_score(source_id: str, source_name: str) -> int:
-    source_id = normalize(source_id)
-    source_name = normalize(source_name)
+    sid = normalize(source_id)
+    sname = normalize(source_name)
 
-    if source_id in TRUSTED_SOURCES:
+    if sid in TRUSTED_SOURCES:
         return 3
 
-    if "reuters" in source_name or "bloomberg" in source_name or "cnbc" in source_name:
+    if "reuters" in sname or "bloomberg" in sname or "cnbc" in sname:
         return 3
 
-    if "finance" in source_name or "market" in source_name:
+    if "finance" in sname or "market" in sname or "journal" in sname:
         return 2
 
     return 1
 
 
-def headline_score(title: str, description: str) -> tuple[int, str]:
+def classify_lane(title: str, description: str) -> str:
     text = normalize(f"{title} {description}")
+
+    if contains_any(text, CRITICAL_SHOCK_KEYWORDS):
+        return "critical_shock"
+
+    if contains_any(text, HIGH_MACRO_POLICY_KEYWORDS):
+        return "high_macro_policy"
+
+    if contains_any(text, MEDIUM_MARKET_KEYWORDS):
+        return "medium_market"
+
+    return "background"
+
+
+def score_headline(title: str, description: str, source_id: str, source_name: str) -> tuple[int, str]:
+    text = normalize(f"{title} {description}")
+    lane = classify_lane(title, description)
     score = 0
-    lane = "background"
 
-    if contains_any(text, CRITICAL_KEYWORDS):
-        score += 8
-        lane = "critical"
-
-    if contains_any(text, HIGH_KEYWORDS):
-        score += 5
-        lane = "high" if lane != "critical" else lane
-
-    if contains_any(text, MEDIUM_KEYWORDS):
-        score += 2
-        if lane == "background":
-            lane = "medium"
-
-    # Broad market phrases
-    broad_terms = [
-        "stocks fall",
-        "stocks rally",
-        "markets tumble",
-        "markets rise",
-        "nasdaq",
-        "s&p 500",
-        "dow jones",
-        "wall street",
-        "global markets",
-    ]
-
-    if contains_any(text, broad_terms):
+    if lane == "critical_shock":
+        score += 9
+    elif lane == "high_macro_policy":
+        score += 6
+    elif lane == "medium_market":
         score += 3
 
-    # Surprise / urgency words
-    urgency_terms = [
-        "unexpected",
-        "surge",
-        "plunge",
-        "shocks",
-        "crashes",
-        "jumps",
-        "slumps",
-        "emergency",
-    ]
+    if contains_any(text, BROAD_MARKET_TERMS):
+        score += 3
 
-    if contains_any(text, urgency_terms):
+    if contains_any(text, URGENCY_TERMS):
         score += 2
+
+    if contains_any(text, LOW_SIGNAL_TERMS):
+        score -= 4
+
+    # Routine finance should not be "critical"
+    if contains_any(text, ROUTINE_FINANCE_TERMS):
+        score -= 3
+
+    # Broad policy/geopolitical + market framing gets extra weight
+    if lane in {"critical_shock", "high_macro_policy"} and contains_any(text, BROAD_MARKET_TERMS):
+        score += 2
+
+    score += source_score(source_id, source_name)
 
     return score, lane
 
 
-def classify(score: int) -> tuple[str, str]:
-    if score >= 11:
+def map_score_to_risk(score: int, lane: str) -> tuple[str, str]:
+    # Only true macro/geopolitical shock can be CRITICAL
+    if lane == "critical_shock" and score >= 11:
         return "high", "CRITICAL"
-    if score >= 8:
+
+    if score >= 9:
         return "medium", "HIGH"
+
     if score >= 5:
         return "medium", "MEDIUM"
+
     return "low", "BACKGROUND"
 
 
-def build_guidance(severity: str, title: str) -> str:
-    text = normalize(title)
+def build_guidance(title: str, description: str, severity: str, lane: str) -> str:
+    text = normalize(f"{title} {description}")
 
     if severity == "CRITICAL":
-        return "Major global market-moving headline detected. Elevated volatility risk."
+        return "Major global market-moving headline detected. Treat conditions as elevated risk."
 
     if "powell" in text or "federal reserve" in text or "fomc" in text:
-        return "Fed communication risk elevated. Rates-sensitive assets may react."
+        return "Fed communication risk is elevated. Rates-sensitive assets may react."
 
     if "trump" in text or "tariff" in text or "white house" in text:
-        return "Policy communication risk elevated. Watch indices and USD."
+        return "Policy communication risk is elevated. Watch indices, USD, and rates."
 
-    if "oil" in text or "hormuz" in text or "opec" in text:
-        return "Energy headline detected. Watch oil, inflation expectations, risk sentiment."
+    if "oil" in text or "hormuz" in text or "opec" in text or "shipping lane" in text:
+        return "Energy and supply-risk headline detected. Watch oil, inflation expectations, and risk sentiment."
 
     if severity == "HIGH":
-        return "High-impact headline detected. Broad market sensitivity elevated."
+        return "High-impact headline detected. Broad market sensitivity is elevated."
 
     if severity == "MEDIUM":
-        return "Relevant headline detected. Monitor for follow-through."
+        return "Relevant market headline detected. Monitor for follow-through, not panic."
 
-    return "Low-priority headline. Background monitoring only."
+    if lane == "medium_market":
+        return "Routine market headline detected. Background monitoring only."
+
+    return "Low-priority headline. No strong market warning from this item."
 
 # ==================================================
 # MAIN CYCLE
@@ -287,12 +346,14 @@ def process_headlines_cycle() -> None:
     try:
         articles = fetch_headlines()
 
-        best_score = 0
+        best_score = -999
         best_title = ""
+        best_description = ""
         best_source = ""
         best_risk = "low"
         best_severity = "BACKGROUND"
         best_guidance = ""
+        best_lane = "background"
 
         for article in articles:
             title = str(article.get("title", "")).strip()
@@ -306,34 +367,35 @@ def process_headlines_cycle() -> None:
                 continue
 
             norm_title = normalize(title)
-
             if norm_title in seen_titles:
                 continue
 
-            base_score, lane = headline_score(title, description)
-            trust = source_score(source_id, source_name)
+            score, lane = score_headline(title, description, source_id, source_name)
+            risk, severity = map_score_to_risk(score, lane)
+            guidance = build_guidance(title, description, severity, lane)
 
-            total = base_score + trust
-
-            if total > best_score:
-                risk, severity = classify(total)
-
-                best_score = total
+            if score > best_score:
+                best_score = score
                 best_title = title
-                best_source = source_name or source_id
+                best_description = description
+                best_source = source_name or source_id or "Unknown"
                 best_risk = risk
                 best_severity = severity
-                best_guidance = build_guidance(severity, title)
+                best_guidance = guidance
+                best_lane = lane
 
         state = load_state()
 
-        # keep non-headline warnings
         existing = state.get("active_warnings", [])
         keep = [w for w in existing if not str(w).startswith("HEADLINE:")]
 
         warnings = []
-        if best_score >= 8:
-            warnings.append(f"HEADLINE: {best_severity} news risk active")
+        if best_severity == "CRITICAL":
+            warnings.append("HEADLINE: Critical global headline risk active")
+        elif best_severity == "HIGH":
+            warnings.append("HEADLINE: High-impact headline risk active")
+        elif best_severity == "MEDIUM":
+            warnings.append("HEADLINE: Moderate headline pressure active")
 
         state["headline_risk"] = best_risk
         state["active_warnings"] = keep + warnings
@@ -351,7 +413,9 @@ def process_headlines_cycle() -> None:
             "Donna Headlines:",
             best_severity,
             "|",
-            best_title if best_title else "No major headline"
+            best_lane,
+            "|",
+            best_title if best_title else "No major headline",
         )
 
     except Exception as e:
