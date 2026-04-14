@@ -743,6 +743,10 @@ async def finnhub_loop():
 # ==================================================
 @app.on_event("startup")
 async def startup():
+    await asyncio.to_thread(process_news_guard_cycle)
+    await asyncio.to_thread(process_headlines_cycle)
+    await asyncio.to_thread(process_finnhub_cycle)
+
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
