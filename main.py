@@ -953,7 +953,23 @@ async def assistant_chat(request: Request):
         "value": "",
         "reply": "State check complete. No action taken.",
     }
+   risk = load_risk_state()
 
+if not reply:
+    event_phase = str(risk.get("event_phase", "")).upper()
+    minutes_to_event = risk.get("minutes_to_event", None)
+    donna_session = str(risk.get("donna_session", "unknown"))
+
+    if event_phase == "LIVE":
+        reply = "Macro event is live. Volatility is active now. Stand down until reaction becomes clear."
+    elif event_phase == "IMMINENT":
+        reply = f"High-impact event is close. {minutes_to_event} minutes remaining. Reduce size and avoid random entries."
+    elif event_phase == "APPROACHING":
+        reply = f"Event risk is building. {minutes_to_event} minutes to the next macro event. Stay selective."
+    elif event_phase == "POST_EVENT_COOLDOWN":
+        reply = "Recent macro release is still affecting conditions. Treat this as a cooldown volatility window."
+    else:
+        reply = f"Donna time check complete. Session: {donna_session}. No direct action taken."
     try:
         response = client.responses.create(
             model=OPENAI_MODEL,
@@ -1749,21 +1765,24 @@ body{
 
                         <textarea class="textarea" id="chat_input" placeholder="Ask Donna something or give a command..."></textarea>
 
-                        <div class="btn-row">
-                            <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
-                            <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
-                            <button class="btn ghost" onclick="quickAsk('What time is it and what session are we in?')">Time Check</button>
-                        </div>
+                       <div class="btn-row">
+                          <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
+                          <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
+                           <button class="btn ghost" onclick="quickAsk('What time is it and what session are we in?')">Time Check</button>
+                           <button class="btn ghost" onclick="quickAsk('Is this a dangerous time to trade?')">Danger Check</button>
+                           </div>
 
-                        <div class="quick-actions">
-                            <button class="quick-chip" onclick="quickAsk('What matters right now?')">What Matters</button>
-                            <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
-                            <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
-                            <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
-                            <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
-                            <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
-                            <button class="quick-chip" onclick="quickAsk('Clear tasks.')">Clear Tasks</button>
-                            <button class="quick-chip" onclick="quickAsk('Clear reminders.')">Clear Reminders</button>
+                    <div class="quick-actions">
+                        <button class="quick-chip" onclick="quickAsk('What matters right now?')">What Matters</button>
+                         <button class="quick-chip" onclick="quickAsk('How long until the next event?')">Time To Event</button>
+                        <button class="quick-chip" onclick="quickAsk('Are we near a red-folder event?')">Red Folder Check</button>
+                        <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
+                        <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
+                        <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
+                        <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
+                        <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
+                        <button class="quick-chip" onclick="quickAsk('Clear tasks.')">Clear Tasks</button>
+                        <button class="quick-chip" onclick="quickAsk('Clear reminders.')">Clear Reminders</button>
                         </div>
                     </div>
                 </div>
