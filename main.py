@@ -1672,89 +1672,149 @@ body{
         </div>
     </div>
 
-    <div class="section" id="section-news">
-        <div class="grid-3">
-            <div class="panel console-card">
-                <div class="section-title">Macro Console</div>
-                <div class="console-head" id="news_macro_title">No major event loaded</div>
-                <div class="console-note" id="news_macro_note">Donna is monitoring upcoming macro volatility windows.</div>
-            </div>
+  <div class="section" id="section-news">
 
-            <div class="panel console-card">
-                <div class="section-title">Headline Console</div>
-                <div class="console-head" id="headline_title">No major headline detected</div>
-                <div class="console-note" id="headline_note">Headline guidance unavailable.</div>
-                <div class="sub" id="headline_source">Source: -</div>
-            </div>
+    <!-- TOP BROADCAST STRIP -->
+    <div class="grid-3">
 
-            <div class="panel console-card">
-                <div class="section-title">Market Catalyst Console</div>
-                <div class="console-head" id="market_title">No major market catalyst detected</div>
-                <div class="console-note" id="market_note">Market guidance unavailable.</div>
-                <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Open source</a>
+        <div class="panel">
+            <div class="section-title">Breaking News</div>
+            <div style="font-size:24px;font-weight:900;line-height:1.15;" id="breaking_banner">
+                No breaking headline
+            </div>
+            <div class="sub" id="breaking_sub">
+                Donna is scanning global market-moving developments.
             </div>
         </div>
 
-        <div class="grid-2" style="margin-top:16px;">
-            <div>
-                <div class="panel">
-                    <div class="section-title">Live Intelligence Feed</div>
-
-                    <div class="feed-item">
-                        <span class="feed-label">Headline:</span>
-                        <span id="last_headline">No recent headline</span>
-                    </div>
-
-                    <div class="feed-item">
-                        <span class="feed-label">Market Headline:</span>
-                        <span id="last_market_headline">No recent market headline</span>
-                    </div>
-                </div>
-
-                <div class="panel" style="margin-top:16px;">
-                    <div class="section-title">Warning Pressure</div>
-                    <div id="warning_pressure_news"></div>
-                </div>
+        <div class="panel">
+            <div class="section-title">Macro Countdown</div>
+            <div style="font-size:34px;font-weight:900;" id="macro_countdown">
+                --
             </div>
-
-            <div>
-                <div class="panel">
-                    <div class="section-title">News Risk Snapshot</div>
-
-                    <div class="kv">
-                        <div class="kv-label">Macro Risk</div>
-                        <div class="kv-value" id="macro_news">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Headline Risk</div>
-                        <div class="kv-value" id="headline_news">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Market Risk</div>
-                        <div class="kv-value" id="market_news">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Headline Severity</div>
-                        <div class="kv-value" id="headline_severity_news">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Market Severity</div>
-                        <div class="kv-value" id="market_severity_news">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Market Symbol</div>
-                        <div class="kv-value" id="market_symbol_news">-</div>
-                    </div>
-                </div>
+            <div class="sub" id="macro_countdown_sub">
+                Waiting for next event
             </div>
         </div>
+
+        <div class="panel">
+            <div class="section-title">Live Risk Radar</div>
+
+            <div class="kv">
+                <div class="kv-label">Macro</div>
+                <div class="kv-value" id="macro_news">-</div>
+            </div>
+
+            <div class="kv">
+                <div class="kv-label">Headline</div>
+                <div class="kv-value" id="headline_news">-</div>
+            </div>
+
+            <div class="kv">
+                <div class="kv-label">Market</div>
+                <div class="kv-value" id="market_news">-</div>
+            </div>
+        </div>
+
     </div>
 
+    <!-- MAIN NEWS GRID -->
+    <div class="grid-2" style="margin-top:16px;">
+
+        <div>
+
+            <div class="panel">
+                <div class="section-title">Top Story</div>
+                <div style="font-size:22px;font-weight:900;line-height:1.2;" id="headline_title">
+                    No major headline detected
+                </div>
+
+                <div class="sub" style="margin-top:12px;" id="headline_note">
+                    Headline guidance unavailable.
+                </div>
+
+                <div class="sub" style="margin-top:10px;" id="headline_source">
+                    Source: -
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div class="section-title">Macro Radar</div>
+
+                <div style="font-size:18px;font-weight:800;" id="news_macro_title">
+                    No major event loaded
+                </div>
+
+                <div class="sub" style="margin-top:10px;" id="news_macro_note">
+                    Donna is monitoring upcoming macro volatility windows.
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Phase</div>
+                    <div class="kv-value" id="event_phase_news">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Event Time</div>
+                    <div class="kv-value" id="event_time_news">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Session</div>
+                    <div class="kv-value" id="session_news">-</div>
+                </div>
+            </div>
+
+        </div>
+
+        <div>
+
+            <div class="panel">
+                <div class="section-title">Market Catalyst</div>
+
+                <div style="font-size:22px;font-weight:900;line-height:1.2;" id="market_title">
+                    No major market catalyst detected
+                </div>
+
+                <div class="sub" style="margin-top:12px;" id="market_note">
+                    Market guidance unavailable.
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Severity</div>
+                    <div class="kv-value" id="market_severity_news">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Symbol</div>
+                    <div class="kv-value" id="market_symbol_news">-</div>
+                </div>
+
+                <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">
+                    Open source
+                </a>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div class="section-title">Donna Briefing</div>
+
+                <div id="warning_pressure_news"></div>
+
+                <div class="feed-item">
+                    <span class="feed-label">Latest Headline:</span>
+                    <span id="last_headline">No recent headline</span>
+                </div>
+
+                <div class="feed-item">
+                    <span class="feed-label">Latest Market Story:</span>
+                    <span id="last_market_headline">No recent market headline</span>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+</div>
     <div class="section" id="section-assistant">
         <div class="grid-2">
             <div>
