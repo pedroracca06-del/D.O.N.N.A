@@ -84,13 +84,16 @@ Summary: 1 hard-hitting line
 """.strip()
 
 DONNA_ASSISTANT_PROMPT = """
-You are Donna, the command center AI assistant inside a trading and productivity dashboard.
+You are Donna, the command center AI assistant inside a live trading and intelligence dashboard.
 
 Tone:
 Cold. Sharp. Helpful. Professional. Brief.
 
+Core job:
+Interpret timing, risk, session context, headlines, market catalysts, and assistant state for a futures trader.
+
 You can do two things:
-1. Answer questions about current system state.
+1. Answer questions about the current system state.
 2. Trigger one assistant action if the user clearly asks for it.
 
 You must return ONLY valid JSON in this exact shape:
@@ -100,14 +103,38 @@ You must return ONLY valid JSON in this exact shape:
   "reply": "short direct response to the user"
 }
 
-Rules:
+Reasoning rules:
+- Treat time and event proximity as highly important.
+- If a high-impact event is LIVE, IMMINENT, or within a dangerous window, say so directly.
+- If the user asks whether it is safe or dangerous to trade, judge using:
+  - macro_risk
+  - headline_risk
+  - market_news_risk
+  - minutes_to_event
+  - event_phase
+  - donna_session
+- If event_phase is LIVE, reply as if volatility is active now.
+- If event_phase is IMMINENT, reply as if the user should reduce size and avoid random entries.
+- If event_phase is APPROACHING, reply as if caution is increasing.
+- If event_phase is POST_EVENT_COOLDOWN, reply as if conditions may still be unstable.
+- If the user asks "what matters right now", prioritize:
+  1. live/imminent macro event timing
+  2. critical headline risk
+  3. major market catalyst risk
+  4. session context
+- If the user asks how long until something, use minutes_to_event and event_time_ny.
+- If the user asks what session we are in, use donna_session.
+- If the user asks what time it is, use donna_time_ny and donna_time_utc.
+- If the user asks for a state readout, synthesize rather than dumping raw fields.
+- Be decisive. Do not sound vague unless the data is actually missing.
+
+Action rules:
 - If the user is asking a question, use action = "none".
 - If the user clearly wants a focus/task/reminder action, choose the correct action.
 - For clear actions, value can be empty string.
 - Never return markdown.
 - Never return extra text outside JSON.
 """.strip()
-
 # ==================================================
 # TELEGRAM
 # ==================================================
@@ -566,25 +593,37 @@ def summarize_system_context() -> str:
     return f"""
 Current Donna state:
 
-Risk:
-- Macro Risk: {risk.get("macro_risk", "low")}
-- Headline Risk: {risk.get("headline_risk", "low")}
-- Market News Risk: {risk.get("market_news_risk", "low")}
-- Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
+Time Engine:
+- Donna Time NY: {risk.get("donna_time_ny", "unknown")}
+- Donna Time UTC: {risk.get("donna_time_utc", "unknown")}
+- Donna Day: {risk.get("donna_day", "unknown")}
+- Donna Session: {risk.get("donna_session", "unknown")}
+
+Macro Timing:
 - Next Event: {risk.get("next_event", "none")}
+- Event Time NY: {risk.get("event_time_ny", "unknown")}
 - Minutes To Event: {risk.get("minutes_to_event", "unknown")}
 - Event Phase: {risk.get("event_phase", "unknown")}
-- Donna Time NY: {risk.get("donna_time_ny", "unknown")}
-- Donna Session: {risk.get("donna_session", "unknown")}
+- Macro Risk: {risk.get("macro_risk", "low")}
+
+Headline / News Layer:
+- Headline Risk: {risk.get("headline_risk", "low")}
 - Last Headline: {risk.get("last_headline", "none")}
 - Headline Severity: {risk.get("headline_severity", "none")}
 - Headline Guidance: {risk.get("headline_guidance", "none")}
+- Headline Source: {risk.get("headline_source", "none")}
+
+Market Catalyst Layer:
+- Market News Risk: {risk.get("market_news_risk", "low")}
 - Last Market Headline: {risk.get("last_market_headline", "none")}
 - Market Symbol: {risk.get("last_market_symbol", "none")}
 - Market Severity: {risk.get("last_market_severity", "none")}
 - Market Guidance: {risk.get("last_market_guidance", "none")}
 
-Assistant:
+Warnings:
+- Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
+
+Assistant State:
 - Daily Focus: {assistant.get("daily_focus", "")}
 - Tasks: {assistant.get("tasks", [])}
 - Reminders: {assistant.get("reminders", [])}
@@ -912,7 +951,7 @@ async def assistant_chat(request: Request):
     fallback = {
         "action": "none",
         "value": "",
-        "reply": "Command received. State check complete.",
+        "reply": "State check complete. No action taken.",
     }
 
     try:
