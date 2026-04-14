@@ -774,248 +774,6 @@ async def assistant_data():
     return load_assistant_state()
 
 
-@app.get("/dashboard-data")
-async def dashboard_data():
-    state = load_risk_state()
-    alerts = load_alert_history()
-    assistant = load_assistant_state()
-
-    return {
-        "status": "online",
-        "macro_risk": state.get("macro_risk", "low"),
-        "headline_risk": state.get("headline_risk", "low"),
-        "market_news_risk": state.get("market_news_risk", "low"),
-        "active_warnings": state.get("active_warnings", []),
-        "next_event": state.get("next_event", ""),
-        "minutes_to_event": state.get("minutes_to_event", None),
-        "last_headline": state.get("last_headline", ""),
-        "last_market_headline": state.get("last_market_headline", ""),
-        "last_updated": state.get("last_updated", ""),
-        "headline_severity": state.get("headline_severity", ""),
-        "headline_guidance": state.get("headline_guidance", ""),
-        "headline_source": state.get("headline_source", ""),
-        "last_market_symbol": state.get("last_market_symbol", ""),
-        "last_market_severity": state.get("last_market_severity", ""),
-        "last_market_guidance": state.get("last_market_guidance", ""),
-        "last_market_url": state.get("last_market_url", ""),
-        "donna_time_utc": state.get("donna_time_utc", ""),
-        "donna_time_ny": state.get("donna_time_ny", ""),
-        "donna_day": state.get("donna_day", ""),
-        "donna_session": state.get("donna_session", ""),
-        "event_phase": state.get("event_phase", ""),
-        "event_time_ny": state.get("event_time_ny", ""),
-        "alerts": alerts[:10],
-        "assistant": assistant,
-    }
-
-
-@app.get("/check-env")
-async def check_env():
-    return {
-        "openai_key_found": bool(OPENAI_API_KEY),
-        "telegram_found": bool(TELEGRAM_BOT_TOKEN),
-        "newsapi_found": bool(os.getenv("NEWSAPI_KEY")),
-        "finnhub_found": bool(os.getenv("FINNHUB_API_KEY")),
-        "risk_file_exists": RISK_STATE_FILE.exists(),
-        "alerts_file_exists": ALERTS_FILE.exists(),
-        "assistant_file_exists": ASSISTANT_FILE.exists(),
-        "telegram_alert_mode": TELEGRAM_ALERT_MODE,
-        "model": OPENAI_MODEL,
-    }
-
-
-@app.get("/test-telegram")
-async def test_telegram():
-    return send_telegram_message("DONNA TEST MESSAGE")
-
-# ==================================================
-# ROUTES - ASSISTANT ACTIONS
-# ==================================================
-@app.post("/assistant/set-focus")
-async def assistant_set_focus(request: Request):
-    body = await request.json()
-    value = str(body.get("daily_focus", "")).strip()
-
-    if not value:
-        raise HTTPException(status_code=400, detail="daily_focus is required")
-
-    state = load_assistant_state()
-    state["daily_focus"] = value
-    save_assistant_state(state)
-
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/add-task")
-async def assistant_add_task(request: Request):
-    body = await request.json()
-    value = str(body.get("task", "")).strip()
-
-    if not value:
-        raise HTTPException(status_code=400, detail="task is required")
-
-    state = load_assistant_state()
-    state["tasks"].append(value)
-    state["tasks"] = state["tasks"][:20]
-    save_assistant_state(state)
-
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/add-reminder")
-async def assistant_add_reminder(request: Request):
-    body = await request.json()
-    value = str(body.get("reminder", "")).strip()
-
-    if not value:
-        raise HTTPException(status_code=400, detail="reminder is required")
-
-    state = load_assistant_state()
-    state["reminders"].append(value)
-    state["reminders"] = state["reminders"][:20]
-    save_assistant_state(state)
-
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/delete-task")
-async def assistant_delete_task(request: Request):
-    body = await request.json()
-    index = body.get("index", None)
-
-    if index is None:
-        raise HTTPException(status_code=400, detail="index is required")
-
-    state = load_assistant_state()
-
-    try:
-        index = int(index)
-    except Exception:
-        raise HTTPException(status_code=400, detail="index must be integer")
-
-    if index < 0 or index >= len(state["tasks"]):
-        raise HTTPException(status_code=400, detail="invalid task index")
-
-    state["tasks"].pop(index)
-    save_assistant_state(state)
-
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/delete-reminder")
-async def assistant_delete_reminder(request: Request):
-    body = await request.json()
-    index = body.get("index", None)
-
-    if index is None:
-        raise HTTPException(status_code=400, detail="index is required")
-
-    state = load_assistant_state()
-
-    try:
-        index = int(index)
-    except Exception:
-        raise HTTPException(status_code=400, detail="index must be integer")
-
-    if index < 0 or index >= len(state["reminders"]):
-        raise HTTPException(status_code=400, detail="invalid reminder index")
-
-    state["reminders"].pop(index)
-    save_assistant_state(state)
-
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/clear-tasks")
-async def assistant_clear_tasks():
-    state = load_assistant_state()
-    state["tasks"] = []
-    save_assistant_state(state)
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/clear-reminders")
-async def assistant_clear_reminders():
-    state = load_assistant_state()
-    state["reminders"] = []
-    save_assistant_state(state)
-    return {"status": "ok", "assistant": state}
-
-
-@app.post("/assistant/chat")
-async def assistant_chat(request: Request):
-    body = await request.json()
-    message = str(body.get("message", "")).strip()
-
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
-
-    context = summarize_system_context()
-
-    fallback = {
-        "action": "none",
-        "value": "",
-        "reply": "State check complete. No action taken.",
-    }
-
-    try:
-        response = client.responses.create(
-            model=OPENAI_MODEL,
-            instructions=DONNA_ASSISTANT_PROMPT,
-            input=f"User message:\n{message}\n\nSystem context:\n{context}",
-            max_output_tokens=220,
-        )
-
-        parsed = parse_json_loose(response.output_text, fallback)
-
-        action = str(parsed.get("action", "none")).strip().lower()
-        value = str(parsed.get("value", "")).strip()
-        reply = str(parsed.get("reply", "")).strip()
-
-        risk = load_risk_state()
-
-        if not reply:
-            event_phase = str(risk.get("event_phase", "")).upper()
-            minutes_to_event = risk.get("minutes_to_event", None)
-            donna_session = str(risk.get("donna_session", "unknown"))
-
-            if event_phase == "LIVE":
-                reply = "Macro event is live. Volatility is active now. Stand down until reaction becomes clear."
-            elif event_phase == "IMMINENT":
-                reply = f"High-impact event is close. {minutes_to_event} minutes remaining. Reduce size and avoid random entries."
-            elif event_phase == "APPROACHING":
-                reply = f"Event risk is building. {minutes_to_event} minutes to the next macro event. Stay selective."
-            elif event_phase == "POST_EVENT_COOLDOWN":
-                reply = "Recent macro release is still affecting conditions. Treat this as a cooldown volatility window."
-            else:
-                reply = f"Donna time check complete. Session: {donna_session}. No direct action taken."
-
-        updated_state = apply_assistant_action(action, value)
-
-        return {
-            "status": "ok",
-            "action": action,
-            "value": value,
-            "reply": reply,
-            "assistant": updated_state,
-            "risk": load_risk_state(),
-            "alerts": load_alert_history()[:10],
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "action": "none",
-            "value": "",
-            "reply": f"Assistant error: {str(e)}",
-            "assistant": load_assistant_state(),
-            "risk": load_risk_state(),
-            "alerts": load_alert_history()[:10],
-        }
-
-# ==================================================
-# ROUTES - DASHBOARD
-# ==================================================
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return """
@@ -1024,51 +782,57 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A V4</title>
+<title>D.O.N.N.A V2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
     --bg:#060912;
     --bg2:#0b1220;
-    --panel:rgba(14,21,34,.84);
-    --panel2:rgba(18,27,42,.96);
+    --bg3:#101a2d;
+    --panel:rgba(15,23,38,.82);
+    --panel2:rgba(18,28,46,.96);
     --line:rgba(255,255,255,.07);
+    --line-strong:rgba(255,255,255,.12);
     --text:#eef4ff;
     --muted:#8ea4c5;
+    --muted2:#6f84a6;
     --low:#4dffab;
     --medium:#ffd24f;
     --high:#ff637d;
     --blue:#4f8cff;
     --blue2:#2b5fd9;
+    --purple:#8b7dff;
     --chip:rgba(255,255,255,.04);
-    --shadow:0 10px 35px rgba(0,0,0,.28);
+    --shadow:0 14px 40px rgba(0,0,0,.34);
+    --radius:22px;
 }
+html,body{min-height:100%;}
 body{
     font-family:Inter,Arial,sans-serif;
     color:var(--text);
     background:
-        radial-gradient(circle at top right, rgba(79,140,255,.18), transparent 24%),
-        radial-gradient(circle at bottom left, rgba(77,255,171,.08), transparent 22%),
+        radial-gradient(circle at top right, rgba(79,140,255,.18), transparent 25%),
+        radial-gradient(circle at 15% 85%, rgba(77,255,171,.08), transparent 20%),
         linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);
-    min-height:100vh;
-    padding:22px;
+    padding:20px;
 }
-.wrapper{max-width:1520px;margin:0 auto;}
+.wrapper{max-width:1540px;margin:0 auto;}
 .topbar{
     display:flex;
     justify-content:space-between;
     align-items:flex-start;
     gap:18px;
     flex-wrap:wrap;
-    margin-bottom:18px;
+    margin-bottom:16px;
 }
 .brand h1{
-    font-size:40px;
+    font-size:42px;
+    line-height:1;
     letter-spacing:4px;
     font-weight:900;
 }
 .brand p{
-    margin-top:7px;
+    margin-top:8px;
     color:var(--muted);
     font-size:14px;
     letter-spacing:.4px;
@@ -1087,11 +851,10 @@ body{
     border-radius:999px;
     background:rgba(77,255,171,.08);
     border:1px solid rgba(77,255,171,.22);
+    box-shadow:var(--shadow);
 }
 .pulse-dot{
-    width:11px;
-    height:11px;
-    border-radius:50%;
+    width:11px;height:11px;border-radius:50%;
     background:var(--low);
     box-shadow:0 0 16px rgba(77,255,171,.8);
     animation:pulse 1.6s infinite;
@@ -1124,32 +887,97 @@ body{
     border:1px solid rgba(255,255,255,.06);
     transition:.18s ease;
 }
-.nav-btn:hover{
-    background:rgba(255,255,255,.08);
-}
+.nav-btn:hover{background:rgba(255,255,255,.08);}
 .nav-btn.active{
     background:linear-gradient(135deg,var(--blue),var(--blue2));
     color:white;
     box-shadow:var(--shadow);
 }
+.live-strip{
+    display:grid;
+    grid-template-columns:220px 1fr 220px;
+    gap:12px;
+    align-items:center;
+    margin-bottom:16px;
+}
+.live-pill{
+    background:linear-gradient(135deg, rgba(255,99,125,.16), rgba(255,99,125,.08));
+    border:1px solid rgba(255,99,125,.22);
+    border-radius:16px;
+    padding:14px 16px;
+    font-size:12px;
+    font-weight:900;
+    letter-spacing:1.4px;
+    text-transform:uppercase;
+    color:#ffc0cc;
+}
+.ticker{
+    position:relative;
+    overflow:hidden;
+    border-radius:16px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.07);
+    min-height:52px;
+    display:flex;
+    align-items:center;
+    box-shadow:var(--shadow);
+}
+.ticker-track{
+    display:inline-flex;
+    white-space:nowrap;
+    padding-left:100%;
+    animation:tickerMove 24s linear infinite;
+    will-change:transform;
+}
+@keyframes tickerMove{
+    0%{transform:translateX(0);}
+    100%{transform:translateX(-100%);}
+}
+.ticker-item{
+    padding-right:50px;
+    font-size:14px;
+    color:#dce8fb;
+}
+.ticker-strong{
+    font-weight:800;
+    color:#ffffff;
+}
+.session-chip{
+    background:linear-gradient(135deg, rgba(79,140,255,.16), rgba(79,140,255,.08));
+    border:1px solid rgba(79,140,255,.22);
+    border-radius:16px;
+    padding:14px 16px;
+    text-align:center;
+    box-shadow:var(--shadow);
+}
+.session-chip .top{
+    color:var(--muted);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+}
+.session-chip .val{
+    margin-top:5px;
+    font-size:16px;
+    font-weight:900;
+}
 .hero{
     display:grid;
-    grid-template-columns:1.42fr .98fr;
+    grid-template-columns:1.45fr 1fr;
     gap:16px;
     margin-bottom:18px;
 }
-.card,.panel{
+.panel,.stat-card{
     background:var(--panel);
     border:1px solid var(--line);
-    border-radius:22px;
+    border-radius:var(--radius);
     padding:20px;
     box-shadow:var(--shadow);
     backdrop-filter:blur(10px);
 }
 .panel{background:var(--panel2);}
-.hero-main{min-height:170px;}
 .hero-title{
-    font-size:13px;
+    font-size:12px;
     text-transform:uppercase;
     letter-spacing:1.8px;
     color:var(--muted);
@@ -1167,27 +995,41 @@ body{
     font-size:15px;
 }
 .hero-side{
-    display:flex;
-    flex-direction:column;
-    gap:12px;
+    display:grid;
+    gap:14px;
 }
 .hero-focus{
     font-size:20px;
     font-weight:800;
     line-height:1.35;
 }
+.hero-mini{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+.mini-card{
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:16px;
+    padding:14px;
+}
+.mini-label{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+    color:var(--muted);
+}
+.mini-value{
+    margin-top:6px;
+    font-size:16px;
+    font-weight:900;
+}
 .stat-grid{
     display:grid;
     grid-template-columns:repeat(4,1fr);
     gap:16px;
     margin-bottom:18px;
-}
-.stat-card{
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:22px;
-    padding:20px;
-    box-shadow:var(--shadow);
 }
 .label{
     font-size:12px;
@@ -1204,11 +1046,7 @@ body{
 .value.low{color:var(--low);}
 .value.medium{color:var(--medium);}
 .value.high{color:var(--high);}
-.value.event{
-    font-size:24px;
-    color:#fff;
-    line-height:1.15;
-}
+.value.event{font-size:24px;color:#fff;line-height:1.15;}
 .sub{
     margin-top:10px;
     color:var(--muted);
@@ -1227,7 +1065,7 @@ body{
     gap:16px;
 }
 .section-title{
-    font-size:13px;
+    font-size:12px;
     color:var(--muted);
     text-transform:uppercase;
     letter-spacing:1.6px;
@@ -1240,14 +1078,8 @@ body{
     font-size:15px;
     line-height:1.45;
 }
-.feed-item:last-child{
-    border-bottom:none;
-    padding-bottom:0;
-}
-.feed-label{
-    color:white;
-    font-weight:800;
-}
+.feed-item:last-child{border-bottom:none;padding-bottom:0;}
+.feed-label{color:white;font-weight:800;}
 .badge{
     display:inline-flex;
     align-items:center;
@@ -1332,12 +1164,8 @@ body{
     transition:.18s ease;
 }
 .btn:hover{transform:translateY(-1px);}
-.btn.primary{
-    background:linear-gradient(135deg,var(--blue),var(--blue2));
-}
-.btn.secondary{
-    background:#253754;
-}
+.btn.primary{background:linear-gradient(135deg,var(--blue),var(--blue2));}
+.btn.secondary{background:#253754;}
 .btn.ghost{
     background:rgba(255,255,255,.05);
     border:1px solid rgba(255,255,255,.08);
@@ -1378,20 +1206,18 @@ body{
     font-size:13px;
     font-weight:700;
 }
-.quick-chip:hover{
-    background:rgba(255,255,255,.07);
-}
+.quick-chip:hover{background:rgba(255,255,255,.07);}
 .chat-shell{
     display:flex;
     flex-direction:column;
     gap:12px;
 }
 .chat-output{
-    min-height:220px;
-    max-height:460px;
+    min-height:240px;
+    max-height:500px;
     overflow:auto;
     border-radius:18px;
-    background:rgba(0,0,0,.16);
+    background:rgba(0,0,0,.18);
     border:1px solid rgba(255,255,255,.06);
     padding:14px;
 }
@@ -1418,14 +1244,12 @@ body{
     color:var(--muted);
     margin-bottom:6px;
 }
-.console-card{
-    min-height:170px;
-}
+.console-card{min-height:190px;}
 .console-head{
-    font-size:15px;
-    font-weight:800;
+    font-size:20px;
+    font-weight:900;
     color:#f4f8ff;
-    line-height:1.45;
+    line-height:1.2;
 }
 .console-note{
     margin-top:10px;
@@ -1441,6 +1265,37 @@ body{
     font-size:13px;
     font-weight:700;
 }
+.news-feature{
+    position:relative;
+    overflow:hidden;
+}
+.news-feature:before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg, rgba(79,140,255,.08), transparent 45%);
+    pointer-events:none;
+}
+.breaking-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 12px;
+    border-radius:999px;
+    background:rgba(255,99,125,.12);
+    border:1px solid rgba(255,99,125,.25);
+    color:#ffc0cc;
+    font-size:11px;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+    margin-bottom:14px;
+}
+.breaking-dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--high);
+    box-shadow:0 0 14px rgba(255,99,125,.8);
+}
 .footer{
     margin-top:18px;
     display:flex;
@@ -1451,10 +1306,11 @@ body{
     font-size:13px;
 }
 .mono{
-    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 @media(max-width:1180px){
     .hero{grid-template-columns:1fr;}
+    .live-strip{grid-template-columns:1fr;}
     .stat-grid{grid-template-columns:repeat(2,1fr);}
     .grid-2,.grid-3{grid-template-columns:1fr;}
 }
@@ -1474,7 +1330,7 @@ body{
     <div class="topbar">
         <div class="brand">
             <h1>D.O.N.N.A</h1>
-            <p>Dynamic Operational Neural Network Assistant // Internal Clock Live</p>
+            <p>Dynamic Operational Neural Network Assistant // Command Center UI V2</p>
         </div>
 
         <div class="top-right">
@@ -1492,8 +1348,25 @@ body{
         </div>
     </div>
 
+    <div class="live-strip">
+        <div class="live-pill">Live Intelligence</div>
+
+        <div class="ticker">
+            <div class="ticker-track" id="ticker_track">
+                <div class="ticker-item">
+                    <span class="ticker-strong">Donna</span> loading live intelligence...
+                </div>
+            </div>
+        </div>
+
+        <div class="session-chip">
+            <div class="top">Current Session</div>
+            <div class="val" id="session_chip_val">-</div>
+        </div>
+    </div>
+
     <div class="hero">
-        <div class="panel hero-main">
+        <div class="panel">
             <div class="hero-title">Donna Overview</div>
             <div class="hero-headline" id="hero_headline">System online. Monitoring macro, global headlines, market catalysts, and alerts.</div>
             <div class="hero-sub" id="hero_sub">
@@ -1506,6 +1379,18 @@ body{
                 <div class="hero-title">Daily Focus</div>
                 <div class="hero-focus" id="daily_focus_hero">Loading...</div>
             </div>
+
+            <div class="hero-mini">
+                <div class="mini-card">
+                    <div class="mini-label">Donna Time</div>
+                    <div class="mini-value mono" id="donna_time_ny">-</div>
+                </div>
+                <div class="mini-card">
+                    <div class="mini-label">Event Phase</div>
+                    <div class="mini-value" id="event_phase">-</div>
+                </div>
+            </div>
+
             <div>
                 <div class="hero-title">Next Event Window</div>
                 <div style="font-size:18px;font-weight:800;" id="next_event_hero">Loading...</div>
@@ -1553,66 +1438,27 @@ body{
 
                     <div class="kv">
                         <div class="kv-label">New York Time</div>
-                        <div class="kv-value mono" id="donna_time_ny">-</div>
+                        <div class="kv-value mono" id="donna_time_ny_panel">-</div>
                     </div>
-
                     <div class="kv">
                         <div class="kv-label">UTC Time</div>
                         <div class="kv-value mono" id="donna_time_utc">-</div>
                     </div>
-
                     <div class="kv">
                         <div class="kv-label">Day</div>
                         <div class="kv-value" id="donna_day">-</div>
                     </div>
-
                     <div class="kv">
                         <div class="kv-label">Session</div>
                         <div class="kv-value" id="donna_session">-</div>
                     </div>
-
                     <div class="kv">
                         <div class="kv-label">Event Phase</div>
-                        <div class="kv-value" id="event_phase">-</div>
+                        <div class="kv-value" id="event_phase_panel">-</div>
                     </div>
-
                     <div class="kv">
                         <div class="kv-label">Event Time NY</div>
                         <div class="kv-value" id="event_time_ny">-</div>
-                    </div>
-                </div>
-
-                <div class="panel" style="margin-top:16px;">
-                    <div class="section-title">Risk Radar</div>
-
-                    <div class="kv">
-                        <div class="kv-label">Status</div>
-                        <div class="kv-value" id="status_2">ONLINE</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Next Event</div>
-                        <div class="kv-value" id="next_event_2">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Minutes Remaining</div>
-                        <div class="kv-value" id="minutes_to_event_2">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Headline Severity</div>
-                        <div class="kv-value" id="headline_severity_dash">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Market Severity</div>
-                        <div class="kv-value" id="market_severity_dash">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Last Updated</div>
-                        <div class="kv-value mono" id="last_updated">-</div>
                     </div>
                 </div>
             </div>
@@ -1622,6 +1468,22 @@ body{
                     <div class="section-title">Recent Donna Alerts</div>
                     <div id="alerts_feed_dashboard">
                         <div class="feed-item">No alerts yet</div>
+                    </div>
+                </div>
+
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">Risk Radar</div>
+                    <div class="kv">
+                        <div class="kv-label">Headline Severity</div>
+                        <div class="kv-value" id="headline_severity_dash">-</div>
+                    </div>
+                    <div class="kv">
+                        <div class="kv-label">Market Severity</div>
+                        <div class="kv-value" id="market_severity_dash">-</div>
+                    </div>
+                    <div class="kv">
+                        <div class="kv-label">Last Updated</div>
+                        <div class="kv-value mono" id="last_updated">-</div>
                     </div>
                 </div>
             </div>
@@ -1642,179 +1504,68 @@ body{
             <div>
                 <div class="panel">
                     <div class="section-title">Trading Command Snapshot</div>
-
-                    <div class="kv">
-                        <div class="kv-label">Telegram Mode</div>
-                        <div class="kv-value" id="telegram_mode">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Latest Signal Count</div>
-                        <div class="kv-value" id="alert_count">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Macro Risk Bias</div>
-                        <div class="kv-value" id="macro_bias_trading">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Headline Risk Bias</div>
-                        <div class="kv-value" id="headline_bias_trading">-</div>
-                    </div>
-
-                    <div class="kv">
-                        <div class="kv-label">Market Risk Bias</div>
-                        <div class="kv-value" id="market_bias_trading">-</div>
-                    </div>
+                    <div class="kv"><div class="kv-label">Telegram Mode</div><div class="kv-value" id="telegram_mode">-</div></div>
+                    <div class="kv"><div class="kv-label">Latest Signal Count</div><div class="kv-value" id="alert_count">-</div></div>
+                    <div class="kv"><div class="kv-label">Macro Risk Bias</div><div class="kv-value" id="macro_bias_trading">-</div></div>
+                    <div class="kv"><div class="kv-label">Headline Risk Bias</div><div class="kv-value" id="headline_bias_trading">-</div></div>
+                    <div class="kv"><div class="kv-label">Market Risk Bias</div><div class="kv-value" id="market_bias_trading">-</div></div>
                 </div>
             </div>
         </div>
     </div>
 
-  <div class="section" id="section-news">
-
-    <!-- TOP BROADCAST STRIP -->
-    <div class="grid-3">
-
-        <div class="panel">
-            <div class="section-title">Breaking News</div>
-            <div style="font-size:24px;font-weight:900;line-height:1.15;" id="breaking_banner">
-                No breaking headline
-            </div>
-            <div class="sub" id="breaking_sub">
-                Donna is scanning global market-moving developments.
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="section-title">Macro Countdown</div>
-            <div style="font-size:34px;font-weight:900;" id="macro_countdown">
-                --
-            </div>
-            <div class="sub" id="macro_countdown_sub">
-                Waiting for next event
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="section-title">Live Risk Radar</div>
-
-            <div class="kv">
-                <div class="kv-label">Macro</div>
-                <div class="kv-value" id="macro_news">-</div>
-            </div>
-
-            <div class="kv">
-                <div class="kv-label">Headline</div>
-                <div class="kv-value" id="headline_news">-</div>
-            </div>
-
-            <div class="kv">
-                <div class="kv-label">Market</div>
-                <div class="kv-value" id="market_news">-</div>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- MAIN NEWS GRID -->
-    <div class="grid-2" style="margin-top:16px;">
-
-        <div>
-
-            <div class="panel">
+    <div class="section" id="section-news">
+        <div class="grid-3">
+            <div class="panel news-feature console-card">
+                <div class="breaking-tag"><span class="breaking-dot"></span> Breaking</div>
                 <div class="section-title">Top Story</div>
-                <div style="font-size:22px;font-weight:900;line-height:1.2;" id="headline_title">
-                    No major headline detected
-                </div>
-
-                <div class="sub" style="margin-top:12px;" id="headline_note">
-                    Headline guidance unavailable.
-                </div>
-
-                <div class="sub" style="margin-top:10px;" id="headline_source">
-                    Source: -
-                </div>
+                <div class="console-head" id="headline_title">No major headline detected</div>
+                <div class="console-note" id="headline_note">Headline guidance unavailable.</div>
+                <div class="sub" id="headline_source">Source: -</div>
             </div>
 
-            <div class="panel" style="margin-top:16px;">
-                <div class="section-title">Macro Radar</div>
-
-                <div style="font-size:18px;font-weight:800;" id="news_macro_title">
-                    No major event loaded
-                </div>
-
-                <div class="sub" style="margin-top:10px;" id="news_macro_note">
-                    Donna is monitoring upcoming macro volatility windows.
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Phase</div>
-                    <div class="kv-value" id="event_phase_news">-</div>
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Event Time</div>
-                    <div class="kv-value" id="event_time_news">-</div>
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Session</div>
-                    <div class="kv-value" id="session_news">-</div>
-                </div>
+            <div class="panel console-card">
+                <div class="section-title">Macro Countdown</div>
+                <div class="console-head" id="news_macro_title">No major event loaded</div>
+                <div class="console-note" id="news_macro_note">Donna is monitoring upcoming macro volatility windows.</div>
+                <div class="kv"><div class="kv-label">Phase</div><div class="kv-value" id="event_phase_news">-</div></div>
+                <div class="kv"><div class="kv-label">Event Time</div><div class="kv-value" id="event_time_news">-</div></div>
+                <div class="kv"><div class="kv-label">Session</div><div class="kv-value" id="session_news">-</div></div>
             </div>
 
-        </div>
-
-        <div>
-
-            <div class="panel">
+            <div class="panel console-card">
                 <div class="section-title">Market Catalyst</div>
-
-                <div style="font-size:22px;font-weight:900;line-height:1.2;" id="market_title">
-                    No major market catalyst detected
-                </div>
-
-                <div class="sub" style="margin-top:12px;" id="market_note">
-                    Market guidance unavailable.
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Severity</div>
-                    <div class="kv-value" id="market_severity_news">-</div>
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Symbol</div>
-                    <div class="kv-value" id="market_symbol_news">-</div>
-                </div>
-
-                <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">
-                    Open source
-                </a>
+                <div class="console-head" id="market_title">No major market catalyst detected</div>
+                <div class="console-note" id="market_note">Market guidance unavailable.</div>
+                <div class="kv"><div class="kv-label">Severity</div><div class="kv-value" id="market_severity_news">-</div></div>
+                <div class="kv"><div class="kv-label">Symbol</div><div class="kv-value" id="market_symbol_news">-</div></div>
+                <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Open source</a>
             </div>
-
-            <div class="panel" style="margin-top:16px;">
-                <div class="section-title">Donna Briefing</div>
-
-                <div id="warning_pressure_news"></div>
-
-                <div class="feed-item">
-                    <span class="feed-label">Latest Headline:</span>
-                    <span id="last_headline">No recent headline</span>
-                </div>
-
-                <div class="feed-item">
-                    <span class="feed-label">Latest Market Story:</span>
-                    <span id="last_market_headline">No recent market headline</span>
-                </div>
-            </div>
-
         </div>
 
+        <div class="grid-2" style="margin-top:16px;">
+            <div>
+                <div class="panel">
+                    <div class="section-title">Donna Briefing</div>
+                    <div id="warning_pressure_news"></div>
+                    <div class="feed-item"><span class="feed-label">Latest Headline:</span> <span id="last_headline">No recent headline</span></div>
+                    <div class="feed-item"><span class="feed-label">Latest Market Story:</span> <span id="last_market_headline">No recent market headline</span></div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel">
+                    <div class="section-title">Live Risk Radar</div>
+                    <div class="kv"><div class="kv-label">Macro Risk</div><div class="kv-value" id="macro_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Headline Risk</div><div class="kv-value" id="headline_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Market Risk</div><div class="kv-value" id="market_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Headline Severity</div><div class="kv-value" id="headline_severity_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Market Severity</div><div class="kv-value" id="market_severity_news_2">-</div></div>
+                </div>
+            </div>
+        </div>
     </div>
-</div>
+
     <div class="section" id="section-assistant">
         <div class="grid-2">
             <div>
@@ -1831,24 +1582,22 @@ body{
 
                         <textarea class="textarea" id="chat_input" placeholder="Ask Donna something or give a command..."></textarea>
 
-                       <div class="btn-row">
-                          <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
-                          <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
-                           <button class="btn ghost" onclick="quickAsk('What time is it and what session are we in?')">Time Check</button>
-                           <button class="btn ghost" onclick="quickAsk('Is this a dangerous time to trade?')">Danger Check</button>
-                           </div>
+                        <div class="btn-row">
+                            <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
+                            <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
+                            <button class="btn ghost" onclick="quickAsk('What time is it and what session are we in?')">Time Check</button>
+                            <button class="btn ghost" onclick="quickAsk('Is this a dangerous time to trade?')">Danger Check</button>
+                        </div>
 
-                    <div class="quick-actions">
-                        <button class="quick-chip" onclick="quickAsk('What matters right now?')">What Matters</button>
-                         <button class="quick-chip" onclick="quickAsk('How long until the next event?')">Time To Event</button>
-                        <button class="quick-chip" onclick="quickAsk('Are we near a red-folder event?')">Red Folder Check</button>
-                        <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
-                        <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
-                        <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
-                        <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
-                        <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
-                        <button class="quick-chip" onclick="quickAsk('Clear tasks.')">Clear Tasks</button>
-                        <button class="quick-chip" onclick="quickAsk('Clear reminders.')">Clear Reminders</button>
+                        <div class="quick-actions">
+                            <button class="quick-chip" onclick="quickAsk('What matters right now?')">What Matters</button>
+                            <button class="quick-chip" onclick="quickAsk('How long until the next event?')">Time To Event</button>
+                            <button class="quick-chip" onclick="quickAsk('Are we near a red-folder event?')">Red Folder Check</button>
+                            <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
+                            <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
+                            <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
+                            <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
+                            <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
                         </div>
                     </div>
                 </div>
@@ -1896,8 +1645,8 @@ body{
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A V4</div>
-        <div>Dashboard Primary // Internal Clock Active // News Engine 2.0</div>
+        <div>D.O.N.N.A UI V2</div>
+        <div>Premium command center / live news terminal / assistant layer active</div>
     </div>
 </div>
 
@@ -1947,6 +1696,35 @@ function formatTimeText(mins){
     if (mins === null || mins === undefined) return 'No timed event loaded';
     if (mins === 0) return 'Live or immediate event window';
     return mins + ' minutes remaining';
+}
+
+function setText(id, value, fallback='-'){
+    const el = document.getElementById(id);
+    if (el) el.innerText = value || fallback;
+}
+
+function buildTicker(data){
+    const warnings = (data.active_warnings || []).slice(0,4);
+    const items = [];
+
+    items.push(`<div class="ticker-item"><span class="ticker-strong">Macro:</span> ${escapeHtml(String(data.macro_risk || '-').toUpperCase())}</div>`);
+    items.push(`<div class="ticker-item"><span class="ticker-strong">Headline:</span> ${escapeHtml(String(data.headline_risk || '-').toUpperCase())}</div>`);
+    items.push(`<div class="ticker-item"><span class="ticker-strong">Market:</span> ${escapeHtml(String(data.market_news_risk || '-').toUpperCase())}</div>`);
+    items.push(`<div class="ticker-item"><span class="ticker-strong">Next:</span> ${escapeHtml(data.next_event || 'No event loaded')}</div>`);
+
+    warnings.forEach(w => {
+        items.push(`<div class="ticker-item"><span class="ticker-strong">Warning:</span> ${escapeHtml(w)}</div>`);
+    });
+
+    if (data.last_headline){
+        items.push(`<div class="ticker-item"><span class="ticker-strong">Headline:</span> ${escapeHtml(data.last_headline)}</div>`);
+    }
+
+    if (data.last_market_headline){
+        items.push(`<div class="ticker-item"><span class="ticker-strong">Market Story:</span> ${escapeHtml(data.last_market_headline)}</div>`);
+    }
+
+    document.getElementById('ticker_track').innerHTML = items.join('');
 }
 
 async function saveFocus(){
@@ -2128,11 +1906,6 @@ function renderReminders(reminders){
     `).join('');
 }
 
-function setText(id, value, fallback='-'){
-    const el = document.getElementById(id);
-    if (el) el.innerText = value || fallback;
-}
-
 async function refreshDashboard(){
     try{
         const res = await fetch('/dashboard-data');
@@ -2143,37 +1916,30 @@ async function refreshDashboard(){
         const alerts = data.alerts || [];
 
         setText('status_text', status);
-        setText('status_2', status);
-
         applyRisk('macro_risk', data.macro_risk);
         applyRisk('headline_risk', data.headline_risk);
         applyRisk('market_news_risk', data.market_news_risk);
-
-        setText('macro_news', String(data.macro_risk || '-').toUpperCase());
-        setText('headline_news', String(data.headline_risk || '-').toUpperCase());
-        setText('market_news', String(data.market_news_risk || '-').toUpperCase());
 
         const nextEvent = data.next_event || 'NONE';
         const mins = data.minutes_to_event;
 
         setText('next_event', nextEvent);
-        setText('next_event_2', nextEvent);
         setText('next_event_hero', nextEvent);
-
-        setText('minutes_to_event', formatTimeText(mins));
-        setText('minutes_to_event_2', mins !== null && mins !== undefined ? String(mins) : '-');
         setText('next_event_hero_sub', formatTimeText(mins));
+        setText('minutes_to_event', formatTimeText(mins));
 
-        setText('last_updated', data.last_updated || '-');
+        setText('daily_focus', assistant.daily_focus || 'No focus set');
+        setText('daily_focus_hero', assistant.daily_focus || 'No focus set');
+
         setText('donna_time_ny', data.donna_time_ny || '-');
+        setText('donna_time_ny_panel', data.donna_time_ny || '-');
         setText('donna_time_utc', data.donna_time_utc || '-');
         setText('donna_day', data.donna_day || '-');
         setText('donna_session', data.donna_session || '-');
         setText('event_phase', data.event_phase || '-');
+        setText('event_phase_panel', data.event_phase || '-');
         setText('event_time_ny', data.event_time_ny || '-');
-
-        setText('daily_focus', assistant.daily_focus || 'No focus set');
-        setText('daily_focus_hero', assistant.daily_focus || 'No focus set');
+        setText('session_chip_val', data.donna_session || '-');
 
         const heroHead = `System online. ${String(data.macro_risk || 'low').toUpperCase()} macro risk, ${String(data.headline_risk || 'low').toUpperCase()} headline risk, ${String(data.market_news_risk || 'low').toUpperCase()} market risk.`;
         setText('hero_headline', heroHead);
@@ -2186,10 +1952,8 @@ async function refreshDashboard(){
 
         renderWarnings(data.active_warnings || [], 'warnings');
         renderWarnings(data.active_warnings || [], 'warning_pressure_news');
-
         renderAlerts(alerts, 'alerts_feed_dashboard');
         renderAlerts(alerts, 'alerts_feed_trading');
-
         renderTasks(assistant.tasks || []);
         renderReminders(assistant.reminders || []);
 
@@ -2201,12 +1965,7 @@ async function refreshDashboard(){
 
         setText('headline_severity_dash', data.headline_severity || '-');
         setText('market_severity_dash', data.last_market_severity || '-');
-        setText('headline_severity_news', data.headline_severity || '-');
-        setText('market_severity_news', data.last_market_severity || '-');
-        setText('market_symbol_news', data.last_market_symbol || '-');
-
-        setText('last_headline', data.last_headline || 'No recent headline');
-        setText('last_market_headline', data.last_market_headline || 'No recent market headline');
+        setText('last_updated', data.last_updated || '-');
 
         setText('headline_title', data.last_headline || 'No major headline detected');
         setText('headline_note', data.headline_guidance || 'Headline guidance unavailable.');
@@ -2214,15 +1973,17 @@ async function refreshDashboard(){
 
         setText('market_title', data.last_market_headline || 'No major market catalyst detected');
         setText('market_note', data.last_market_guidance || 'Market guidance unavailable.');
+        setText('market_severity_news', data.last_market_severity || '-');
+        setText('market_severity_news_2', data.last_market_severity || '-');
+        setText('market_symbol_news', data.last_market_symbol || '-');
 
-        const marketLink = document.getElementById('market_link');
-        if (data.last_market_url){
-            marketLink.style.display = 'inline-block';
-            marketLink.href = data.last_market_url;
-        } else {
-            marketLink.style.display = 'none';
-            marketLink.href = '#';
-        }
+        setText('last_headline', data.last_headline || 'No recent headline');
+        setText('last_market_headline', data.last_market_headline || 'No recent market headline');
+
+        setText('macro_news', String(data.macro_risk || '-').toUpperCase());
+        setText('headline_news', String(data.headline_risk || '-').toUpperCase());
+        setText('market_news', String(data.market_news_risk || '-').toUpperCase());
+        setText('headline_severity_news', data.headline_severity || '-');
 
         const macroTitle = data.next_event || 'No major event loaded';
         let macroNote = 'Donna is monitoring upcoming macro volatility windows.';
@@ -2239,6 +2000,20 @@ async function refreshDashboard(){
         }
         setText('news_macro_title', macroTitle);
         setText('news_macro_note', macroNote);
+        setText('event_phase_news', data.event_phase || '-');
+        setText('event_time_news', data.event_time_ny || '-');
+        setText('session_news', data.donna_session || '-');
+
+        const marketLink = document.getElementById('market_link');
+        if (data.last_market_url){
+            marketLink.style.display = 'inline-block';
+            marketLink.href = data.last_market_url;
+        } else {
+            marketLink.style.display = 'none';
+            marketLink.href = '#';
+        }
+
+        buildTicker(data);
 
     }catch(err){
         console.log(err);
