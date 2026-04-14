@@ -17,11 +17,13 @@ env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
+MACRO_CACHE_FILE = BASE_DIR / "donna_macro_cache.json"
 
 NY_TZ = ZoneInfo("America/New_York")
 UTC_TZ = ZoneInfo("UTC")
 
 FOREX_FACTORY_XML = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
+CACHE_HOURS = 6
 
 # ==================================================
 # RED FOLDER FILTERS
@@ -55,8 +57,12 @@ def now_ny() -> datetime:
     return datetime.now(NY_TZ)
 
 
+def now_utc() -> datetime:
+    return datetime.now(UTC_TZ)
+
+
 def now_iso() -> str:
-    return datetime.now(UTC_TZ).isoformat()
+    return now_utc().isoformat()
 
 
 def load_state() -> dict:
@@ -106,9 +112,74 @@ def contains_high_impact(title: str) -> bool:
 
 
 # ==================================================
+# CACHE
+# ==================================================
+def load_macro_cache() -> dict:
+    default_cache = {
+        "fetched_at": "",
+        "events": [],
+    }
+
+    try:
+        if not MACRO_CACHE_FILE.exists():
+            return default_cache
+
+        with open(MACRO_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return default_cache
+
+        return {**default_cache, **data}
+    except Exception:
+        return default_cache
+
+
+def save_macro_cache(events: list[dict]) -> None:
+    payload = {
+        "fetched_at": now_iso(),
+        "events": events,
+    }
+
+    with open(MACRO_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def cache_is_fresh(cache: dict) -> bool:
+    fetched_at = str(cache.get("fetched_at", "")).strip()
+    if not fetched_at:
+        return False
+
+    try:
+        dt = datetime.fromisoformat(fetched_at)
+    except Exception:
+        return False
+
+    return now_utc() - dt < timedelta(hours=CACHE_HOURS)
+
+
+# ==================================================
 # FOREX FACTORY FETCH
 # ==================================================
-def fetch_calendar_events() -> list[dict]:
+def parse_event_datetime(raw: str):
+    formats = [
+        "%m-%d-%Y %I:%M%p",
+        "%m-%d-%Y %H:%M",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %I:%M%p",
+    ]
+
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.replace(tzinfo=NY_TZ)
+        except Exception:
+            pass
+
+    return None
+
+
+def fetch_calendar_events_from_source() -> list[dict]:
     response = requests.get(FOREX_FACTORY_XML, timeout=20)
     response.raise_for_status()
 
@@ -127,10 +198,9 @@ def fetch_calendar_events() -> list[dict]:
             if not title or not date_text:
                 continue
 
-            # Example date format can vary slightly, so keep robust
             dt_raw = f"{date_text} {time_text}".strip()
-
             event_dt = parse_event_datetime(dt_raw)
+
             if not event_dt:
                 continue
 
@@ -138,7 +208,7 @@ def fetch_calendar_events() -> list[dict]:
                 "title": title,
                 "country": country,
                 "impact": impact,
-                "datetime": event_dt,
+                "datetime": event_dt.isoformat(),
             })
 
         except Exception:
@@ -147,22 +217,22 @@ def fetch_calendar_events() -> list[dict]:
     return events
 
 
-def parse_event_datetime(raw: str):
-    formats = [
-        "%m-%d-%Y %I:%M%p",
-        "%m-%d-%Y %H:%M",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d %I:%M%p",
-    ]
+def fetch_calendar_events() -> list[dict]:
+    cache = load_macro_cache()
 
-    for fmt in formats:
-        try:
-            dt = datetime.strptime(raw, fmt)
-            return dt.replace(tzinfo=NY_TZ)
-        except Exception:
-            pass
+    if cache_is_fresh(cache):
+        return cache.get("events", [])
 
-    return None
+    try:
+        events = fetch_calendar_events_from_source()
+        save_macro_cache(events)
+        return events
+    except Exception as e:
+        if cache.get("events"):
+            print("Donna News Guard using cached macro calendar due to fetch error:", str(e))
+            return cache.get("events", [])
+        raise
+
 
 # ==================================================
 # EVENT ENGINE
@@ -171,24 +241,45 @@ def get_priority_events(events: list[dict]) -> list[dict]:
     out = []
 
     for e in events:
-        title = e["title"]
-        impact = e["impact"]
+        title = str(e.get("title", ""))
+        impact = str(e.get("impact", "")).lower()
+        dt_raw = str(e.get("datetime", "")).strip()
+
+        if not dt_raw:
+            continue
+
+        try:
+            event_dt = datetime.fromisoformat(dt_raw)
+        except Exception:
+            continue
 
         if impact == "high" or contains_high_impact(title):
-            out.append(e)
+            out.append({
+                "title": title,
+                "country": str(e.get("country", "")),
+                "impact": impact,
+                "datetime": event_dt,
+            })
 
     return sorted(out, key=lambda x: x["datetime"])
 
 
-def find_next_event(events: list[dict]):
+def find_relevant_event(events: list[dict]):
     now = now_ny()
 
-    future = [e for e in events if e["datetime"] >= now]
+    window_start = now - timedelta(minutes=30)
+    window_end = now + timedelta(hours=24)
 
-    if not future:
-        return None
+    relevant = [
+        e for e in events
+        if window_start <= e["datetime"] <= window_end
+    ]
 
-    return future[0]
+    if not relevant:
+        future = [e for e in events if e["datetime"] >= now]
+        return future[0] if future else None
+
+    return sorted(relevant, key=lambda x: abs((x["datetime"] - now).total_seconds()))[0]
 
 
 def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int | None]:
@@ -199,41 +290,36 @@ def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int
 
     event_name = next_event["title"]
     event_time = next_event["datetime"]
-
     minutes = int((event_time - now).total_seconds() / 60)
 
     warnings = []
 
-    # Live event window
     if -5 <= minutes <= 5:
         risk = "high"
         warnings.append("Macro event live now — volatility elevated")
         warnings.append(f"{event_name} active")
         return risk, warnings, event_name, 0
 
-    # Immediate pre-event
     if 0 < minutes <= 15:
         risk = "high"
         warnings.append("High-impact event approaching — reduce size")
         warnings.append(f"{event_name} in {minutes}m")
         return risk, warnings, event_name, minutes
 
-    # Pre-event caution
     if 15 < minutes <= 60:
         risk = "medium"
         warnings.append("High-impact macro event approaching")
         warnings.append(f"{event_name} in {minutes}m")
         return risk, warnings, event_name, minutes
 
-    # Post-event cool down
     if -30 <= minutes < -5:
         risk = "medium"
         warnings.append("Post-event volatility window active")
         warnings.append(f"{event_name} recently released")
         return risk, warnings, event_name, 0
 
-    # Normal
     return "low", [], event_name, max(minutes, 0)
+
 
 # ==================================================
 # MAIN CYCLE
@@ -242,13 +328,12 @@ def process_news_guard_cycle() -> None:
     try:
         raw_events = fetch_calendar_events()
         priority_events = get_priority_events(raw_events)
-        next_event = find_next_event(priority_events)
+        next_event = find_relevant_event(priority_events)
 
         macro_risk, warnings, event_name, mins = build_macro_state(next_event)
 
         state = load_state()
 
-        # preserve non-macro warnings
         existing = state.get("active_warnings", [])
         keep = [
             w for w in existing
