@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
+from datetime import datetime, timezone
 import asyncio
 import os
 import json
@@ -39,6 +40,7 @@ app = FastAPI(title="DONNA MASTER CORE")
 # FILES
 # ==================================================
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
+ALERTS_FILE = BASE_DIR / "donna_alert_history.json"
 
 # ==================================================
 # LOOP TIMERS
@@ -46,6 +48,14 @@ RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 NEWS_POLL_SECONDS = 60
 HEADLINE_POLL_SECONDS = 900
 FINNHUB_POLL_SECONDS = 600
+
+# ==================================================
+# TELEGRAM MODE
+# all = send every trade alert
+# critical = only send TAKE / high conviction
+# off = dashboard only
+# ==================================================
+TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower()
 
 # ==================================================
 # SYSTEM PROMPT
@@ -95,6 +105,27 @@ def send_telegram_message(text: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
+
+def should_send_trade_to_telegram(parsed: dict) -> bool:
+    if TELEGRAM_ALERT_MODE == "off":
+        return False
+
+    if TELEGRAM_ALERT_MODE == "all":
+        return True
+
+    verdict = str(parsed.get("verdict", "")).upper()
+    confidence_raw = str(parsed.get("confidence", "0")).replace("%", "").strip()
+
+    try:
+        confidence_num = float(confidence_raw)
+    except Exception:
+        confidence_num = 0.0
+
+    if TELEGRAM_ALERT_MODE == "critical":
+        return verdict == "TAKE" or confidence_num >= 80
+
+    return True
+
 # ==================================================
 # HELPERS
 # ==================================================
@@ -103,6 +134,10 @@ def safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return default
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def normalize_payload(payload: dict) -> dict:
@@ -155,6 +190,44 @@ def load_risk_state() -> dict:
         return merged
     except Exception:
         return default_state
+
+
+def load_alert_history() -> list:
+    try:
+        if not ALERTS_FILE.exists():
+            return []
+
+        with open(ALERTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_alert_history(alerts: list) -> None:
+    with open(ALERTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(alerts, f, indent=2)
+
+
+def add_alert_to_history(data: dict, parsed: dict) -> None:
+    alerts = load_alert_history()
+
+    entry = {
+        "ticker": data.get("ticker", "UNKNOWN"),
+        "signal": data.get("signal", "UNKNOWN"),
+        "session": data.get("session", "unknown"),
+        "timeframe": data.get("timeframe", "unknown"),
+        "price": data.get("price", "0"),
+        "verdict": parsed.get("verdict", "UNKNOWN"),
+        "confidence": parsed.get("confidence", "N/A"),
+        "summary": parsed.get("summary", ""),
+        "timestamp": utc_now_iso(),
+    }
+
+    alerts.insert(0, entry)
+    alerts = alerts[:30]
+    save_alert_history(alerts)
 
 # ==================================================
 # VERDICT ENGINE
@@ -405,8 +478,12 @@ def process_signal(payload: dict):
         raw = response.output_text
         parsed = extract_fields(raw)
 
+        add_alert_to_history(data, parsed)
+
         msg = format_message(data, parsed)
-        send_telegram_message(msg)
+
+        if should_send_trade_to_telegram(parsed):
+            send_telegram_message(msg)
 
     except Exception as e:
         print("Signal error:", str(e))
@@ -462,6 +539,11 @@ async def risk_state():
     return load_risk_state()
 
 
+@app.get("/alerts-data")
+async def alerts_data():
+    return {"alerts": load_alert_history()}
+
+
 @app.get("/check-env")
 async def check_env():
     return {
@@ -470,6 +552,8 @@ async def check_env():
         "newsapi_found": bool(os.getenv("NEWSAPI_KEY")),
         "finnhub_found": bool(os.getenv("FINNHUB_API_KEY")),
         "risk_file_exists": RISK_STATE_FILE.exists(),
+        "alerts_file_exists": ALERTS_FILE.exists(),
+        "telegram_alert_mode": TELEGRAM_ALERT_MODE,
         "model": OPENAI_MODEL,
     }
 
@@ -757,6 +841,37 @@ body{
     text-align:right;
 }
 
+.alert-box{
+    padding:12px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+}
+
+.alert-box:last-child{
+    border-bottom:none;
+}
+
+.alert-top{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    font-weight:700;
+    color:#eef4fd;
+}
+
+.alert-meta{
+    margin-top:6px;
+    color:var(--muted);
+    font-size:13px;
+}
+
+.alert-summary{
+    margin-top:6px;
+    color:#d8e4f4;
+    font-size:14px;
+    line-height:1.4;
+}
+
 @media(max-width:1100px){
     .grid{
         grid-template-columns:repeat(2,1fr);
@@ -844,6 +959,13 @@ body{
                     <span id="last_market_headline">No recent market headline</span>
                 </div>
             </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div class="section-title">Recent Donna Alerts</div>
+                <div id="alerts_feed">
+                    <div class="feed-item">No alerts yet</div>
+                </div>
+            </div>
         </div>
 
         <div>
@@ -854,10 +976,10 @@ body{
                         Donna is online and monitoring macro, headlines, and market catalysts.
                     </div>
                     <div class="assistant-item">
-                        Use this space next for tasks, reminders, routines, and daily objectives.
+                        Dashboard is now the primary home for alerts. Telegram is a secondary push layer.
                     </div>
                     <div class="assistant-item">
-                        Phase 3 is live. Donna is transitioning from intelligence engine to full operator interface.
+                        Next step: tasks, reminders, routines, and daily operating widgets.
                     </div>
                 </div>
             </div>
@@ -948,6 +1070,34 @@ async function refreshDashboard(){
 
         document.getElementById('last_updated').innerText =
             data.last_updated || "-";
+
+        const alertsRes = await fetch('/alerts-data');
+        const alertsJson = await alertsRes.json();
+        const alerts = alertsJson.alerts || [];
+
+        const alertsFeed = document.getElementById('alerts_feed');
+
+        if (alerts.length) {
+            alertsFeed.innerHTML = alerts.map(a => `
+                <div class="alert-box">
+                    <div class="alert-top">
+                        <span>${a.ticker} | ${a.signal} | ${a.verdict}</span>
+                        <span>${a.confidence}</span>
+                    </div>
+                    <div class="alert-meta">
+                        TF: ${a.timeframe} | Session: ${a.session} | Price: ${a.price}
+                    </div>
+                    <div class="alert-summary">
+                        ${a.summary || ""}
+                    </div>
+                    <div class="alert-meta">
+                        ${a.timestamp}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            alertsFeed.innerHTML = '<div class="feed-item">No alerts yet</div>';
+        }
 
     } catch(err){
         console.log(err);
