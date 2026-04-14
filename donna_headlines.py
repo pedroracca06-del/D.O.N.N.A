@@ -22,7 +22,6 @@ RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 # ==================================================
 REQUEST_TIMEOUT = 20
 MAX_HEADLINES = 15
-
 NEWS_URL = "https://newsapi.org/v2/top-headlines"
 
 TRUSTED_SOURCES = {
@@ -36,31 +35,29 @@ TRUSTED_SOURCES = {
     "yahoo-finance",
 }
 
-# In-memory dedupe for current runtime
 seen_titles: set[str] = set()
 
 # ==================================================
-# KEYWORD MAP
+# STRICT KEYWORD MAP
 # ==================================================
-CRITICAL_SHOCK_KEYWORDS = [
-    "war",
-    "missile",
-    "attack",
-    "strike",
-    "invasion",
-    "nuclear",
-    "blockade",
+CRITICAL_PHRASES = [
     "strait of hormuz",
-    "hormuz",
-    "shipping lane",
-    "oil supply disruption",
     "emergency fed",
     "bank collapse",
     "bank failure",
-    "default",
     "debt default",
     "terror attack",
     "martial law",
+    "oil supply disruption",
+    "shipping lane closed",
+    "missile strike",
+    "military strike",
+]
+
+CRITICAL_SINGLE_WORDS = [
+    "invasion",
+    "blockade",
+    "nuclear",
 ]
 
 HIGH_MACRO_POLICY_KEYWORDS = [
@@ -81,8 +78,6 @@ HIGH_MACRO_POLICY_KEYWORDS = [
     "treasury secretary",
     "executive order",
     "opec",
-    "oil jumps",
-    "oil surges",
     "sanctions",
 ]
 
@@ -150,6 +145,7 @@ ROUTINE_FINANCE_TERMS = [
     "analyst expectations",
     "private credit",
     "fund flows",
+    "banking and trading",
 ]
 
 # ==================================================
@@ -165,6 +161,11 @@ def normalize(text: str) -> str:
 
 def contains_any(text: str, words: list[str]) -> bool:
     return any(word in text for word in words)
+
+
+def contains_whole_word(text: str, word: str) -> bool:
+    parts = text.replace("/", " ").replace("-", " ").replace(",", " ").replace(".", " ").split()
+    return word in parts
 
 
 def load_state() -> dict:
@@ -196,7 +197,6 @@ def load_state() -> dict:
         merged = {**default_state, **data}
         if not isinstance(merged.get("active_warnings"), list):
             merged["active_warnings"] = []
-
         return merged
     except Exception:
         return default_state
@@ -250,10 +250,29 @@ def source_score(source_id: str, source_name: str) -> int:
     return 1
 
 
+def is_true_critical_shock(title: str, description: str) -> bool:
+    text = normalize(f"{title} {description}")
+
+    if contains_any(text, CRITICAL_PHRASES):
+        return True
+
+    # Only allow a few single words as critical, and only if broad market/geopolitical context exists
+    has_single_critical = any(contains_whole_word(text, w) for w in CRITICAL_SINGLE_WORDS)
+    has_broad_context = contains_any(
+        text,
+        BROAD_MARKET_TERMS + ["oil", "shipping", "military", "iran", "israel", "taiwan", "russia", "china"]
+    )
+
+    if has_single_critical and has_broad_context:
+        return True
+
+    return False
+
+
 def classify_lane(title: str, description: str) -> str:
     text = normalize(f"{title} {description}")
 
-    if contains_any(text, CRITICAL_SHOCK_KEYWORDS):
+    if is_true_critical_shock(title, description):
         return "critical_shock"
 
     if contains_any(text, HIGH_MACRO_POLICY_KEYWORDS):
@@ -286,11 +305,9 @@ def score_headline(title: str, description: str, source_id: str, source_name: st
     if contains_any(text, LOW_SIGNAL_TERMS):
         score -= 4
 
-    # Routine finance should not be "critical"
     if contains_any(text, ROUTINE_FINANCE_TERMS):
-        score -= 3
+        score -= 4
 
-    # Broad policy/geopolitical + market framing gets extra weight
     if lane in {"critical_shock", "high_macro_policy"} and contains_any(text, BROAD_MARKET_TERMS):
         score += 2
 
@@ -300,9 +317,14 @@ def score_headline(title: str, description: str, source_id: str, source_name: st
 
 
 def map_score_to_risk(score: int, lane: str) -> tuple[str, str]:
-    # Only true macro/geopolitical shock can be CRITICAL
     if lane == "critical_shock" and score >= 11:
         return "high", "CRITICAL"
+
+    if lane == "high_macro_policy" and score >= 9:
+        return "medium", "HIGH"
+
+    if lane == "medium_market" and score >= 5:
+        return "medium", "MEDIUM"
 
     if score >= 9:
         return "medium", "HIGH"
@@ -325,7 +347,7 @@ def build_guidance(title: str, description: str, severity: str, lane: str) -> st
     if "trump" in text or "tariff" in text or "white house" in text:
         return "Policy communication risk is elevated. Watch indices, USD, and rates."
 
-    if "oil" in text or "hormuz" in text or "opec" in text or "shipping lane" in text:
+    if "oil" in text or "hormuz" in text or "opec" in text or "shipping" in text:
         return "Energy and supply-risk headline detected. Watch oil, inflation expectations, and risk sentiment."
 
     if severity == "HIGH":
@@ -333,9 +355,6 @@ def build_guidance(title: str, description: str, severity: str, lane: str) -> st
 
     if severity == "MEDIUM":
         return "Relevant market headline detected. Monitor for follow-through, not panic."
-
-    if lane == "medium_market":
-        return "Routine market headline detected. Background monitoring only."
 
     return "Low-priority headline. No strong market warning from this item."
 
