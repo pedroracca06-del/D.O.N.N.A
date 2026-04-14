@@ -160,7 +160,9 @@ def normalize_payload(payload: dict) -> dict:
         "quality": str(payload.get("quality", "NA")).upper(),
     }
 
-
+# ==================================================
+# STATE LOAD / SAVE
+# ==================================================
 def load_risk_state() -> dict:
     default_state = {
         "macro_risk": "low",
@@ -233,17 +235,19 @@ def add_alert_to_history(data: dict, parsed: dict) -> None:
 
 def load_assistant_state() -> dict:
     default_state = {
-        "daily_focus": "Stay sharp. Protect focus. Execute well.",
+        "daily_focus": "Build Donna into a true command center.",
         "tasks": [
-            "Review market conditions",
-            "Check Donna dashboard",
-            "Handle top priority task"
+            "Review dashboard",
+            "Check active alerts",
+            "Handle top work priority",
+            "Study and improve execution",
         ],
         "reminders": [
-            "Check next macro event",
-            "Review active warnings"
+            "Watch next macro event",
+            "Review Donna warnings",
+            "Stay focused and avoid low-quality trades",
         ],
-        "last_updated": utc_now_iso()
+        "last_updated": utc_now_iso(),
     }
 
     try:
@@ -572,7 +576,7 @@ async def startup():
     asyncio.create_task(finnhub_loop())
 
 # ==================================================
-# ROUTES
+# ROUTES - DATA
 # ==================================================
 @app.get("/")
 async def root():
@@ -613,7 +617,58 @@ async def check_env():
 async def test_telegram():
     return send_telegram_message("DONNA TEST MESSAGE")
 
+# ==================================================
+# ROUTES - ASSISTANT ACTIONS
+# ==================================================
+@app.post("/assistant/set-focus")
+async def assistant_set_focus(request: Request):
+    body = await request.json()
+    value = str(body.get("daily_focus", "")).strip()
 
+    if not value:
+        raise HTTPException(status_code=400, detail="daily_focus is required")
+
+    state = load_assistant_state()
+    state["daily_focus"] = value
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+
+@app.post("/assistant/add-task")
+async def assistant_add_task(request: Request):
+    body = await request.json()
+    value = str(body.get("task", "")).strip()
+
+    if not value:
+        raise HTTPException(status_code=400, detail="task is required")
+
+    state = load_assistant_state()
+    state["tasks"].append(value)
+    state["tasks"] = state["tasks"][:20]
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+
+@app.post("/assistant/add-reminder")
+async def assistant_add_reminder(request: Request):
+    body = await request.json()
+    value = str(body.get("reminder", "")).strip()
+
+    if not value:
+        raise HTTPException(status_code=400, detail="reminder is required")
+
+    state = load_assistant_state()
+    state["reminders"].append(value)
+    state["reminders"] = state["reminders"][:20]
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+# ==================================================
+# ROUTES - DASHBOARD
+# ==================================================
 @app.get("/dashboard-data")
 async def dashboard_data():
     state = load_risk_state()
@@ -642,12 +697,7 @@ async def dashboard():
 <title>D.O.N.N.A Command Center</title>
 
 <style>
-*{
-    margin:0;
-    padding:0;
-    box-sizing:border-box;
-}
-
+*{margin:0;padding:0;box-sizing:border-box;}
 :root{
     --bg:#060a10;
     --bg2:#0b1220;
@@ -659,10 +709,8 @@ async def dashboard():
     --low:#47ff9c;
     --medium:#ffd24d;
     --high:#ff5e74;
-    --blue:#59a7ff;
     --glow:0 0 30px rgba(89,167,255,.08);
 }
-
 body{
     font-family: Inter, Arial, sans-serif;
     background:
@@ -672,281 +720,93 @@ body{
     color:var(--text);
     padding:24px;
 }
-
-.wrapper{
-    max-width:1380px;
-    margin:0 auto;
-}
-
+.wrapper{max-width:1380px;margin:0 auto;}
 .topbar{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:18px;
-    flex-wrap:wrap;
-    margin-bottom:22px;
+    display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:22px;
 }
-
-.brand h1{
-    font-size:38px;
-    letter-spacing:4px;
-    font-weight:900;
-}
-
-.brand p{
-    margin-top:6px;
-    color:var(--muted);
-    font-size:14px;
-    letter-spacing:.4px;
-}
-
-.status-wrap{
-    display:flex;
-    align-items:center;
-    gap:12px;
-}
-
+.brand h1{font-size:38px;letter-spacing:4px;font-weight:900;}
+.brand p{margin-top:6px;color:var(--muted);font-size:14px;letter-spacing:.4px;}
+.status-wrap{display:flex;align-items:center;gap:12px;}
 .pulse-dot{
-    width:12px;
-    height:12px;
-    border-radius:50%;
-    background:var(--low);
-    box-shadow:0 0 18px rgba(71,255,156,.85);
-    animation:pulse 1.6s infinite;
+    width:12px;height:12px;border-radius:50%;background:var(--low);
+    box-shadow:0 0 18px rgba(71,255,156,.85);animation:pulse 1.6s infinite;
 }
-
 @keyframes pulse{
     0%{transform:scale(.9);opacity:.9;}
     70%{transform:scale(1.25);opacity:.35;}
     100%{transform:scale(.95);opacity:.9;}
 }
-
 .status-pill{
-    padding:10px 18px;
-    border-radius:999px;
-    background:rgba(71,255,156,.08);
-    border:1px solid rgba(71,255,156,.28);
-    color:#9cffc7;
-    font-size:14px;
-    font-weight:800;
-    letter-spacing:.6px;
+    padding:10px 18px;border-radius:999px;background:rgba(71,255,156,.08);
+    border:1px solid rgba(71,255,156,.28);color:#9cffc7;font-size:14px;font-weight:800;letter-spacing:.6px;
 }
-
-.grid{
-    display:grid;
-    grid-template-columns:repeat(4,1fr);
-    gap:16px;
-    margin-bottom:18px;
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px;}
+.card,.panel{
+    background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;
+    box-shadow:var(--glow);backdrop-filter:blur(10px);
 }
-
-.card{
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:20px;
-    padding:20px;
-    box-shadow:var(--glow);
-    backdrop-filter: blur(10px);
-    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-}
-
-.card:hover,
-.panel:hover{
-    transform:translateY(-2px);
-    border-color:rgba(89,167,255,.18);
-    box-shadow:0 0 36px rgba(89,167,255,.12);
-}
-
+.panel{background:var(--panel-2);}
 .label{
-    font-size:12px;
-    color:var(--muted);
-    text-transform:uppercase;
-    letter-spacing:1.6px;
-    margin-bottom:14px;
+    font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;
 }
-
-.value{
-    font-size:40px;
-    font-weight:900;
-    line-height:1;
-}
-
+.value{font-size:40px;font-weight:900;line-height:1;}
 .value.low{color:var(--low);}
 .value.medium{color:var(--medium);}
 .value.high{color:var(--high);}
-
-.value.event{
-    font-size:26px;
-    color:#ffffff;
-}
-
-.sub{
-    margin-top:10px;
-    color:var(--muted);
-    font-size:14px;
-}
-
-.layout{
-    display:grid;
-    grid-template-columns:1.65fr .95fr;
-    gap:16px;
-    align-items:start;
-}
-
-.panel{
-    background:var(--panel-2);
-    border:1px solid var(--line);
-    border-radius:20px;
-    padding:20px;
-    box-shadow:var(--glow);
-    backdrop-filter: blur(10px);
-    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-}
-
+.value.event{font-size:26px;color:#ffffff;}
+.sub{margin-top:10px;color:var(--muted);font-size:14px;}
+.layout{display:grid;grid-template-columns:1.65fr .95fr;gap:16px;align-items:start;}
 .section-title{
-    font-size:13px;
-    color:var(--muted);
-    text-transform:uppercase;
-    letter-spacing:1.6px;
-    margin-bottom:14px;
+    font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;
 }
-
 .feed-item{
-    padding:12px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-    color:#e6edf7;
-    font-size:15px;
-    line-height:1.45;
+    padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);color:#e6edf7;font-size:15px;line-height:1.45;
 }
-
-.feed-item:last-child{
-    border-bottom:none;
-    padding-bottom:0;
-}
-
-.feed-label{
-    color:#ffffff;
-    font-weight:700;
-}
-
+.feed-item:last-child{border-bottom:none;padding-bottom:0;}
+.feed-label{color:#ffffff;font-weight:700;}
 .warning-badge{
-    display:inline-block;
-    padding:7px 11px;
-    border-radius:999px;
-    font-size:12px;
-    font-weight:700;
-    margin:0 8px 8px 0;
-    border:1px solid rgba(255,255,255,.08);
-    background:rgba(255,255,255,.03);
-    color:#d8e4f7;
+    display:inline-block;padding:7px 11px;border-radius:999px;font-size:12px;font-weight:700;
+    margin:0 8px 8px 0;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:#d8e4f7;
 }
-
-.assistant-box{
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-}
-
+.assistant-box{display:flex;flex-direction:column;gap:12px;}
 .assistant-item{
-    padding:14px;
-    border-radius:14px;
-    background:rgba(255,255,255,.03);
-    border:1px solid rgba(255,255,255,.05);
-    color:#dde6f3;
-    font-size:14px;
-    line-height:1.45;
+    padding:14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);
+    color:#dde6f3;font-size:14px;line-height:1.45;
 }
-
-.footer{
-    margin-top:16px;
-    display:flex;
-    justify-content:space-between;
-    gap:14px;
-    flex-wrap:wrap;
-    color:var(--muted);
-    font-size:13px;
-}
-
 .history-row{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    padding:12px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-    font-size:14px;
+    display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px;
 }
-
-.history-row:last-child{
-    border-bottom:none;
+.history-row:last-child{border-bottom:none;}
+.history-label{color:#dfe8f5;}
+.history-value{color:var(--muted);text-align:right;}
+.alert-box{padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.alert-box:last-child{border-bottom:none;}
+.alert-top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-weight:700;color:#eef4fd;}
+.alert-meta{margin-top:6px;color:var(--muted);font-size:13px;}
+.alert-summary{margin-top:6px;color:#d8e4f4;font-size:14px;line-height:1.4;}
+.small{color:var(--muted);font-size:13px;margin-top:6px;}
+.input{
+    width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.04);color:white;outline:none;margin-top:10px;
 }
-
-.history-label{
-    color:#dfe8f5;
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+.btn{
+    padding:10px 14px;border:none;border-radius:12px;cursor:pointer;font-weight:700;
+    background:#1d3557;color:white;
 }
-
-.history-value{
-    color:var(--muted);
-    text-align:right;
+.btn.secondary{background:#243b55;}
+.footer{
+    margin-top:16px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;
 }
-
-.alert-box{
-    padding:12px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-}
-
-.alert-box:last-child{
-    border-bottom:none;
-}
-
-.alert-top{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-    font-weight:700;
-    color:#eef4fd;
-}
-
-.alert-meta{
-    margin-top:6px;
-    color:var(--muted);
-    font-size:13px;
-}
-
-.alert-summary{
-    margin-top:6px;
-    color:#d8e4f4;
-    font-size:14px;
-    line-height:1.4;
-}
-
-.small{
-    color:var(--muted);
-    font-size:13px;
-    margin-top:6px;
-}
-
 @media(max-width:1100px){
-    .grid{
-        grid-template-columns:repeat(2,1fr);
-    }
-    .layout{
-        grid-template-columns:1fr;
-    }
+    .grid{grid-template-columns:repeat(2,1fr);}
+    .layout{grid-template-columns:1fr;}
 }
-
 @media(max-width:680px){
-    body{
-        padding:14px;
-    }
-    .brand h1{
-        font-size:28px;
-    }
-    .grid{
-        grid-template-columns:1fr;
-    }
-    .value{
-        font-size:34px;
-    }
+    body{padding:14px;}
+    .brand h1{font-size:28px;}
+    .grid{grid-template-columns:1fr;}
+    .value{font-size:34px;}
 }
 </style>
 </head>
@@ -1029,16 +889,28 @@ body{
                     <div class="assistant-item">
                         <strong>Daily Focus</strong>
                         <div class="small" id="daily_focus">Loading...</div>
+                        <input class="input" id="focus_input" placeholder="Set daily focus..." />
+                        <div class="btn-row">
+                            <button class="btn" onclick="saveFocus()">Save Focus</button>
+                        </div>
                     </div>
 
                     <div class="assistant-item">
                         <strong>Today's Tasks</strong>
                         <div id="tasks_list" class="small">Loading...</div>
+                        <input class="input" id="task_input" placeholder="Add task..." />
+                        <div class="btn-row">
+                            <button class="btn secondary" onclick="addTask()">Add Task</button>
+                        </div>
                     </div>
 
                     <div class="assistant-item">
                         <strong>Reminders</strong>
                         <div id="reminders_list" class="small">Loading...</div>
+                        <input class="input" id="reminder_input" placeholder="Add reminder..." />
+                        <div class="btn-row">
+                            <button class="btn secondary" onclick="addReminder()">Add Reminder</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1087,6 +959,48 @@ function applyRisk(id, val){
     const el = document.getElementById(id);
     el.className = "value " + riskClass(val);
     el.innerText = String(val).toUpperCase();
+}
+
+async function saveFocus(){
+    const value = document.getElementById('focus_input').value.trim();
+    if(!value) return;
+
+    await fetch('/assistant/set-focus', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({daily_focus:value})
+    });
+
+    document.getElementById('focus_input').value = '';
+    refreshDashboard();
+}
+
+async function addTask(){
+    const value = document.getElementById('task_input').value.trim();
+    if(!value) return;
+
+    await fetch('/assistant/add-task', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({task:value})
+    });
+
+    document.getElementById('task_input').value = '';
+    refreshDashboard();
+}
+
+async function addReminder(){
+    const value = document.getElementById('reminder_input').value.trim();
+    if(!value) return;
+
+    await fetch('/assistant/add-reminder', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({reminder:value})
+    });
+
+    document.getElementById('reminder_input').value = '';
+    refreshDashboard();
 }
 
 async function refreshDashboard(){
