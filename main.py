@@ -953,23 +953,7 @@ async def assistant_chat(request: Request):
         "value": "",
         "reply": "State check complete. No action taken.",
     }
-   risk = load_risk_state()
 
-if not reply:
-    event_phase = str(risk.get("event_phase", "")).upper()
-    minutes_to_event = risk.get("minutes_to_event", None)
-    donna_session = str(risk.get("donna_session", "unknown"))
-
-    if event_phase == "LIVE":
-        reply = "Macro event is live. Volatility is active now. Stand down until reaction becomes clear."
-    elif event_phase == "IMMINENT":
-        reply = f"High-impact event is close. {minutes_to_event} minutes remaining. Reduce size and avoid random entries."
-    elif event_phase == "APPROACHING":
-        reply = f"Event risk is building. {minutes_to_event} minutes to the next macro event. Stay selective."
-    elif event_phase == "POST_EVENT_COOLDOWN":
-        reply = "Recent macro release is still affecting conditions. Treat this as a cooldown volatility window."
-    else:
-        reply = f"Donna time check complete. Session: {donna_session}. No direct action taken."
     try:
         response = client.responses.create(
             model=OPENAI_MODEL,
@@ -982,7 +966,25 @@ if not reply:
 
         action = str(parsed.get("action", "none")).strip().lower()
         value = str(parsed.get("value", "")).strip()
-        reply = str(parsed.get("reply", "Done.")).strip()
+        reply = str(parsed.get("reply", "")).strip()
+
+        risk = load_risk_state()
+
+        if not reply:
+            event_phase = str(risk.get("event_phase", "")).upper()
+            minutes_to_event = risk.get("minutes_to_event", None)
+            donna_session = str(risk.get("donna_session", "unknown"))
+
+            if event_phase == "LIVE":
+                reply = "Macro event is live. Volatility is active now. Stand down until reaction becomes clear."
+            elif event_phase == "IMMINENT":
+                reply = f"High-impact event is close. {minutes_to_event} minutes remaining. Reduce size and avoid random entries."
+            elif event_phase == "APPROACHING":
+                reply = f"Event risk is building. {minutes_to_event} minutes to the next macro event. Stay selective."
+            elif event_phase == "POST_EVENT_COOLDOWN":
+                reply = "Recent macro release is still affecting conditions. Treat this as a cooldown volatility window."
+            else:
+                reply = f"Donna time check complete. Session: {donna_session}. No direct action taken."
 
         updated_state = apply_assistant_action(action, value)
 
