@@ -47,7 +47,7 @@ ASSISTANT_FILE = BASE_DIR / "donna_assistant_state.json"
 # ==================================================
 # LOOP TIMERS
 # ==================================================
-NEWS_POLL_SECONDS = 60
+NEWS_POLL_SECONDS = 900
 HEADLINE_POLL_SECONDS = 900
 FINNHUB_POLL_SECONDS = 600
 
@@ -2070,7 +2070,7 @@ document.getElementById('chat_input').addEventListener('keydown', async function
 });
 
 refreshDashboard();
-setInterval(refreshDashboard, 5000);
+setInterval(refreshDashboard, 15000);
 </script>
 </body>
 </html>
