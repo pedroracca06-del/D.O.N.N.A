@@ -504,7 +504,7 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A Command Center</title>
+<title>D.O.N.N.A Command Center V2</title>
 
 <style>
 *{
@@ -513,125 +513,272 @@ async def dashboard():
     box-sizing:border-box;
 }
 
+:root{
+    --bg:#060a10;
+    --bg2:#0b1220;
+    --panel:rgba(14,21,34,.82);
+    --panel-2:rgba(18,27,42,.92);
+    --line:rgba(255,255,255,.06);
+    --text:#f2f6fc;
+    --muted:#8ca0bf;
+    --low:#47ff9c;
+    --medium:#ffd24d;
+    --high:#ff5e74;
+    --blue:#59a7ff;
+    --glow:0 0 30px rgba(89,167,255,.08);
+}
+
 body{
     font-family: Inter, Arial, sans-serif;
-    background: radial-gradient(circle at top right,#182030 0%,#0b0f14 45%,#05070a 100%);
-    color:#ffffff;
+    background:
+        radial-gradient(circle at top right, rgba(46,113,255,.16), transparent 25%),
+        radial-gradient(circle at bottom left, rgba(0,255,153,.08), transparent 20%),
+        linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+    color:var(--text);
     padding:24px;
 }
 
 .wrapper{
-    max-width:1300px;
-    margin:auto;
+    max-width:1380px;
+    margin:0 auto;
 }
 
 .topbar{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    margin-bottom:22px;
-    gap:20px;
+    gap:18px;
     flex-wrap:wrap;
+    margin-bottom:22px;
 }
 
 .brand h1{
-    font-size:34px;
-    letter-spacing:2px;
-    font-weight:800;
+    font-size:38px;
+    letter-spacing:4px;
+    font-weight:900;
 }
 
 .brand p{
-    color:#8ea0bd;
-    margin-top:4px;
+    margin-top:6px;
+    color:var(--muted);
     font-size:14px;
+    letter-spacing:.4px;
+}
+
+.status-wrap{
+    display:flex;
+    align-items:center;
+    gap:12px;
+}
+
+.pulse-dot{
+    width:12px;
+    height:12px;
+    border-radius:50%;
+    background:var(--low);
+    box-shadow:0 0 18px rgba(71,255,156,.85);
+    animation:pulse 1.6s infinite;
+}
+
+@keyframes pulse{
+    0%{transform:scale(.9);opacity:.9;}
+    70%{transform:scale(1.25);opacity:.35;}
+    100%{transform:scale(.95);opacity:.9;}
 }
 
 .status-pill{
-    padding:10px 16px;
+    padding:10px 18px;
     border-radius:999px;
-    background:rgba(0,255,140,.08);
-    border:1px solid rgba(0,255,140,.35);
-    color:#7fffb6;
+    background:rgba(71,255,156,.08);
+    border:1px solid rgba(71,255,156,.28);
+    color:#9cffc7;
     font-size:14px;
-    font-weight:700;
+    font-weight:800;
+    letter-spacing:.6px;
 }
 
 .grid{
     display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    grid-template-columns:repeat(4,1fr);
     gap:16px;
     margin-bottom:18px;
 }
 
 .card{
-    background:rgba(18,25,35,.88);
-    border:1px solid rgba(255,255,255,.05);
-    border-radius:18px;
-    padding:18px;
-    box-shadow:0 10px 30px rgba(0,0,0,.35);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:20px;
+    box-shadow:var(--glow);
+    backdrop-filter: blur(10px);
+    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.card:hover,
+.panel:hover{
+    transform:translateY(-2px);
+    border-color:rgba(89,167,255,.18);
+    box-shadow:0 0 36px rgba(89,167,255,.12);
 }
 
 .label{
-    font-size:13px;
-    color:#8ea0bd;
-    margin-bottom:10px;
+    font-size:12px;
+    color:var(--muted);
     text-transform:uppercase;
-    letter-spacing:1px;
+    letter-spacing:1.6px;
+    margin-bottom:14px;
 }
 
 .value{
-    font-size:28px;
-    font-weight:800;
+    font-size:40px;
+    font-weight:900;
+    line-height:1;
 }
 
-.low{color:#4dff9a;}
-.medium{color:#ffd24d;}
-.high{color:#ff5f6d;}
+.value.low{color:var(--low);}
+.value.medium{color:var(--medium);}
+.value.high{color:var(--high);}
 
-.section{
-    margin-top:14px;
+.value.event{
+    font-size:26px;
+    color:#ffffff;
 }
 
-.big-card{
-    background:rgba(18,25,35,.92);
-    border:1px solid rgba(255,255,255,.05);
-    border-radius:18px;
+.sub{
+    margin-top:10px;
+    color:var(--muted);
+    font-size:14px;
+}
+
+.layout{
+    display:grid;
+    grid-template-columns:1.65fr .95fr;
+    gap:16px;
+    align-items:start;
+}
+
+.panel{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:20px;
     padding:20px;
-    margin-top:16px;
-    box-shadow:0 10px 30px rgba(0,0,0,.35);
+    box-shadow:var(--glow);
+    backdrop-filter: blur(10px);
+    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.section-title{
+    font-size:13px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:1.6px;
+    margin-bottom:14px;
 }
 
 .feed-item{
-    padding:10px 0;
-    border-bottom:1px solid rgba(255,255,255,.05);
-    color:#d9e2ef;
+    padding:12px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    color:#e6edf7;
     font-size:15px;
+    line-height:1.45;
 }
 
 .feed-item:last-child{
     border-bottom:none;
+    padding-bottom:0;
 }
 
-.small{
-    color:#8ea0bd;
-    font-size:13px;
-    margin-top:6px;
+.feed-label{
+    color:#ffffff;
+    font-weight:700;
+}
+
+.muted{
+    color:var(--muted);
+}
+
+.warning-badge{
+    display:inline-block;
+    padding:7px 11px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:700;
+    margin:0 8px 8px 0;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.03);
+    color:#d8e4f7;
+}
+
+.assistant-box{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+
+.assistant-item{
+    padding:14px;
+    border-radius:14px;
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.05);
+    color:#dde6f3;
+    font-size:14px;
+    line-height:1.45;
 }
 
 .footer{
-    margin-top:20px;
-    color:#6f819d;
+    margin-top:16px;
+    display:flex;
+    justify-content:space-between;
+    gap:14px;
+    flex-wrap:wrap;
+    color:var(--muted);
     font-size:13px;
 }
 
-.glow{
-    box-shadow:0 0 0 1px rgba(80,160,255,.08),0 0 24px rgba(80,160,255,.08);
+.history-row{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    padding:12px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    font-size:14px;
 }
 
-@media(max-width:700px){
-    body{padding:14px;}
-    .brand h1{font-size:26px;}
-    .value{font-size:24px;}
+.history-row:last-child{
+    border-bottom:none;
+}
+
+.history-label{
+    color:#dfe8f5;
+}
+
+.history-value{
+    color:var(--muted);
+    text-align:right;
+}
+
+@media(max-width:1100px){
+    .grid{
+        grid-template-columns:repeat(2,1fr);
+    }
+    .layout{
+        grid-template-columns:1fr;
+    }
+}
+
+@media(max-width:680px){
+    body{
+        padding:14px;
+    }
+    .brand h1{
+        font-size:28px;
+    }
+    .grid{
+        grid-template-columns:1fr;
+    }
+    .value{
+        font-size:34px;
+    }
 }
 </style>
 </head>
@@ -644,66 +791,118 @@ body{
             <h1>D.O.N.N.A</h1>
             <p>Dynamic Operational Neural Network Assistant</p>
         </div>
-        <div class="status-pill" id="status">ONLINE</div>
+
+        <div class="status-wrap">
+            <div class="pulse-dot"></div>
+            <div class="status-pill" id="status">ONLINE</div>
+        </div>
     </div>
 
     <div class="grid">
-
-        <div class="card glow">
+        <div class="card">
             <div class="label">Macro Risk</div>
             <div class="value" id="macro_risk">-</div>
+            <div class="sub">Scheduled event pressure</div>
         </div>
 
-        <div class="card glow">
+        <div class="card">
             <div class="label">Headline Risk</div>
             <div class="value" id="headline_risk">-</div>
+            <div class="sub">Breaking macro / geopolitical flow</div>
         </div>
 
-        <div class="card glow">
+        <div class="card">
             <div class="label">Market Risk</div>
             <div class="value" id="market_news_risk">-</div>
+            <div class="sub">Company / sector catalyst pressure</div>
         </div>
 
-        <div class="card glow">
+        <div class="card">
             <div class="label">Next Event</div>
-            <div class="value" id="next_event">-</div>
-            <div class="small" id="minutes_to_event"></div>
+            <div class="value event" id="next_event">-</div>
+            <div class="sub" id="minutes_to_event"></div>
         </div>
-
     </div>
 
-    <div class="big-card">
-        <div class="label">Active Warnings</div>
-        <div id="warnings"></div>
-    </div>
+    <div class="layout">
+        <div>
+            <div class="panel">
+                <div class="section-title">Active Warnings</div>
+                <div id="warnings"></div>
+            </div>
 
-    <div class="big-card">
-        <div class="label">Latest Headlines</div>
-        <div class="feed-item">
-            <strong>News Feed:</strong>
-            <span id="last_headline">-</span>
+            <div class="panel" style="margin-top:16px;">
+                <div class="section-title">Live Intelligence Feed</div>
+
+                <div class="feed-item">
+                    <span class="feed-label">News Feed:</span>
+                    <span id="last_headline">No recent headline</span>
+                </div>
+
+                <div class="feed-item">
+                    <span class="feed-label">Market Feed:</span>
+                    <span id="last_market_headline">No recent market headline</span>
+                </div>
+            </div>
         </div>
-        <div class="feed-item">
-            <strong>Market Feed:</strong>
-            <span id="last_market_headline">-</span>
+
+        <div>
+            <div class="panel">
+                <div class="section-title">Assistant Panel</div>
+                <div class="assistant-box">
+                    <div class="assistant-item">
+                        Donna is online and monitoring macro, headlines, and market catalysts.
+                    </div>
+                    <div class="assistant-item">
+                        Use this space next for tasks, reminders, routines, and daily objectives.
+                    </div>
+                    <div class="assistant-item">
+                        Phase 3 is live. Donna is transitioning from intelligence engine to full operator interface.
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div class="section-title">System Snapshot</div>
+
+                <div class="history-row">
+                    <div class="history-label">Status</div>
+                    <div class="history-value" id="status_2">ONLINE</div>
+                </div>
+
+                <div class="history-row">
+                    <div class="history-label">Next Event</div>
+                    <div class="history-value" id="next_event_2">-</div>
+                </div>
+
+                <div class="history-row">
+                    <div class="history-label">Minutes Remaining</div>
+                    <div class="history-value" id="minutes_to_event_2">-</div>
+                </div>
+
+                <div class="history-row">
+                    <div class="history-label">Last Updated</div>
+                    <div class="history-value" id="last_updated">-</div>
+                </div>
+            </div>
         </div>
     </div>
 
     <div class="footer">
-        Last Updated: <span id="last_updated">-</span>
+        <div>D.O.N.N.A Interface v2</div>
+        <div>Hybrid Command Center</div>
     </div>
-
 </div>
 
 <script>
 function riskClass(v){
     const x = String(v).toLowerCase();
-    if(x.includes("high")) return "high";
-    if(x.includes("medium")) return "medium";
+    if (x.includes("high")) return "high";
+    if (x.includes("medium")) return "medium";
     return "low";
 }
 
-function applyRisk(id,val){
+function applyRisk(id, val){
     const el = document.getElementById(id);
     el.className = "value " + riskClass(val);
     el.innerText = String(val).toUpperCase();
@@ -714,28 +913,31 @@ async function refreshDashboard(){
         const res = await fetch('/dashboard-data');
         const data = await res.json();
 
-        document.getElementById('status').innerText = data.status.toUpperCase();
+        const status = (data.status || "online").toUpperCase();
+        document.getElementById('status').innerText = status;
+        document.getElementById('status_2').innerText = status;
 
         applyRisk('macro_risk', data.macro_risk);
         applyRisk('headline_risk', data.headline_risk);
         applyRisk('market_news_risk', data.market_news_risk);
 
-        document.getElementById('next_event').innerText =
-            data.next_event ? data.next_event : "NONE";
+        const nextEvent = data.next_event || "NONE";
+        document.getElementById('next_event').innerText = nextEvent;
+        document.getElementById('next_event_2').innerText = nextEvent;
 
+        const mins = data.minutes_to_event;
         document.getElementById('minutes_to_event').innerText =
-            data.minutes_to_event !== null
-            ? data.minutes_to_event + " minutes remaining"
-            : "";
+            mins !== null ? mins + " minutes remaining" : "No timed event loaded";
+        document.getElementById('minutes_to_event_2').innerText =
+            mins !== null ? mins : "-";
 
         const warnBox = document.getElementById('warnings');
-
-        if(data.active_warnings && data.active_warnings.length){
+        if (data.active_warnings && data.active_warnings.length){
             warnBox.innerHTML = data.active_warnings
-                .map(x => '<div class="feed-item">' + x + '</div>')
+                .map(x => '<span class="warning-badge">' + x + '</span>')
                 .join('');
         } else {
-            warnBox.innerHTML = '<div class="feed-item">No active warnings</div>';
+            warnBox.innerHTML = '<span class="warning-badge">No active warnings</span>';
         }
 
         document.getElementById('last_headline').innerText =
@@ -755,7 +957,6 @@ async function refreshDashboard(){
 refreshDashboard();
 setInterval(refreshDashboard, 5000);
 </script>
-
 </body>
 </html>
 """
