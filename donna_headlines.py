@@ -2,93 +2,119 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import os
-import requests
 import json
+import requests
 
-print("HEADLINES FILE LOADED")
-
-# =========================
-# ENV LOAD
-# =========================
-env_path = Path(__file__).parent / ".env"
+# ==================================================
+# ENV / PATHS
+# ==================================================
+BASE_DIR = Path(__file__).parent
+env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-RISK_STATE_FILE = Path(__file__).parent / "donna_risk_state.json"
+RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 
-# =========================
+# ==================================================
 # SETTINGS
-# =========================
-PAGE_SIZE = 20
-MIN_SEVERITY_TO_ALERT = 2
-REQUEST_TIMEOUT = 25
+# ==================================================
+REQUEST_TIMEOUT = 20
+MAX_HEADLINES = 12
 
-seen_urls: set[str] = set()
+NEWS_URL = "https://newsapi.org/v2/top-headlines"
 
-NEWS_QUERY = (
-    '("Trump" OR "Donald Trump" OR "White House" OR tariff OR sanctions '
-    'OR Iran OR Israel OR missile OR airstrike OR war OR ceasefire OR oil '
-    'OR "Federal Reserve" OR Fed OR FOMC OR Powell OR "Jerome Powell" '
-    'OR "rate decision" OR China OR "trade war")'
-)
-
-HIGH_RISK_TERMS = [
-    "airstrike",
-    "missile",
-    "attack",
-    "war",
-    "emergency",
-    "tariff",
-    "sanctions",
-    "fed",
-    "fomc",
-    "powell",
-    "military",
-    "oil",
-    "retaliation",
-]
-
-HEADERS = {
-    "X-Api-Key": NEWSAPI_KEY or "",
-    "User-Agent": "DonnaHeadlineGuard/1.0",
+TRUSTED_SOURCES = {
+    "reuters",
+    "associated-press",
+    "bloomberg",
+    "cnbc",
+    "financial-times",
+    "the-wall-street-journal",
+    "business-insider",
+    "marketwatch",
+    "yahoo-finance",
 }
 
+seen_titles: set[str] = set()
 
-# =========================
-# TELEGRAM
-# =========================
-def send_telegram_message(text: str) -> dict:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return {"error": "Missing Telegram credentials"}
+# ==================================================
+# KEYWORD MAP
+# ==================================================
+CRITICAL_KEYWORDS = [
+    "war",
+    "missile",
+    "attack",
+    "strike",
+    "invasion",
+    "nuclear",
+    "sanction",
+    "blockade",
+    "shipping lane",
+    "strait",
+    "hormuz",
+    "terror",
+    "emergency fed",
+    "bank collapse",
+    "default",
+]
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-    }
+HIGH_KEYWORDS = [
+    "powell",
+    "fomc",
+    "federal reserve",
+    "rate cut",
+    "rate hike",
+    "inflation",
+    "cpi",
+    "ppi",
+    "jobs report",
+    "yield surge",
+    "treasury yields",
+    "tariff",
+    "trump",
+    "white house",
+    "treasury secretary",
+    "oil jumps",
+    "opec",
+]
 
-    response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.json()
+MEDIUM_KEYWORDS = [
+    "earnings",
+    "guidance",
+    "downgrade",
+    "upgrade",
+    "ai spending",
+    "chips",
+    "big tech",
+    "merger",
+    "acquisition",
+    "recession",
+]
+
+# ==================================================
+# HELPERS
+# ==================================================
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-# =========================
-# RISK STATE
-# =========================
-def load_risk_state() -> dict:
+def load_state() -> dict:
     default_state = {
         "macro_risk": "low",
         "headline_risk": "low",
+        "market_news_risk": "low",
         "active_warnings": [],
         "next_event": "",
         "minutes_to_event": None,
         "last_headline": "",
+        "last_market_headline": "",
         "last_updated": "",
+        "headline_severity": "",
+        "headline_guidance": "",
+        "headline_source": "",
     }
 
     try:
@@ -102,222 +128,231 @@ def load_risk_state() -> dict:
             return default_state
 
         merged = {**default_state, **data}
+
         if not isinstance(merged.get("active_warnings"), list):
             merged["active_warnings"] = []
 
         return merged
+
     except Exception:
         return default_state
 
 
-def save_risk_state_headline(headline_risk: str, active_warnings: list[str], last_headline: str) -> None:
-    state = load_risk_state()
-
-    macro_warnings = [
-        w for w in state.get("active_warnings", [])
-        if not str(w).startswith("HEADLINE:")
-    ]
-
-    headline_prefixed = [f"HEADLINE: {w}" for w in active_warnings]
-
-    state["headline_risk"] = headline_risk
-    state["active_warnings"] = macro_warnings + headline_prefixed
-    state["last_headline"] = last_headline
-    state["last_updated"] = datetime.now(timezone.utc).isoformat()
+def save_state(state: dict) -> None:
+    state["last_updated"] = now_iso()
 
     with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
 
-# =========================
-# NEWSAPI
-# =========================
-def fetch_newsapi_headlines() -> list[dict]:
+def normalize(text: str) -> str:
+    return " ".join(str(text).lower().split())
+
+
+def contains_any(text: str, words: list[str]) -> bool:
+    return any(word in text for word in words)
+
+# ==================================================
+# FETCH
+# ==================================================
+def fetch_headlines() -> list[dict]:
     if not NEWSAPI_KEY:
         raise RuntimeError("Missing NEWSAPI_KEY")
 
-    base_url = "https://newsapi.org/v2/everything"
-
-    now_utc = datetime.now(timezone.utc)
-    from_utc = now_utc - timedelta(hours=6)
-
     params = {
-        "q": NEWS_QUERY,
         "language": "en",
-        "sortBy": "publishedAt",
-        "pageSize": PAGE_SIZE,
-        "from": from_utc.isoformat().replace("+00:00", "Z"),
+        "pageSize": MAX_HEADLINES,
+        "apiKey": NEWSAPI_KEY,
+        "category": "business",
     }
 
-    response = requests.get(base_url, headers=HEADERS, params=params, timeout=REQUEST_TIMEOUT)
+    response = requests.get(NEWS_URL, params=params, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
-
-    body = response.text.strip()
-    if not body:
-        raise RuntimeError("NEWSAPI_EMPTY_RESPONSE")
 
     data = response.json()
 
     if data.get("status") != "ok":
-        raise RuntimeError(f"NEWSAPI_BAD_STATUS: {data}")
+        raise RuntimeError("NewsAPI bad response")
 
-    articles = data.get("articles", [])
-    if not isinstance(articles, list):
-        return []
+    return data.get("articles", [])
 
-    return articles
-
-
-# =========================
+# ==================================================
 # SCORING
-# =========================
-def classify_theme(text: str) -> str:
-    t = text.lower()
+# ==================================================
+def source_score(source_id: str, source_name: str) -> int:
+    source_id = normalize(source_id)
+    source_name = normalize(source_name)
 
-    if any(term in t for term in ["trump", "donald trump", "white house", "tariff", "sanctions"]):
-        return "TRUMP / POLICY"
-    if any(term in t for term in ["iran", "israel", "airstrike", "missile", "ceasefire", "war", "retaliation"]):
-        return "GEOPOLITICS"
-    if any(term in t for term in ["fed", "fomc", "powell", "federal reserve", "rate decision"]):
-        return "FED / RATES"
-    if any(term in t for term in ["china", "trade war"]):
-        return "CHINA / TRADE"
-    if "oil" in t:
-        return "OIL / ENERGY"
+    if source_id in TRUSTED_SOURCES:
+        return 3
 
-    return "GENERAL RISK"
+    if "reuters" in source_name or "bloomberg" in source_name or "cnbc" in source_name:
+        return 3
+
+    if "finance" in source_name or "market" in source_name:
+        return 2
+
+    return 1
 
 
-def score_headline(title: str, description: str = "", source_name: str = "") -> int:
-    text = f"{title} {description} {source_name}".lower()
+def headline_score(title: str, description: str) -> tuple[int, str]:
+    text = normalize(f"{title} {description}")
     score = 0
+    lane = "background"
 
-    if any(term in text for term in ["iran", "israel", "war", "missile", "airstrike", "retaliation"]):
+    if contains_any(text, CRITICAL_KEYWORDS):
+        score += 8
+        lane = "critical"
+
+    if contains_any(text, HIGH_KEYWORDS):
+        score += 5
+        lane = "high" if lane != "critical" else lane
+
+    if contains_any(text, MEDIUM_KEYWORDS):
+        score += 2
+        if lane == "background":
+            lane = "medium"
+
+    # Broad market phrases
+    broad_terms = [
+        "stocks fall",
+        "stocks rally",
+        "markets tumble",
+        "markets rise",
+        "nasdaq",
+        "s&p 500",
+        "dow jones",
+        "wall street",
+        "global markets",
+    ]
+
+    if contains_any(text, broad_terms):
         score += 3
 
-    if any(term in text for term in ["trump", "white house", "tariff", "sanctions"]):
+    # Surprise / urgency words
+    urgency_terms = [
+        "unexpected",
+        "surge",
+        "plunge",
+        "shocks",
+        "crashes",
+        "jumps",
+        "slumps",
+        "emergency",
+    ]
+
+    if contains_any(text, urgency_terms):
         score += 2
 
-    if any(term in text for term in ["fed", "fomc", "powell", "federal reserve", "rate decision"]):
-        score += 3
-
-    if "oil" in text:
-        score += 1
-
-    for term in HIGH_RISK_TERMS:
-        if term in text:
-            score += 1
-
-    return score
+    return score, lane
 
 
-def severity_label(score: int) -> str:
-    if score >= 6:
-        return "HIGH"
-    if score >= 3:
-        return "MEDIUM"
-    return "LOW"
+def classify(score: int) -> tuple[str, str]:
+    if score >= 11:
+        return "high", "CRITICAL"
+    if score >= 8:
+        return "medium", "HIGH"
+    if score >= 5:
+        return "medium", "MEDIUM"
+    return "low", "BACKGROUND"
 
 
-def build_message(article: dict, score: int) -> str:
-    source_name = str(article.get("source", {}).get("name", "Unknown source")).strip()
-    title = str(article.get("title", "Unknown headline")).strip()
-    description = str(article.get("description", "")).strip()
-    url = str(article.get("url", "")).strip()
-    published_at = str(article.get("publishedAt", "")).strip()
+def build_guidance(severity: str, title: str) -> str:
+    text = normalize(title)
 
-    theme = classify_theme(f"{title} {description}")
-    severity = severity_label(score)
+    if severity == "CRITICAL":
+        return "Major global market-moving headline detected. Elevated volatility risk."
 
-    guidance = (
-        "Headline risk is elevated. Expect fast repricing, liquidity sweeps, and unstable continuation quality."
-        if severity == "HIGH"
-        else "Potential market-moving headline. Trade with caution until direction stabilizes."
-    )
+    if "powell" in text or "federal reserve" in text or "fomc" in text:
+        return "Fed communication risk elevated. Rates-sensitive assets may react."
 
-    return (
-        f"⚠️ DONNA HEADLINE GUARD\n\n"
-        f"Severity: {severity}\n"
-        f"Theme: {theme}\n"
-        f"Headline: {title}\n"
-        f"Source: {source_name}\n"
-        f"Published: {published_at or 'N/A'}\n\n"
-        f"Donna Guidance: {guidance}\n\n"
-        f"{url}"
-    )
+    if "trump" in text or "tariff" in text or "white house" in text:
+        return "Policy communication risk elevated. Watch indices and USD."
 
+    if "oil" in text or "hormuz" in text or "opec" in text:
+        return "Energy headline detected. Watch oil, inflation expectations, risk sentiment."
 
-def derive_headline_risk(articles: list[dict]) -> tuple[str, list[str], str]:
-    best_score = 0
-    best_title = ""
-    warnings: list[str] = []
+    if severity == "HIGH":
+        return "High-impact headline detected. Broad market sensitivity elevated."
 
-    for article in articles:
-        title = str(article.get("title", "")).strip()
-        description = str(article.get("description", "")).strip()
-        source_name = str(article.get("source", {}).get("name", "")).strip()
+    if severity == "MEDIUM":
+        return "Relevant headline detected. Monitor for follow-through."
 
-        if not title:
-            continue
+    return "Low-priority headline. Background monitoring only."
 
-        score = score_headline(title, description, source_name)
-        if score > best_score:
-            best_score = score
-            best_title = title
-
-    if best_score >= 6:
-        warnings.append("High-risk macro/geopolitical headline environment")
-        return "high", warnings, best_title
-
-    if best_score >= 3:
-        warnings.append("Moderate headline risk in market backdrop")
-        return "medium", warnings, best_title
-
-    return "low", [], ""
-
-
-# =========================
-# MAIN PROCESS
-# =========================
+# ==================================================
+# MAIN CYCLE
+# ==================================================
 def process_headlines_cycle() -> None:
-    print("Checking headlines...")
-    articles = fetch_newsapi_headlines()
+    try:
+        articles = fetch_headlines()
 
-    headline_risk, warnings, last_headline = derive_headline_risk(articles)
-    save_risk_state_headline(headline_risk, warnings, last_headline)
+        best_score = 0
+        best_title = ""
+        best_source = ""
+        best_risk = "low"
+        best_severity = "BACKGROUND"
+        best_guidance = ""
 
-    if not articles:
-        print("Donna Headline Guard: no matching headlines.")
-        return
+        for article in articles:
+            title = str(article.get("title", "")).strip()
+            description = str(article.get("description", "")).strip()
 
-    sent_count = 0
+            source = article.get("source", {}) or {}
+            source_id = str(source.get("id", "")).strip()
+            source_name = str(source.get("name", "")).strip()
 
-    for article in articles:
-        title = str(article.get("title", "")).strip()
-        description = str(article.get("description", "")).strip()
-        url = str(article.get("url", "")).strip()
-        source_name = str(article.get("source", {}).get("name", "")).strip()
+            if not title:
+                continue
 
-        if not title or not url:
-            continue
+            norm_title = normalize(title)
 
-        if url in seen_urls:
-            continue
+            if norm_title in seen_titles:
+                continue
 
-        score = score_headline(title, description, source_name)
-        if score < MIN_SEVERITY_TO_ALERT:
-            continue
+            base_score, lane = headline_score(title, description)
+            trust = source_score(source_id, source_name)
 
-        message = build_message(article, score)
-        result = send_telegram_message(message)
-        print("Headline alert sent:", result)
+            total = base_score + trust
 
-        seen_urls.add(url)
-        sent_count += 1
+            if total > best_score:
+                risk, severity = classify(total)
 
-    if sent_count == 0:
-        print("Donna Headline Guard: nothing severe enough to alert.")
+                best_score = total
+                best_title = title
+                best_source = source_name or source_id
+                best_risk = risk
+                best_severity = severity
+                best_guidance = build_guidance(severity, title)
 
-if __name__ == "__main__":
-    main()
-    
+        state = load_state()
+
+        # keep non-headline warnings
+        existing = state.get("active_warnings", [])
+        keep = [w for w in existing if not str(w).startswith("HEADLINE:")]
+
+        warnings = []
+        if best_score >= 8:
+            warnings.append(f"HEADLINE: {best_severity} news risk active")
+
+        state["headline_risk"] = best_risk
+        state["active_warnings"] = keep + warnings
+        state["last_headline"] = best_title
+        state["headline_severity"] = best_severity
+        state["headline_guidance"] = best_guidance
+        state["headline_source"] = best_source
+
+        save_state(state)
+
+        if best_title:
+            seen_titles.add(normalize(best_title))
+
+        print(
+            "Donna Headlines:",
+            best_severity,
+            "|",
+            best_title if best_title else "No major headline"
+        )
+
+    except Exception as e:
+        print("Donna Headline Guard error:", str(e))
