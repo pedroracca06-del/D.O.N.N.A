@@ -35,7 +35,7 @@ if not TELEGRAM_CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_CHAT_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-app = FastAPI(title="DONNA MASTER CORE V3")
+app = FastAPI(title="DONNA MASTER CORE V4")
 
 # ==================================================
 # FILES
@@ -220,6 +220,12 @@ def load_risk_state() -> dict:
         "last_market_severity": "",
         "last_market_guidance": "",
         "last_market_url": "",
+        "donna_time_utc": "",
+        "donna_time_ny": "",
+        "donna_day": "",
+        "donna_session": "",
+        "event_phase": "",
+        "event_time_ny": "",
     }
 
     try:
@@ -529,6 +535,8 @@ Market News Risk: {risk["market_news_risk"]}
 Warnings: {warnings}
 Next Event: {risk["next_event"]}
 Minutes To Event: {risk["minutes_to_event"]}
+Event Phase: {risk.get("event_phase", "")}
+Donna Session: {risk.get("donna_session", "")}
 Last Headline: {risk["last_headline"]}
 Headline Severity: {risk.get("headline_severity", "")}
 Headline Guidance: {risk.get("headline_guidance", "")}
@@ -565,6 +573,9 @@ Risk:
 - Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
 - Next Event: {risk.get("next_event", "none")}
 - Minutes To Event: {risk.get("minutes_to_event", "unknown")}
+- Event Phase: {risk.get("event_phase", "unknown")}
+- Donna Time NY: {risk.get("donna_time_ny", "unknown")}
+- Donna Session: {risk.get("donna_session", "unknown")}
 - Last Headline: {risk.get("last_headline", "none")}
 - Headline Severity: {risk.get("headline_severity", "none")}
 - Headline Guidance: {risk.get("headline_guidance", "none")}
@@ -744,6 +755,12 @@ async def dashboard_data():
         "last_market_severity": state.get("last_market_severity", ""),
         "last_market_guidance": state.get("last_market_guidance", ""),
         "last_market_url": state.get("last_market_url", ""),
+        "donna_time_utc": state.get("donna_time_utc", ""),
+        "donna_time_ny": state.get("donna_time_ny", ""),
+        "donna_day": state.get("donna_day", ""),
+        "donna_session": state.get("donna_session", ""),
+        "event_phase": state.get("event_phase", ""),
+        "event_time_ny": state.get("event_time_ny", ""),
         "alerts": alerts[:10],
         "assistant": assistant,
     }
@@ -946,13 +963,12 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A V3</title>
+<title>D.O.N.N.A V4</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
     --bg:#060912;
     --bg2:#0b1220;
-    --bg3:#0f1728;
     --panel:rgba(14,21,34,.84);
     --panel2:rgba(18,27,42,.96);
     --line:rgba(255,255,255,.07);
@@ -1397,7 +1413,7 @@ body{
     <div class="topbar">
         <div class="brand">
             <h1>D.O.N.N.A</h1>
-            <p>Dynamic Operational Neural Network Assistant // News Engine 2.0</p>
+            <p>Dynamic Operational Neural Network Assistant // Internal Clock Live</p>
         </div>
 
         <div class="top-right">
@@ -1469,6 +1485,40 @@ body{
                 <div class="panel">
                     <div class="section-title">Active Warnings</div>
                     <div id="warnings"></div>
+                </div>
+
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">Donna Internal Clock</div>
+
+                    <div class="kv">
+                        <div class="kv-label">New York Time</div>
+                        <div class="kv-value mono" id="donna_time_ny">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">UTC Time</div>
+                        <div class="kv-value mono" id="donna_time_utc">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Day</div>
+                        <div class="kv-value" id="donna_day">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Session</div>
+                        <div class="kv-value" id="donna_session">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Event Phase</div>
+                        <div class="kv-value" id="event_phase">-</div>
+                    </div>
+
+                    <div class="kv">
+                        <div class="kv-label">Event Time NY</div>
+                        <div class="kv-value" id="event_time_ny">-</div>
+                    </div>
                 </div>
 
                 <div class="panel" style="margin-top:16px;">
@@ -1654,7 +1704,7 @@ body{
                         <div class="chat-output" id="chat_output">
                             <div class="chat-msg assistant">
                                 <span class="chat-role">Donna</span>
-                                Donna online. Ask for risk, news, event timing, alerts, or give a command.
+                                Donna online. Ask for risk, time, session, event timing, news, alerts, or give a command.
                             </div>
                         </div>
 
@@ -1663,10 +1713,11 @@ body{
                         <div class="btn-row">
                             <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
                             <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
-                            <button class="btn ghost" onclick="quickAsk('What matters right now?')">What Matters</button>
+                            <button class="btn ghost" onclick="quickAsk('What time is it and what session are we in?')">Time Check</button>
                         </div>
 
                         <div class="quick-actions">
+                            <button class="quick-chip" onclick="quickAsk('What matters right now?')">What Matters</button>
                             <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
                             <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
                             <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
@@ -1721,8 +1772,8 @@ body{
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A V3</div>
-        <div>Dashboard Primary // Telegram Secondary // News Engine 2.0 Live</div>
+        <div>D.O.N.N.A V4</div>
+        <div>Dashboard Primary // Internal Clock Active // News Engine 2.0</div>
     </div>
 </div>
 
@@ -1958,11 +2009,6 @@ function setText(id, value, fallback='-'){
     if (el) el.innerText = value || fallback;
 }
 
-function setHtml(id, value){
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = value;
-}
-
 async function refreshDashboard(){
     try{
         const res = await fetch('/dashboard-data');
@@ -1993,7 +2039,14 @@ async function refreshDashboard(){
         setText('minutes_to_event', formatTimeText(mins));
         setText('minutes_to_event_2', mins !== null && mins !== undefined ? String(mins) : '-');
         setText('next_event_hero_sub', formatTimeText(mins));
+
         setText('last_updated', data.last_updated || '-');
+        setText('donna_time_ny', data.donna_time_ny || '-');
+        setText('donna_time_utc', data.donna_time_utc || '-');
+        setText('donna_day', data.donna_day || '-');
+        setText('donna_session', data.donna_session || '-');
+        setText('event_phase', data.event_phase || '-');
+        setText('event_time_ny', data.event_time_ny || '-');
 
         setText('daily_focus', assistant.daily_focus || 'No focus set');
         setText('daily_focus_hero', assistant.daily_focus || 'No focus set');
@@ -2003,8 +2056,8 @@ async function refreshDashboard(){
 
         const hasWarnings = data.active_warnings && data.active_warnings.length;
         const heroSub = hasWarnings
-            ? 'Active warnings are live. Donna is monitoring macro timing, headline shock, and market catalyst pressure.'
-            : 'No major live warning pressure. Donna is monitoring events, signals, and operator state.';
+            ? 'Active warnings are live. Donna is monitoring macro timing, headline shock, market catalyst pressure, and session context.'
+            : 'No major live warning pressure. Donna is monitoring time, events, signals, and operator state.';
         setText('hero_sub', heroSub);
 
         renderWarnings(data.active_warnings || [], 'warnings');
@@ -2049,8 +2102,14 @@ async function refreshDashboard(){
 
         const macroTitle = data.next_event || 'No major event loaded';
         let macroNote = 'Donna is monitoring upcoming macro volatility windows.';
-        if (mins === 0){
-            macroNote = 'Macro event live or immediate. Volatility sensitivity elevated.';
+        if (data.event_phase === 'LIVE'){
+            macroNote = 'Macro event live. Volatility sensitivity elevated.';
+        } else if (data.event_phase === 'IMMINENT'){
+            macroNote = 'High-impact event is imminent. Reduce size and avoid random entries.';
+        } else if (data.event_phase === 'APPROACHING'){
+            macroNote = `${mins} minutes to next major event.`;
+        } else if (data.event_phase === 'POST_EVENT_COOLDOWN'){
+            macroNote = 'Recent event released. Cooldown volatility window is still active.';
         } else if (mins !== null && mins !== undefined){
             macroNote = `${mins} minutes to next major event.`;
         }
