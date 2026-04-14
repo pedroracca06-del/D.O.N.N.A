@@ -500,108 +500,256 @@ async def dashboard_data():
 async def dashboard():
     return """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>DONNA Dashboard</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D.O.N.N.A Command Center</title>
+
 <style>
-body {
-    background: #0b0f14;
-    color: white;
-    font-family: Arial, sans-serif;
-    padding: 20px;
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
 }
-.card {
-    background: #121923;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-radius: 12px;
+
+body{
+    font-family: Inter, Arial, sans-serif;
+    background: radial-gradient(circle at top right,#182030 0%,#0b0f14 45%,#05070a 100%);
+    color:#ffffff;
+    padding:24px;
 }
-h1 {
-    margin-bottom: 20px;
+
+.wrapper{
+    max-width:1300px;
+    margin:auto;
 }
-.label {
-    color: #8fa3bf;
-    font-size: 14px;
+
+.topbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:22px;
+    gap:20px;
+    flex-wrap:wrap;
 }
-.value {
-    font-size: 20px;
-    font-weight: bold;
+
+.brand h1{
+    font-size:34px;
+    letter-spacing:2px;
+    font-weight:800;
 }
-.small {
-    font-size: 14px;
-    margin-top: 6px;
-    color: #c7d2e0;
+
+.brand p{
+    color:#8ea0bd;
+    margin-top:4px;
+    font-size:14px;
+}
+
+.status-pill{
+    padding:10px 16px;
+    border-radius:999px;
+    background:rgba(0,255,140,.08);
+    border:1px solid rgba(0,255,140,.35);
+    color:#7fffb6;
+    font-size:14px;
+    font-weight:700;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:16px;
+    margin-bottom:18px;
+}
+
+.card{
+    background:rgba(18,25,35,.88);
+    border:1px solid rgba(255,255,255,.05);
+    border-radius:18px;
+    padding:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+
+.label{
+    font-size:13px;
+    color:#8ea0bd;
+    margin-bottom:10px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+}
+
+.value{
+    font-size:28px;
+    font-weight:800;
+}
+
+.low{color:#4dff9a;}
+.medium{color:#ffd24d;}
+.high{color:#ff5f6d;}
+
+.section{
+    margin-top:14px;
+}
+
+.big-card{
+    background:rgba(18,25,35,.92);
+    border:1px solid rgba(255,255,255,.05);
+    border-radius:18px;
+    padding:20px;
+    margin-top:16px;
+    box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+
+.feed-item{
+    padding:10px 0;
+    border-bottom:1px solid rgba(255,255,255,.05);
+    color:#d9e2ef;
+    font-size:15px;
+}
+
+.feed-item:last-child{
+    border-bottom:none;
+}
+
+.small{
+    color:#8ea0bd;
+    font-size:13px;
+    margin-top:6px;
+}
+
+.footer{
+    margin-top:20px;
+    color:#6f819d;
+    font-size:13px;
+}
+
+.glow{
+    box-shadow:0 0 0 1px rgba(80,160,255,.08),0 0 24px rgba(80,160,255,.08);
+}
+
+@media(max-width:700px){
+    body{padding:14px;}
+    .brand h1{font-size:26px;}
+    .value{font-size:24px;}
 }
 </style>
 </head>
+
 <body>
+<div class="wrapper">
 
-<h1>DONNA LIVE DASHBOARD</h1>
+    <div class="topbar">
+        <div class="brand">
+            <h1>D.O.N.N.A</h1>
+            <p>Dynamic Operational Neural Network Assistant</p>
+        </div>
+        <div class="status-pill" id="status">ONLINE</div>
+    </div>
 
-<div class="card">
-    <div class="label">System Status</div>
-    <div class="value" id="status">Loading...</div>
-</div>
+    <div class="grid">
 
-<div class="card">
-    <div class="label">Macro Risk</div>
-    <div class="value" id="macro_risk">-</div>
-</div>
+        <div class="card glow">
+            <div class="label">Macro Risk</div>
+            <div class="value" id="macro_risk">-</div>
+        </div>
 
-<div class="card">
-    <div class="label">Headline Risk</div>
-    <div class="value" id="headline_risk">-</div>
-</div>
+        <div class="card glow">
+            <div class="label">Headline Risk</div>
+            <div class="value" id="headline_risk">-</div>
+        </div>
 
-<div class="card">
-    <div class="label">Market News Risk</div>
-    <div class="value" id="market_news_risk">-</div>
-</div>
+        <div class="card glow">
+            <div class="label">Market Risk</div>
+            <div class="value" id="market_news_risk">-</div>
+        </div>
 
-<div class="card">
-    <div class="label">Next Event</div>
-    <div class="value" id="next_event">-</div>
-    <div class="small" id="minutes_to_event"></div>
-</div>
+        <div class="card glow">
+            <div class="label">Next Event</div>
+            <div class="value" id="next_event">-</div>
+            <div class="small" id="minutes_to_event"></div>
+        </div>
 
-<div class="card">
-    <div class="label">Warnings</div>
-    <div class="small" id="warnings">-</div>
-</div>
+    </div>
 
-<div class="card">
-    <div class="label">Last Headline</div>
-    <div class="small" id="last_headline">-</div>
-</div>
+    <div class="big-card">
+        <div class="label">Active Warnings</div>
+        <div id="warnings"></div>
+    </div>
 
-<div class="card">
-    <div class="label">Last Market Headline</div>
-    <div class="small" id="last_market_headline">-</div>
-</div>
+    <div class="big-card">
+        <div class="label">Latest Headlines</div>
+        <div class="feed-item">
+            <strong>News Feed:</strong>
+            <span id="last_headline">-</span>
+        </div>
+        <div class="feed-item">
+            <strong>Market Feed:</strong>
+            <span id="last_market_headline">-</span>
+        </div>
+    </div>
 
-<div class="card">
-    <div class="label">Last Updated</div>
-    <div class="small" id="last_updated">-</div>
+    <div class="footer">
+        Last Updated: <span id="last_updated">-</span>
+    </div>
+
 </div>
 
 <script>
-async function refreshDashboard() {
-    const res = await fetch('/dashboard-data');
-    const data = await res.json();
+function riskClass(v){
+    const x = String(v).toLowerCase();
+    if(x.includes("high")) return "high";
+    if(x.includes("medium")) return "medium";
+    return "low";
+}
 
-    document.getElementById('status').innerText = data.status;
-    document.getElementById('macro_risk').innerText = data.macro_risk;
-    document.getElementById('headline_risk').innerText = data.headline_risk;
-    document.getElementById('market_news_risk').innerText = data.market_news_risk;
-    document.getElementById('next_event').innerText = data.next_event || '-';
-    document.getElementById('minutes_to_event').innerText =
-        data.minutes_to_event !== null ? data.minutes_to_event + ' minutes remaining' : '';
-    document.getElementById('warnings').innerText =
-        data.active_warnings.length ? data.active_warnings.join(' | ') : 'None';
-    document.getElementById('last_headline').innerText = data.last_headline || '-';
-    document.getElementById('last_market_headline').innerText = data.last_market_headline || '-';
-    document.getElementById('last_updated').innerText = data.last_updated || '-';
+function applyRisk(id,val){
+    const el = document.getElementById(id);
+    el.className = "value " + riskClass(val);
+    el.innerText = String(val).toUpperCase();
+}
+
+async function refreshDashboard(){
+    try{
+        const res = await fetch('/dashboard-data');
+        const data = await res.json();
+
+        document.getElementById('status').innerText = data.status.toUpperCase();
+
+        applyRisk('macro_risk', data.macro_risk);
+        applyRisk('headline_risk', data.headline_risk);
+        applyRisk('market_news_risk', data.market_news_risk);
+
+        document.getElementById('next_event').innerText =
+            data.next_event ? data.next_event : "NONE";
+
+        document.getElementById('minutes_to_event').innerText =
+            data.minutes_to_event !== null
+            ? data.minutes_to_event + " minutes remaining"
+            : "";
+
+        const warnBox = document.getElementById('warnings');
+
+        if(data.active_warnings && data.active_warnings.length){
+            warnBox.innerHTML = data.active_warnings
+                .map(x => '<div class="feed-item">' + x + '</div>')
+                .join('');
+        } else {
+            warnBox.innerHTML = '<div class="feed-item">No active warnings</div>';
+        }
+
+        document.getElementById('last_headline').innerText =
+            data.last_headline || "No recent headline";
+
+        document.getElementById('last_market_headline').innerText =
+            data.last_market_headline || "No recent market headline";
+
+        document.getElementById('last_updated').innerText =
+            data.last_updated || "-";
+
+    } catch(err){
+        console.log(err);
+    }
 }
 
 refreshDashboard();
