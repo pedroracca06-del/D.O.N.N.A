@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import os
 import json
 import requests
 import xml.etree.ElementTree as ET
@@ -83,11 +82,11 @@ def get_market_session_label(dt: datetime | None = None) -> str:
     dt = dt or now_ny()
     minutes = dt.hour * 60 + dt.minute
 
-    # NY-based timing
+    # NY-based rough global session model
     # Asia: 19:00 - 03:00
     # London: 03:00 - 09:30
     # NY Cash: 09:30 - 16:00
-    # NY After Hours / Off Hours otherwise
+    # Off hours: everything else
 
     if minutes >= 19 * 60 or minutes < 3 * 60:
         return "ASIA"
@@ -116,7 +115,6 @@ def describe_event_phase(minutes_to_event: int | None) -> str:
         return "PASSED"
     return "SCHEDULED"
 
-
 # ==================================================
 # STATE
 # ==================================================
@@ -138,7 +136,6 @@ def load_state() -> dict:
         "last_market_severity": "",
         "last_market_guidance": "",
         "last_market_url": "",
-        # Donna internal clock fields
         "donna_time_utc": "",
         "donna_time_ny": "",
         "donna_day": "",
@@ -177,7 +174,6 @@ def save_state(state: dict) -> None:
 
     with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
-
 
 # ==================================================
 # CACHE
@@ -225,7 +221,6 @@ def cache_is_fresh(cache: dict) -> bool:
 
     return now_utc() - dt < timedelta(hours=CACHE_HOURS)
 
-
 # ==================================================
 # FILTER HELPERS
 # ==================================================
@@ -236,7 +231,6 @@ def contains_high_impact(title: str) -> bool:
 
 def normalize_title(title: str) -> str:
     return " ".join(str(title).lower().split())
-
 
 # ==================================================
 # FOREX FACTORY FETCH
@@ -313,7 +307,6 @@ def fetch_calendar_events() -> list[dict]:
             return cache.get("events", [])
         raise
 
-
 # ==================================================
 # EVENT ENGINE
 # ==================================================
@@ -350,6 +343,7 @@ def find_relevant_event(events: list[dict]):
     if not events:
         return None
 
+    # Prefer events within the nearby actionable window
     window_start = now - timedelta(minutes=30)
     window_end = now + timedelta(hours=24)
 
@@ -359,7 +353,10 @@ def find_relevant_event(events: list[dict]):
     ]
 
     if relevant:
-        return sorted(relevant, key=lambda x: abs((x["datetime"] - now).total_seconds()))[0]
+        return sorted(
+            relevant,
+            key=lambda x: abs((x["datetime"] - now).total_seconds())
+        )[0]
 
     future = [e for e in events if e["datetime"] >= now]
     return future[0] if future else None
@@ -404,7 +401,6 @@ def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int
 
     return "low", [], event_name, max(minutes, 0), event_time_label
 
-
 # ==================================================
 # MAIN CYCLE
 # ==================================================
@@ -443,47 +439,6 @@ def process_news_guard_cycle() -> None:
             event_phase,
             "|",
             current_time_label(),
-        )
-
-    except Exception as e:
-        print("Donna News Guard error:", str(e))
-
-
-# ==================================================
-# MAIN CYCLE
-# ==================================================
-def process_news_guard_cycle() -> None:
-    try:
-        raw_events = fetch_calendar_events()
-        priority_events = get_priority_events(raw_events)
-        next_event = find_relevant_event(priority_events)
-
-        macro_risk, warnings, event_name, mins = build_macro_state(next_event)
-
-        state = load_state()
-
-        existing = state.get("active_warnings", [])
-        keep = [
-            w for w in existing
-            if not str(w).startswith("MACRO:")
-        ]
-
-        macro_warns = [f"MACRO: {w}" for w in warnings]
-
-        state["macro_risk"] = macro_risk
-        state["active_warnings"] = keep + macro_warns
-        state["next_event"] = event_name
-        state["minutes_to_event"] = mins
-
-        save_state(state)
-
-        print(
-            "Donna News Guard:",
-            macro_risk,
-            "|",
-            event_name if event_name else "No major event",
-            "|",
-            mins
         )
 
     except Exception as e:
