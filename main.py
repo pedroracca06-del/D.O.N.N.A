@@ -594,6 +594,122 @@ Fusion Verdict: {fusion}
 Confidence Guidance: {confidence_note}
 """.strip()
 
+def build_market_driver_engine():
+    state = load_risk_state()
+
+    macro = str(state.get("macro_risk", "low")).lower()
+    headline = str(state.get("headline_risk", "low")).lower()
+    market = str(state.get("market_news_risk", "low")).lower()
+
+    next_event = str(state.get("next_event", ""))
+    event_phase = str(state.get("event_phase", ""))
+    session = str(state.get("donna_session", "OFF_HOURS"))
+
+    headline_text = str(state.get("last_headline", "")).lower()
+    market_text = str(state.get("last_market_headline", "")).lower()
+
+    dominant_driver = "Balanced Conditions"
+    secondary_driver = "No clear secondary force"
+    regime = "Neutral"
+    threat = "None"
+    confidence = "Low"
+    summary = "No strong market driver currently detected."
+
+    # ==========================================
+    # AI / TECH LEADERSHIP
+    # ==========================================
+    if any(x in market_text for x in [
+        "nvidia", "microsoft", "apple", "amazon",
+        "meta", "google", "tesla", "ai"
+    ]):
+        dominant_driver = "AI / Mega-Cap Leadership"
+        regime = "Risk-On Trend"
+        confidence = "High"
+        summary = "Large-cap leadership is supporting index strength."
+
+    # ==========================================
+    # MACRO EVENT PRESSURE
+    # ==========================================
+    if macro == "high":
+        dominant_driver = "Macro Event Risk"
+        regime = "High Volatility"
+        threat = next_event or "Upcoming Event"
+        confidence = "High"
+        summary = "Macro timing is dominating market behavior."
+
+    elif macro == "medium" and regime == "Neutral":
+        dominant_driver = "Macro Positioning"
+        regime = "Cautious Trend"
+        confidence = "Medium"
+        summary = "Markets are positioning around upcoming macro risk."
+
+    # ==========================================
+    # HEADLINE SHOCK
+    # ==========================================
+    if headline == "high":
+        dominant_driver = "Headline Shock"
+        regime = "Reactive Conditions"
+        confidence = "High"
+        summary = "Breaking headlines are driving price reaction."
+
+    # ==========================================
+    # MARKET NEWS / EARNINGS
+    # ==========================================
+    if market == "high" and dominant_driver == "Balanced Conditions":
+        dominant_driver = "Company / Earnings Catalyst"
+        regime = "Catalyst Driven"
+        confidence = "Medium"
+        summary = "Company-specific catalysts are influencing index direction."
+
+    # ==========================================
+    # EVENT PHASE LOGIC
+    # ==========================================
+    if event_phase == "LIVE":
+        threat = "Live Macro Release"
+        regime = "Volatility Expansion"
+
+    elif event_phase == "IMMINENT":
+        threat = next_event or "Event Imminent"
+
+    elif event_phase == "POST_EVENT_COOLDOWN":
+        secondary_driver = "Post-Event Repricing"
+
+    # ==========================================
+    # SESSION LOGIC
+    # ==========================================
+    if session == "ASIA" and confidence == "Low":
+        regime = "Thin Liquidity"
+
+    elif session == "LONDON" and confidence == "Low":
+        regime = "Expansion Window"
+
+    elif session == "NEW_YORK_CASH" and confidence == "Low":
+        regime = "Primary Volume Session"
+
+    # ==========================================
+    # SECONDARY DRIVER DETECTION
+    # ==========================================
+    if "yield" in headline_text or "rates" in headline_text:
+        secondary_driver = "Rates Sensitivity"
+
+    elif "oil" in headline_text:
+        secondary_driver = "Energy Pressure"
+
+    elif "war" in headline_text or "iran" in headline_text:
+        secondary_driver = "Geopolitical Risk"
+
+    elif "fed" in headline_text or "powell" in headline_text:
+        secondary_driver = "Federal Reserve Guidance"
+
+    return {
+        "dominant_driver": dominant_driver,
+        "secondary_driver": secondary_driver,
+        "market_regime": regime,
+        "market_threat": threat,
+        "market_confidence": confidence,
+        "market_summary": summary
+    }
+
 def summarize_system_context() -> str:
     risk = load_risk_state()
     alerts = load_alert_history()[:5]
@@ -807,6 +923,7 @@ async def dashboard_data():
     state = load_risk_state()
     alerts = load_alert_history()
     assistant = load_assistant_state()
+    driver = build_market_driver_engine()
 
     return {
         "status": "online",
@@ -834,6 +951,7 @@ async def dashboard_data():
         "event_time_ny": state.get("event_time_ny", ""),
         "alerts": alerts[:10],
         "assistant": assistant,
+        **driver
     }
 
 @app.get("/check-env")
