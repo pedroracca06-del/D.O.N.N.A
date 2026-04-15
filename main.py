@@ -1517,7 +1517,39 @@ body{
     <div class="section" id="section-news">
         <div class="panel" style="margin-bottom:16px;">
             <div class="section-title">Markets Overview</div>
+            <div class="panel" style="margin-bottom:16px;">
+    <div class="section-title">Market Chart</div>
 
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+        <div>
+            <div style="font-size:14px;color:var(--muted);font-weight:700;" id="chart_symbol_label">NQ / Nasdaq Tone</div>
+            <div style="font-size:42px;font-weight:900;line-height:1;" id="chart_price">23,885</div>
+            <div style="margin-top:8px;font-size:18px;font-weight:800;" id="chart_change">+246.41 (+1.04%)</div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="quick-chip" onclick="setChartRange('1D')">1D</button>
+            <button class="quick-chip" onclick="setChartRange('5D')">5D</button>
+            <button class="quick-chip" onclick="setChartRange('1M')">1M</button>
+            <button class="quick-chip" onclick="setChartRange('6M')">6M</button>
+            <button class="quick-chip" onclick="setChartRange('1Y')">1Y</button>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
+        <button class="quick-chip" onclick="setChartSymbol('SPX')">SPX</button>
+        <button class="quick-chip" onclick="setChartSymbol('NQ')">NQ</button>
+        <button class="quick-chip" onclick="setChartSymbol('ES')">ES</button>
+    </div>
+
+    <div style="margin-top:18px;border:1px solid rgba(255,255,255,.06);border-radius:18px;background:rgba(255,255,255,.03);padding:14px;">
+        <canvas id="marketChartCanvas" height="120"></canvas>
+    </div>
+
+    <div class="sub" id="chart_summary" style="margin-top:14px;">
+        Donna market chart is loading.
+    </div>
+        </div>
             <div class="grid-3">
                 <div class="mini-card">
                     <div class="mini-label">S&P / ES Tone</div>
@@ -1976,7 +2008,134 @@ function renderReminders(reminders){
         </div>
     `).join('');
 }
+let donnaChartSymbol = 'NQ';
+let donnaChartRange = '1D';
 
+function getMockChartData(symbol, range, data){
+    const dominant = String(data?.dominant_driver || '').toLowerCase();
+    const regime = String(data?.market_regime || '').toLowerCase();
+    const moodUp = dominant.includes('leadership') || regime.includes('trend') || regime.includes('constructive') || regime.includes('risk-on');
+
+    let points = [];
+
+    if (range === '1D'){
+        points = moodUp
+            ? [20, 45, 32, 40, 55, 52, 60, 58, 67, 70, 68, 74]
+            : [72, 68, 65, 62, 58, 55, 53, 50, 47, 45, 42, 40];
+    } else if (range === '5D'){
+        points = moodUp
+            ? [20, 24, 28, 32, 38, 41, 46, 50, 54, 58, 63, 68]
+            : [70, 67, 63, 60, 56, 52, 49, 45, 42, 39, 36, 34];
+    } else if (range === '1M'){
+        points = moodUp
+            ? [15, 18, 22, 24, 30, 36, 40, 48, 53, 58, 66, 74]
+            : [75, 73, 69, 64, 60, 55, 50, 46, 43, 40, 37, 35];
+    } else if (range === '6M'){
+        points = moodUp
+            ? [10, 16, 20, 25, 32, 38, 45, 51, 58, 64, 72, 80]
+            : [82, 78, 72, 68, 61, 56, 50, 46, 41, 38, 34, 31];
+    } else {
+        points = moodUp
+            ? [8, 12, 16, 24, 30, 38, 48, 56, 62, 70, 78, 86]
+            : [86, 82, 76, 69, 62, 56, 50, 45, 39, 35, 31, 28];
+    }
+
+    let label = symbol === 'SPX' ? 'S&P 500' : symbol === 'ES' ? 'ES Futures' : 'Nasdaq / NQ';
+    let price = symbol === 'SPX' ? '6,997.63' : symbol === 'ES' ? '6,999.75' : '23,885.49';
+    let change = symbol === 'SPX' ? '+30.25 (+0.43%)' : symbol === 'ES' ? '+31.50 (+0.45%)' : '+246.41 (+1.04%)';
+
+    if (!moodUp){
+        change = symbol === 'SPX' ? '-22.10 (-0.31%)' : symbol === 'ES' ? '-18.75 (-0.27%)' : '-102.15 (-0.43%)';
+    }
+
+    return { points, label, price, change };
+}
+
+function drawDonnaChart(series){
+    const canvas = document.getElementById('marketChartCanvas');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+    const height = canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
+
+    const w = canvas.offsetWidth;
+    const h = canvas.offsetHeight;
+    const pad = 10;
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+
+    for (let i = 0; i < 5; i++){
+        const y = pad + (i * ((h - pad * 2) / 4));
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(w - pad, y);
+        ctx.stroke();
+    }
+
+    const min = Math.min(...series);
+    const max = Math.max(...series);
+    const range = Math.max(max - min, 1);
+
+    ctx.beginPath();
+    series.forEach((val, i) => {
+        const x = pad + (i * ((w - pad * 2) / (series.length - 1)));
+        const y = h - pad - (((val - min) / range) * (h - pad * 2));
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#9ec2ff';
+    ctx.stroke();
+
+    const last = series[series.length - 1];
+    const lastX = pad + ((series.length - 1) * ((w - pad * 2) / (series.length - 1)));
+    const lastY = h - pad - (((last - min) / range) * (h - pad * 2));
+
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#9ec2ff';
+    ctx.fill();
+}
+
+function updateMarketChartModule(data){
+    const chart = getMockChartData(donnaChartSymbol, donnaChartRange, data);
+
+    setText('chart_symbol_label', `${donnaChartSymbol} / ${chart.label}`);
+    setText('chart_price', chart.price);
+    setText('chart_change', chart.change);
+    setText(
+        'chart_summary',
+        `${chart.label} on ${donnaChartRange}: ${data.market_summary || 'Donna is reading current market conditions.'}`
+    );
+
+    const changeEl = document.getElementById('chart_change');
+    if (changeEl){
+        const down = chart.change.trim().startsWith('-');
+        changeEl.style.color = down ? 'var(--high)' : 'var(--low)';
+    }
+
+    drawDonnaChart(chart.points);
+}
+
+function setChartSymbol(symbol){
+    donnaChartSymbol = symbol;
+    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
+}
+
+function setChartRange(range){
+    donnaChartRange = range;
+    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
+}
+
+window.addEventListener('resize', () => {
+    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
+});
 async function refreshDashboard(){
     try{
         const res = await fetch('/dashboard-data');
