@@ -2155,10 +2155,277 @@ function setChartRange(range){
 window.addEventListener('resize', () => {
     if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
 });
+let donnaChartSymbol = 'NQ';
+let donnaChartRange = '1D';
+window.__lastDashboardData = null;
+
+const DONNA_MARKET_MAP = {
+    SPX: {
+        label: 'S&P 500',
+        basePrice: 6997.63,
+        upChange: { points: 30.25, pct: 0.43 },
+        downChange: { points: -22.10, pct: -0.31 }
+    },
+    NQ: {
+        label: 'Nasdaq / NQ',
+        basePrice: 23885.49,
+        upChange: { points: 246.41, pct: 1.04 },
+        downChange: { points: -102.15, pct: -0.43 }
+    },
+    ES: {
+        label: 'ES Futures',
+        basePrice: 6999.75,
+        upChange: { points: 31.50, pct: 0.45 },
+        downChange: { points: -18.75, pct: -0.27 }
+    },
+    DJIA: {
+        label: 'Dow Jones',
+        basePrice: 48352.50,
+        upChange: { points: 118.40, pct: 0.25 },
+        downChange: { points: -183.49, pct: -0.38 }
+    },
+    VIX: {
+        label: 'VIX',
+        basePrice: 17.84,
+        upChange: { points: 0.92, pct: 5.44 },
+        downChange: { points: -0.68, pct: -3.67 }
+    },
+    DXY: {
+        label: 'US Dollar Index',
+        basePrice: 104.32,
+        upChange: { points: 0.41, pct: 0.39 },
+        downChange: { points: -0.36, pct: -0.34 }
+    },
+    TNX: {
+        label: '10Y Treasury Yield',
+        basePrice: 4.42,
+        upChange: { points: 0.06, pct: 1.38 },
+        downChange: { points: -0.05, pct: -1.12 }
+    },
+    RTY: {
+        label: 'Russell 2000',
+        basePrice: 2241.30,
+        upChange: { points: 19.85, pct: 0.89 },
+        downChange: { points: -14.20, pct: -0.63 }
+    },
+    GOLD: {
+        label: 'Gold',
+        basePrice: 2388.20,
+        upChange: { points: 18.90, pct: 0.80 },
+        downChange: { points: -14.60, pct: -0.61 }
+    },
+    OIL: {
+        label: 'Crude Oil',
+        basePrice: 81.46,
+        upChange: { points: 1.84, pct: 2.31 },
+        downChange: { points: -1.22, pct: -1.48 }
+    },
+    BTC: {
+        label: 'Bitcoin',
+        basePrice: 84250.00,
+        upChange: { points: 2150.00, pct: 2.62 },
+        downChange: { points: -1680.00, pct: -1.96 }
+    }
+};
+
+function chartMoodIsUp(data){
+    const dominant = String(data?.dominant_driver || '').toLowerCase();
+    const regime = String(data?.market_regime || '').toLowerCase();
+    const threat = String(data?.market_threat || '').toLowerCase();
+    const macro = String(data?.macro_risk || '').toLowerCase();
+
+    if (macro === 'high' || threat.includes('live macro')) return false;
+    if (dominant.includes('leadership')) return true;
+    if (regime.includes('risk-on') || regime.includes('trend') || regime.includes('constructive')) return true;
+    return true;
+}
+
+function buildSeries(range, isUp, symbol){
+    const presetsUp = {
+        '1D': [20, 45, 32, 40, 55, 52, 60, 58, 67, 70, 68, 74],
+        '5D': [20, 24, 28, 32, 38, 41, 46, 50, 54, 58, 63, 68],
+        '1M': [15, 18, 22, 24, 30, 36, 40, 48, 53, 58, 66, 74],
+        '6M': [10, 16, 20, 25, 32, 38, 45, 51, 58, 64, 72, 80],
+        '1Y': [8, 12, 16, 24, 30, 38, 48, 56, 62, 70, 78, 86]
+    };
+
+    const presetsDown = {
+        '1D': [72, 68, 65, 62, 58, 55, 53, 50, 47, 45, 42, 40],
+        '5D': [70, 67, 63, 60, 56, 52, 49, 45, 42, 39, 36, 34],
+        '1M': [75, 73, 69, 64, 60, 55, 50, 46, 43, 40, 37, 35],
+        '6M': [82, 78, 72, 68, 61, 56, 50, 46, 41, 38, 34, 31],
+        '1Y': [86, 82, 76, 69, 62, 56, 50, 45, 39, 35, 31, 28]
+    };
+
+    let series = (isUp ? presetsUp[range] : presetsDown[range]).slice();
+
+    if (symbol === 'VIX') series = isUp ? presetsDown[range].slice() : presetsUp[range].slice();
+    if (symbol === 'TNX' && !isUp) series = presetsDown[range].slice();
+
+    return series;
+}
+
+function formatNumber(value){
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+}
+
+function getChartPayload(symbol, range, data){
+    const cfg = DONNA_MARKET_MAP[symbol] || DONNA_MARKET_MAP.NQ;
+    const isUp = chartMoodIsUp(data);
+    const move = isUp ? cfg.upChange : cfg.downChange;
+    const series = buildSeries(range, isUp, symbol);
+
+    return {
+        label: cfg.label,
+        price: formatNumber(cfg.basePrice),
+        change: `${move.points >= 0 ? '+' : ''}${move.points.toFixed(2)} (${move.pct >= 0 ? '+' : ''}${move.pct.toFixed(2)}%)`,
+        isUp,
+        series
+    };
+}
+
+function drawDonnaChart(series, isUp){
+    const canvas = document.getElementById('marketChartCanvas');
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+
+    canvas.width = Math.max(300, Math.floor(rect.width * ratio));
+    canvas.height = Math.max(160, Math.floor(rect.height * ratio));
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    const w = rect.width;
+    const h = rect.height;
+    const pad = 14;
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+
+    for (let i = 0; i < 5; i++){
+        const y = pad + (i * ((h - pad * 2) / 4));
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(w - pad, y);
+        ctx.stroke();
+    }
+
+    const min = Math.min(...series);
+    const max = Math.max(...series);
+    const range = Math.max(max - min, 1);
+
+    const points = series.map((val, i) => {
+        const x = pad + (i * ((w - pad * 2) / (series.length - 1)));
+        const y = h - pad - (((val - min) / range) * (h - pad * 2));
+        return { x, y };
+    });
+
+    const grad = ctx.createLinearGradient(0, pad, 0, h - pad);
+    if (isUp){
+        grad.addColorStop(0, 'rgba(77,255,171,0.28)');
+        grad.addColorStop(1, 'rgba(77,255,171,0.02)');
+    } else {
+        grad.addColorStop(0, 'rgba(255,99,125,0.28)');
+        grad.addColorStop(1, 'rgba(255,99,125,0.02)');
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, h - pad);
+    points.forEach((p, i) => {
+        if (i === 0) ctx.lineTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+    });
+    ctx.lineTo(points[points.length - 1].x, h - pad);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.beginPath();
+    points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+    });
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = isUp ? '#4dffab' : '#ff637d';
+    ctx.stroke();
+
+    const last = points[points.length - 1];
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = isUp ? '#4dffab' : '#ff637d';
+    ctx.fill();
+}
+
+function refreshChartButtons(){
+    document.querySelectorAll('#marketSymbolBar .quick-chip').forEach(btn => {
+        const txt = btn.textContent.trim().toUpperCase();
+        const isActive =
+            (txt === 'GOLD' && donnaChartSymbol === 'GOLD') ||
+            (txt === 'OIL' && donnaChartSymbol === 'OIL') ||
+            (txt === 'BTC' && donnaChartSymbol === 'BTC') ||
+            txt === donnaChartSymbol;
+
+        btn.style.background = isActive ? 'linear-gradient(135deg,var(--blue),var(--blue2))' : 'rgba(255,255,255,.04)';
+        btn.style.color = '#fff';
+    });
+}
+
+function updateMarketChartModule(data){
+    const payload = getChartPayload(donnaChartSymbol, donnaChartRange, data);
+
+    setText('chart_symbol_label', `${donnaChartSymbol} / ${payload.label}`);
+    setText('chart_price', payload.price);
+    setText('chart_change', payload.change);
+
+    const changeEl = document.getElementById('chart_change');
+    if (changeEl){
+        changeEl.style.color = payload.isUp ? 'var(--low)' : 'var(--high)';
+    }
+
+    setText(
+        'chart_momentum',
+        payload.isUp ? 'Constructive' : 'Defensive'
+    );
+
+    const riskTone =
+        String(data?.macro_risk || '').toLowerCase() === 'high' ? 'High Alert' :
+        String(data?.headline_risk || '').toLowerCase() === 'high' ? 'Headline Sensitive' :
+        String(data?.market_news_risk || '').toLowerCase() === 'high' ? 'Catalyst Active' :
+        'Balanced';
+
+    setText('chart_risk_tone', riskTone);
+    setText('chart_driver', data?.dominant_driver || 'Balanced Conditions');
+    setText(
+        'chart_summary',
+        `${payload.label} on ${donnaChartRange}: ${data?.market_summary || 'Donna is analyzing live market conditions.'}`
+    );
+
+    drawDonnaChart(payload.series, payload.isUp);
+    refreshChartButtons();
+}
+
+function setChartSymbol(symbol){
+    donnaChartSymbol = symbol;
+    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
+}
+
+function setChartRange(range){
+    donnaChartRange = range;
+    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
+}
+
+window.addEventListener('resize', () => {
+    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
+});
 async function refreshDashboard(){
     try{
         const res = await fetch('/dashboard-data');
         const data = await res.json();
+        window.__lastDashboardData = data;
 
         const status = String(data.status || 'online').toUpperCase();
         const assistant = data.assistant || {};
@@ -2289,7 +2556,7 @@ async function refreshDashboard(){
             marketLink.style.display = 'none';
             marketLink.href = '#';
         }
-
+        updateMarketChartModule(data);
         buildTicker(data);
 
     }catch(err){
