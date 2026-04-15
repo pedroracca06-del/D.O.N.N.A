@@ -1130,9 +1130,6 @@ async def assistant_chat(request: Request):
             "alerts": load_alert_history()[:10],
         }
 
-# ==================================================
-# DASHBOARD
-# ==================================================
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return """
@@ -1141,7 +1138,7 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A Recovery</title>
+<title>D.O.N.N.A Command Center</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
@@ -1355,7 +1352,7 @@ body{
     <div class="topbar">
         <div class="brand">
             <h1>D.O.N.N.A</h1>
-            <p>Dynamic Operational Neural Network Assistant // Recovery Build</p>
+            <p>Dynamic Operational Neural Network Assistant // Command Center</p>
         </div>
 
         <div class="top-right">
@@ -1393,7 +1390,9 @@ body{
             <div class="hero-sub" id="hero_sub">
                 Donna is running as the command center for trading intelligence, event risk, headline pressure, and operator support.
             </div>
-        </div>        <div class="panel hero-side">
+        </div>
+
+        <div class="panel hero-side">
             <div>
                 <div class="hero-title">Daily Focus</div>
                 <div class="hero-focus" id="daily_focus_hero">Loading...</div>
@@ -1471,38 +1470,15 @@ body{
                     </div>
                 </div>
 
-            <div class="panel" style="margin-top:16px;">
-                <div class="section-title">Market Driver Engine</div>
-
-                <div class="kv">
-                    <div class="kv-label">Dominant Driver</div>
-                    <div class="kv-value" id="dominant_driver">-</div>
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">Market Driver Engine</div>
+                    <div class="kv"><div class="kv-label">Dominant Driver</div><div class="kv-value" id="dominant_driver">-</div></div>
+                    <div class="kv"><div class="kv-label">Secondary Driver</div><div class="kv-value" id="secondary_driver">-</div></div>
+                    <div class="kv"><div class="kv-label">Regime</div><div class="kv-value" id="market_regime">-</div></div>
+                    <div class="kv"><div class="kv-label">Threat</div><div class="kv-value" id="market_threat">-</div></div>
+                    <div class="kv"><div class="kv-label">Confidence</div><div class="kv-value" id="market_confidence">-</div></div>
+                    <div class="sub" id="market_summary" style="margin-top:14px;">No driver summary available.</div>
                 </div>
-
-                <div class="kv">
-                    <div class="kv-label">Secondary Driver</div>
-                    <div class="kv-value" id="secondary_driver">-</div>
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Regime</div>
-                    <div class="kv-value" id="market_regime">-</div>
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Threat</div>
-                    <div class="kv-value" id="market_threat">-</div>
-                </div>
-
-                <div class="kv">
-                    <div class="kv-label">Confidence</div>
-                    <div class="kv-value" id="market_confidence">-</div>
-                </div>
-
-                <div class="sub" id="market_summary" style="margin-top:14px;">
-                    No driver summary available.
-                </div>
-            </div>
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Risk Radar</div>
@@ -1539,52 +1515,122 @@ body{
     </div>
 
     <div class="section" id="section-news">
-        <div class="grid-3">
-            <div class="panel news-feature console-card">
-                <div class="breaking-tag"><span class="breaking-dot"></span> Breaking</div>
-                <div class="section-title">Top Story</div>
-                <div class="console-head" id="headline_title">No major headline detected</div>
-                <div class="console-note" id="headline_note">Headline guidance unavailable.</div>
-                <div class="sub" id="headline_source">Source: -</div>
-            </div>
+        <div class="panel" style="margin-bottom:16px;">
+            <div class="section-title">Markets Overview</div>
 
-            <div class="panel console-card">
-                <div class="section-title">Macro Countdown</div>
-                <div class="console-head" id="news_macro_title">No major event loaded</div>
-                <div class="console-note" id="news_macro_note">Donna is monitoring upcoming macro volatility windows.</div>
-                <div class="kv"><div class="kv-label">Phase</div><div class="kv-value" id="event_phase_news">-</div></div>
-                <div class="kv"><div class="kv-label">Event Time</div><div class="kv-value" id="event_time_news">-</div></div>
-                <div class="kv"><div class="kv-label">Session</div><div class="kv-value" id="session_news">-</div></div>
-            </div>
+            <div class="grid-3">
+                <div class="mini-card">
+                    <div class="mini-label">S&P / ES Tone</div>
+                    <div class="mini-value" id="market_card_spx">Loading...</div>
+                    <div class="sub" id="market_card_spx_sub">Broad market pulse</div>
+                </div>
 
-            <div class="panel console-card">
-                <div class="section-title">Market Catalyst</div>
-                <div class="console-head" id="market_title">No major market catalyst detected</div>
-                <div class="console-note" id="market_note">Market guidance unavailable.</div>
-                <div class="kv"><div class="kv-label">Severity</div><div class="kv-value" id="market_severity_news">-</div></div>
-                <div class="kv"><div class="kv-label">Symbol</div><div class="kv-value" id="market_symbol_news">-</div></div>
-                <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Open source</a>
+                <div class="mini-card">
+                    <div class="mini-label">Nasdaq / NQ Tone</div>
+                    <div class="mini-value" id="market_card_nq">Loading...</div>
+                    <div class="sub" id="market_card_nq_sub">Growth and tech pressure</div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-label">Donna Market Mood</div>
+                    <div class="mini-value" id="market_mood">Loading...</div>
+                    <div class="sub" id="market_mood_sub">Live intelligence read</div>
+                </div>
             </div>
         </div>
 
-        <div class="grid-2" style="margin-top:16px;">
+        <div class="grid-2">
             <div>
-                <div class="panel">
+                <div class="panel news-feature" style="min-height:360px;">
+                    <div class="breaking-tag">
+                        <span class="breaking-dot"></span>
+                        Top Story
+                    </div>
+
+                    <div class="console-head" id="headline_title" style="font-size:30px; line-height:1.08;">
+                        No major headline detected
+                    </div>
+
+                    <div class="console-note" id="headline_note" style="font-size:15px; margin-top:14px;">
+                        Headline guidance unavailable.
+                    </div>
+
+                    <div class="sub" id="headline_source" style="margin-top:14px;">
+                        Source: -
+                    </div>
+
+                    <div class="btn-row" style="margin-top:16px;">
+                        <button class="quick-chip" type="button">Top News</button>
+                        <button class="quick-chip" type="button">Macro</button>
+                        <button class="quick-chip" type="button">Fed</button>
+                        <button class="quick-chip" type="button">Geopolitics</button>
+                        <button class="quick-chip" type="button">Earnings</button>
+                        <button class="quick-chip" type="button">Drivers</button>
+                    </div>
+                </div>
+
+                <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Donna Briefing</div>
-                    <div id="warning_pressure_news"></div>
-                    <div class="feed-item"><span class="feed-label">Latest Headline:</span> <span id="last_headline">No recent headline</span></div>
-                    <div class="feed-item"><span class="feed-label">Latest Market Story:</span> <span id="last_market_headline">No recent market headline</span></div>
+
+                    <div class="feed-item"><span class="feed-label">Dominant Driver:</span> <span id="dominant_driver_news">-</span></div>
+                    <div class="feed-item"><span class="feed-label">Secondary Driver:</span> <span id="secondary_driver_news">-</span></div>
+                    <div class="feed-item"><span class="feed-label">Regime:</span> <span id="market_regime_news">-</span></div>
+                    <div class="feed-item"><span class="feed-label">Threat:</span> <span id="market_threat_news">-</span></div>
+                    <div class="feed-item"><span class="feed-label">Confidence:</span> <span id="market_confidence_news">-</span></div>
+
+                    <div class="sub" id="market_summary_news" style="margin-top:14px;">
+                        No driver summary available.
+                    </div>
                 </div>
             </div>
 
             <div>
                 <div class="panel">
-                    <div class="section-title">Live Risk Radar</div>
-                    <div class="kv"><div class="kv-label">Macro Risk</div><div class="kv-value" id="macro_news">-</div></div>
+                    <div class="section-title">Macro Countdown</div>
+
+                    <div class="console-head" id="news_macro_title">
+                        No major event loaded
+                    </div>
+
+                    <div class="console-note" id="news_macro_note">
+                        Donna is monitoring upcoming macro volatility windows.
+                    </div>
+
+                    <div class="kv"><div class="kv-label">Next Event</div><div class="kv-value" id="news_next_event">-</div></div>
+                    <div class="kv"><div class="kv-label">Minutes</div><div class="kv-value" id="news_minutes_to_event">-</div></div>
+                    <div class="kv"><div class="kv-label">Phase</div><div class="kv-value" id="event_phase_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Session</div><div class="kv-value" id="session_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Event Time</div><div class="kv-value" id="event_time_news">-</div></div>
+                </div>
+
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">Market Catalyst</div>
+
+                    <div class="console-head" id="market_title" style="font-size:24px;">
+                        No major market catalyst detected
+                    </div>
+
+                    <div class="console-note" id="market_note">
+                        Market guidance unavailable.
+                    </div>
+
+                    <div class="kv"><div class="kv-label">Severity</div><div class="kv-value" id="market_severity_news">-</div></div>
+                    <div class="kv"><div class="kv-label">Symbol</div><div class="kv-value" id="market_symbol_news">-</div></div>
                     <div class="kv"><div class="kv-label">Headline Risk</div><div class="kv-value" id="headline_news">-</div></div>
                     <div class="kv"><div class="kv-label">Market Risk</div><div class="kv-value" id="market_news">-</div></div>
-                    <div class="kv"><div class="kv-label">Headline Severity</div><div class="kv-value" id="headline_severity_news">-</div></div>
-                    <div class="kv"><div class="kv-label">Market Severity</div><div class="kv-value" id="market_severity_news_2">-</div></div>
+
+                    <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">
+                        Open source
+                    </a>
+                </div>
+
+                <div class="panel" style="margin-top:16px;">
+                    <div class="section-title">Live News Tape</div>
+
+                    <div class="feed-item"><span class="feed-label">Latest Headline:</span> <span id="last_headline">No recent headline</span></div>
+                    <div class="feed-item"><span class="feed-label">Latest Market Story:</span> <span id="last_market_headline">No recent market headline</span></div>
+
+                    <div style="margin-top:14px;" id="warning_pressure_news"></div>
                 </div>
             </div>
         </div>
@@ -1619,6 +1665,7 @@ body{
                             <button class="quick-chip" onclick="quickAsk('Are we near a red-folder event?')">Red Folder Check</button>
                             <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
                             <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
+                            <button class="quick-chip" onclick="quickAsk('What is moving the market right now?')">Market Driver</button>
                             <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
                             <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
                             <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
@@ -1669,8 +1716,8 @@ body{
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A Recovery</div>
-        <div>Dashboard primary / news terminal / assistant layer active</div>
+        <div>D.O.N.N.A Command Center</div>
+        <div>Dashboard / News / Trading / Assistant</div>
     </div>
 </div>
 
@@ -1989,7 +2036,6 @@ async function refreshDashboard(){
 
         setText('headline_severity_dash', data.headline_severity || '-');
         setText('market_severity_dash', data.last_market_severity || '-');
-
         setText('dominant_driver', data.dominant_driver || '-');
         setText('secondary_driver', data.secondary_driver || '-');
         setText('market_regime', data.market_regime || '-');
@@ -2005,7 +2051,6 @@ async function refreshDashboard(){
         setText('market_title', data.last_market_headline || 'No major market catalyst detected');
         setText('market_note', data.last_market_guidance || 'Market guidance unavailable.');
         setText('market_severity_news', data.last_market_severity || '-');
-        setText('market_severity_news_2', data.last_market_severity || '-');
         setText('market_symbol_news', data.last_market_symbol || '-');
 
         setText('last_headline', data.last_headline || 'No recent headline');
@@ -2014,7 +2059,6 @@ async function refreshDashboard(){
         setText('macro_news', String(data.macro_risk || '-').toUpperCase());
         setText('headline_news', String(data.headline_risk || '-').toUpperCase());
         setText('market_news', String(data.market_news_risk || '-').toUpperCase());
-        setText('headline_severity_news', data.headline_severity || '-');
 
         const macroTitle = data.next_event || 'No major event loaded';
         let macroNote = 'Donna is monitoring upcoming macro volatility windows.';
@@ -2029,11 +2073,35 @@ async function refreshDashboard(){
         } else if (mins !== null && mins !== undefined){
             macroNote = `${mins} minutes to next major event.`;
         }
+
         setText('news_macro_title', macroTitle);
         setText('news_macro_note', macroNote);
+        setText('news_next_event', data.next_event || '-');
+        setText('news_minutes_to_event', data.minutes_to_event !== null && data.minutes_to_event !== undefined ? String(data.minutes_to_event) : '-');
         setText('event_phase_news', data.event_phase || '-');
         setText('event_time_news', data.event_time_ny || '-');
         setText('session_news', data.donna_session || '-');
+
+        setText('dominant_driver_news', data.dominant_driver || '-');
+        setText('secondary_driver_news', data.secondary_driver || '-');
+        setText('market_regime_news', data.market_regime || '-');
+        setText('market_threat_news', data.market_threat || '-');
+        setText('market_confidence_news', data.market_confidence || '-');
+        setText('market_summary_news', data.market_summary || 'No driver summary available.');
+
+        setText('market_card_spx', data.market_regime || 'Neutral');
+        setText('market_card_spx_sub', data.market_summary || 'Broad market pulse');
+        setText('market_card_nq', data.dominant_driver || 'Balanced Conditions');
+        setText('market_card_nq_sub', data.secondary_driver || 'Growth and tech pressure');
+
+        const mood =
+            String(data.macro_risk || '').toLowerCase() === 'high' ? 'High Alert' :
+            String(data.headline_risk || '').toLowerCase() === 'high' ? 'Headline Sensitive' :
+            String(data.market_news_risk || '').toLowerCase() === 'high' ? 'Catalyst Active' :
+            'Constructive';
+
+        setText('market_mood', mood);
+        setText('market_mood_sub', data.market_threat || 'Live intelligence read');
 
         const marketLink = document.getElementById('market_link');
         if (data.last_market_url){
