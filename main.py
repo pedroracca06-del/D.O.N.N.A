@@ -1413,9 +1413,7 @@ body{
             <div class="hero-sub" id="hero_sub">
                 Donna is running as the command center for trading intelligence, event risk, headline pressure, and operator support.
             </div>
-        </div>
-
-        <div class="panel hero-side">
+        </div>        <div class="panel hero-side">
             <div>
                 <div class="hero-title">Daily Focus</div>
                 <div class="hero-focus" id="daily_focus_hero">Loading...</div>
@@ -1492,6 +1490,39 @@ body{
                         <div class="feed-item">No alerts yet</div>
                     </div>
                 </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div class="section-title">Market Driver Engine</div>
+
+                <div class="kv">
+                    <div class="kv-label">Dominant Driver</div>
+                    <div class="kv-value" id="dominant_driver">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Secondary Driver</div>
+                    <div class="kv-value" id="secondary_driver">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Regime</div>
+                    <div class="kv-value" id="market_regime">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Threat</div>
+                    <div class="kv-value" id="market_threat">-</div>
+                </div>
+
+                <div class="kv">
+                    <div class="kv-label">Confidence</div>
+                    <div class="kv-value" id="market_confidence">-</div>
+                </div>
+
+                <div class="sub" id="market_summary" style="margin-top:14px;">
+                    No driver summary available.
+                </div>
+            </div>
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Risk Radar</div>
@@ -1978,6 +2009,13 @@ async function refreshDashboard(){
 
         setText('headline_severity_dash', data.headline_severity || '-');
         setText('market_severity_dash', data.last_market_severity || '-');
+
+        setText('dominant_driver', data.dominant_driver || '-');
+        setText('secondary_driver', data.secondary_driver || '-');
+        setText('market_regime', data.market_regime || '-');
+        setText('market_threat', data.market_threat || '-');
+        setText('market_confidence', data.market_confidence || '-');
+        setText('market_summary', data.market_summary || 'No driver summary available.');
         setText('last_updated', data.last_updated || '-');
 
         setText('headline_title', data.last_headline || 'No major headline detected');
@@ -2046,7 +2084,6 @@ setInterval(refreshDashboard, 15000);
 </body>
 </html>
 """
-
 # ==================================================
 # WEBHOOK
 # ==================================================
