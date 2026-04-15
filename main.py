@@ -482,36 +482,315 @@ function render(data){
   document.getElementById('threat').textContent = data.market_threat;
   document.getElementById('confidence').textContent = data.market_confidence;
   document.getElementById('driverSummary').textContent = data.market_summary;
-  document.getElementById('warnings').innerHTML = data.active_warnings.map(x => `<span class="badge">${x}</span>`).join('');
+  document.getElementById('warnings').innerHTML = data.acti<script>
+let state = null;
 
-  document.getElementById('chartLabel').textContent = data.chart.label;
-  document.getElementById('chartPrice').textContent = data.chart.price;
-  document.getElementById('chartChange').textContent = data.chart.change;
-  document.getElementById('tradeRegime').textContent = data.market_regime;
-  document.getElementById('tradeDriver').textContent = data.dominant_driver;
-  document.getElementById('tradeThreat').textContent = data.market_threat;
-  document.getElementById('tradeEvent').textContent = data.next_event;
-  document.getElementById('tradeConfidence').textContent = data.market_confidence;
+const symbolData = {
+  NQ: {
+    label: "NASDAQ / NQ",
+    price: "23,885.49",
+    change: "+246.41 (+1.04%)",
+    momentum: "Constructive",
+    riskTone: "Balanced",
+    donnaRead: "AI Leadership",
+    points: [62,68,64,74,79,76,84,88,86,93,97,102,98,106,111,108,114,120,117,125,132]
+  },
+  ES: {
+    label: "S&P 500 / ES",
+    price: "7,022.95",
+    change: "+55.57 (+0.80%)",
+    momentum: "Stable",
+    riskTone: "Balanced",
+    donnaRead: "Broad Index Strength",
+    points: [70,71,72,73,72,74,75,76,78,77,79,80,81,82,83,82,84,85,86,87,88]
+  },
+  SPX: {
+    label: "S&P 500 / SPX",
+    price: "7,024.09",
+    change: "+56.71 (+0.81%)",
+    momentum: "Constructive",
+    riskTone: "Moderate",
+    donnaRead: "Index Bid",
+    points: [66,67,68,70,72,71,73,75,76,78,77,79,81,83,84,86,85,87,88,89,91]
+  },
+  BTC: {
+    label: "Bitcoin / BTC",
+    price: "84,210.22",
+    change: "+1,124.83 (+1.35%)",
+    momentum: "Volatile",
+    riskTone: "Risk-On",
+    donnaRead: "Crypto Strength",
+    points: [40,52,48,61,55,67,63,74,69,81,77,86,82,90,87,94,91,99,96,104,101]
+  },
+  NVDA: {
+    label: "NVIDIA / NVDA",
+    price: "942.18",
+    change: "+18.21 (+1.97%)",
+    momentum: "Strong",
+    riskTone: "Aggressive",
+    donnaRead: "Mega-Cap Leadership",
+    points: [45,47,49,51,54,57,60,62,66,70,74,78,83,87,91,96,101,105,109,114,118]
+  },
+  TSLA: {
+    label: "Tesla / TSLA",
+    price: "171.44",
+    change: "-2.63 (-1.51%)",
+    momentum: "Weak",
+    riskTone: "Unstable",
+    donnaRead: "Relative Weakness",
+    points: [118,116,114,112,110,108,106,103,101,99,97,95,94,92,91,89,87,85,84,82,80]
+  }
+};
+
+const rangeMultipliers = {
+  "1D": 1,
+  "5D": 1.08,
+  "1M": 1.18,
+  "6M": 1.35,
+  "1Y": 1.55
+};
+
+let currentSymbol = "NQ";
+let currentRange = "1D";
+
+function setActiveTab(name){
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tabs").forEach(t => t.classList.remove("active"));
+  const tab = document.getElementById("tab-" + name);
+  if (tab) tab.classList.add("active");
+
+  if (name === "trading") {
+    setTimeout(() => drawCurrentChart(), 80);
+  }
+}
+
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+});
+
+function riskClass(v){
+  v = String(v || "").toLowerCase();
+  if (v === "high") return "high";
+  if (v === "medium") return "medium";
+  return "low";
+}
+
+function scaledPoints(basePoints, range) {
+  const mult = rangeMultipliers[range] || 1;
+  const first = basePoints[0];
+  return basePoints.map((p, i) => {
+    const drift = (p - first) * mult;
+    const wave = Math.sin(i / 2) * (range === "1D" ? 0 : range === "5D" ? 1.5 : range === "1M" ? 3 : range === "6M" ? 5 : 7);
+    return Math.round((first + drift + wave) * 100) / 100;
+  });
+}
+
+function drawChart(points){
+  const canvas = document.getElementById("tradeChart");
+  if (!canvas) return;
+
+  const parent = canvas.parentElement;
+  if (!parent) return;
+
+  const rect = parent.getBoundingClientRect();
+  const w = Math.max(300, Math.floor(rect.width - 24));
+  const h = Math.max(240, Math.floor(rect.height - 24));
+  const ratio = window.devicePixelRatio || 1;
+
+  canvas.width = w * ratio;
+  canvas.height = h * ratio;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(ratio, ratio);
+  ctx.clearRect(0, 0, w, h);
+
+  // grid
+  ctx.strokeStyle = "rgba(255,255,255,.08)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 5; i++) {
+    const y = (h / 5) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const padX = 18;
+  const padY = 18;
+
+  const coords = points.map((p, i) => {
+    const x = (i / (points.length - 1)) * (w - padX * 2) + padX;
+    const norm = (p - min) / ((max - min) || 1);
+    const y = h - (norm * (h - padY * 2) + padY);
+    return { x, y };
+  });
+
+  // fill
+  ctx.beginPath();
+  ctx.moveTo(coords[0].x, coords[0].y);
+  coords.forEach(pt => ctx.lineTo(pt.x, pt.y));
+  ctx.lineTo(coords[coords.length - 1].x, h - padY);
+  ctx.lineTo(coords[0].x, h - padY);
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(88,166,255,.30)");
+  grad.addColorStop(1, "rgba(88,166,255,.03)");
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  ctx.moveTo(coords[0].x, coords[0].y);
+  coords.forEach(pt => ctx.lineTo(pt.x, pt.y));
+  ctx.strokeStyle = "#58a6ff";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // last dot
+  const last = coords[coords.length - 1];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
+  ctx.fillStyle = "#58a6ff";
+  ctx.fill();
+}
+
+function drawCurrentChart() {
+  const sym = symbolData[currentSymbol];
+  if (!sym) return;
+  drawChart(scaledPoints(sym.points, currentRange));
+}
+
+function renderTable(rows){
+  const body = document.getElementById("marketTable");
+  if (!body) return;
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.symbol}</td>
+      <td>${r.price}</td>
+      <td class="${r.dir}">${r.change}</td>
+      <td class="${r.dir}">${r.pct}</td>
+    </tr>
+  `).join("");
+}
+
+function updateTradingView() {
+  const sym = symbolData[currentSymbol];
+  if (!sym) return;
+
+  const labelEl = document.getElementById("chartLabel");
+  const priceEl = document.getElementById("chartPrice");
+  const changeEl = document.getElementById("chartChange");
+
+  if (labelEl) labelEl.textContent = sym.label;
+  if (priceEl) priceEl.textContent = sym.price;
+  if (changeEl) {
+    changeEl.textContent = sym.change;
+    changeEl.style.color = sym.change.trim().startsWith("-") ? "#ff637d" : "#43f7ad";
+  }
+
+  const cards = document.querySelectorAll(".small-card .val");
+  const subs = document.querySelectorAll(".small-card .hero-sub");
+
+  if (cards[0]) cards[0].textContent = sym.momentum;
+  if (cards[1]) cards[1].textContent = sym.riskTone;
+  if (cards[2]) cards[2].textContent = sym.donnaRead;
+
+  if (subs[0]) subs[0].textContent = "Trend state";
+  if (subs[1]) subs[1].textContent = "Volatility pressure";
+  if (subs[2]) subs[2].textContent = "Current driver";
+
+  drawCurrentChart();
+}
+
+function bindTradingControls() {
+  document.querySelectorAll(".chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".chip").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentSymbol = btn.dataset.symbol;
+      updateTradingView();
+    });
+  });
+
+  document.querySelectorAll(".range-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentRange = btn.textContent.trim();
+      drawCurrentChart();
+    });
+  });
+}
+
+function render(data){
+  state = data;
+
+  document.getElementById("sessionVal").textContent = data.donna_session;
+  document.getElementById("heroTitle").textContent = `${data.dominant_driver} is leading current conditions.`;
+  document.getElementById("heroSub").textContent = data.market_summary;
+  document.getElementById("donnaTime").textContent = data.donna_time;
+  document.getElementById("eventPhase").textContent = data.event_phase;
+  document.getElementById("nextEventHero").textContent = data.next_event;
+  document.getElementById("nextEventSub").textContent = `${data.minutes_to_event} minutes to event`;
+  document.getElementById("nextEventCard").textContent = data.next_event;
+  document.getElementById("nextEventMinutes").textContent = `${data.minutes_to_event} minutes remaining`;
+
+  const macro = document.getElementById("macroRisk");
+  macro.textContent = String(data.macro_risk).toUpperCase();
+  macro.className = "val " + riskClass(data.macro_risk);
+
+  const head = document.getElementById("headlineRisk");
+  head.textContent = String(data.headline_risk).toUpperCase();
+  head.className = "val " + riskClass(data.headline_risk);
+
+  const market = document.getElementById("marketRisk");
+  market.textContent = String(data.market_news_risk).toUpperCase();
+  market.className = "val " + riskClass(data.market_news_risk);
+
+  document.getElementById("clockNY").textContent = data.donna_time;
+  document.getElementById("clockSession").textContent = data.donna_session;
+  document.getElementById("clockPhase").textContent = data.event_phase;
+  document.getElementById("domDriver").textContent = data.dominant_driver;
+  document.getElementById("secDriver").textContent = data.secondary_driver;
+  document.getElementById("regime").textContent = data.market_regime;
+  document.getElementById("threat").textContent = data.market_threat;
+  document.getElementById("confidence").textContent = data.market_confidence;
+  document.getElementById("driverSummary").textContent = data.market_summary;
+  document.getElementById("warnings").innerHTML = data.active_warnings.map(x => `<span class="badge">${x}</span>`).join("");
+
+  document.getElementById("tradeRegime").textContent = data.market_regime;
+  document.getElementById("tradeDriver").textContent = data.dominant_driver;
+  document.getElementById("tradeThreat").textContent = data.market_threat;
+  document.getElementById("tradeEvent").textContent = data.next_event;
+  document.getElementById("tradeConfidence").textContent = data.market_confidence;
+
   renderTable(data.market_rows);
-  drawChart(data.chart.points);
 
-  document.getElementById('topStory').textContent = data.last_headline;
-  document.getElementById('topStoryNote').textContent = data.headline_guidance;
-  document.getElementById('newsDriver').textContent = data.dominant_driver;
-  document.getElementById('newsSecond').textContent = data.secondary_driver;
-  document.getElementById('newsRegime').textContent = data.market_regime;
-  document.getElementById('newsThreat').textContent = data.market_threat;
-  document.getElementById('newsConfidence').textContent = data.market_confidence;
-  document.getElementById('newsSummary').textContent = data.market_summary;
-  document.getElementById('macroTitle').textContent = data.next_event;
-  document.getElementById('macroSub').textContent = `${data.minutes_to_event} minutes until event window.`;
-  document.getElementById('marketTitle').textContent = data.last_market_headline;
-  document.getElementById('marketSub').textContent = data.last_market_guidance;
-  document.getElementById('latestHeadline').textContent = data.last_headline;
-  document.getElementById('latestMarket').textContent = data.last_market_headline;
-  document.getElementById('footerTime').textContent = 'last update: ' + data.donna_time;
+  document.getElementById("topStory").textContent = data.last_headline;
+  document.getElementById("topStoryNote").textContent = data.headline_guidance;
+  document.getElementById("newsDriver").textContent = data.dominant_driver;
+  document.getElementById("newsSecond").textContent = data.secondary_driver;
+  document.getElementById("newsRegime").textContent = data.market_regime;
+  document.getElementById("newsThreat").textContent = data.market_threat;
+  document.getElementById("newsConfidence").textContent = data.market_confidence;
+  document.getElementById("newsSummary").textContent = data.market_summary;
+  document.getElementById("macroTitle").textContent = data.next_event;
+  document.getElementById("macroSub").textContent = `${data.minutes_to_event} minutes until event window.`;
+  document.getElementById("marketTitle").textContent = data.last_market_headline;
+  document.getElementById("marketSub").textContent = data.last_market_guidance;
+  document.getElementById("latestHeadline").textContent = data.last_headline;
+  document.getElementById("latestMarket").textContent = data.last_market_headline;
+  document.getElementById("footerTime").textContent = "last update: " + data.donna_time;
 
-  document.getElementById('tape').innerHTML = `
+  document.getElementById("tape").innerHTML = `
     <span><b>Macro:</b> ${String(data.macro_risk).toUpperCase()}</span>
     <span><b>Headline:</b> ${String(data.headline_risk).toUpperCase()}</span>
     <span><b>Market:</b> ${String(data.market_news_risk).toUpperCase()}</span>
@@ -520,10 +799,18 @@ function render(data){
     <span><b>Event:</b> ${data.next_event}</span>
     <span><b>Session:</b> ${data.donna_session}</span>
   `;
+
+  updateTradingView();
 }
 
-fetch('/dashboard-data').then(r => r.json()).then(render);
-window.addEventListener('resize', () => state && drawChart(state.chart.points));
+bindTradingControls();
+fetch("/dashboard-data").then(r => r.json()).then(data => {
+  render(data);
+  setTimeout(() => drawCurrentChart(), 120);
+});
+window.addEventListener("resize", () => {
+  if (state) drawCurrentChart();
+});
 </script>
 </body>
 </html>"""
