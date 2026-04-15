@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
@@ -11,9 +11,25 @@ import json
 import re
 import requests
 
-from donna_news import process_news_guard_cycle
-from donna_headlines import process_headlines_cycle
-from donna_finnhub import process_finnhub_cycle
+# Optional external workers
+try:
+    from donna_news import process_news_guard_cycle
+except Exception:
+    def process_news_guard_cycle():
+        return None
+
+try:
+    from donna_headlines import process_headlines_cycle
+except Exception:
+    def process_headlines_cycle():
+        return None
+
+try:
+    from donna_finnhub import process_finnhub_cycle
+except Exception:
+    def process_finnhub_cycle():
+        return None
+
 
 # ==================================================
 # ENV
@@ -22,21 +38,16 @@ BASE_DIR = Path(__file__).parent
 env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_ALERT_MODE = os.getenv("TELEGRAM_ALERT_MODE", "all").lower().strip()
 
-if not OPENAI_API_KEY:
-    raise RuntimeError("Missing OPENAI_API_KEY")
-if not TELEGRAM_BOT_TOKEN:
-    raise RuntimeError("Missing TELEGRAM_BOT_TOKEN")
-if not TELEGRAM_CHAT_ID:
-    raise RuntimeError("Missing TELEGRAM_CHAT_ID")
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-app = FastAPI(title="DONNA MASTER CORE RECOVERY")
+app = FastAPI(title="DONNA CORE RECOVERY", version="3.0")
+
 
 # ==================================================
 # FILES
@@ -44,6 +55,7 @@ app = FastAPI(title="DONNA MASTER CORE RECOVERY")
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 ALERTS_FILE = BASE_DIR / "donna_alert_history.json"
 ASSISTANT_FILE = BASE_DIR / "donna_assistant_state.json"
+
 
 # ==================================================
 # TIME
@@ -72,6 +84,10 @@ def local_session_label(dt: datetime | None = None) -> str:
         return "NEW_YORK_CASH"
     return "OFF_HOURS"
 
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 # ==================================================
 # LOOP TIMERS
 # ==================================================
@@ -79,9 +95,41 @@ NEWS_POLL_SECONDS = 900
 HEADLINE_POLL_SECONDS = 900
 FINNHUB_POLL_SECONDS = 600
 
+
 # ==================================================
-# SYSTEM PROMPTS
+# PROMPTS
 # ==================================================
+DONNA_SIGNAL_PROMPT = """
+You are Donna, an elite futures trading intelligence assistant.
+
+You analyze one futures alert using:
+- setup quality
+- score
+- context
+- session
+- trend alignment
+- macro risk
+- headline risk
+- market-news risk
+- event timing
+- market regime
+
+Return plain text in EXACTLY this format:
+
+Verdict: TAKE | CAUTION | SKIP
+Confidence: XX%
+Why: short explanation
+Risk: short risk summary
+Execution: short execution note
+Summary: one concise final line
+
+Rules:
+- Be decisive.
+- Do not use markdown.
+- Do not output JSON.
+- Keep each field short.
+""".strip()
+
 DONNA_ASSISTANT_PROMPT = """
 You are Donna, the command center AI assistant inside a live trading and intelligence dashboard.
 
@@ -131,44 +179,10 @@ Reasoning rules:
 Action rules:
 - If the user is asking a question, use action = "none".
 - If the user clearly wants a focus/task/reminder action, choose the correct action.
-- For clear actions, value can be empty string.
 - Never return markdown.
 - Never return extra text outside JSON.
 """.strip()
-# ==================================================
-# TELEGRAM
-# ==================================================
-def send_telegram_message(text: str) -> dict:
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-    }
 
-    try:
-        response = requests.post(url, json=payload, timeout=20)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-def should_send_trade_to_telegram(parsed: dict) -> bool:
-    if TELEGRAM_ALERT_MODE == "off":
-        return False
-    if TELEGRAM_ALERT_MODE == "all":
-        return True
-
-    verdict = str(parsed.get("verdict", "")).upper()
-    confidence_raw = str(parsed.get("confidence", "0")).replace("%", "").strip()
-
-    try:
-        confidence_num = float(confidence_raw)
-    except Exception:
-        confidence_num = 0.0
-
-    if TELEGRAM_ALERT_MODE == "critical":
-        return verdict == "TAKE" or confidence_num >= 80
-
-    return True
 
 # ==================================================
 # HELPERS
@@ -178,28 +192,6 @@ def safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return default
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-def normalize_payload(payload: dict) -> dict:
-    return {
-        "ticker": str(payload.get("ticker", "UNKNOWN")),
-        "price": str(payload.get("price", "0")),
-        "signal": str(payload.get("signal", "NONE")).upper(),
-        "timeframe": str(payload.get("timeframe", "unknown")),
-        "session": str(payload.get("session", "unknown")),
-        "setup_type": str(payload.get("setup_type", "unknown")),
-        "signal_priority": str(payload.get("signal_priority", "unknown")),
-        "context_strength": str(payload.get("context_strength", "unknown")),
-        "market_state": str(payload.get("market_state", "neutral")),
-        "scenario": str(payload.get("scenario", "none")),
-        "fib_zone": str(payload.get("fib_zone", "none")),
-        "liquidity": str(payload.get("liquidity", "unknown")),
-        "bias": str(payload.get("bias", "neutral")),
-        "score": str(payload.get("score", "0")),
-        "quality": str(payload.get("quality", "NA")).upper(),
-    }
 
 def parse_json_loose(text: str, fallback: dict) -> dict:
     if not text:
@@ -220,6 +212,85 @@ def parse_json_loose(text: str, fallback: dict) -> dict:
             pass
 
     return fallback
+
+def extract_fields(text: str) -> dict:
+    if not text:
+        return {
+            "verdict": "UNKNOWN",
+            "confidence": "N/A",
+            "why": "No response.",
+            "risk": "Unknown.",
+            "execution": "Stand by.",
+            "summary": "No summary.",
+        }
+
+    def grab(label: str, default: str):
+        m = re.search(rf"{label}:\s*(.+)", text, re.IGNORECASE)
+        return m.group(1).strip() if m else default
+
+    return {
+        "verdict": grab("Verdict", "UNKNOWN").upper(),
+        "confidence": grab("Confidence", "N/A"),
+        "why": grab("Why", "No reason."),
+        "risk": grab("Risk", "Unknown."),
+        "execution": grab("Execution", "Stand by."),
+        "summary": grab("Summary", text.strip()),
+    }
+
+def normalize_payload(payload: dict) -> dict:
+    return {
+        "ticker": str(payload.get("ticker", "UNKNOWN")),
+        "price": str(payload.get("price", "0")),
+        "signal": str(payload.get("signal", "NONE")).upper(),
+        "timeframe": str(payload.get("timeframe", "unknown")),
+        "session": str(payload.get("session", "unknown")),
+        "setup_type": str(payload.get("setup_type", "unknown")),
+        "signal_priority": str(payload.get("signal_priority", "unknown")),
+        "context_strength": str(payload.get("context_strength", "unknown")),
+        "market_state": str(payload.get("market_state", "neutral")),
+        "scenario": str(payload.get("scenario", "none")),
+        "fib_zone": str(payload.get("fib_zone", "none")),
+        "liquidity": str(payload.get("liquidity", "unknown")),
+        "bias": str(payload.get("bias", "neutral")),
+        "score": str(payload.get("score", "0")),
+        "quality": str(payload.get("quality", "NA")).upper(),
+    }
+
+def send_telegram_message(text: str) -> dict:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return {"ok": False, "error": "Telegram not configured"}
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=20)
+        return response.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def should_send_trade_to_telegram(parsed: dict) -> bool:
+    if TELEGRAM_ALERT_MODE == "off":
+        return False
+    if TELEGRAM_ALERT_MODE == "all":
+        return True
+
+    verdict = str(parsed.get("verdict", "")).upper()
+    confidence_raw = str(parsed.get("confidence", "0")).replace("%", "").strip()
+
+    try:
+        confidence_num = float(confidence_raw)
+    except Exception:
+        confidence_num = 0.0
+
+    if TELEGRAM_ALERT_MODE == "critical":
+        return verdict == "TAKE" or confidence_num >= 80
+
+    return True
+
 
 # ==================================================
 # STATE LOAD / SAVE
@@ -264,9 +335,25 @@ def load_risk_state() -> dict:
         if not isinstance(merged.get("active_warnings"), list):
             merged["active_warnings"] = []
 
+        # keep clock fresh even if workers are down
+        merged["donna_time_utc"] = local_now_utc().isoformat()
+        merged["donna_time_ny"] = local_now_ny().isoformat()
+        merged["donna_day"] = local_day_name()
+        merged["donna_session"] = local_session_label()
+
         return merged
     except Exception:
         return default_state
+
+def save_risk_state(state: dict) -> None:
+    state["donna_time_utc"] = local_now_utc().isoformat()
+    state["donna_time_ny"] = local_now_ny().isoformat()
+    state["donna_day"] = local_day_name()
+    state["donna_session"] = local_session_label()
+    state["last_updated"] = utc_now_iso()
+
+    with open(RISK_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
 
 def load_alert_history() -> list:
     try:
@@ -347,6 +434,7 @@ def save_assistant_state(state: dict) -> None:
     with open(ASSISTANT_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
+
 # ==================================================
 # VERDICT ENGINE
 # ==================================================
@@ -388,9 +476,9 @@ def pre_verdict_engine(data: dict) -> str:
     else:
         points -= 1
 
-    if session in ["NY", "NY_PRE", "London"]:
+    if session in ["NY", "NY_PRE", "London", "NEW_YORK_CASH", "LONDON"]:
         points += 2
-    elif session == "Asia":
+    elif session in ["Asia", "ASIA"]:
         points -= 1
 
     aligned = (
@@ -485,37 +573,207 @@ def confidence_bias(risk: dict, data: dict) -> str:
         return "Slightly reduce confidence."
     return "Normal confidence."
 
-# ==================================================
-# PARSER
-# ==================================================
-def extract_fields(text: str) -> dict:
-    if not text:
-        return {
-            "verdict": "UNKNOWN",
-            "confidence": "N/A",
-            "why": "No response.",
-            "risk": "Unknown.",
-            "execution": "Stand by.",
-            "summary": "No summary.",
-        }
 
-    def grab(label, default):
-        m = re.search(rf"{label}:\s*(.+)", text, re.IGNORECASE)
-        return m.group(1).strip() if m else default
+# ==================================================
+# DRIVER ENGINE
+# ==================================================
+def build_market_driver_engine() -> dict:
+    state = load_risk_state()
+
+    macro = str(state.get("macro_risk", "low")).lower()
+    headline = str(state.get("headline_risk", "low")).lower()
+    market = str(state.get("market_news_risk", "low")).lower()
+
+    next_event = str(state.get("next_event", ""))
+    event_phase = str(state.get("event_phase", ""))
+    session = str(state.get("donna_session", "OFF_HOURS"))
+
+    headline_text = str(state.get("last_headline", "")).lower()
+    market_text = str(state.get("last_market_headline", "")).lower()
+
+    dominant_driver = "Balanced Conditions"
+    secondary_driver = "No clear secondary force"
+    regime = "Neutral"
+    threat = "None"
+    confidence = "Low"
+    summary = "No strong market driver currently detected."
+
+    if any(x in market_text for x in [
+        "nvidia", "microsoft", "apple", "amazon",
+        "meta", "google", "tesla", "ai"
+    ]):
+        dominant_driver = "AI / Mega-Cap Leadership"
+        regime = "Risk-On Trend"
+        confidence = "High"
+        summary = "Large-cap leadership is supporting index strength."
+
+    if macro == "high":
+        dominant_driver = "Macro Event Risk"
+        regime = "High Volatility"
+        threat = next_event or "Upcoming Event"
+        confidence = "High"
+        summary = "Macro timing is dominating market behavior."
+
+    elif macro == "medium" and regime == "Neutral":
+        dominant_driver = "Macro Positioning"
+        regime = "Cautious Trend"
+        confidence = "Medium"
+        summary = "Markets are positioning around upcoming macro risk."
+
+    if headline == "high":
+        dominant_driver = "Headline Shock"
+        regime = "Reactive Conditions"
+        confidence = "High"
+        summary = "Breaking headlines are driving price reaction."
+
+    if market == "high" and dominant_driver == "Balanced Conditions":
+        dominant_driver = "Company / Earnings Catalyst"
+        regime = "Catalyst Driven"
+        confidence = "Medium"
+        summary = "Company-specific catalysts are influencing index direction."
+
+    if event_phase == "LIVE":
+        threat = "Live Macro Release"
+        regime = "Volatility Expansion"
+    elif event_phase == "IMMINENT":
+        threat = next_event or "Event Imminent"
+    elif event_phase == "POST_EVENT_COOLDOWN":
+        secondary_driver = "Post-Event Repricing"
+
+    if session == "ASIA" and confidence == "Low":
+        regime = "Thin Liquidity"
+    elif session == "LONDON" and confidence == "Low":
+        regime = "Expansion Window"
+    elif session == "NEW_YORK_CASH" and confidence == "Low":
+        regime = "Primary Volume Session"
+
+    if "yield" in headline_text or "rates" in headline_text:
+        secondary_driver = "Rates Sensitivity"
+    elif "oil" in headline_text:
+        secondary_driver = "Energy Pressure"
+    elif "war" in headline_text or "iran" in headline_text:
+        secondary_driver = "Geopolitical Risk"
+    elif "fed" in headline_text or "powell" in headline_text:
+        secondary_driver = "Federal Reserve Guidance"
 
     return {
-        "verdict": grab("Verdict", "UNKNOWN").upper(),
-        "confidence": grab("Confidence", "N/A"),
-        "why": grab("Why", "No reason."),
-        "risk": grab("Risk", "Unknown."),
-        "execution": grab("Execution", "Stand by."),
-        "summary": grab("Summary", text.strip()),
+        "dominant_driver": dominant_driver,
+        "secondary_driver": secondary_driver,
+        "market_regime": regime,
+        "market_threat": threat,
+        "market_confidence": confidence,
+        "market_summary": summary,
     }
 
+def summarize_system_context() -> str:
+    risk = load_risk_state()
+    alerts = load_alert_history()[:5]
+    assistant = load_assistant_state()
+    driver = build_market_driver_engine()
+
+    alerts_text = []
+    for a in alerts:
+        alerts_text.append(
+            f"{a.get('ticker', 'UNK')} {a.get('signal', '')} {a.get('verdict', '')} "
+            f"{a.get('confidence', '')} @ {a.get('price', '')}"
+        )
+
+    return f"""
+Current Donna state:
+
+Time Engine:
+- Donna Time NY: {risk.get("donna_time_ny")}
+- Donna Time UTC: {risk.get("donna_time_utc")}
+- Donna Day: {risk.get("donna_day")}
+- Donna Session: {risk.get("donna_session")}
+
+Macro Timing:
+- Next Event: {risk.get("next_event", "none")}
+- Event Time NY: {risk.get("event_time_ny", "unknown")}
+- Minutes To Event: {risk.get("minutes_to_event", "unknown")}
+- Event Phase: {risk.get("event_phase", "unknown")}
+- Macro Risk: {risk.get("macro_risk", "low")}
+
+Headline / News Layer:
+- Headline Risk: {risk.get("headline_risk", "low")}
+- Last Headline: {risk.get("last_headline", "none")}
+- Headline Severity: {risk.get("headline_severity", "none")}
+- Headline Guidance: {risk.get("headline_guidance", "none")}
+- Headline Source: {risk.get("headline_source", "none")}
+
+Market Catalyst Layer:
+- Market News Risk: {risk.get("market_news_risk", "low")}
+- Last Market Headline: {risk.get("last_market_headline", "none")}
+- Market Symbol: {risk.get("last_market_symbol", "none")}
+- Market Severity: {risk.get("last_market_severity", "none")}
+- Market Guidance: {risk.get("last_market_guidance", "none")}
+
+Market Driver Engine:
+- Dominant Driver: {driver.get("dominant_driver", "unknown")}
+- Secondary Driver: {driver.get("secondary_driver", "unknown")}
+- Regime: {driver.get("market_regime", "unknown")}
+- Threat: {driver.get("market_threat", "unknown")}
+- Confidence: {driver.get("market_confidence", "unknown")}
+- Summary: {driver.get("market_summary", "unknown")}
+
+Warnings:
+- Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
+
+Assistant State:
+- Daily Focus: {assistant.get("daily_focus", "")}
+- Tasks: {assistant.get("tasks", [])}
+- Reminders: {assistant.get("reminders", [])}
+
+Recent Alerts:
+- {" | ".join(alerts_text) if alerts_text else "No recent alerts"}
+""".strip()
+
+
 # ==================================================
-# PROMPT BUILDERS
+# FORMATTERS / ACTIONS
 # ==================================================
-def build_prompt(data: dict) -> str:
+def format_message(data: dict, result: dict) -> str:
+    return f"""DONNA // {data['ticker']} // {data['signal']}
+{data['session']} | TF {data['timeframe']} | Price {data['price']}
+
+Verdict: {result['verdict']}
+Confidence: {result['confidence']}
+Why: {result['why']}
+Risk: {result['risk']}
+Execution: {result['execution']}
+Summary: {result['summary']}"""
+
+def apply_assistant_action(action: str, value: str) -> dict:
+    state = load_assistant_state()
+
+    action = str(action or "none").strip().lower()
+    value = str(value or "").strip()
+
+    if action == "set_focus" and value:
+        state["daily_focus"] = value
+        save_assistant_state(state)
+    elif action == "add_task" and value:
+        state["tasks"].append(value)
+        state["tasks"] = state["tasks"][:20]
+        save_assistant_state(state)
+    elif action == "add_reminder" and value:
+        state["reminders"].append(value)
+        state["reminders"] = state["reminders"][:20]
+        save_assistant_state(state)
+    elif action == "clear_tasks":
+        state["tasks"] = []
+        save_assistant_state(state)
+    elif action == "clear_reminders":
+        state["reminders"] = []
+        save_assistant_state(state)
+
+    return state
+
+
+# ==================================================
+# PROMPT BUILDER
+# ==================================================
+def build_signal_prompt(data: dict) -> str:
     risk = load_risk_state()
     base_verdict = pre_verdict_engine(data)
     fusion = apply_fusion_overlay(base_verdict, risk, data)
@@ -565,229 +823,6 @@ Fusion Verdict: {fusion}
 Confidence Guidance: {confidence_note}
 """.strip()
 
-def build_market_driver_engine():
-    state = load_risk_state()
-
-    macro = str(state.get("macro_risk", "low")).lower()
-    headline = str(state.get("headline_risk", "low")).lower()
-    market = str(state.get("market_news_risk", "low")).lower()
-
-    next_event = str(state.get("next_event", ""))
-    event_phase = str(state.get("event_phase", ""))
-    session = str(state.get("donna_session", "OFF_HOURS"))
-
-    headline_text = str(state.get("last_headline", "")).lower()
-    market_text = str(state.get("last_market_headline", "")).lower()
-
-    dominant_driver = "Balanced Conditions"
-    secondary_driver = "No clear secondary force"
-    regime = "Neutral"
-    threat = "None"
-    confidence = "Low"
-    summary = "No strong market driver currently detected."
-
-    # ==========================================
-    # AI / TECH LEADERSHIP
-    # ==========================================
-    if any(x in market_text for x in [
-        "nvidia", "microsoft", "apple", "amazon",
-        "meta", "google", "tesla", "ai"
-    ]):
-        dominant_driver = "AI / Mega-Cap Leadership"
-        regime = "Risk-On Trend"
-        confidence = "High"
-        summary = "Large-cap leadership is supporting index strength."
-
-    # ==========================================
-    # MACRO EVENT PRESSURE
-    # ==========================================
-    if macro == "high":
-        dominant_driver = "Macro Event Risk"
-        regime = "High Volatility"
-        threat = next_event or "Upcoming Event"
-        confidence = "High"
-        summary = "Macro timing is dominating market behavior."
-
-    elif macro == "medium" and regime == "Neutral":
-        dominant_driver = "Macro Positioning"
-        regime = "Cautious Trend"
-        confidence = "Medium"
-        summary = "Markets are positioning around upcoming macro risk."
-
-    # ==========================================
-    # HEADLINE SHOCK
-    # ==========================================
-    if headline == "high":
-        dominant_driver = "Headline Shock"
-        regime = "Reactive Conditions"
-        confidence = "High"
-        summary = "Breaking headlines are driving price reaction."
-
-    # ==========================================
-    # MARKET NEWS / EARNINGS
-    # ==========================================
-    if market == "high" and dominant_driver == "Balanced Conditions":
-        dominant_driver = "Company / Earnings Catalyst"
-        regime = "Catalyst Driven"
-        confidence = "Medium"
-        summary = "Company-specific catalysts are influencing index direction."
-
-    # ==========================================
-    # EVENT PHASE LOGIC
-    # ==========================================
-    if event_phase == "LIVE":
-        threat = "Live Macro Release"
-        regime = "Volatility Expansion"
-
-    elif event_phase == "IMMINENT":
-        threat = next_event or "Event Imminent"
-
-    elif event_phase == "POST_EVENT_COOLDOWN":
-        secondary_driver = "Post-Event Repricing"
-
-    # ==========================================
-    # SESSION LOGIC
-    # ==========================================
-    if session == "ASIA" and confidence == "Low":
-        regime = "Thin Liquidity"
-
-    elif session == "LONDON" and confidence == "Low":
-        regime = "Expansion Window"
-
-    elif session == "NEW_YORK_CASH" and confidence == "Low":
-        regime = "Primary Volume Session"
-
-    # ==========================================
-    # SECONDARY DRIVER DETECTION
-    # ==========================================
-    if "yield" in headline_text or "rates" in headline_text:
-        secondary_driver = "Rates Sensitivity"
-
-    elif "oil" in headline_text:
-        secondary_driver = "Energy Pressure"
-
-    elif "war" in headline_text or "iran" in headline_text:
-        secondary_driver = "Geopolitical Risk"
-
-    elif "fed" in headline_text or "powell" in headline_text:
-        secondary_driver = "Federal Reserve Guidance"
-
-    return {
-        "dominant_driver": dominant_driver,
-        "secondary_driver": secondary_driver,
-        "market_regime": regime,
-        "market_threat": threat,
-        "market_confidence": confidence,
-        "market_summary": summary
-    }
-
-def summarize_system_context() -> str:
-    risk = load_risk_state()
-    alerts = load_alert_history()[:5]
-    assistant = load_assistant_state()
-    driver = build_market_driver_engine()
-
-    donna_time_ny = risk.get("donna_time_ny") or local_now_ny().isoformat()
-    donna_time_utc = risk.get("donna_time_utc") or local_now_utc().isoformat()
-    donna_day = risk.get("donna_day") or local_day_name()
-    donna_session = risk.get("donna_session") or local_session_label()
-
-    alerts_text = []
-    for a in alerts:
-        alerts_text.append(
-            f"{a.get('ticker', 'UNK')} {a.get('signal', '')} {a.get('verdict', '')} "
-            f"{a.get('confidence', '')} @ {a.get('price', '')}"
-        )
-
-    return f"""
-Current Donna state:
-
-Time Engine:
-- Donna Time NY: {donna_time_ny}
-- Donna Time UTC: {donna_time_utc}
-- Donna Day: {donna_day}
-- Donna Session: {donna_session}
-
-Macro Timing:
-- Next Event: {risk.get("next_event", "none")}
-- Event Time NY: {risk.get("event_time_ny", "unknown")}
-- Minutes To Event: {risk.get("minutes_to_event", "unknown")}
-- Event Phase: {risk.get("event_phase", "unknown")}
-- Macro Risk: {risk.get("macro_risk", "low")}
-
-Headline / News Layer:
-- Headline Risk: {risk.get("headline_risk", "low")}
-- Last Headline: {risk.get("last_headline", "none")}
-- Headline Severity: {risk.get("headline_severity", "none")}
-- Headline Guidance: {risk.get("headline_guidance", "none")}
-- Headline Source: {risk.get("headline_source", "none")}
-
-Market Catalyst Layer:
-- Market News Risk: {risk.get("market_news_risk", "low")}
-- Last Market Headline: {risk.get("last_market_headline", "none")}
-- Market Symbol: {risk.get("last_market_symbol", "none")}
-- Market Severity: {risk.get("last_market_severity", "none")}
-- Market Guidance: {risk.get("last_market_guidance", "none")}
-
-Market Driver Engine:
-- Dominant Driver: {driver.get("dominant_driver", "unknown")}
-- Secondary Driver: {driver.get("secondary_driver", "unknown")}
-- Regime: {driver.get("market_regime", "unknown")}
-- Threat: {driver.get("market_threat", "unknown")}
-- Confidence: {driver.get("market_confidence", "unknown")}
-- Summary: {driver.get("market_summary", "unknown")}
-
-Warnings:
-- Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
-
-Assistant State:
-- Daily Focus: {assistant.get("daily_focus", "")}
-- Tasks: {assistant.get("tasks", [])}
-- Reminders: {assistant.get("reminders", [])}
-
-Recent Alerts:
-- {" | ".join(alerts_text) if alerts_text else "No recent alerts"}
-""".strip()
-
-# ==================================================
-# FORMATTERS / ACTIONS
-# ==================================================
-def format_message(data: dict, result: dict) -> str:
-    return f"""DONNA // {data['ticker']} // {data['signal']}
-{data['session']} | TF {data['timeframe']} | Price {data['price']}
-
-Verdict: {result['verdict']}
-Confidence: {result['confidence']}
-Why: {result['why']}
-Risk: {result['risk']}
-Execution: {result['execution']}
-Summary: {result['summary']}"""
-
-def apply_assistant_action(action: str, value: str) -> dict:
-    state = load_assistant_state()
-
-    action = str(action or "none").strip().lower()
-    value = str(value or "").strip()
-
-    if action == "set_focus" and value:
-        state["daily_focus"] = value
-        save_assistant_state(state)
-    elif action == "add_task" and value:
-        state["tasks"].append(value)
-        state["tasks"] = state["tasks"][:20]
-        save_assistant_state(state)
-    elif action == "add_reminder" and value:
-        state["reminders"].append(value)
-        state["reminders"] = state["reminders"][:20]
-        save_assistant_state(state)
-    elif action == "clear_tasks":
-        state["tasks"] = []
-        save_assistant_state(state)
-    elif action == "clear_reminders":
-        state["reminders"] = []
-        save_assistant_state(state)
-
-    return state
 
 # ==================================================
 # SIGNAL PROCESSOR
@@ -797,29 +832,48 @@ def process_signal(payload: dict):
         data = normalize_payload(payload)
 
         if data["signal"] == "NONE":
-            return
+            return {"status": "ignored", "reason": "signal NONE"}
 
-        prompt = build_prompt(data)
+        if not client:
+            parsed = {
+                "verdict": apply_fusion_overlay(pre_verdict_engine(data), load_risk_state(), data),
+                "confidence": "65%",
+                "why": "OpenAI unavailable. Using fallback engine.",
+                "risk": "Fallback logic only.",
+                "execution": "Wait for confirmation before acting.",
+                "summary": "Donna fallback engine processed this signal.",
+            }
+        else:
+            prompt = build_signal_prompt(data)
 
-        response = client.responses.create(
-            model=OPENAI_MODEL,
-            instructions=DONNA_SYSTEM_PROMPT,
-            input=prompt,
-            max_output_tokens=220,
-        )
+            response = client.responses.create(
+                model=OPENAI_MODEL,
+                instructions=DONNA_SIGNAL_PROMPT,
+                input=prompt,
+                max_output_tokens=220,
+            )
 
-        raw = response.output_text
-        parsed = extract_fields(raw)
+            raw = response.output_text
+            parsed = extract_fields(raw)
 
         add_alert_to_history(data, parsed)
-
         msg = format_message(data, parsed)
 
+        telegram_result = None
         if should_send_trade_to_telegram(parsed):
-            send_telegram_message(msg)
+            telegram_result = send_telegram_message(msg)
+
+        return {
+            "status": "ok",
+            "data": data,
+            "parsed": parsed,
+            "telegram": telegram_result,
+        }
 
     except Exception as e:
         print("Signal error:", str(e))
+        return {"status": "error", "error": str(e)}
+
 
 # ==================================================
 # LOOPS
@@ -848,11 +902,20 @@ async def finnhub_loop():
             print("Finnhub loop error:", str(e))
         await asyncio.sleep(FINNHUB_POLL_SECONDS)
 
+
 # ==================================================
 # STARTUP
 # ==================================================
 @app.on_event("startup")
 async def startup():
+    # make sure files exist
+    if not RISK_STATE_FILE.exists():
+        save_risk_state(load_risk_state())
+    if not ALERTS_FILE.exists():
+        save_alert_history([])
+    if not ASSISTANT_FILE.exists():
+        save_assistant_state(load_assistant_state())
+
     try:
         await asyncio.to_thread(process_news_guard_cycle)
     except Exception as e:
@@ -872,6 +935,7 @@ async def startup():
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
 
+
 # ==================================================
 # ROUTES - BASIC
 # ==================================================
@@ -882,6 +946,7 @@ async def root():
 @app.head("/")
 async def root_head():
     return Response(status_code=200)
+
 
 # ==================================================
 # ROUTES - DATA
@@ -931,7 +996,8 @@ async def dashboard_data():
         "event_time_ny": state.get("event_time_ny", ""),
         "alerts": alerts[:10],
         "assistant": assistant,
-        **driver
+        "telegram_alert_mode": TELEGRAM_ALERT_MODE,
+        **driver,
     }
 
 @app.get("/check-env")
@@ -951,6 +1017,39 @@ async def check_env():
 @app.get("/test-telegram")
 async def test_telegram():
     return send_telegram_message("DONNA TEST MESSAGE")
+
+
+# ==================================================
+# ROUTES - WEBHOOK
+# ==================================================
+@app.post("/webhook")
+async def webhook(request: Request):
+    try:
+        body = await request.body()
+        text = body.decode("utf-8", errors="ignore").strip()
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Empty body")
+
+        try:
+            payload = json.loads(text)
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Webhook body is not valid JSON. Received: {text[:200]}"
+            )
+
+        result = process_signal(payload)
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Signal processing failed"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ==================================================
 # ROUTES - ASSISTANT ACTIONS
@@ -1067,13 +1166,24 @@ async def assistant_chat(request: Request):
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
-    context = summarize_system_context()
-
     fallback = {
         "action": "none",
         "value": "",
         "reply": "State check complete. No action taken.",
     }
+
+    if not client:
+        return {
+            "status": "ok",
+            "action": "none",
+            "value": "",
+            "reply": "OpenAI is not configured. Donna assistant is in fallback mode.",
+            "assistant": load_assistant_state(),
+            "risk": load_risk_state(),
+            "alerts": load_alert_history()[:10],
+        }
+
+    context = summarize_system_context()
 
     try:
         response = client.responses.create(
@@ -1130,9 +1240,11 @@ async def assistant_chat(request: Request):
             "alerts": load_alert_history()[:10],
         }
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
-    return """
+
+# ==================================================
+# DASHBOARD HTML
+# ==================================================
+DASHBOARD_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1144,8 +1256,7 @@ async def dashboard():
 :root{
     --bg:#060912;
     --bg2:#0b1220;
-    --bg3:#101a2d;
-    --panel:rgba(15,23,38,.82);
+    --panel:rgba(15,23,38,.88);
     --panel2:rgba(18,28,46,.96);
     --line:rgba(255,255,255,.07);
     --text:#eef4ff;
@@ -1169,14 +1280,9 @@ body{
         linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);
     padding:20px;
 }
-.wrapper{max-width:1540px;margin:0 auto;}
+.wrapper{max-width:1500px;margin:0 auto;}
 .topbar{
-    display:flex;
-    justify-content:space-between;
-    align-items:flex-start;
-    gap:18px;
-    flex-wrap:wrap;
-    margin-bottom:16px;
+    display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:16px;
 }
 .brand h1{font-size:42px;line-height:1;letter-spacing:4px;font-weight:900;}
 .brand p{margin-top:8px;color:var(--muted);font-size:14px;letter-spacing:.4px;}
@@ -1215,7 +1321,7 @@ body{
     border:1px solid rgba(255,255,255,.07);min-height:52px;display:flex;align-items:center;box-shadow:var(--shadow);
 }
 .ticker-track{
-    display:inline-flex;white-space:nowrap;padding-left:100%;animation:tickerMove 24s linear infinite;will-change:transform;
+    display:inline-flex;white-space:nowrap;padding-left:100%;animation:tickerMove 26s linear infinite;will-change:transform;
 }
 @keyframes tickerMove{
     0%{transform:translateX(0);}
@@ -1248,16 +1354,15 @@ body{
 .mini-value{margin-top:6px;font-size:16px;font-weight:900;}
 .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px;}
 .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;}
-.value{font-size:40px;font-weight:900;line-height:1;}
+.value{font-size:40px;font-weight:900;line-height:1;text-transform:uppercase;}
 .value.low{color:var(--low);}
 .value.medium{color:var(--medium);}
 .value.high{color:var(--high);}
-.value.event{font-size:24px;color:#fff;line-height:1.15;}
+.value.event{font-size:24px;color:#fff;line-height:1.15;text-transform:none;}
 .sub{margin-top:10px;color:var(--muted);font-size:14px;}
 .section{display:none;}
 .section.active{display:block;}
 .grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
 .section-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;}
 .feed-item{padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06);color:#e9f1fe;font-size:15px;line-height:1.45;}
 .feed-item:last-child{border-bottom:none;padding-bottom:0;}
@@ -1315,26 +1420,15 @@ body{
 .chat-msg.user{background:rgba(79,140,255,.13);border:1px solid rgba(79,140,255,.2);}
 .chat-msg.assistant{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);}
 .chat-role{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:var(--muted);margin-bottom:6px;}
-.console-card{min-height:190px;}
 .console-head{font-size:20px;font-weight:900;color:#f4f8ff;line-height:1.2;}
 .console-note{margin-top:10px;color:var(--muted);line-height:1.55;font-size:14px;}
-.link-out{display:inline-block;margin-top:10px;color:#9ec2ff;text-decoration:none;font-size:13px;font-weight:700;}
-.news-feature{position:relative;overflow:hidden;}
-.news-feature:before{
-    content:"";position:absolute;inset:0;background:linear-gradient(135deg, rgba(79,140,255,.08), transparent 45%);pointer-events:none;
-}
-.breaking-tag{
-    display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(255,99,125,.12);
-    border:1px solid rgba(255,99,125,.25);color:#ffc0cc;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:14px;
-}
-.breaking-dot{width:8px;height:8px;border-radius:50%;background:var(--high);box-shadow:0 0 14px rgba(255,99,125,.8);}
 .footer{margin-top:18px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
 @media(max-width:1180px){
     .hero{grid-template-columns:1fr;}
     .live-strip{grid-template-columns:1fr;}
     .stat-grid{grid-template-columns:repeat(2,1fr);}
-    .grid-2,.grid-3{grid-template-columns:1fr;}
+    .grid-2{grid-template-columns:1fr;}
 }
 @media(max-width:760px){
     body{padding:14px;}
@@ -1362,10 +1456,10 @@ body{
             </div>
 
             <div class="navbar">
-                <button class="nav-btn active" onclick="showSection('dashboard', this)">Dashboard</button>
-                <button class="nav-btn" onclick="showSection('trading', this)">Trading</button>
-                <button class="nav-btn" onclick="showSection('news', this)">News</button>
-                <button class="nav-btn" onclick="showSection('assistant', this)">Assistant</button>
+                <button class="nav-btn active" data-target="dashboard">Dashboard</button>
+                <button class="nav-btn" data-target="trading">Trading</button>
+                <button class="nav-btn" data-target="news">News</button>
+                <button class="nav-btn" data-target="assistant">Assistant</button>
             </div>
         </div>
     </div>
@@ -1479,13 +1573,6 @@ body{
                     <div class="kv"><div class="kv-label">Confidence</div><div class="kv-value" id="market_confidence">-</div></div>
                     <div class="sub" id="market_summary" style="margin-top:14px;">No driver summary available.</div>
                 </div>
-
-                <div class="panel" style="margin-top:16px;">
-                    <div class="section-title">Risk Radar</div>
-                    <div class="kv"><div class="kv-label">Headline Severity</div><div class="kv-value" id="headline_severity_dash">-</div></div>
-                    <div class="kv"><div class="kv-label">Market Severity</div><div class="kv-value" id="market_severity_dash">-</div></div>
-                    <div class="kv"><div class="kv-label">Last Updated</div><div class="kv-value mono" id="last_updated">-</div></div>
-                </div>
             </div>
         </div>
     </div>
@@ -1515,138 +1602,31 @@ body{
     </div>
 
     <div class="section" id="section-news">
-
-<div class="panel" style="margin-bottom:16px;">
-    <div class="section-title">Market Center</div>
-
-    <!-- Symbol Bar -->
-    <div id="marketSymbolBar" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;scrollbar-width:none;">
-        <button class="quick-chip" onclick="setChartSymbol('SPX')">SPX</button>
-        <button class="quick-chip" onclick="setChartSymbol('NQ')">NQ</button>
-        <button class="quick-chip" onclick="setChartSymbol('ES')">ES</button>
-        <button class="quick-chip" onclick="setChartSymbol('DJIA')">DJIA</button>
-        <button class="quick-chip" onclick="setChartSymbol('VIX')">VIX</button>
-        <button class="quick-chip" onclick="setChartSymbol('DXY')">DXY</button>
-        <button class="quick-chip" onclick="setChartSymbol('TNX')">TNX</button>
-        <button class="quick-chip" onclick="setChartSymbol('RTY')">RTY</button>
-        <button class="quick-chip" onclick="setChartSymbol('GOLD')">Gold</button>
-        <button class="quick-chip" onclick="setChartSymbol('OIL')">Oil</button>
-        <button class="quick-chip" onclick="setChartSymbol('BTC')">BTC</button>
-    </div>
-
-    <!-- Header -->
-    <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
-        <div>
-            <div style="font-size:13px;color:var(--muted);font-weight:800;letter-spacing:1px;text-transform:uppercase;" id="chart_symbol_label">
-                Nasdaq / NQ
-            </div>
-
-            <div style="font-size:46px;font-weight:900;line-height:1;margin-top:6px;" id="chart_price">
-                23,885.49
-            </div>
-
-            <div style="margin-top:8px;font-size:20px;font-weight:900;color:var(--low);" id="chart_change">
-                +246.41 (+1.04%)
-            </div>
-        </div>
-
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="quick-chip" onclick="setChartRange('1D')">1D</button>
-            <button class="quick-chip" onclick="setChartRange('5D')">5D</button>
-            <button class="quick-chip" onclick="setChartRange('1M')">1M</button>
-            <button class="quick-chip" onclick="setChartRange('6M')">6M</button>
-            <button class="quick-chip" onclick="setChartRange('1Y')">1Y</button>
-        </div>
-    </div>
-
-    <!-- Chart -->
-    <div style="margin-top:18px;padding:14px;border-radius:18px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">
-        <canvas id="marketChartCanvas" style="width:100%;height:220px;display:block;"></canvas>
-    </div>
-
-    <!-- Intelligence -->
-    <div class="grid-3" style="margin-top:16px;">
-        <div class="mini-card">
-            <div class="mini-label">Momentum</div>
-            <div class="mini-value" id="chart_momentum">Constructive</div>
-            <div class="sub">Trend state</div>
-        </div>
-
-        <div class="mini-card">
-            <div class="mini-label">Risk Tone</div>
-            <div class="mini-value" id="chart_risk_tone">Balanced</div>
-            <div class="sub">Volatility pressure</div>
-        </div>
-
-        <div class="mini-card">
-            <div class="mini-label">Donna Read</div>
-            <div class="mini-value" id="chart_driver">AI Leadership</div>
-            <div class="sub">Current driver</div>
-        </div>
-    </div>
-
-    <div class="sub" id="chart_summary" style="margin-top:14px;">
-        Donna is analyzing live market conditions.
-    </div>
-</div>
-
         <div class="grid-2">
             <div>
-                <div class="panel news-feature" style="min-height:360px;">
-                    <div class="breaking-tag">
-                        <span class="breaking-dot"></span>
-                        Top Story
-                    </div>
-
-                    <div class="console-head" id="headline_title" style="font-size:30px; line-height:1.08;">
-                        No major headline detected
-                    </div>
-
-                    <div class="console-note" id="headline_note" style="font-size:15px; margin-top:14px;">
-                        Headline guidance unavailable.
-                    </div>
-
-                    <div class="sub" id="headline_source" style="margin-top:14px;">
-                        Source: -
-                    </div>
-
-                    <div class="btn-row" style="margin-top:16px;">
-                        <button class="quick-chip" type="button">Top News</button>
-                        <button class="quick-chip" type="button">Macro</button>
-                        <button class="quick-chip" type="button">Fed</button>
-                        <button class="quick-chip" type="button">Geopolitics</button>
-                        <button class="quick-chip" type="button">Earnings</button>
-                        <button class="quick-chip" type="button">Drivers</button>
-                    </div>
+                <div class="panel">
+                    <div class="section-title">Top Story</div>
+                    <div class="console-head" id="headline_title">No major headline detected</div>
+                    <div class="console-note" id="headline_note">Headline guidance unavailable.</div>
+                    <div class="sub" id="headline_source">Source: -</div>
                 </div>
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Donna Briefing</div>
-
                     <div class="feed-item"><span class="feed-label">Dominant Driver:</span> <span id="dominant_driver_news">-</span></div>
                     <div class="feed-item"><span class="feed-label">Secondary Driver:</span> <span id="secondary_driver_news">-</span></div>
                     <div class="feed-item"><span class="feed-label">Regime:</span> <span id="market_regime_news">-</span></div>
                     <div class="feed-item"><span class="feed-label">Threat:</span> <span id="market_threat_news">-</span></div>
                     <div class="feed-item"><span class="feed-label">Confidence:</span> <span id="market_confidence_news">-</span></div>
-
-                    <div class="sub" id="market_summary_news" style="margin-top:14px;">
-                        No driver summary available.
-                    </div>
+                    <div class="sub" id="market_summary_news" style="margin-top:14px;">No driver summary available.</div>
                 </div>
             </div>
 
             <div>
                 <div class="panel">
                     <div class="section-title">Macro Countdown</div>
-
-                    <div class="console-head" id="news_macro_title">
-                        No major event loaded
-                    </div>
-
-                    <div class="console-note" id="news_macro_note">
-                        Donna is monitoring upcoming macro volatility windows.
-                    </div>
-
+                    <div class="console-head" id="news_macro_title">No major event loaded</div>
+                    <div class="console-note" id="news_macro_note">Donna is monitoring upcoming macro volatility windows.</div>
                     <div class="kv"><div class="kv-label">Next Event</div><div class="kv-value" id="news_next_event">-</div></div>
                     <div class="kv"><div class="kv-label">Minutes</div><div class="kv-value" id="news_minutes_to_event">-</div></div>
                     <div class="kv"><div class="kv-label">Phase</div><div class="kv-value" id="event_phase_news">-</div></div>
@@ -1656,31 +1636,18 @@ body{
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Market Catalyst</div>
-
-                    <div class="console-head" id="market_title" style="font-size:24px;">
-                        No major market catalyst detected
-                    </div>
-
-                    <div class="console-note" id="market_note">
-                        Market guidance unavailable.
-                    </div>
-
+                    <div class="console-head" id="market_title">No major market catalyst detected</div>
+                    <div class="console-note" id="market_note">Market guidance unavailable.</div>
                     <div class="kv"><div class="kv-label">Severity</div><div class="kv-value" id="market_severity_news">-</div></div>
                     <div class="kv"><div class="kv-label">Symbol</div><div class="kv-value" id="market_symbol_news">-</div></div>
                     <div class="kv"><div class="kv-label">Headline Risk</div><div class="kv-value" id="headline_news">-</div></div>
                     <div class="kv"><div class="kv-label">Market Risk</div><div class="kv-value" id="market_news">-</div></div>
-
-                    <a class="link-out" id="market_link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">
-                        Open source
-                    </a>
                 </div>
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Live News Tape</div>
-
                     <div class="feed-item"><span class="feed-label">Latest Headline:</span> <span id="last_headline">No recent headline</span></div>
                     <div class="feed-item"><span class="feed-label">Latest Market Story:</span> <span id="last_market_headline">No recent market headline</span></div>
-
                     <div style="margin-top:14px;" id="warning_pressure_news"></div>
                 </div>
             </div>
@@ -1704,22 +1671,10 @@ body{
                         <textarea class="textarea" id="chat_input" placeholder="Ask Donna something or give a command..."></textarea>
 
                         <div class="btn-row">
-                            <button class="btn primary" onclick="sendDonnaChat()">Send to Donna</button>
-                            <button class="btn ghost" onclick="quickAsk('What is the current risk environment?')">Risk Summary</button>
-                            <button class="btn ghost" onclick="quickAsk('What time is it and what session are we in?')">Time Check</button>
-                            <button class="btn ghost" onclick="quickAsk('Is this a dangerous time to trade?')">Danger Check</button>
-                        </div>
-
-                        <div class="quick-actions">
-                            <button class="quick-chip" onclick="quickAsk('What matters right now?')">What Matters</button>
-                            <button class="quick-chip" onclick="quickAsk('How long until the next event?')">Time To Event</button>
-                            <button class="quick-chip" onclick="quickAsk('Are we near a red-folder event?')">Red Folder Check</button>
-                            <button class="quick-chip" onclick="quickAsk('Summarize the latest headline risk.')">Headline Risk</button>
-                            <button class="quick-chip" onclick="quickAsk('Summarize the latest market catalyst.')">Market Catalyst</button>
-                            <button class="quick-chip" onclick="quickAsk('What is moving the market right now?')">Market Driver</button>
-                            <button class="quick-chip" onclick="quickAsk('Set my focus to execution and discipline.')">Set Focus</button>
-                            <button class="quick-chip" onclick="quickAsk('Add task review top alerts.')">Add Task</button>
-                            <button class="quick-chip" onclick="quickAsk('Add reminder review next macro event.')">Add Reminder</button>
+                            <button class="btn primary" id="chat_send_btn">Send to Donna</button>
+                            <button class="btn ghost" id="risk_summary_btn">Risk Summary</button>
+                            <button class="btn ghost" id="time_check_btn">Time Check</button>
+                            <button class="btn ghost" id="danger_check_btn">Danger Check</button>
                         </div>
                     </div>
                 </div>
@@ -1727,878 +1682,384 @@ body{
 
             <div>
                 <div class="panel">
-                    <div class="section-title">Assistant Control Panel</div>
+                    <div class="section-title">Assistant State</div>
 
-                    <div class="assistant-item">
-                        <strong>Daily Focus</strong>
-                        <div class="sub" id="daily_focus">Loading...</div>
-                        <input class="input" id="focus_input" placeholder="Set daily focus..." />
-                        <div class="btn-row">
-                            <button class="btn primary" onclick="saveFocus()">Save Focus</button>
-                        </div>
+                    <div class="hero-title">Daily Focus</div>
+                    <input class="input" id="focus_input" placeholder="Set Donna daily focus">
+                    <div class="btn-row">
+                        <button class="btn primary" id="set_focus_btn">Set Focus</button>
                     </div>
 
-                    <div style="height:14px;"></div>
-
-                    <div class="assistant-item">
-                        <strong>Tasks</strong>
-                        <div id="tasks_list" class="sub">Loading...</div>
-                        <input class="input" id="task_input" placeholder="Add task..." />
-                        <div class="btn-row">
-                            <button class="btn secondary" onclick="addTask()">Add Task</button>
-                            <button class="btn ghost" onclick="clearTasks()">Clear All</button>
-                        </div>
+                    <div class="hero-title" style="margin-top:18px;">Tasks</div>
+                    <input class="input" id="task_input" placeholder="Add task">
+                    <div class="btn-row">
+                        <button class="btn secondary" id="add_task_btn">Add Task</button>
+                        <button class="btn ghost" id="clear_tasks_btn">Clear Tasks</button>
                     </div>
+                    <div id="tasks_list" style="margin-top:12px;"></div>
 
-                    <div style="height:14px;"></div>
-
-                    <div class="assistant-item">
-                        <strong>Reminders</strong>
-                        <div id="reminders_list" class="sub">Loading...</div>
-                        <input class="input" id="reminder_input" placeholder="Add reminder..." />
-                        <div class="btn-row">
-                            <button class="btn secondary" onclick="addReminder()">Add Reminder</button>
-                            <button class="btn ghost" onclick="clearReminders()">Clear All</button>
-                        </div>
+                    <div class="hero-title" style="margin-top:18px;">Reminders</div>
+                    <input class="input" id="reminder_input" placeholder="Add reminder">
+                    <div class="btn-row">
+                        <button class="btn secondary" id="add_reminder_btn">Add Reminder</button>
+                        <button class="btn ghost" id="clear_reminders_btn">Clear Reminders</button>
                     </div>
+                    <div id="reminders_list" style="margin-top:12px;"></div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A Command Center</div>
-        <div>Dashboard / News / Trading / Assistant</div>
+        <div>Donna Core Recovery Build</div>
+        <div class="mono" id="footer_updated">last update: -</div>
     </div>
+
 </div>
 
 <script>
-function riskClass(v){
-    const x = String(v || '').toLowerCase();
-    if (x.includes('high')) return 'high';
-    if (x.includes('medium')) return 'medium';
-    return 'low';
+let latestData = null;
+
+function riskClass(v) {
+    const x = String(v || "").toLowerCase();
+    if (x === "high") return "high";
+    if (x === "medium") return "medium";
+    return "low";
 }
 
-function applyRisk(id, val){
+function showSection(name) {
+    document.querySelectorAll(".section").forEach(el => el.classList.remove("active"));
+    const target = document.getElementById("section-" + name);
+    if (target) target.classList.add("active");
+
+    document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active"));
+    document.querySelectorAll('.nav-btn[data-target="' + name + '"]').forEach(btn => btn.classList.add("active"));
+}
+
+function setText(id, value) {
     const el = document.getElementById(id);
-    el.className = 'value ' + riskClass(val);
-    el.innerText = String(val || '-').toUpperCase();
+    if (el) el.textContent = value ?? "-";
 }
 
-function escapeHtml(value){
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-function showSection(sectionName, btn){
-    document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById('section-' + sectionName).classList.add('active');
-    btn.classList.add('active');
-}
-
-function addChatMessage(role, text){
-    const output = document.getElementById('chat_output');
-    const div = document.createElement('div');
-    div.className = 'chat-msg ' + role;
-    div.innerHTML = `
-        <span class="chat-role">${role === 'user' ? 'You' : 'Donna'}</span>
-        ${escapeHtml(text)}
-    `;
-    output.appendChild(div);
-    output.scrollTop = output.scrollHeight;
-}
-
-function formatTimeText(mins){
-    if (mins === null || mins === undefined) return 'No timed event loaded';
-    if (mins === 0) return 'Live or immediate event window';
-    return mins + ' minutes remaining';
-}
-
-function setText(id, value, fallback='-'){
+function setRiskValue(id, value) {
     const el = document.getElementById(id);
-    if (el) el.innerText = value || fallback;
+    if (!el) return;
+    el.textContent = String(value || "-").toUpperCase();
+    el.className = "value " + riskClass(value);
 }
 
-function buildTicker(data){
-    const warnings = (data.active_warnings || []).slice(0,4);
-    const items = [];
-
-    items.push(`<div class="ticker-item"><span class="ticker-strong">Macro:</span> ${escapeHtml(String(data.macro_risk || '-').toUpperCase())}</div>`);
-    items.push(`<div class="ticker-item"><span class="ticker-strong">Headline:</span> ${escapeHtml(String(data.headline_risk || '-').toUpperCase())}</div>`);
-    items.push(`<div class="ticker-item"><span class="ticker-strong">Market:</span> ${escapeHtml(String(data.market_news_risk || '-').toUpperCase())}</div>`);
-    items.push(`<div class="ticker-item"><span class="ticker-strong">Next:</span> ${escapeHtml(data.next_event || 'No event loaded')}</div>`);
-
-    warnings.forEach(w => {
-        items.push(`<div class="ticker-item"><span class="ticker-strong">Warning:</span> ${escapeHtml(w)}</div>`);
-    });
-
-    if (data.last_headline){
-        items.push(`<div class="ticker-item"><span class="ticker-strong">Headline:</span> ${escapeHtml(data.last_headline)}</div>`);
+function renderWarnings(list, targetId) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    if (!list || !list.length) {
+        target.innerHTML = '<span class="badge low">No active warnings</span>';
+        return;
     }
-
-    if (data.last_market_headline){
-        items.push(`<div class="ticker-item"><span class="ticker-strong">Market Story:</span> ${escapeHtml(data.last_market_headline)}</div>`);
-    }
-
-    document.getElementById('ticker_track').innerHTML = items.join('');
+    target.innerHTML = list.map(x => `<span class="badge high">${escapeHtml(x)}</span>`).join("");
 }
 
-async function saveFocus(){
-    const value = document.getElementById('focus_input').value.trim();
-    if(!value) return;
+function renderAlerts(alerts, targetId) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
 
-    await fetch('/assistant/set-focus', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({daily_focus:value})
-    });
-
-    document.getElementById('focus_input').value = '';
-    refreshDashboard();
-}
-
-async function addTask(){
-    const value = document.getElementById('task_input').value.trim();
-    if(!value) return;
-
-    await fetch('/assistant/add-task', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({task:value})
-    });
-
-    document.getElementById('task_input').value = '';
-    refreshDashboard();
-}
-
-async function addReminder(){
-    const value = document.getElementById('reminder_input').value.trim();
-    if(!value) return;
-
-    await fetch('/assistant/add-reminder', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({reminder:value})
-    });
-
-    document.getElementById('reminder_input').value = '';
-    refreshDashboard();
-}
-
-async function deleteTask(index){
-    await fetch('/assistant/delete-task', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({index:index})
-    });
-    refreshDashboard();
-}
-
-async function deleteReminder(index){
-    await fetch('/assistant/delete-reminder', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({index:index})
-    });
-    refreshDashboard();
-}
-
-async function clearTasks(){
-    await fetch('/assistant/clear-tasks', {method:'POST'});
-    refreshDashboard();
-}
-
-async function clearReminders(){
-    await fetch('/assistant/clear-reminders', {method:'POST'});
-    refreshDashboard();
-}
-
-async function quickAsk(text){
-    document.getElementById('chat_input').value = text;
-    await sendDonnaChat();
-}
-
-async function sendDonnaChat(){
-    const input = document.getElementById('chat_input');
-    const message = input.value.trim();
-    if(!message) return;
-
-    addChatMessage('user', message);
-    input.value = '';
-
-    try{
-        const res = await fetch('/assistant/chat', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({message})
-        });
-
-        const data = await res.json();
-        addChatMessage('assistant', data.reply || 'Command complete.');
-        refreshDashboard();
-    }catch(err){
-        addChatMessage('assistant', 'Assistant route error.');
-        console.log(err);
-    }
-}
-
-function renderWarnings(warnings, targetId){
-    const box = document.getElementById(targetId);
-    if (warnings && warnings.length){
-        box.innerHTML = warnings.map(x => {
-            const low = String(x).toLowerCase();
-            const cls = low.includes('high') || low.includes('critical')
-                ? 'high'
-                : low.includes('medium')
-                    ? 'medium'
-                    : 'low';
-            return '<span class="badge ' + cls + '">' + escapeHtml(x) + '</span>';
-        }).join('');
-    } else {
-        box.innerHTML = '<span class="badge low">No active warnings</span>';
-    }
-}
-
-function renderAlerts(alerts, targetId){
-    const box = document.getElementById(targetId);
-
-    if (!alerts || !alerts.length){
-        box.innerHTML = '<div class="feed-item">No alerts yet</div>';
+    if (!alerts || !alerts.length) {
+        target.innerHTML = '<div class="feed-item">No alerts yet</div>';
         return;
     }
 
-    box.innerHTML = alerts.map(a => `
+    target.innerHTML = alerts.map((a, i) => `
         <div class="alert-box">
             <div class="alert-top">
-                <span>${escapeHtml(a.ticker)} | ${escapeHtml(a.signal)} | ${escapeHtml(a.verdict)}</span>
-                <span>${escapeHtml(a.confidence)}</span>
+                <div>${escapeHtml(a.ticker || "UNK")} // ${escapeHtml(a.signal || "-")}</div>
+                <div>${escapeHtml(a.verdict || "-")} // ${escapeHtml(a.confidence || "-")}</div>
             </div>
-            <div class="alert-meta">
-                TF: ${escapeHtml(a.timeframe)} | Session: ${escapeHtml(a.session)} | Price: ${escapeHtml(a.price)}
-            </div>
-            <div class="alert-summary">
-                ${escapeHtml(a.summary || '')}
-            </div>
-            <div class="alert-meta mono">
-                ${escapeHtml(a.timestamp || '')}
-            </div>
+            <div class="alert-meta">${escapeHtml(a.session || "-")} | TF ${escapeHtml(a.timeframe || "-")} | Price ${escapeHtml(a.price || "-")}</div>
+            <div class="alert-summary">${escapeHtml(a.summary || "No summary")}</div>
         </div>
-    `).join('');
+    `).join("");
 }
 
-function renderTasks(tasks){
-    const box = document.getElementById('tasks_list');
+function renderList(items, targetId, deleteRoute, itemKey) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
 
-    if (!tasks || !tasks.length){
-        box.innerHTML = '<div class="feed-item">No tasks</div>';
+    if (!items || !items.length) {
+        target.innerHTML = '<div class="feed-item">None</div>';
         return;
     }
 
-    box.innerHTML = tasks.map((x, i) => `
+    target.innerHTML = items.map((item, idx) => `
         <div class="item-row">
-            <div class="item-text">${escapeHtml(x)}</div>
+            <div class="item-text">${escapeHtml(item)}</div>
             <div class="item-actions">
-                <button class="btn ghost" onclick="deleteTask(${i})">Delete</button>
+                <button class="btn ghost" onclick="deleteIndexedItem('${deleteRoute}', ${idx})">Delete</button>
             </div>
         </div>
-    `).join('');
+    `).join("");
 }
 
-function renderReminders(reminders){
-    const box = document.getElementById('reminders_list');
-
-    if (!reminders || !reminders.length){
-        box.innerHTML = '<div class="feed-item">No reminders</div>';
-        return;
-    }
-
-    box.innerHTML = reminders.map((x, i) => `
-        <div class="item-row">
-            <div class="item-text">${escapeHtml(x)}</div>
-            <div class="item-actions">
-                <button class="btn ghost" onclick="deleteReminder(${i})">Delete</button>
-            </div>
-        </div>
-    `).join('');
-}
-let donnaChartSymbol = 'NQ';
-let donnaChartRange = '1D';
-
-function getMockChartData(symbol, range, data){
-    const dominant = String(data?.dominant_driver || '').toLowerCase();
-    const regime = String(data?.market_regime || '').toLowerCase();
-    const moodUp = dominant.includes('leadership') || regime.includes('trend') || regime.includes('constructive') || regime.includes('risk-on');
-
-    let points = [];
-
-    if (range === '1D'){
-        points = moodUp
-            ? [20, 45, 32, 40, 55, 52, 60, 58, 67, 70, 68, 74]
-            : [72, 68, 65, 62, 58, 55, 53, 50, 47, 45, 42, 40];
-    } else if (range === '5D'){
-        points = moodUp
-            ? [20, 24, 28, 32, 38, 41, 46, 50, 54, 58, 63, 68]
-            : [70, 67, 63, 60, 56, 52, 49, 45, 42, 39, 36, 34];
-    } else if (range === '1M'){
-        points = moodUp
-            ? [15, 18, 22, 24, 30, 36, 40, 48, 53, 58, 66, 74]
-            : [75, 73, 69, 64, 60, 55, 50, 46, 43, 40, 37, 35];
-    } else if (range === '6M'){
-        points = moodUp
-            ? [10, 16, 20, 25, 32, 38, 45, 51, 58, 64, 72, 80]
-            : [82, 78, 72, 68, 61, 56, 50, 46, 41, 38, 34, 31];
-    } else {
-        points = moodUp
-            ? [8, 12, 16, 24, 30, 38, 48, 56, 62, 70, 78, 86]
-            : [86, 82, 76, 69, 62, 56, 50, 45, 39, 35, 31, 28];
-    }
-
-    let label = symbol === 'SPX' ? 'S&P 500' : symbol === 'ES' ? 'ES Futures' : 'Nasdaq / NQ';
-    let price = symbol === 'SPX' ? '6,997.63' : symbol === 'ES' ? '6,999.75' : '23,885.49';
-    let change = symbol === 'SPX' ? '+30.25 (+0.43%)' : symbol === 'ES' ? '+31.50 (+0.45%)' : '+246.41 (+1.04%)';
-
-    if (!moodUp){
-        change = symbol === 'SPX' ? '-22.10 (-0.31%)' : symbol === 'ES' ? '-18.75 (-0.27%)' : '-102.15 (-0.43%)';
-    }
-
-    return { points, label, price, change };
+function escapeHtml(str) {
+    return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }
 
-function drawDonnaChart(series){
-    const canvas = document.getElementById('marketChartCanvas');
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width = canvas.offsetWidth * window.devicePixelRatio;
-    const height = canvas.height = canvas.offsetHeight * window.devicePixelRatio;
-
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    ctx.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
-
-    const w = canvas.offsetWidth;
-    const h = canvas.offsetHeight;
-    const pad = 10;
-
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-
-    for (let i = 0; i < 5; i++){
-        const y = pad + (i * ((h - pad * 2) / 4));
-        ctx.beginPath();
-        ctx.moveTo(pad, y);
-        ctx.lineTo(w - pad, y);
-        ctx.stroke();
+async function api(url, options = {}) {
+    const res = await fetch(url, {
+        headers: { "Content-Type": "application/json" },
+        ...options
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data.detail || data.reply || "Request failed");
     }
+    return data;
+}
 
-    const min = Math.min(...series);
-    const max = Math.max(...series);
-    const range = Math.max(max - min, 1);
+function addChatMessage(role, text) {
+    const wrap = document.getElementById("chat_output");
+    if (!wrap) return;
+    const cls = role === "user" ? "user" : "assistant";
+    const name = role === "user" ? "You" : "Donna";
+    const div = document.createElement("div");
+    div.className = "chat-msg " + cls;
+    div.innerHTML = `<span class="chat-role">${name}</span>${escapeHtml(text)}`;
+    wrap.appendChild(div);
+    wrap.scrollTop = wrap.scrollHeight;
+}
 
-    ctx.beginPath();
-    series.forEach((val, i) => {
-        const x = pad + (i * ((w - pad * 2) / (series.length - 1)));
-        const y = h - pad - (((val - min) / range) * (h - pad * 2));
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+async function sendDonnaChat(message = null) {
+    const input = document.getElementById("chat_input");
+    const text = message || (input ? input.value.trim() : "");
+    if (!text) return;
+
+    addChatMessage("user", text);
+    if (input && !message) input.value = "";
+
+    try {
+        const data = await api("/assistant/chat", {
+            method: "POST",
+            body: JSON.stringify({ message: text })
+        });
+        addChatMessage("assistant", data.reply || "No response.");
+        await refreshDashboard();
+    } catch (err) {
+        addChatMessage("assistant", "Assistant error: " + err.message);
+    }
+}
+
+async function deleteIndexedItem(route, index) {
+    try {
+        await api(route, {
+            method: "POST",
+            body: JSON.stringify({ index })
+        });
+        await refreshDashboard();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function setFocus() {
+    const el = document.getElementById("focus_input");
+    const daily_focus = el.value.trim();
+    if (!daily_focus) return;
+    try {
+        await api("/assistant/set-focus", {
+            method: "POST",
+            body: JSON.stringify({ daily_focus })
+        });
+        el.value = "";
+        await refreshDashboard();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function addTask() {
+    const el = document.getElementById("task_input");
+    const task = el.value.trim();
+    if (!task) return;
+    try {
+        await api("/assistant/add-task", {
+            method: "POST",
+            body: JSON.stringify({ task })
+        });
+        el.value = "";
+        await refreshDashboard();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function addReminder() {
+    const el = document.getElementById("reminder_input");
+    const reminder = el.value.trim();
+    if (!reminder) return;
+    try {
+        await api("/assistant/add-reminder", {
+            method: "POST",
+            body: JSON.stringify({ reminder })
+        });
+        el.value = "";
+        await refreshDashboard();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function clearTasks() {
+    try {
+        await api("/assistant/clear-tasks", { method: "POST" });
+        await refreshDashboard();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function clearReminders() {
+    try {
+        await api("/assistant/clear-reminders", { method: "POST" });
+        await refreshDashboard();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+function bindEvents() {
+    document.querySelectorAll(".nav-btn").forEach(btn => {
+        btn.addEventListener("click", () => showSection(btn.dataset.target));
     });
 
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#9ec2ff';
-    ctx.stroke();
+    document.getElementById("chat_send_btn")?.addEventListener("click", () => sendDonnaChat());
+    document.getElementById("risk_summary_btn")?.addEventListener("click", () => sendDonnaChat("What is the current risk environment?"));
+    document.getElementById("time_check_btn")?.addEventListener("click", () => sendDonnaChat("What time is it and what session are we in?"));
+    document.getElementById("danger_check_btn")?.addEventListener("click", () => sendDonnaChat("Is this a dangerous time to trade?"));
 
-    const last = series[series.length - 1];
-    const lastX = pad + ((series.length - 1) * ((w - pad * 2) / (series.length - 1)));
-    const lastY = h - pad - (((last - min) / range) * (h - pad * 2));
+    document.getElementById("set_focus_btn")?.addEventListener("click", setFocus);
+    document.getElementById("add_task_btn")?.addEventListener("click", addTask);
+    document.getElementById("add_reminder_btn")?.addEventListener("click", addReminder);
+    document.getElementById("clear_tasks_btn")?.addEventListener("click", clearTasks);
+    document.getElementById("clear_reminders_btn")?.addEventListener("click", clearReminders);
 
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#9ec2ff';
-    ctx.fill();
-}
-
-function updateMarketChartModule(data){
-    const chart = getMockChartData(donnaChartSymbol, donnaChartRange, data);
-
-    setText('chart_symbol_label', `${donnaChartSymbol} / ${chart.label}`);
-    setText('chart_price', chart.price);
-    setText('chart_change', chart.change);
-    setText(
-        'chart_summary',
-        `${chart.label} on ${donnaChartRange}: ${data.market_summary || 'Donna is reading current market conditions.'}`
-    );
-
-    const changeEl = document.getElementById('chart_change');
-    if (changeEl){
-        const down = chart.change.trim().startsWith('-');
-        changeEl.style.color = down ? 'var(--high)' : 'var(--low)';
-    }
-
-    drawDonnaChart(chart.points);
-}
-
-function setChartSymbol(symbol){
-    donnaChartSymbol = symbol;
-    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
-}
-
-function setChartRange(range){
-    donnaChartRange = range;
-    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
-}
-
-window.addEventListener('resize', () => {
-    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
-});
-let donnaChartSymbol = 'NQ';
-let donnaChartRange = '1D';
-window.__lastDashboardData = null;
-
-const DONNA_MARKET_MAP = {
-    SPX: {
-        label: 'S&P 500',
-        basePrice: 6997.63,
-        upChange: { points: 30.25, pct: 0.43 },
-        downChange: { points: -22.10, pct: -0.31 }
-    },
-    NQ: {
-        label: 'Nasdaq / NQ',
-        basePrice: 23885.49,
-        upChange: { points: 246.41, pct: 1.04 },
-        downChange: { points: -102.15, pct: -0.43 }
-    },
-    ES: {
-        label: 'ES Futures',
-        basePrice: 6999.75,
-        upChange: { points: 31.50, pct: 0.45 },
-        downChange: { points: -18.75, pct: -0.27 }
-    },
-    DJIA: {
-        label: 'Dow Jones',
-        basePrice: 48352.50,
-        upChange: { points: 118.40, pct: 0.25 },
-        downChange: { points: -183.49, pct: -0.38 }
-    },
-    VIX: {
-        label: 'VIX',
-        basePrice: 17.84,
-        upChange: { points: 0.92, pct: 5.44 },
-        downChange: { points: -0.68, pct: -3.67 }
-    },
-    DXY: {
-        label: 'US Dollar Index',
-        basePrice: 104.32,
-        upChange: { points: 0.41, pct: 0.39 },
-        downChange: { points: -0.36, pct: -0.34 }
-    },
-    TNX: {
-        label: '10Y Treasury Yield',
-        basePrice: 4.42,
-        upChange: { points: 0.06, pct: 1.38 },
-        downChange: { points: -0.05, pct: -1.12 }
-    },
-    RTY: {
-        label: 'Russell 2000',
-        basePrice: 2241.30,
-        upChange: { points: 19.85, pct: 0.89 },
-        downChange: { points: -14.20, pct: -0.63 }
-    },
-    GOLD: {
-        label: 'Gold',
-        basePrice: 2388.20,
-        upChange: { points: 18.90, pct: 0.80 },
-        downChange: { points: -14.60, pct: -0.61 }
-    },
-    OIL: {
-        label: 'Crude Oil',
-        basePrice: 81.46,
-        upChange: { points: 1.84, pct: 2.31 },
-        downChange: { points: -1.22, pct: -1.48 }
-    },
-    BTC: {
-        label: 'Bitcoin',
-        basePrice: 84250.00,
-        upChange: { points: 2150.00, pct: 2.62 },
-        downChange: { points: -1680.00, pct: -1.96 }
-    }
-};
-
-function chartMoodIsUp(data){
-    const dominant = String(data?.dominant_driver || '').toLowerCase();
-    const regime = String(data?.market_regime || '').toLowerCase();
-    const threat = String(data?.market_threat || '').toLowerCase();
-    const macro = String(data?.macro_risk || '').toLowerCase();
-
-    if (macro === 'high' || threat.includes('live macro')) return false;
-    if (dominant.includes('leadership')) return true;
-    if (regime.includes('risk-on') || regime.includes('trend') || regime.includes('constructive')) return true;
-    return true;
-}
-
-function buildSeries(range, isUp, symbol){
-    const presetsUp = {
-        '1D': [20, 45, 32, 40, 55, 52, 60, 58, 67, 70, 68, 74],
-        '5D': [20, 24, 28, 32, 38, 41, 46, 50, 54, 58, 63, 68],
-        '1M': [15, 18, 22, 24, 30, 36, 40, 48, 53, 58, 66, 74],
-        '6M': [10, 16, 20, 25, 32, 38, 45, 51, 58, 64, 72, 80],
-        '1Y': [8, 12, 16, 24, 30, 38, 48, 56, 62, 70, 78, 86]
-    };
-
-    const presetsDown = {
-        '1D': [72, 68, 65, 62, 58, 55, 53, 50, 47, 45, 42, 40],
-        '5D': [70, 67, 63, 60, 56, 52, 49, 45, 42, 39, 36, 34],
-        '1M': [75, 73, 69, 64, 60, 55, 50, 46, 43, 40, 37, 35],
-        '6M': [82, 78, 72, 68, 61, 56, 50, 46, 41, 38, 34, 31],
-        '1Y': [86, 82, 76, 69, 62, 56, 50, 45, 39, 35, 31, 28]
-    };
-
-    let series = (isUp ? presetsUp[range] : presetsDown[range]).slice();
-
-    if (symbol === 'VIX') series = isUp ? presetsDown[range].slice() : presetsUp[range].slice();
-    if (symbol === 'TNX' && !isUp) series = presetsDown[range].slice();
-
-    return series;
-}
-
-function formatNumber(value){
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
-}
-
-function getChartPayload(symbol, range, data){
-    const cfg = DONNA_MARKET_MAP[symbol] || DONNA_MARKET_MAP.NQ;
-    const isUp = chartMoodIsUp(data);
-    const move = isUp ? cfg.upChange : cfg.downChange;
-    const series = buildSeries(range, isUp, symbol);
-
-    return {
-        label: cfg.label,
-        price: formatNumber(cfg.basePrice),
-        change: `${move.points >= 0 ? '+' : ''}${move.points.toFixed(2)} (${move.pct >= 0 ? '+' : ''}${move.pct.toFixed(2)}%)`,
-        isUp,
-        series
-    };
-}
-
-function drawDonnaChart(series, isUp){
-    const canvas = document.getElementById('marketChartCanvas');
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-
-    canvas.width = Math.max(300, Math.floor(rect.width * ratio));
-    canvas.height = Math.max(160, Math.floor(rect.height * ratio));
-
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    const w = rect.width;
-    const h = rect.height;
-    const pad = 14;
-
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-
-    for (let i = 0; i < 5; i++){
-        const y = pad + (i * ((h - pad * 2) / 4));
-        ctx.beginPath();
-        ctx.moveTo(pad, y);
-        ctx.lineTo(w - pad, y);
-        ctx.stroke();
-    }
-
-    const min = Math.min(...series);
-    const max = Math.max(...series);
-    const range = Math.max(max - min, 1);
-
-    const points = series.map((val, i) => {
-        const x = pad + (i * ((w - pad * 2) / (series.length - 1)));
-        const y = h - pad - (((val - min) / range) * (h - pad * 2));
-        return { x, y };
-    });
-
-    const grad = ctx.createLinearGradient(0, pad, 0, h - pad);
-    if (isUp){
-        grad.addColorStop(0, 'rgba(77,255,171,0.28)');
-        grad.addColorStop(1, 'rgba(77,255,171,0.02)');
-    } else {
-        grad.addColorStop(0, 'rgba(255,99,125,0.28)');
-        grad.addColorStop(1, 'rgba(255,99,125,0.02)');
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, h - pad);
-    points.forEach((p, i) => {
-        if (i === 0) ctx.lineTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-    });
-    ctx.lineTo(points[points.length - 1].x, h - pad);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    ctx.beginPath();
-    points.forEach((p, i) => {
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-    });
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = isUp ? '#4dffab' : '#ff637d';
-    ctx.stroke();
-
-    const last = points[points.length - 1];
-    ctx.beginPath();
-    ctx.arc(last.x, last.y, 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = isUp ? '#4dffab' : '#ff637d';
-    ctx.fill();
-}
-
-function refreshChartButtons(){
-    document.querySelectorAll('#marketSymbolBar .quick-chip').forEach(btn => {
-        const txt = btn.textContent.trim().toUpperCase();
-        const isActive =
-            (txt === 'GOLD' && donnaChartSymbol === 'GOLD') ||
-            (txt === 'OIL' && donnaChartSymbol === 'OIL') ||
-            (txt === 'BTC' && donnaChartSymbol === 'BTC') ||
-            txt === donnaChartSymbol;
-
-        btn.style.background = isActive ? 'linear-gradient(135deg,var(--blue),var(--blue2))' : 'rgba(255,255,255,.04)';
-        btn.style.color = '#fff';
-    });
-}
-
-function updateMarketChartModule(data){
-    const payload = getChartPayload(donnaChartSymbol, donnaChartRange, data);
-
-    setText('chart_symbol_label', `${donnaChartSymbol} / ${payload.label}`);
-    setText('chart_price', payload.price);
-    setText('chart_change', payload.change);
-
-    const changeEl = document.getElementById('chart_change');
-    if (changeEl){
-        changeEl.style.color = payload.isUp ? 'var(--low)' : 'var(--high)';
-    }
-
-    setText(
-        'chart_momentum',
-        payload.isUp ? 'Constructive' : 'Defensive'
-    );
-
-    const riskTone =
-        String(data?.macro_risk || '').toLowerCase() === 'high' ? 'High Alert' :
-        String(data?.headline_risk || '').toLowerCase() === 'high' ? 'Headline Sensitive' :
-        String(data?.market_news_risk || '').toLowerCase() === 'high' ? 'Catalyst Active' :
-        'Balanced';
-
-    setText('chart_risk_tone', riskTone);
-    setText('chart_driver', data?.dominant_driver || 'Balanced Conditions');
-    setText(
-        'chart_summary',
-        `${payload.label} on ${donnaChartRange}: ${data?.market_summary || 'Donna is analyzing live market conditions.'}`
-    );
-
-    drawDonnaChart(payload.series, payload.isUp);
-    refreshChartButtons();
-}
-
-function setChartSymbol(symbol){
-    donnaChartSymbol = symbol;
-    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
-}
-
-function setChartRange(range){
-    donnaChartRange = range;
-    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
-}
-
-window.addEventListener('resize', () => {
-    if (window.__lastDashboardData) updateMarketChartModule(window.__lastDashboardData);
-});
-async function refreshDashboard(){
-    try{
-        const res = await fetch('/dashboard-data');
-        const data = await res.json();
-        window.__lastDashboardData = data;
-
-        const status = String(data.status || 'online').toUpperCase();
-        const assistant = data.assistant || {};
-        const alerts = data.alerts || [];
-
-        setText('status_text', status);
-        applyRisk('macro_risk', data.macro_risk);
-        applyRisk('headline_risk', data.headline_risk);
-        applyRisk('market_news_risk', data.market_news_risk);
-
-        const nextEvent = data.next_event || 'NONE';
-        const mins = data.minutes_to_event;
-
-        setText('next_event', nextEvent);
-        setText('next_event_hero', nextEvent);
-        setText('next_event_hero_sub', formatTimeText(mins));
-        setText('minutes_to_event', formatTimeText(mins));
-
-        setText('daily_focus', assistant.daily_focus || 'No focus set');
-        setText('daily_focus_hero', assistant.daily_focus || 'No focus set');
-
-        setText('donna_time_ny', data.donna_time_ny || '-');
-        setText('donna_time_ny_panel', data.donna_time_ny || '-');
-        setText('donna_time_utc', data.donna_time_utc || '-');
-        setText('donna_day', data.donna_day || '-');
-        setText('donna_session', data.donna_session || '-');
-        setText('event_phase', data.event_phase || '-');
-        setText('event_phase_panel', data.event_phase || '-');
-        setText('event_time_ny', data.event_time_ny || '-');
-        setText('session_chip_val', data.donna_session || '-');
-
-        const heroHead = `System online. ${String(data.macro_risk || 'low').toUpperCase()} macro risk, ${String(data.headline_risk || 'low').toUpperCase()} headline risk, ${String(data.market_news_risk || 'low').toUpperCase()} market risk.`;
-        setText('hero_headline', heroHead);
-
-        const hasWarnings = data.active_warnings && data.active_warnings.length;
-        const heroSub = hasWarnings
-            ? 'Active warnings are live. Donna is monitoring macro timing, headline shock, market catalyst pressure, and session context.'
-            : 'No major live warning pressure. Donna is monitoring time, events, signals, and operator state.';
-        setText('hero_sub', heroSub);
-
-        renderWarnings(data.active_warnings || [], 'warnings');
-        renderWarnings(data.active_warnings || [], 'warning_pressure_news');
-        renderAlerts(alerts, 'alerts_feed_dashboard');
-        renderAlerts(alerts, 'alerts_feed_trading');
-        renderTasks(assistant.tasks || []);
-        renderReminders(assistant.reminders || []);
-
-        setText('telegram_mode', 'LIVE');
-        setText('alert_count', String(alerts.length || 0));
-        setText('macro_bias_trading', String(data.macro_risk || '-').toUpperCase());
-        setText('headline_bias_trading', String(data.headline_risk || '-').toUpperCase());
-        setText('market_bias_trading', String(data.market_news_risk || '-').toUpperCase());
-
-        setText('headline_severity_dash', data.headline_severity || '-');
-        setText('market_severity_dash', data.last_market_severity || '-');
-        setText('dominant_driver', data.dominant_driver || '-');
-        setText('secondary_driver', data.secondary_driver || '-');
-        setText('market_regime', data.market_regime || '-');
-        setText('market_threat', data.market_threat || '-');
-        setText('market_confidence', data.market_confidence || '-');
-        setText('market_summary', data.market_summary || 'No driver summary available.');
-        setText('last_updated', data.last_updated || '-');
-
-        setText('headline_title', data.last_headline || 'No major headline detected');
-        setText('headline_note', data.headline_guidance || 'Headline guidance unavailable.');
-        setText('headline_source', 'Source: ' + (data.headline_source || '-'));
-
-        setText('market_title', data.last_market_headline || 'No major market catalyst detected');
-        setText('market_note', data.last_market_guidance || 'Market guidance unavailable.');
-        setText('market_severity_news', data.last_market_severity || '-');
-        setText('market_symbol_news', data.last_market_symbol || '-');
-
-        setText('last_headline', data.last_headline || 'No recent headline');
-        setText('last_market_headline', data.last_market_headline || 'No recent market headline');
-
-        setText('macro_news', String(data.macro_risk || '-').toUpperCase());
-        setText('headline_news', String(data.headline_risk || '-').toUpperCase());
-        setText('market_news', String(data.market_news_risk || '-').toUpperCase());
-
-        const macroTitle = data.next_event || 'No major event loaded';
-        let macroNote = 'Donna is monitoring upcoming macro volatility windows.';
-        if (data.event_phase === 'LIVE'){
-            macroNote = 'Macro event live. Volatility sensitivity elevated.';
-        } else if (data.event_phase === 'IMMINENT'){
-            macroNote = 'High-impact event is imminent. Reduce size and avoid random entries.';
-        } else if (data.event_phase === 'APPROACHING'){
-            macroNote = `${mins} minutes to next major event.`;
-        } else if (data.event_phase === 'POST_EVENT_COOLDOWN'){
-            macroNote = 'Recent event released. Cooldown volatility window is still active.';
-        } else if (mins !== null && mins !== undefined){
-            macroNote = `${mins} minutes to next major event.`;
+    document.getElementById("chat_input")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendDonnaChat();
         }
+    });
+}
 
-        setText('news_macro_title', macroTitle);
-        setText('news_macro_note', macroNote);
-        setText('news_next_event', data.next_event || '-');
-        setText('news_minutes_to_event', data.minutes_to_event !== null && data.minutes_to_event !== undefined ? String(data.minutes_to_event) : '-');
-        setText('event_phase_news', data.event_phase || '-');
-        setText('event_time_news', data.event_time_ny || '-');
-        setText('session_news', data.donna_session || '-');
+async function refreshDashboard() {
+    try {
+        const data = await api("/dashboard-data");
+        latestData = data;
 
-        setText('dominant_driver_news', data.dominant_driver || '-');
-        setText('secondary_driver_news', data.secondary_driver || '-');
-        setText('market_regime_news', data.market_regime || '-');
-        setText('market_threat_news', data.market_threat || '-');
-        setText('market_confidence_news', data.market_confidence || '-');
-        setText('market_summary_news', data.market_summary || 'No driver summary available.');
+        setText("status_text", String(data.status || "online").toUpperCase());
+        setText("session_chip_val", data.donna_session || "-");
 
-        setText('market_card_spx', data.market_regime || 'Neutral');
-        setText('market_card_spx_sub', data.market_summary || 'Broad market pulse');
-        setText('market_card_nq', data.dominant_driver || 'Balanced Conditions');
-        setText('market_card_nq_sub', data.secondary_driver || 'Growth and tech pressure');
+        setText("hero_headline", data.dominant_driver ? `${data.dominant_driver} is leading current conditions.` : "System online.");
+        setText("hero_sub", data.market_summary || "Donna is monitoring live conditions.");
+        setText("daily_focus_hero", data.assistant?.daily_focus || "No focus set.");
+        setText("donna_time_ny", data.donna_time_ny || "-");
+        setText("event_phase", data.event_phase || "-");
+        setText("next_event_hero", data.next_event || "No event loaded");
+        setText("next_event_hero_sub", data.minutes_to_event != null ? `${data.minutes_to_event} minutes to event` : "No timed event loaded");
 
-        const mood =
-            String(data.macro_risk || '').toLowerCase() === 'high' ? 'High Alert' :
-            String(data.headline_risk || '').toLowerCase() === 'high' ? 'Headline Sensitive' :
-            String(data.market_news_risk || '').toLowerCase() === 'high' ? 'Catalyst Active' :
-            'Constructive';
+        setRiskValue("macro_risk", data.macro_risk);
+        setRiskValue("headline_risk", data.headline_risk);
+        setRiskValue("market_news_risk", data.market_news_risk);
 
-        setText('market_mood', mood);
-        setText('market_mood_sub', data.market_threat || 'Live intelligence read');
+        setText("next_event", data.next_event || "None");
+        setText("minutes_to_event", data.minutes_to_event != null ? `${data.minutes_to_event} minutes remaining` : "No timed event loaded");
 
-        const marketLink = document.getElementById('market_link');
-        if (data.last_market_url){
-            marketLink.style.display = 'inline-block';
-            marketLink.href = data.last_market_url;
-        } else {
-            marketLink.style.display = 'none';
-            marketLink.href = '#';
-        }
-        updateMarketChartModule(data);
-        buildTicker(data);
+        renderWarnings(data.active_warnings, "warnings");
+        renderWarnings(data.active_warnings, "warning_pressure_news");
 
-    }catch(err){
-        console.log(err);
+        setText("donna_time_ny_panel", data.donna_time_ny || "-");
+        setText("donna_time_utc", data.donna_time_utc || "-");
+        setText("donna_day", data.donna_day || "-");
+        setText("donna_session", data.donna_session || "-");
+        setText("event_phase_panel", data.event_phase || "-");
+        setText("event_time_ny", data.event_time_ny || "-");
+
+        renderAlerts(data.alerts || [], "alerts_feed_dashboard");
+        renderAlerts(data.alerts || [], "alerts_feed_trading");
+
+        setText("dominant_driver", data.dominant_driver || "-");
+        setText("secondary_driver", data.secondary_driver || "-");
+        setText("market_regime", data.market_regime || "-");
+        setText("market_threat", data.market_threat || "-");
+        setText("market_confidence", data.market_confidence || "-");
+        setText("market_summary", data.market_summary || "-");
+
+        setText("telegram_mode", data.telegram_alert_mode || "-");
+        setText("alert_count", String((data.alerts || []).length));
+        setText("macro_bias_trading", data.macro_risk || "-");
+        setText("headline_bias_trading", data.headline_risk || "-");
+        setText("market_bias_trading", data.market_news_risk || "-");
+
+        setText("headline_title", data.last_headline || "No major headline detected");
+        setText("headline_note", data.headline_guidance || "Headline guidance unavailable.");
+        setText("headline_source", "Source: " + (data.headline_source || "-"));
+
+        setText("dominant_driver_news", data.dominant_driver || "-");
+        setText("secondary_driver_news", data.secondary_driver || "-");
+        setText("market_regime_news", data.market_regime || "-");
+        setText("market_threat_news", data.market_threat || "-");
+        setText("market_confidence_news", data.market_confidence || "-");
+        setText("market_summary_news", data.market_summary || "-");
+
+        setText("news_macro_title", data.next_event || "No major event loaded");
+        setText("news_macro_note", data.minutes_to_event != null ? `${data.minutes_to_event} minutes until event window.` : "Donna is monitoring upcoming macro volatility windows.");
+        setText("news_next_event", data.next_event || "-");
+        setText("news_minutes_to_event", data.minutes_to_event != null ? String(data.minutes_to_event) : "-");
+        setText("event_phase_news", data.event_phase || "-");
+        setText("session_news", data.donna_session || "-");
+        setText("event_time_news", data.event_time_ny || "-");
+
+        setText("market_title", data.last_market_headline || "No major market catalyst detected");
+        setText("market_note", data.last_market_guidance || "Market guidance unavailable.");
+        setText("market_severity_news", data.last_market_severity || "-");
+        setText("market_symbol_news", data.last_market_symbol || "-");
+        setText("headline_news", data.headline_risk || "-");
+        setText("market_news", data.market_news_risk || "-");
+
+        setText("last_headline", data.last_headline || "No recent headline");
+        setText("last_market_headline", data.last_market_headline || "No recent market headline");
+
+        renderList(data.assistant?.tasks || [], "tasks_list", "/assistant/delete-task", "task");
+        renderList(data.assistant?.reminders || [], "reminders_list", "/assistant/delete-reminder", "reminder");
+
+        setText("footer_updated", "last update: " + (data.last_updated || new Date().toISOString()));
+
+        const tickerPieces = [];
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Macro:</span> ${escapeHtml(String(data.macro_risk || "-").toUpperCase())}</div>`);
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Headline:</span> ${escapeHtml(String(data.headline_risk || "-").toUpperCase())}</div>`);
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Market:</span> ${escapeHtml(String(data.market_news_risk || "-").toUpperCase())}</div>`);
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Driver:</span> ${escapeHtml(data.dominant_driver || "-")}</div>`);
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Threat:</span> ${escapeHtml(data.market_threat || "-")}</div>`);
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Event:</span> ${escapeHtml(data.next_event || "None")}</div>`);
+        tickerPieces.push(`<div class="ticker-item"><span class="ticker-strong">Session:</span> ${escapeHtml(data.donna_session || "-")}</div>`);
+        document.getElementById("ticker_track").innerHTML = tickerPieces.join("");
+
+    } catch (err) {
+        console.error(err);
+        setText("status_text", "OFFLINE");
     }
 }
 
-document.getElementById('chat_input').addEventListener('keydown', async function(e){
-    if(e.key === 'Enter' && !e.shiftKey){
-        e.preventDefault();
-        await sendDonnaChat();
-    }
-});
-
+bindEvents();
 refreshDashboard();
 setInterval(refreshDashboard, 15000);
 </script>
 </body>
 </html>
 """
-# ==================================================
-# WEBHOOK
-# ==================================================
-@app.post("/webhook")
-async def webhook(request: Request, background_tasks: BackgroundTasks):
-    try:
-        body = await request.body()
-        text = body.decode("utf-8").strip()
 
-        if not text:
-            raise HTTPException(status_code=400, detail="Empty body")
-
-        payload = json.loads(text)
-        background_tasks.add_task(process_signal, payload)
-
-        return {
-            "status": "received",
-            "ticker": payload.get("ticker", "UNKNOWN"),
-            "signal": payload.get("signal", "UNKNOWN"),
-        }
-
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    return HTMLResponse(content=DASHBOARD_HTML)
