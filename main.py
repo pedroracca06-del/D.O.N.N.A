@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import asyncio
 import os
 import json
@@ -35,7 +36,7 @@ if not TELEGRAM_CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_CHAT_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-app = FastAPI(title="DONNA MASTER CORE V4")
+app = FastAPI(title="DONNA MASTER CORE RECOVERY")
 
 # ==================================================
 # FILES
@@ -43,6 +44,33 @@ app = FastAPI(title="DONNA MASTER CORE V4")
 RISK_STATE_FILE = BASE_DIR / "donna_risk_state.json"
 ALERTS_FILE = BASE_DIR / "donna_alert_history.json"
 ASSISTANT_FILE = BASE_DIR / "donna_assistant_state.json"
+
+# ==================================================
+# TIME
+# ==================================================
+NY_TZ = ZoneInfo("America/New_York")
+UTC_TZ = ZoneInfo("UTC")
+
+def local_now_ny() -> datetime:
+    return datetime.now(NY_TZ)
+
+def local_now_utc() -> datetime:
+    return datetime.now(UTC_TZ)
+
+def local_day_name() -> str:
+    return local_now_ny().strftime("%A")
+
+def local_session_label(dt: datetime | None = None) -> str:
+    dt = dt or local_now_ny()
+    minutes = dt.hour * 60 + dt.minute
+
+    if minutes >= 19 * 60 or minutes < 3 * 60:
+        return "ASIA"
+    if 3 * 60 <= minutes < 9 * 60 + 30:
+        return "LONDON"
+    if 9 * 60 + 30 <= minutes < 16 * 60:
+        return "NEW_YORK_CASH"
+    return "OFF_HOURS"
 
 # ==================================================
 # LOOP TIMERS
@@ -135,6 +163,7 @@ Action rules:
 - Never return markdown.
 - Never return extra text outside JSON.
 """.strip()
+
 # ==================================================
 # TELEGRAM
 # ==================================================
@@ -151,11 +180,9 @@ def send_telegram_message(text: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-
 def should_send_trade_to_telegram(parsed: dict) -> bool:
     if TELEGRAM_ALERT_MODE == "off":
         return False
-
     if TELEGRAM_ALERT_MODE == "all":
         return True
 
@@ -181,10 +208,8 @@ def safe_float(value, default=0.0):
     except Exception:
         return default
 
-
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
 
 def normalize_payload(payload: dict) -> dict:
     return {
@@ -204,7 +229,6 @@ def normalize_payload(payload: dict) -> dict:
         "score": str(payload.get("score", "0")),
         "quality": str(payload.get("quality", "NA")).upper(),
     }
-
 
 def parse_json_loose(text: str, fallback: dict) -> dict:
     if not text:
@@ -273,7 +297,6 @@ def load_risk_state() -> dict:
     except Exception:
         return default_state
 
-
 def load_alert_history() -> list:
     try:
         if not ALERTS_FILE.exists():
@@ -286,11 +309,9 @@ def load_alert_history() -> list:
     except Exception:
         return []
 
-
 def save_alert_history(alerts: list) -> None:
     with open(ALERTS_FILE, "w", encoding="utf-8") as f:
         json.dump(alerts, f, indent=2)
-
 
 def add_alert_to_history(data: dict, parsed: dict) -> None:
     alerts = load_alert_history()
@@ -310,7 +331,6 @@ def add_alert_to_history(data: dict, parsed: dict) -> None:
     alerts.insert(0, entry)
     alerts = alerts[:30]
     save_alert_history(alerts)
-
 
 def load_assistant_state() -> dict:
     default_state = {
@@ -350,7 +370,6 @@ def load_assistant_state() -> dict:
         return merged
     except Exception:
         return default_state
-
 
 def save_assistant_state(state: dict) -> None:
     state["last_updated"] = utc_now_iso()
@@ -420,7 +439,6 @@ def pre_verdict_engine(data: dict) -> str:
         return "CAUTION"
     return "SKIP"
 
-
 def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
     macro = str(risk.get("macro_risk", "low")).lower()
     headline = str(risk.get("headline_risk", "low")).lower()
@@ -458,7 +476,6 @@ def apply_fusion_overlay(base_verdict: str, risk: dict, data: dict) -> str:
         return "SKIP"
 
     return base_verdict
-
 
 def confidence_bias(risk: dict, data: dict) -> str:
     macro = str(risk.get("macro_risk", "low")).lower()
@@ -577,11 +594,15 @@ Fusion Verdict: {fusion}
 Confidence Guidance: {confidence_note}
 """.strip()
 
-
 def summarize_system_context() -> str:
     risk = load_risk_state()
     alerts = load_alert_history()[:5]
     assistant = load_assistant_state()
+
+    donna_time_ny = risk.get("donna_time_ny") or local_now_ny().isoformat()
+    donna_time_utc = risk.get("donna_time_utc") or local_now_utc().isoformat()
+    donna_day = risk.get("donna_day") or local_day_name()
+    donna_session = risk.get("donna_session") or local_session_label()
 
     alerts_text = []
     for a in alerts:
@@ -594,10 +615,10 @@ def summarize_system_context() -> str:
 Current Donna state:
 
 Time Engine:
-- Donna Time NY: {risk.get("donna_time_ny", "unknown")}
-- Donna Time UTC: {risk.get("donna_time_utc", "unknown")}
-- Donna Day: {risk.get("donna_day", "unknown")}
-- Donna Session: {risk.get("donna_session", "unknown")}
+- Donna Time NY: {donna_time_ny}
+- Donna Time UTC: {donna_time_utc}
+- Donna Day: {donna_day}
+- Donna Session: {donna_session}
 
 Macro Timing:
 - Next Event: {risk.get("next_event", "none")}
@@ -646,7 +667,6 @@ Risk: {result['risk']}
 Execution: {result['execution']}
 Summary: {result['summary']}"""
 
-
 def apply_assistant_action(action: str, value: str) -> dict:
     state = load_assistant_state()
 
@@ -656,21 +676,17 @@ def apply_assistant_action(action: str, value: str) -> dict:
     if action == "set_focus" and value:
         state["daily_focus"] = value
         save_assistant_state(state)
-
     elif action == "add_task" and value:
         state["tasks"].append(value)
         state["tasks"] = state["tasks"][:20]
         save_assistant_state(state)
-
     elif action == "add_reminder" and value:
         state["reminders"].append(value)
         state["reminders"] = state["reminders"][:20]
         save_assistant_state(state)
-
     elif action == "clear_tasks":
         state["tasks"] = []
         save_assistant_state(state)
-
     elif action == "clear_reminders":
         state["reminders"] = []
         save_assistant_state(state)
@@ -720,7 +736,6 @@ async def news_loop():
             print("Donna News loop error:", str(e))
         await asyncio.sleep(NEWS_POLL_SECONDS)
 
-
 async def headline_loop():
     while True:
         try:
@@ -728,7 +743,6 @@ async def headline_loop():
         except Exception as e:
             print("Headline loop error:", str(e))
         await asyncio.sleep(HEADLINE_POLL_SECONDS)
-
 
 async def finnhub_loop():
     while True:
@@ -743,37 +757,284 @@ async def finnhub_loop():
 # ==================================================
 @app.on_event("startup")
 async def startup():
-    await asyncio.to_thread(process_news_guard_cycle)
-    await asyncio.to_thread(process_headlines_cycle)
-    await asyncio.to_thread(process_finnhub_cycle)
+    try:
+        await asyncio.to_thread(process_news_guard_cycle)
+    except Exception as e:
+        print("Startup news init error:", str(e))
+
+    try:
+        await asyncio.to_thread(process_headlines_cycle)
+    except Exception as e:
+        print("Startup headlines init error:", str(e))
+
+    try:
+        await asyncio.to_thread(process_finnhub_cycle)
+    except Exception as e:
+        print("Startup finnhub init error:", str(e))
 
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
 
 # ==================================================
-# ROUTES - DATA
+# ROUTES - BASIC
 # ==================================================
 @app.get("/")
 async def root():
     return {"status": "Donna is online"}
 
+@app.head("/")
+async def root_head():
+    return Response(status_code=200)
 
+# ==================================================
+# ROUTES - DATA
+# ==================================================
 @app.get("/risk-state")
 async def risk_state():
     return load_risk_state()
-
 
 @app.get("/alerts-data")
 async def alerts_data():
     return {"alerts": load_alert_history()}
 
-
 @app.get("/assistant-data")
 async def assistant_data():
     return load_assistant_state()
 
+@app.get("/dashboard-data")
+async def dashboard_data():
+    state = load_risk_state()
+    alerts = load_alert_history()
+    assistant = load_assistant_state()
 
+    return {
+        "status": "online",
+        "macro_risk": state.get("macro_risk", "low"),
+        "headline_risk": state.get("headline_risk", "low"),
+        "market_news_risk": state.get("market_news_risk", "low"),
+        "active_warnings": state.get("active_warnings", []),
+        "next_event": state.get("next_event", ""),
+        "minutes_to_event": state.get("minutes_to_event", None),
+        "last_headline": state.get("last_headline", ""),
+        "last_market_headline": state.get("last_market_headline", ""),
+        "last_updated": state.get("last_updated", ""),
+        "headline_severity": state.get("headline_severity", ""),
+        "headline_guidance": state.get("headline_guidance", ""),
+        "headline_source": state.get("headline_source", ""),
+        "last_market_symbol": state.get("last_market_symbol", ""),
+        "last_market_severity": state.get("last_market_severity", ""),
+        "last_market_guidance": state.get("last_market_guidance", ""),
+        "last_market_url": state.get("last_market_url", ""),
+        "donna_time_utc": state.get("donna_time_utc") or local_now_utc().isoformat(),
+        "donna_time_ny": state.get("donna_time_ny") or local_now_ny().isoformat(),
+        "donna_day": state.get("donna_day") or local_day_name(),
+        "donna_session": state.get("donna_session") or local_session_label(),
+        "event_phase": state.get("event_phase", ""),
+        "event_time_ny": state.get("event_time_ny", ""),
+        "alerts": alerts[:10],
+        "assistant": assistant,
+    }
+
+@app.get("/check-env")
+async def check_env():
+    return {
+        "openai_key_found": bool(OPENAI_API_KEY),
+        "telegram_found": bool(TELEGRAM_BOT_TOKEN),
+        "newsapi_found": bool(os.getenv("NEWSAPI_KEY")),
+        "finnhub_found": bool(os.getenv("FINNHUB_API_KEY")),
+        "risk_file_exists": RISK_STATE_FILE.exists(),
+        "alerts_file_exists": ALERTS_FILE.exists(),
+        "assistant_file_exists": ASSISTANT_FILE.exists(),
+        "telegram_alert_mode": TELEGRAM_ALERT_MODE,
+        "model": OPENAI_MODEL,
+    }
+
+@app.get("/test-telegram")
+async def test_telegram():
+    return send_telegram_message("DONNA TEST MESSAGE")
+
+# ==================================================
+# ROUTES - ASSISTANT ACTIONS
+# ==================================================
+@app.post("/assistant/set-focus")
+async def assistant_set_focus(request: Request):
+    body = await request.json()
+    value = str(body.get("daily_focus", "")).strip()
+
+    if not value:
+        raise HTTPException(status_code=400, detail="daily_focus is required")
+
+    state = load_assistant_state()
+    state["daily_focus"] = value
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/add-task")
+async def assistant_add_task(request: Request):
+    body = await request.json()
+    value = str(body.get("task", "")).strip()
+
+    if not value:
+        raise HTTPException(status_code=400, detail="task is required")
+
+    state = load_assistant_state()
+    state["tasks"].append(value)
+    state["tasks"] = state["tasks"][:20]
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/add-reminder")
+async def assistant_add_reminder(request: Request):
+    body = await request.json()
+    value = str(body.get("reminder", "")).strip()
+
+    if not value:
+        raise HTTPException(status_code=400, detail="reminder is required")
+
+    state = load_assistant_state()
+    state["reminders"].append(value)
+    state["reminders"] = state["reminders"][:20]
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/delete-task")
+async def assistant_delete_task(request: Request):
+    body = await request.json()
+    index = body.get("index", None)
+
+    if index is None:
+        raise HTTPException(status_code=400, detail="index is required")
+
+    state = load_assistant_state()
+
+    try:
+        index = int(index)
+    except Exception:
+        raise HTTPException(status_code=400, detail="index must be integer")
+
+    if index < 0 or index >= len(state["tasks"]):
+        raise HTTPException(status_code=400, detail="invalid task index")
+
+    state["tasks"].pop(index)
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/delete-reminder")
+async def assistant_delete_reminder(request: Request):
+    body = await request.json()
+    index = body.get("index", None)
+
+    if index is None:
+        raise HTTPException(status_code=400, detail="index is required")
+
+    state = load_assistant_state()
+
+    try:
+        index = int(index)
+    except Exception:
+        raise HTTPException(status_code=400, detail="index must be integer")
+
+    if index < 0 or index >= len(state["reminders"]):
+        raise HTTPException(status_code=400, detail="invalid reminder index")
+
+    state["reminders"].pop(index)
+    save_assistant_state(state)
+
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/clear-tasks")
+async def assistant_clear_tasks():
+    state = load_assistant_state()
+    state["tasks"] = []
+    save_assistant_state(state)
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/clear-reminders")
+async def assistant_clear_reminders():
+    state = load_assistant_state()
+    state["reminders"] = []
+    save_assistant_state(state)
+    return {"status": "ok", "assistant": state}
+
+@app.post("/assistant/chat")
+async def assistant_chat(request: Request):
+    body = await request.json()
+    message = str(body.get("message", "")).strip()
+
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    context = summarize_system_context()
+
+    fallback = {
+        "action": "none",
+        "value": "",
+        "reply": "State check complete. No action taken.",
+    }
+
+    try:
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            instructions=DONNA_ASSISTANT_PROMPT,
+            input=f"User message:\n{message}\n\nSystem context:\n{context}",
+            max_output_tokens=220,
+        )
+
+        parsed = parse_json_loose(response.output_text, fallback)
+
+        action = str(parsed.get("action", "none")).strip().lower()
+        value = str(parsed.get("value", "")).strip()
+        reply = str(parsed.get("reply", "")).strip()
+
+        risk = load_risk_state()
+
+        if not reply:
+            event_phase = str(risk.get("event_phase", "")).upper()
+            minutes_to_event = risk.get("minutes_to_event", None)
+            donna_session = str(risk.get("donna_session", "unknown"))
+
+            if event_phase == "LIVE":
+                reply = "Macro event is live. Volatility is active now. Stand down until reaction becomes clear."
+            elif event_phase == "IMMINENT":
+                reply = f"High-impact event is close. {minutes_to_event} minutes remaining. Reduce size and avoid random entries."
+            elif event_phase == "APPROACHING":
+                reply = f"Event risk is building. {minutes_to_event} minutes to the next macro event. Stay selective."
+            elif event_phase == "POST_EVENT_COOLDOWN":
+                reply = "Recent macro release is still affecting conditions. Treat this as a cooldown volatility window."
+            else:
+                reply = f"Donna time check complete. Session: {donna_session}. No direct action taken."
+
+        updated_state = apply_assistant_action(action, value)
+
+        return {
+            "status": "ok",
+            "action": action,
+            "value": value,
+            "reply": reply,
+            "assistant": updated_state,
+            "risk": load_risk_state(),
+            "alerts": load_alert_history()[:10],
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "action": "none",
+            "value": "",
+            "reply": f"Assistant error: {str(e)}",
+            "assistant": load_assistant_state(),
+            "risk": load_risk_state(),
+            "alerts": load_alert_history()[:10],
+        }
+
+# ==================================================
+# DASHBOARD
+# ==================================================
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return """
@@ -782,7 +1043,7 @@ async def dashboard():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D.O.N.N.A V2</title>
+<title>D.O.N.N.A Recovery</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
@@ -792,16 +1053,13 @@ async def dashboard():
     --panel:rgba(15,23,38,.82);
     --panel2:rgba(18,28,46,.96);
     --line:rgba(255,255,255,.07);
-    --line-strong:rgba(255,255,255,.12);
     --text:#eef4ff;
     --muted:#8ea4c5;
-    --muted2:#6f84a6;
     --low:#4dffab;
     --medium:#ffd24f;
     --high:#ff637d;
     --blue:#4f8cff;
     --blue2:#2b5fd9;
-    --purple:#8b7dff;
     --chip:rgba(255,255,255,.04);
     --shadow:0 14px 40px rgba(0,0,0,.34);
     --radius:22px;
@@ -825,489 +1083,158 @@ body{
     flex-wrap:wrap;
     margin-bottom:16px;
 }
-.brand h1{
-    font-size:42px;
-    line-height:1;
-    letter-spacing:4px;
-    font-weight:900;
-}
-.brand p{
-    margin-top:8px;
-    color:var(--muted);
-    font-size:14px;
-    letter-spacing:.4px;
-}
-.top-right{
-    display:flex;
-    flex-direction:column;
-    align-items:flex-end;
-    gap:12px;
-}
+.brand h1{font-size:42px;line-height:1;letter-spacing:4px;font-weight:900;}
+.brand p{margin-top:8px;color:var(--muted);font-size:14px;letter-spacing:.4px;}
+.top-right{display:flex;flex-direction:column;align-items:flex-end;gap:12px;}
 .status-strip{
-    display:flex;
-    align-items:center;
-    gap:12px;
-    padding:10px 16px;
-    border-radius:999px;
-    background:rgba(77,255,171,.08);
-    border:1px solid rgba(77,255,171,.22);
-    box-shadow:var(--shadow);
+    display:flex;align-items:center;gap:12px;padding:10px 16px;border-radius:999px;
+    background:rgba(77,255,171,.08);border:1px solid rgba(77,255,171,.22);box-shadow:var(--shadow);
 }
 .pulse-dot{
-    width:11px;height:11px;border-radius:50%;
-    background:var(--low);
-    box-shadow:0 0 16px rgba(77,255,171,.8);
-    animation:pulse 1.6s infinite;
+    width:11px;height:11px;border-radius:50%;background:var(--low);
+    box-shadow:0 0 16px rgba(77,255,171,.8);animation:pulse 1.6s infinite;
 }
 @keyframes pulse{
     0%{transform:scale(.9);opacity:.9;}
     70%{transform:scale(1.22);opacity:.35;}
     100%{transform:scale(.95);opacity:.9;}
 }
-.status-text{
-    font-weight:800;
-    font-size:13px;
-    letter-spacing:.8px;
-    color:#a5ffc8;
-}
-.navbar{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-}
+.status-text{font-weight:800;font-size:13px;letter-spacing:.8px;color:#a5ffc8;}
+.navbar{display:flex;gap:10px;flex-wrap:wrap;}
 .nav-btn{
-    border:none;
-    cursor:pointer;
-    border-radius:14px;
-    padding:12px 16px;
-    font-weight:800;
-    font-size:13px;
-    color:#d6e4fb;
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.06);
-    transition:.18s ease;
+    border:none;cursor:pointer;border-radius:14px;padding:12px 16px;font-weight:800;font-size:13px;
+    color:#d6e4fb;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);transition:.18s ease;
 }
 .nav-btn:hover{background:rgba(255,255,255,.08);}
-.nav-btn.active{
-    background:linear-gradient(135deg,var(--blue),var(--blue2));
-    color:white;
-    box-shadow:var(--shadow);
-}
+.nav-btn.active{background:linear-gradient(135deg,var(--blue),var(--blue2));color:white;box-shadow:var(--shadow);}
 .live-strip{
-    display:grid;
-    grid-template-columns:220px 1fr 220px;
-    gap:12px;
-    align-items:center;
-    margin-bottom:16px;
+    display:grid;grid-template-columns:220px 1fr 220px;gap:12px;align-items:center;margin-bottom:16px;
 }
 .live-pill{
     background:linear-gradient(135deg, rgba(255,99,125,.16), rgba(255,99,125,.08));
-    border:1px solid rgba(255,99,125,.22);
-    border-radius:16px;
-    padding:14px 16px;
-    font-size:12px;
-    font-weight:900;
-    letter-spacing:1.4px;
-    text-transform:uppercase;
-    color:#ffc0cc;
+    border:1px solid rgba(255,99,125,.22);border-radius:16px;padding:14px 16px;
+    font-size:12px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase;color:#ffc0cc;
 }
 .ticker{
-    position:relative;
-    overflow:hidden;
-    border-radius:16px;
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.07);
-    min-height:52px;
-    display:flex;
-    align-items:center;
-    box-shadow:var(--shadow);
+    position:relative;overflow:hidden;border-radius:16px;background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.07);min-height:52px;display:flex;align-items:center;box-shadow:var(--shadow);
 }
 .ticker-track{
-    display:inline-flex;
-    white-space:nowrap;
-    padding-left:100%;
-    animation:tickerMove 24s linear infinite;
-    will-change:transform;
+    display:inline-flex;white-space:nowrap;padding-left:100%;animation:tickerMove 24s linear infinite;will-change:transform;
 }
 @keyframes tickerMove{
     0%{transform:translateX(0);}
     100%{transform:translateX(-100%);}
 }
-.ticker-item{
-    padding-right:50px;
-    font-size:14px;
-    color:#dce8fb;
-}
-.ticker-strong{
-    font-weight:800;
-    color:#ffffff;
-}
+.ticker-item{padding-right:50px;font-size:14px;color:#dce8fb;}
+.ticker-strong{font-weight:800;color:#ffffff;}
 .session-chip{
     background:linear-gradient(135deg, rgba(79,140,255,.16), rgba(79,140,255,.08));
-    border:1px solid rgba(79,140,255,.22);
-    border-radius:16px;
-    padding:14px 16px;
-    text-align:center;
-    box-shadow:var(--shadow);
+    border:1px solid rgba(79,140,255,.22);border-radius:16px;padding:14px 16px;text-align:center;box-shadow:var(--shadow);
 }
-.session-chip .top{
-    color:var(--muted);
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:1.2px;
-}
-.session-chip .val{
-    margin-top:5px;
-    font-size:16px;
-    font-weight:900;
-}
-.hero{
-    display:grid;
-    grid-template-columns:1.45fr 1fr;
-    gap:16px;
-    margin-bottom:18px;
-}
+.session-chip .top{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1.2px;}
+.session-chip .val{margin-top:5px;font-size:16px;font-weight:900;}
+.hero{display:grid;grid-template-columns:1.45fr 1fr;gap:16px;margin-bottom:18px;}
 .panel,.stat-card{
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    padding:20px;
-    box-shadow:var(--shadow);
-    backdrop-filter:blur(10px);
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px;box-shadow:var(--shadow);backdrop-filter:blur(10px);
 }
 .panel{background:var(--panel2);}
-.hero-title{
-    font-size:12px;
-    text-transform:uppercase;
-    letter-spacing:1.8px;
-    color:var(--muted);
-    margin-bottom:14px;
-}
-.hero-headline{
-    font-size:34px;
-    font-weight:900;
-    line-height:1.08;
-    margin-bottom:12px;
-}
-.hero-sub{
-    color:var(--muted);
-    line-height:1.55;
-    font-size:15px;
-}
-.hero-side{
-    display:grid;
-    gap:14px;
-}
-.hero-focus{
-    font-size:20px;
-    font-weight:800;
-    line-height:1.35;
-}
-.hero-mini{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:12px;
-}
+.hero-title{font-size:12px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:14px;}
+.hero-headline{font-size:34px;font-weight:900;line-height:1.08;margin-bottom:12px;}
+.hero-sub{color:var(--muted);line-height:1.55;font-size:15px;}
+.hero-side{display:grid;gap:14px;}
+.hero-focus{font-size:20px;font-weight:800;line-height:1.35;}
+.hero-mini{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .mini-card{
-    background:rgba(255,255,255,.03);
-    border:1px solid rgba(255,255,255,.06);
-    border-radius:16px;
-    padding:14px;
+    background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;
 }
-.mini-label{
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:1.2px;
-    color:var(--muted);
-}
-.mini-value{
-    margin-top:6px;
-    font-size:16px;
-    font-weight:900;
-}
-.stat-grid{
-    display:grid;
-    grid-template-columns:repeat(4,1fr);
-    gap:16px;
-    margin-bottom:18px;
-}
-.label{
-    font-size:12px;
-    color:var(--muted);
-    text-transform:uppercase;
-    letter-spacing:1.6px;
-    margin-bottom:14px;
-}
-.value{
-    font-size:40px;
-    font-weight:900;
-    line-height:1;
-}
+.mini-label{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);}
+.mini-value{margin-top:6px;font-size:16px;font-weight:900;}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px;}
+.label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;}
+.value{font-size:40px;font-weight:900;line-height:1;}
 .value.low{color:var(--low);}
 .value.medium{color:var(--medium);}
 .value.high{color:var(--high);}
 .value.event{font-size:24px;color:#fff;line-height:1.15;}
-.sub{
-    margin-top:10px;
-    color:var(--muted);
-    font-size:14px;
-}
+.sub{margin-top:10px;color:var(--muted);font-size:14px;}
 .section{display:none;}
 .section.active{display:block;}
-.grid-2{
-    display:grid;
-    grid-template-columns:1.3fr 1fr;
-    gap:16px;
-}
-.grid-3{
-    display:grid;
-    grid-template-columns:1fr 1fr 1fr;
-    gap:16px;
-}
-.section-title{
-    font-size:12px;
-    color:var(--muted);
-    text-transform:uppercase;
-    letter-spacing:1.6px;
-    margin-bottom:14px;
-}
-.feed-item{
-    padding:13px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-    color:#e9f1fe;
-    font-size:15px;
-    line-height:1.45;
-}
+.grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+.section-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-bottom:14px;}
+.feed-item{padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06);color:#e9f1fe;font-size:15px;line-height:1.45;}
 .feed-item:last-child{border-bottom:none;padding-bottom:0;}
 .feed-label{color:white;font-weight:800;}
 .badge{
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:8px 12px;
-    border-radius:999px;
-    font-size:12px;
-    font-weight:800;
-    background:var(--chip);
-    border:1px solid rgba(255,255,255,.06);
-    margin:0 8px 8px 0;
-    color:#deebff;
+    display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:800;
+    background:var(--chip);border:1px solid rgba(255,255,255,.06);margin:0 8px 8px 0;color:#deebff;
 }
 .badge.high{color:#ffc0cc;border-color:rgba(255,99,125,.25);background:rgba(255,99,125,.09);}
 .badge.medium{color:#ffe08c;border-color:rgba(255,210,79,.25);background:rgba(255,210,79,.09);}
 .badge.low{color:#baffdc;border-color:rgba(77,255,171,.25);background:rgba(77,255,171,.09);}
-.alert-box{
-    padding:14px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-}
+.alert-box{padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06);}
 .alert-box:last-child{border-bottom:none;}
 .alert-top{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-    font-weight:800;
-    color:#f2f7ff;
+    display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-weight:800;color:#f2f7ff;
 }
-.alert-meta{
-    margin-top:7px;
-    color:var(--muted);
-    font-size:13px;
-}
-.alert-summary{
-    margin-top:7px;
-    color:#d8e5f8;
-    line-height:1.45;
-    font-size:14px;
-}
-.kv{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    padding:13px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-    font-size:14px;
-}
+.alert-meta{margin-top:7px;color:var(--muted);font-size:13px;}
+.alert-summary{margin-top:7px;color:#d8e5f8;line-height:1.45;font-size:14px;}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px;}
 .kv:last-child{border-bottom:none;}
 .kv-label{color:#dce7f9;}
 .kv-value{color:var(--muted);text-align:right;}
 .input,.textarea{
-    width:100%;
-    border-radius:14px;
-    border:1px solid rgba(255,255,255,.08);
-    background:rgba(255,255,255,.04);
-    color:white;
-    outline:none;
-    padding:13px 14px;
-    margin-top:10px;
-    font-size:14px;
+    width:100%;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);
+    color:white;outline:none;padding:13px 14px;margin-top:10px;font-size:14px;
 }
-.textarea{
-    min-height:110px;
-    resize:vertical;
-}
-.btn-row{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    margin-top:12px;
-}
+.textarea{min-height:110px;resize:vertical;}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;}
 .btn{
-    padding:11px 15px;
-    border:none;
-    border-radius:13px;
-    cursor:pointer;
-    font-weight:800;
-    font-size:13px;
-    color:white;
-    background:#1f3c67;
-    transition:.18s ease;
+    padding:11px 15px;border:none;border-radius:13px;cursor:pointer;font-weight:800;font-size:13px;
+    color:white;background:#1f3c67;transition:.18s ease;
 }
 .btn:hover{transform:translateY(-1px);}
 .btn.primary{background:linear-gradient(135deg,var(--blue),var(--blue2));}
 .btn.secondary{background:#253754;}
-.btn.ghost{
-    background:rgba(255,255,255,.05);
-    border:1px solid rgba(255,255,255,.08);
-}
+.btn.ghost{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);}
 .item-row{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    align-items:center;
-    padding:12px 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
+    display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);
 }
 .item-row:last-child{border-bottom:none;}
-.item-text{
-    flex:1;
-    color:#e6eefb;
-    font-size:14px;
-    line-height:1.45;
-}
-.item-actions{
-    display:flex;
-    gap:8px;
-    flex-shrink:0;
-}
-.quick-actions{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    margin-top:12px;
-}
+.item-text{flex:1;color:#e6eefb;font-size:14px;line-height:1.45;}
+.item-actions{display:flex;gap:8px;flex-shrink:0;}
+.quick-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;}
 .quick-chip{
-    padding:10px 12px;
-    border-radius:12px;
-    border:1px solid rgba(255,255,255,.07);
-    background:rgba(255,255,255,.04);
-    color:#deebff;
-    cursor:pointer;
-    font-size:13px;
-    font-weight:700;
+    padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);
+    color:#deebff;cursor:pointer;font-size:13px;font-weight:700;
 }
 .quick-chip:hover{background:rgba(255,255,255,.07);}
-.chat-shell{
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-}
+.chat-shell{display:flex;flex-direction:column;gap:12px;}
 .chat-output{
-    min-height:240px;
-    max-height:500px;
-    overflow:auto;
-    border-radius:18px;
-    background:rgba(0,0,0,.18);
-    border:1px solid rgba(255,255,255,.06);
-    padding:14px;
+    min-height:240px;max-height:500px;overflow:auto;border-radius:18px;background:rgba(0,0,0,.18);
+    border:1px solid rgba(255,255,255,.06);padding:14px;
 }
-.chat-msg{
-    margin-bottom:12px;
-    padding:12px 13px;
-    border-radius:14px;
-    line-height:1.5;
-    font-size:14px;
-}
-.chat-msg.user{
-    background:rgba(79,140,255,.13);
-    border:1px solid rgba(79,140,255,.2);
-}
-.chat-msg.assistant{
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.06);
-}
-.chat-role{
-    display:block;
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:1.1px;
-    color:var(--muted);
-    margin-bottom:6px;
-}
+.chat-msg{margin-bottom:12px;padding:12px 13px;border-radius:14px;line-height:1.5;font-size:14px;}
+.chat-msg.user{background:rgba(79,140,255,.13);border:1px solid rgba(79,140,255,.2);}
+.chat-msg.assistant{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);}
+.chat-role{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:var(--muted);margin-bottom:6px;}
 .console-card{min-height:190px;}
-.console-head{
-    font-size:20px;
-    font-weight:900;
-    color:#f4f8ff;
-    line-height:1.2;
-}
-.console-note{
-    margin-top:10px;
-    color:var(--muted);
-    line-height:1.55;
-    font-size:14px;
-}
-.link-out{
-    display:inline-block;
-    margin-top:10px;
-    color:#9ec2ff;
-    text-decoration:none;
-    font-size:13px;
-    font-weight:700;
-}
-.news-feature{
-    position:relative;
-    overflow:hidden;
-}
+.console-head{font-size:20px;font-weight:900;color:#f4f8ff;line-height:1.2;}
+.console-note{margin-top:10px;color:var(--muted);line-height:1.55;font-size:14px;}
+.link-out{display:inline-block;margin-top:10px;color:#9ec2ff;text-decoration:none;font-size:13px;font-weight:700;}
+.news-feature{position:relative;overflow:hidden;}
 .news-feature:before{
-    content:"";
-    position:absolute;
-    inset:0;
-    background:linear-gradient(135deg, rgba(79,140,255,.08), transparent 45%);
-    pointer-events:none;
+    content:"";position:absolute;inset:0;background:linear-gradient(135deg, rgba(79,140,255,.08), transparent 45%);pointer-events:none;
 }
 .breaking-tag{
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:8px 12px;
-    border-radius:999px;
-    background:rgba(255,99,125,.12);
-    border:1px solid rgba(255,99,125,.25);
-    color:#ffc0cc;
-    font-size:11px;
-    font-weight:900;
-    text-transform:uppercase;
-    letter-spacing:1.2px;
-    margin-bottom:14px;
+    display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(255,99,125,.12);
+    border:1px solid rgba(255,99,125,.25);color:#ffc0cc;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:14px;
 }
-.breaking-dot{
-    width:8px;height:8px;border-radius:50%;
-    background:var(--high);
-    box-shadow:0 0 14px rgba(255,99,125,.8);
-}
-.footer{
-    margin-top:18px;
-    display:flex;
-    justify-content:space-between;
-    gap:14px;
-    flex-wrap:wrap;
-    color:var(--muted);
-    font-size:13px;
-}
-.mono{
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-}
+.breaking-dot{width:8px;height:8px;border-radius:50%;background:var(--high);box-shadow:0 0 14px rgba(255,99,125,.8);}
+.footer{margin-top:18px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
 @media(max-width:1180px){
     .hero{grid-template-columns:1fr;}
     .live-strip{grid-template-columns:1fr;}
@@ -1330,7 +1257,7 @@ body{
     <div class="topbar">
         <div class="brand">
             <h1>D.O.N.N.A</h1>
-            <p>Dynamic Operational Neural Network Assistant // Command Center UI V2</p>
+            <p>Dynamic Operational Neural Network Assistant // Recovery Build</p>
         </div>
 
         <div class="top-right">
@@ -1350,15 +1277,11 @@ body{
 
     <div class="live-strip">
         <div class="live-pill">Live Intelligence</div>
-
         <div class="ticker">
             <div class="ticker-track" id="ticker_track">
-                <div class="ticker-item">
-                    <span class="ticker-strong">Donna</span> loading live intelligence...
-                </div>
+                <div class="ticker-item"><span class="ticker-strong">Donna</span> loading live intelligence...</div>
             </div>
         </div>
-
         <div class="session-chip">
             <div class="top">Current Session</div>
             <div class="val" id="session_chip_val">-</div>
@@ -1435,31 +1358,12 @@ body{
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Donna Internal Clock</div>
-
-                    <div class="kv">
-                        <div class="kv-label">New York Time</div>
-                        <div class="kv-value mono" id="donna_time_ny_panel">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">UTC Time</div>
-                        <div class="kv-value mono" id="donna_time_utc">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">Day</div>
-                        <div class="kv-value" id="donna_day">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">Session</div>
-                        <div class="kv-value" id="donna_session">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">Event Phase</div>
-                        <div class="kv-value" id="event_phase_panel">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">Event Time NY</div>
-                        <div class="kv-value" id="event_time_ny">-</div>
-                    </div>
+                    <div class="kv"><div class="kv-label">New York Time</div><div class="kv-value mono" id="donna_time_ny_panel">-</div></div>
+                    <div class="kv"><div class="kv-label">UTC Time</div><div class="kv-value mono" id="donna_time_utc">-</div></div>
+                    <div class="kv"><div class="kv-label">Day</div><div class="kv-value" id="donna_day">-</div></div>
+                    <div class="kv"><div class="kv-label">Session</div><div class="kv-value" id="donna_session">-</div></div>
+                    <div class="kv"><div class="kv-label">Event Phase</div><div class="kv-value" id="event_phase_panel">-</div></div>
+                    <div class="kv"><div class="kv-label">Event Time NY</div><div class="kv-value" id="event_time_ny">-</div></div>
                 </div>
             </div>
 
@@ -1473,18 +1377,9 @@ body{
 
                 <div class="panel" style="margin-top:16px;">
                     <div class="section-title">Risk Radar</div>
-                    <div class="kv">
-                        <div class="kv-label">Headline Severity</div>
-                        <div class="kv-value" id="headline_severity_dash">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">Market Severity</div>
-                        <div class="kv-value" id="market_severity_dash">-</div>
-                    </div>
-                    <div class="kv">
-                        <div class="kv-label">Last Updated</div>
-                        <div class="kv-value mono" id="last_updated">-</div>
-                    </div>
+                    <div class="kv"><div class="kv-label">Headline Severity</div><div class="kv-value" id="headline_severity_dash">-</div></div>
+                    <div class="kv"><div class="kv-label">Market Severity</div><div class="kv-value" id="market_severity_dash">-</div></div>
+                    <div class="kv"><div class="kv-label">Last Updated</div><div class="kv-value mono" id="last_updated">-</div></div>
                 </div>
             </div>
         </div>
@@ -1645,8 +1540,8 @@ body{
     </div>
 
     <div class="footer">
-        <div>D.O.N.N.A UI V2</div>
-        <div>Premium command center / live news terminal / assistant layer active</div>
+        <div>D.O.N.N.A Recovery</div>
+        <div>Dashboard primary / news terminal / assistant layer active</div>
     </div>
 </div>
 
