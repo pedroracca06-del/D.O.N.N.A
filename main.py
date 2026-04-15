@@ -1515,16 +1515,39 @@ body{
     </div>
 
     <div class="section" id="section-news">
-        <div class="panel" style="margin-bottom:16px;">
-            <div class="section-title">Markets Overview</div>
-            <div class="panel" style="margin-bottom:16px;">
-    <div class="section-title">Market Chart</div>
 
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+<div class="panel" style="margin-bottom:16px;">
+    <div class="section-title">Market Center</div>
+
+    <!-- Symbol Bar -->
+    <div id="marketSymbolBar" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;scrollbar-width:none;">
+        <button class="quick-chip" onclick="setChartSymbol('SPX')">SPX</button>
+        <button class="quick-chip" onclick="setChartSymbol('NQ')">NQ</button>
+        <button class="quick-chip" onclick="setChartSymbol('ES')">ES</button>
+        <button class="quick-chip" onclick="setChartSymbol('DJIA')">DJIA</button>
+        <button class="quick-chip" onclick="setChartSymbol('VIX')">VIX</button>
+        <button class="quick-chip" onclick="setChartSymbol('DXY')">DXY</button>
+        <button class="quick-chip" onclick="setChartSymbol('TNX')">TNX</button>
+        <button class="quick-chip" onclick="setChartSymbol('RTY')">RTY</button>
+        <button class="quick-chip" onclick="setChartSymbol('GOLD')">Gold</button>
+        <button class="quick-chip" onclick="setChartSymbol('OIL')">Oil</button>
+        <button class="quick-chip" onclick="setChartSymbol('BTC')">BTC</button>
+    </div>
+
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
         <div>
-            <div style="font-size:14px;color:var(--muted);font-weight:700;" id="chart_symbol_label">NQ / Nasdaq Tone</div>
-            <div style="font-size:42px;font-weight:900;line-height:1;" id="chart_price">23,885</div>
-            <div style="margin-top:8px;font-size:18px;font-weight:800;" id="chart_change">+246.41 (+1.04%)</div>
+            <div style="font-size:13px;color:var(--muted);font-weight:800;letter-spacing:1px;text-transform:uppercase;" id="chart_symbol_label">
+                Nasdaq / NQ
+            </div>
+
+            <div style="font-size:46px;font-weight:900;line-height:1;margin-top:6px;" id="chart_price">
+                23,885.49
+            </div>
+
+            <div style="margin-top:8px;font-size:20px;font-weight:900;color:var(--low);" id="chart_change">
+                +246.41 (+1.04%)
+            </div>
         </div>
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1536,40 +1559,36 @@ body{
         </div>
     </div>
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
-        <button class="quick-chip" onclick="setChartSymbol('SPX')">SPX</button>
-        <button class="quick-chip" onclick="setChartSymbol('NQ')">NQ</button>
-        <button class="quick-chip" onclick="setChartSymbol('ES')">ES</button>
+    <!-- Chart -->
+    <div style="margin-top:18px;padding:14px;border-radius:18px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">
+        <canvas id="marketChartCanvas" style="width:100%;height:220px;display:block;"></canvas>
     </div>
 
-    <div style="margin-top:18px;border:1px solid rgba(255,255,255,.06);border-radius:18px;background:rgba(255,255,255,.03);padding:14px;">
-        <canvas id="marketChartCanvas" height="120"></canvas>
+    <!-- Intelligence -->
+    <div class="grid-3" style="margin-top:16px;">
+        <div class="mini-card">
+            <div class="mini-label">Momentum</div>
+            <div class="mini-value" id="chart_momentum">Constructive</div>
+            <div class="sub">Trend state</div>
+        </div>
+
+        <div class="mini-card">
+            <div class="mini-label">Risk Tone</div>
+            <div class="mini-value" id="chart_risk_tone">Balanced</div>
+            <div class="sub">Volatility pressure</div>
+        </div>
+
+        <div class="mini-card">
+            <div class="mini-label">Donna Read</div>
+            <div class="mini-value" id="chart_driver">AI Leadership</div>
+            <div class="sub">Current driver</div>
+        </div>
     </div>
 
     <div class="sub" id="chart_summary" style="margin-top:14px;">
-        Donna market chart is loading.
+        Donna is analyzing live market conditions.
     </div>
-        </div>
-            <div class="grid-3">
-                <div class="mini-card">
-                    <div class="mini-label">S&P / ES Tone</div>
-                    <div class="mini-value" id="market_card_spx">Loading...</div>
-                    <div class="sub" id="market_card_spx_sub">Broad market pulse</div>
-                </div>
-
-                <div class="mini-card">
-                    <div class="mini-label">Nasdaq / NQ Tone</div>
-                    <div class="mini-value" id="market_card_nq">Loading...</div>
-                    <div class="sub" id="market_card_nq_sub">Growth and tech pressure</div>
-                </div>
-
-                <div class="mini-card">
-                    <div class="mini-label">Donna Market Mood</div>
-                    <div class="mini-value" id="market_mood">Loading...</div>
-                    <div class="sub" id="market_mood_sub">Live intelligence read</div>
-                </div>
-            </div>
-        </div>
+</div>
 
         <div class="grid-2">
             <div>
