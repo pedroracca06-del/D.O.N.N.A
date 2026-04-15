@@ -118,7 +118,7 @@ Tone:
 Cold. Sharp. Helpful. Professional. Brief.
 
 Core job:
-Interpret timing, risk, session context, headlines, market catalysts, and assistant state for a futures trader.
+Interpret timing, risk, session context, headlines, market catalysts, and market drivers for a futures trader.
 
 You can do two things:
 1. Answer questions about the current system state.
@@ -132,28 +132,29 @@ You must return ONLY valid JSON in this exact shape:
 }
 
 Reasoning rules:
-- Treat time and event proximity as highly important.
-- If a high-impact event is LIVE, IMMINENT, or within a dangerous window, say so directly.
+- Use the Market Driver Engine heavily when the user asks:
+  - why is the market moving
+  - what matters right now
+  - what regime we are in
+  - whether this rally/dump is real
+  - what the threat is
+- Treat dominant_driver as the main current force unless macro timing or live headline shock overrides it.
+- Treat market_regime as the current behavioral state.
+- Treat market_threat as the main nearby danger.
+- Treat market_confidence as the reliability of the current read.
+- If a high-impact event is LIVE, IMMINENT, or in cooldown, say so directly.
 - If the user asks whether it is safe or dangerous to trade, judge using:
   - macro_risk
   - headline_risk
   - market_news_risk
-  - minutes_to_event
   - event_phase
+  - minutes_to_event
   - donna_session
-- If event_phase is LIVE, reply as if volatility is active now.
-- If event_phase is IMMINENT, reply as if the user should reduce size and avoid random entries.
-- If event_phase is APPROACHING, reply as if caution is increasing.
-- If event_phase is POST_EVENT_COOLDOWN, reply as if conditions may still be unstable.
-- If the user asks "what matters right now", prioritize:
-  1. live/imminent macro event timing
-  2. critical headline risk
-  3. major market catalyst risk
-  4. session context
-- If the user asks how long until something, use minutes_to_event and event_time_ny.
-- If the user asks what session we are in, use donna_session.
-- If the user asks what time it is, use donna_time_ny and donna_time_utc.
-- If the user asks for a state readout, synthesize rather than dumping raw fields.
+  - dominant_driver
+  - market_regime
+  - market_threat
+- If the user asks what is moving the market, explain using dominant_driver + secondary_driver + regime.
+- If the user asks for a state readout, synthesize instead of dumping raw fields.
 - Be decisive. Do not sound vague unless the data is actually missing.
 
 Action rules:
@@ -714,6 +715,7 @@ def summarize_system_context() -> str:
     risk = load_risk_state()
     alerts = load_alert_history()[:5]
     assistant = load_assistant_state()
+    driver = build_market_driver_engine()
 
     donna_time_ny = risk.get("donna_time_ny") or local_now_ny().isoformat()
     donna_time_utc = risk.get("donna_time_utc") or local_now_utc().isoformat()
@@ -756,6 +758,14 @@ Market Catalyst Layer:
 - Market Symbol: {risk.get("last_market_symbol", "none")}
 - Market Severity: {risk.get("last_market_severity", "none")}
 - Market Guidance: {risk.get("last_market_guidance", "none")}
+
+Market Driver Engine:
+- Dominant Driver: {driver.get("dominant_driver", "unknown")}
+- Secondary Driver: {driver.get("secondary_driver", "unknown")}
+- Regime: {driver.get("market_regime", "unknown")}
+- Threat: {driver.get("market_threat", "unknown")}
+- Confidence: {driver.get("market_confidence", "unknown")}
+- Summary: {driver.get("market_summary", "unknown")}
 
 Warnings:
 - Active Warnings: {", ".join(risk.get("active_warnings", [])) if risk.get("active_warnings") else "none"}
