@@ -90,21 +90,25 @@ AULT_RISK_STATE = {
     'ES_SESSION_POINTS': 49.5,
 },
 }
-AULT_ASSISTANT_STATE = {
+DEFAULT_ASSISTANT_STATE = {
     'daily_focus': 'Trade what matters. Ignore noise.',
     'tasks': ['Review morning edge', 'Check likely market movers', 'Respect macro timing'],
     'reminders': ['Do not force trades into event windows', 'Leadership names deserve first attention'],
 }
-AULT_SETTINGS = {'theme_mode': 'premium_dark', 'layout_density': 'balanced', 'telegram_alert_mode': TELEGRAM_ALERT_MODE or 'critical'}
-AULT_MACRO_EVENTS = {
+
+DEFAULT_SETTINGS = {
+    'theme_mode': 'premium_dark',
+    'layout_density': 'balanced',
+    'telegram_alert_mode': TELEGRAM_ALERT_MODE or 'critical'
+}
+
+DEFAULT_MACRO_EVENTS = {
     'source': 'ForexFactory/manual',
     'events': [
         {'title': '10:00 ET Data / Fed Window', 'time_et': '10:00', 'importance': 'high', 'category': 'macro', 'note': 'High-impact macro window.'},
         {'title': '14:00 ET Fed / Rates Check', 'time_et': '14:00', 'importance': 'medium', 'category': 'fed', 'note': 'Rates-sensitive period.'},
     ],
 }
-
-
 def now_ny():
     return datetime.now(NY_TZ)
 
