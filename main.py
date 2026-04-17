@@ -75,15 +75,20 @@ DEFAULT_RISK_STATE = {
     'last_market_severity': 'HIGH',
     'event_phase': 'APPROACHING',
     'market_snapshot': {
-        'SPX': {'last': 7022.95, 'chg': 55.57, 'pct': 0.80},
-        'NASDAQ': {'last': 24016.01, 'chg': 376.93, 'pct': 1.60},
-        'DJIA': {'last': 48463.72, 'chg': -72.27, 'pct': -0.15},
-        'VIX': {'last': 18.17, 'chg': -0.19, 'pct': -1.03},
-        'US10Y': {'last': 4.281, 'chg': 0.025, 'pct': 0.59},
-        'DXY': {'last': 103.84, 'chg': -0.14, 'pct': -0.13},
-        'NQ_SESSION_POINTS': 393.0,
-        'ES_SESSION_POINTS': 49.5,
-    },
+    'SPX': {'last': 7022.95, 'chg': 55.57, 'pct': 0.80},
+    'NASDAQ': {'last': 24016.01, 'chg': 376.93, 'pct': 1.60},
+    'DJIA': {'last': 48463.72, 'chg': -72.27, 'pct': -0.15},
+    'VIX': {'last': 18.17, 'chg': -0.19, 'pct': -1.03},
+    'US10Y': {'last': 4.281, 'chg': 0.025, 'pct': 0.59},
+    'DXY': {'last': 103.84, 'chg': -0.14, 'pct': -0.13},
+    'NQ': {'last': 0, 'chg': 0, 'pct': 0},
+    'ES': {'last': 0, 'chg': 0, 'pct': 0},
+    'OIL': {'last': 0, 'chg': 0, 'pct': 0},
+    'GOLD': {'last': 0, 'chg': 0, 'pct': 0},
+    'SILVER': {'last': 0, 'chg': 0, 'pct': 0},
+    'NQ_SESSION_POINTS': 393.0,
+    'ES_SESSION_POINTS': 49.5,
+},
 }
 DEFAULT_ASSISTANT_STATE = {
     'daily_focus': 'Trade what matters. Ignore noise.',
@@ -386,13 +391,12 @@ def get_live_futures_macro_pulse():
     if c:
         return c
 
-    # label, primary_symbol, alt_symbol, fallback_key
     mapping = [
-        ('NQ', 'NQ=F', None, None),
-        ('ES', 'ES=F', None, None),
-        ('OIL', 'CL=F', None, None),
-        ('GOLD', 'GC=F', None, None),
-        ('SILVER', 'SI=F', None, None),
+        ('NQ', 'NQ=F', None, 'NQ'),
+        ('ES', 'ES=F', None, 'ES'),
+        ('OIL', 'CL=F', None, 'OIL'),
+        ('GOLD', 'GC=F', None, 'GOLD'),
+        ('SILVER', 'SI=F', None, 'SILVER'),
         ('DXY', 'DX-Y.NYB', None, 'DXY'),
         ('US10Y', '^TNX', None, 'US10Y'),
         ('VIX', '^VIX', None, 'VIX'),
@@ -407,18 +411,20 @@ def get_live_futures_macro_pulse():
         if not q and fallback_key:
             q = fallback.get(fallback_key, {})
 
-        pct = safe_float((q or {}).get('pct', 0))
+        last = (q or {}).get('last', '-')
+        chg = (q or {}).get('chg', '-')
+        pct_num = safe_float((q or {}).get('pct', 0))
+
         rows.append({
             'symbol': label,
-            'last': (q or {}).get('last', '-'),
-            'chg': (q or {}).get('chg', '-'),
-            'pct': f'{pct:+.2f}%',
-            'dir': 'up' if pct >= 0 else 'down'
+            'last': last,
+            'chg': chg if chg != '-' else '-',
+            'pct': f'{pct_num:+.2f}%' if last != '-' else '-',
+            'dir': 'up' if pct_num >= 0 else 'down'
         })
 
     cache_set('futures_macro_pulse', rows, 20)
     return rows
-
 
 def get_live_movers():
     c = cache_get('movers')
