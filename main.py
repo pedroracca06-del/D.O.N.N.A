@@ -60,7 +60,7 @@ SETTINGS_FILE = BASE_DIR / 'donna_settings.json'
 MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
 CACHE = {}
 
-DEFAULT_RISK_STATE = {
+AULT_RISK_STATE = {
     'macro_risk': 'medium',
     'headline_risk': 'medium',
     'market_news_risk': 'medium',
@@ -90,13 +90,13 @@ DEFAULT_RISK_STATE = {
     'ES_SESSION_POINTS': 49.5,
 },
 }
-DEFAULT_ASSISTANT_STATE = {
+AULT_ASSISTANT_STATE = {
     'daily_focus': 'Trade what matters. Ignore noise.',
     'tasks': ['Review morning edge', 'Check likely market movers', 'Respect macro timing'],
     'reminders': ['Do not force trades into event windows', 'Leadership names deserve first attention'],
 }
-DEFAULT_SETTINGS = {'theme_mode': 'premium_dark', 'layout_density': 'balanced', 'telegram_alert_mode': TELEGRAM_ALERT_MODE or 'critical'}
-DEFAULT_MACRO_EVENTS = {
+AULT_SETTINGS = {'theme_mode': 'premium_dark', 'layout_density': 'balanced', 'telegram_alert_mode': TELEGRAM_ALERT_MODE or 'critical'}
+AULT_MACRO_EVENTS = {
     'source': 'ForexFactory/manual',
     'events': [
         {'title': '10:00 ET Data / Fed Window', 'time_et': '10:00', 'importance': 'high', 'category': 'macro', 'note': 'High-impact macro window.'},
@@ -325,7 +325,23 @@ def get_quote_with_fallback(symbol, alt_symbol=None):
     if q:
         cache_set(key, q, 20)
     return q
+    
+def get_futures_quote(symbol_alias):
+    futures_map = {
+        'NQ': ['NQ=F', 'MNQ=F', 'NQ'],
+        'ES': ['ES=F', 'MES=F', 'ES'],
+        'OIL': ['CL=F', 'USO'],
+        'GOLD': ['GC=F', 'GLD'],
+        'SILVER': ['SI=F', 'SLV'],
+    }
 
+    candidates = futures_map.get(str(symbol_alias).upper(), [])
+    for sym in candidates:
+        q = get_quote_with_fallback(sym)
+        if q and q.get('last') not in (None, '-', 0):
+            return q
+
+    return None
 
 def fetch_fmp_market_movers(kind):
     if not FMP_API_KEY:
@@ -391,36 +407,60 @@ def get_live_futures_macro_pulse():
     if c:
         return c
 
-    mapping = [
-        ('NQ', 'NQ=F', None, 'NQ'),
-        ('ES', 'ES=F', None, 'ES'),
-        ('OIL', 'CL=F', None, 'OIL'),
-        ('GOLD', 'GC=F', None, 'GOLD'),
-        ('SILVER', 'SI=F', None, 'SILVER'),
-        ('DXY', 'DX-Y.NYB', None, 'DXY'),
-        ('US10Y', '^TNX', None, 'US10Y'),
-        ('VIX', '^VIX', None, 'VIX'),
-    ]
-
     fallback = load_risk_state().get('market_snapshot', {})
+
     rows = []
 
-    for label, primary, alt, fallback_key in mapping:
-        q = get_quote_with_fallback(primary, alt)
+    futures_assets = [
+        ('NQ', 'NQ'),
+        ('ES', 'ES'),
+        ('OIL', 'OIL'),
+        ('GOLD', 'GOLD'),
+        ('SILVER', 'SILVER'),
+    ]
 
-        if not q and fallback_key:
+    macro_assets = [
+        ('DXY', 'DX-Y.NYB', 'DXY'),
+        ('US10Y', '^TNX', 'US10Y'),
+        ('VIX', '^VIX', 'VIX'),
+    ]
+
+    for label, fallback_key in futures_assets:
+        q = get_futures_quote(label)
+        if not q:
             q = fallback.get(fallback_key, {})
 
         last = (q or {}).get('last', '-')
         chg = (q or {}).get('chg', '-')
-        pct_num = safe_float((q or {}).get('pct', 0))
+        pct_raw = (q or {}).get('pct', None)
+
+        pct_num = safe_float(pct_raw, None) if pct_raw is not None else None
 
         rows.append({
             'symbol': label,
-            'last': last,
-            'chg': chg if chg != '-' else '-',
-            'pct': f'{pct_num:+.2f}%' if last != '-' else '-',
-            'dir': 'up' if pct_num >= 0 else 'down'
+            'last': last if last not in (None, 0) else '-',
+            'chg': chg if chg not in (None, 0) else '-',
+            'pct': f'{pct_num:+.2f}%' if pct_num is not None and last not in (None, '-', 0) else '-',
+            'dir': 'up' if (pct_num is not None and pct_num >= 0) else 'down'
+        })
+
+    for label, symbol, fallback_key in macro_assets:
+        q = get_quote_with_fallback(symbol)
+        if not q:
+            q = fallback.get(fallback_key, {})
+
+        last = (q or {}).get('last', '-')
+        chg = (q or {}).get('chg', '-')
+        pct_raw = (q or {}).get('pct', None)
+
+        pct_num = safe_float(pct_raw, None) if pct_raw is not None else None
+
+        rows.append({
+            'symbol': label,
+            'last': last if last not in (None, 0) else '-',
+            'chg': chg if chg not in (None, 0) else '-',
+            'pct': f'{pct_num:+.2f}%' if pct_num is not None and last not in (None, '-', 0) else '-',
+            'dir': 'up' if (pct_num is not None and pct_num >= 0) else 'down'
         })
 
     cache_set('futures_macro_pulse', rows, 20)
