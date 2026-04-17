@@ -844,7 +844,139 @@ def apply_assistant_action(action, value):
     elif action == 'clear_reminders': state['reminders'] = []
     save_assistant_state(state)
     return state
+    
+def build_donna_observations(risk=None):
+    state = risk or load_risk_state()
+    pulse = get_live_futures_macro_pulse()
+    driver = build_market_driver_engine(state)
+    morning = build_morning_edge(state)
 
+    pulse_map = {row.get('symbol'): row for row in pulse}
+
+    def pct(symbol):
+        row = pulse_map.get(symbol, {})
+        raw = str(row.get('pct', '')).replace('%', '').replace('+', '').strip()
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    observations = []
+
+    nq_pct = pct('NQ')
+    es_pct = pct('ES')
+    oil_pct = pct('OIL')
+    gold_pct = pct('GOLD')
+    silver_pct = pct('SILVER')
+    dxy_pct = pct('DXY')
+    us10y_pct = pct('US10Y')
+    vix_pct = pct('VIX')
+
+    if oil_pct is not None and abs(oil_pct) >= 2.0:
+        direction = 'surging' if oil_pct > 0 else 'breaking lower'
+        observations.append({
+            'type': 'observation',
+            'title': f'OIL {direction}',
+            'summary': 'Crude is moving enough to affect cross-asset tone. Watch index futures, dollar, and rates response.',
+            'priority': 'high',
+            'timestamp': utc_now_iso(),
+        })
+
+    if nq_pct is not None and nq_pct >= 0.75:
+        observations.append({
+            'type': 'observation',
+            'title': 'Nasdaq strength remains meaningful',
+            'summary': 'NQ is still showing enough upside pressure to matter. Respect leadership until it fails.',
+            'priority': 'high',
+            'timestamp': utc_now_iso(),
+        })
+    elif nq_pct is not None and nq_pct <= -0.75:
+        observations.append({
+            'type': 'observation',
+            'title': 'Nasdaq pressure is real',
+            'summary': 'NQ downside is strong enough to matter. Be careful forcing longs without confirmation.',
+            'priority': 'high',
+            'timestamp': utc_now_iso(),
+        })
+
+    if es_pct is not None and abs(es_pct) >= 0.60:
+        direction = 'confirming upside participation' if es_pct > 0 else 'confirming downside pressure'
+        observations.append({
+            'type': 'observation',
+            'title': f'ES is {direction}',
+            'summary': 'Broad index participation is strong enough to validate the current tape.',
+            'priority': 'medium',
+            'timestamp': utc_now_iso(),
+        })
+
+    if gold_pct is not None and abs(gold_pct) >= 1.0:
+        direction = 'strength' if gold_pct > 0 else 'weakness'
+        observations.append({
+            'type': 'observation',
+            'title': f'Gold {direction} is notable',
+            'summary': 'Metals are moving enough to matter for macro tone and cross-asset interpretation.',
+            'priority': 'medium',
+            'timestamp': utc_now_iso(),
+        })
+
+    if silver_pct is not None and abs(silver_pct) >= 2.0:
+        direction = 'strength' if silver_pct > 0 else 'weakness'
+        observations.append({
+            'type': 'observation',
+            'title': f'Silver {direction} is expanding',
+            'summary': 'Silver volatility is elevated. Respect the move as more than background noise.',
+            'priority': 'medium',
+            'timestamp': utc_now_iso(),
+        })
+
+    if dxy_pct is not None and abs(dxy_pct) >= 0.40:
+        direction = 'rising' if dxy_pct > 0 else 'falling'
+        observations.append({
+            'type': 'observation',
+            'title': f'DXY is {direction}',
+            'summary': 'Dollar movement is becoming important enough to influence equities and metals.',
+            'priority': 'medium',
+            'timestamp': utc_now_iso(),
+        })
+
+    if us10y_pct is not None and abs(us10y_pct) >= 1.0:
+        direction = 'rising' if us10y_pct > 0 else 'falling'
+        observations.append({
+            'type': 'observation',
+            'title': f'US10Y is {direction}',
+            'summary': 'Rates are moving enough to affect risk appetite and valuation-sensitive assets.',
+            'priority': 'medium',
+            'timestamp': utc_now_iso(),
+        })
+
+    if vix_pct is not None and vix_pct >= 4.0:
+        observations.append({
+            'type': 'observation',
+            'title': 'Volatility is expanding',
+            'summary': 'VIX is pressing higher. Expect more fragile conviction and sharper reactions.',
+            'priority': 'high',
+            'timestamp': utc_now_iso(),
+        })
+
+    if str(state.get('event_phase', '')).upper() in {'LIVE', 'IMMINENT', 'APPROACHING'}:
+        observations.append({
+            'type': 'observation',
+            'title': f"Macro timing matters: {state.get('next_event', 'Scheduled event')}",
+            'summary': 'Event risk is close enough that price action may not be clean. Respect timing over impulse.',
+            'priority': 'high',
+            'timestamp': utc_now_iso(),
+        })
+
+    if not observations:
+        observations.append({
+            'type': 'observation',
+            'title': driver.get('dominant_driver', 'Balanced conditions'),
+            'summary': morning.get('first_read', 'Donna does not see a dominant threat beyond normal market rotation.'),
+            'priority': 'low',
+            'timestamp': utc_now_iso(),
+        })
+
+    return observations[:6]
 
 def build_dashboard_payload():
     risk = load_risk_state()
@@ -852,6 +984,7 @@ def build_dashboard_payload():
     morning = build_morning_edge(risk)
     significance = build_session_significance(risk)
     what_matters = build_what_matters_now(risk)
+    observations = build_donna_observations(risk)
 
     movers = build_market_movers_engine()
     alerts = load_alert_history()[:10]
@@ -864,6 +997,8 @@ def build_dashboard_payload():
     news = get_live_news()
     live_movers = get_live_movers()
     futures_macro_pulse = get_live_futures_macro_pulse()
+
+    effective_alerts = alerts if alerts else observations
 
     live_strip = [
         {'label': 'Macro', 'value': str(risk.get('macro_risk', '-')).upper()},
@@ -884,7 +1019,9 @@ def build_dashboard_payload():
         'session_significance': significance,
         'what_matters_now': what_matters,
         'market_movers_engine': movers,
-        'alerts': alerts,
+        'alerts': effective_alerts,
+        'raw_trade_alerts': alerts,
+        'observations': observations,
         'assistant': assistant,
         'settings': settings,
         'major_indexes': live_market['major_indexes'],
@@ -1670,17 +1807,30 @@ function renderTriple(rows,targetId){
 }
 
 function renderAlerts(alerts){
-  if(!alerts||!alerts.length){
-    byId('recentAlerts').innerHTML='<div class="feed-item">No alerts yet</div>';
+  if(!alerts || !alerts.length){
+    byId('recentAlerts').innerHTML = '<div class="feed-item">No Donna alerts or observations yet</div>';
     return;
   }
-  byId('recentAlerts').innerHTML=alerts.map(a=>`
-    <div class="feed-item">
-      <b>${a.ticker}</b> // ${a.signal} // ${a.verdict} // ${a.confidence}<br/>
-      <span style="color:var(--muted)">${a.session} | TF ${a.timeframe} | Price ${a.price}</span><br/>
-      ${a.summary}
-    </div>
-  `).join('');
+
+  byId('recentAlerts').innerHTML = alerts.map(a => {
+    if (a.type === 'observation') {
+      return `
+        <div class="feed-item">
+          <b>${a.title}</b><br/>
+          <span style="color:var(--muted)">Donna Observation // ${String(a.priority || 'low').toUpperCase()}</span><br/>
+          ${a.summary}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="feed-item">
+        <b>${a.ticker}</b> // ${a.signal} // ${a.verdict} // ${a.confidence}<br/>
+        <span style="color:var(--muted)">${a.session} | TF ${a.timeframe} | Price ${a.price}</span><br/>
+        ${a.summary}
+      </div>
+    `;
+  }).join('');
 }
 
 function renderNews(news){
