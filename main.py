@@ -651,6 +651,95 @@ def build_morning_edge(risk=None):
         first_read = 'Respect event timing. Do not confuse pre-event noise for true conviction.'
     return {'today_bias': today_bias, 'main_threat': main_threat, 'open_quality': open_quality, 'focus': focus, 'watch_first': watch_first, 'first_read': first_read, 'driver_note': driver['market_summary']}
 
+def build_what_matters_now(risk=None):
+    state = risk or load_risk_state()
+    morning = build_morning_edge(state)
+    driver = build_market_driver_engine(state)
+    sig = build_session_significance(state)
+    pulse = get_live_futures_macro_pulse()
+
+    pulse_map = {row['symbol']: row for row in pulse}
+
+    def pct(symbol):
+        row = pulse_map.get(symbol, {})
+        raw = str(row.get('pct', '')).replace('%', '').replace('+', '').strip()
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    nq_pct = pct('NQ')
+    es_pct = pct('ES')
+    oil_pct = pct('OIL')
+    gold_pct = pct('GOLD')
+    silver_pct = pct('SILVER')
+    dxy_pct = pct('DXY')
+    vix_pct = pct('VIX')
+    us10y_pct = pct('US10Y')
+
+    headline = 'What matters now is unclear'
+    summary = 'Donna does not yet see one dominant cross-asset force.'
+    watch = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER']
+    mode = 'balanced'
+
+    # 1. High-risk macro / volatility regime
+    if str(state.get('macro_risk', '')).lower() == 'high' or (vix_pct is not None and vix_pct >= 4):
+        headline = 'Macro risk is in control right now'
+        summary = f"{state.get('next_event', 'Macro timing matters')} is the main threat. Respect reaction risk over conviction."
+        watch = ['NQ', 'ES', 'DXY', 'US10Y', 'VIX']
+        mode = 'macro_risk'
+
+    # 2. Oil shock / geopolitical commodity pressure
+    elif oil_pct is not None and abs(oil_pct) >= 2.0:
+        direction = 'surging' if oil_pct > 0 else 'breaking lower'
+        headline = f'Oil is {direction} and changing the tone'
+        summary = 'Energy is making a real move. Watch for cross-asset pressure, inflation/risk sentiment shifts, and index reaction.'
+        watch = ['OIL', 'ES', 'NQ', 'DXY', 'US10Y']
+        mode = 'oil_shock'
+
+    # 3. Precious metals momentum / defensive tone
+    elif ((gold_pct is not None and abs(gold_pct) >= 1.0) or
+          (silver_pct is not None and abs(silver_pct) >= 2.0)):
+        headline = 'Metals are making a real move'
+        summary = 'Gold/silver strength is meaningful enough to matter. Watch for macro defensiveness, dollar relationships, and risk appetite shifts.'
+        watch = ['GOLD', 'SILVER', 'DXY', 'US10Y', 'NQ']
+        mode = 'metals'
+
+    # 4. Nasdaq-led trend expansion
+    elif nq_pct is not None and nq_pct >= 0.75:
+        headline = 'Nasdaq momentum is still leading'
+        summary = sig['summary']
+        watch = ['NQ', 'ES', 'NVDA', 'MSFT', 'AMD']
+        mode = 'nq_momentum'
+
+    # 5. Broad downside / risk-off
+    elif ((nq_pct is not None and nq_pct <= -0.75) or
+          (es_pct is not None and es_pct <= -0.60)):
+        headline = 'Risk-off pressure is leading this tape'
+        summary = 'Index pressure is strong enough to matter. Watch whether this is just rotation or true market stress.'
+        watch = ['NQ', 'ES', 'VIX', 'DXY', 'US10Y']
+        mode = 'risk_off'
+
+    # 6. Rates / dollar pressure
+    elif ((dxy_pct is not None and abs(dxy_pct) >= 0.40) or
+          (us10y_pct is not None and abs(us10y_pct) >= 1.00)):
+        headline = 'Macro pressure is coming from dollar / rates'
+        summary = 'DXY or yields are moving enough to affect equities and metals. Respect cross-asset pressure before forcing directional trades.'
+        watch = ['DXY', 'US10Y', 'NQ', 'ES', 'GOLD']
+        mode = 'rates_fx'
+
+    else:
+        headline = f"{driver['dominant_driver']} is driving current conditions."
+        summary = driver['market_summary']
+        watch = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER']
+        mode = 'balanced'
+
+    return {
+        'headline': headline,
+        'summary': summary,
+        'watch': watch,
+        'mode': mode
+    }
 
 def build_market_movers_engine():
     return {
@@ -762,6 +851,7 @@ def build_dashboard_payload():
     driver = build_market_driver_engine(risk)
     morning = build_morning_edge(risk)
     significance = build_session_significance(risk)
+    what_matters = build_what_matters_now(risk)
 
     movers = build_market_movers_engine()
     alerts = load_alert_history()[:10]
@@ -805,6 +895,7 @@ def build_dashboard_payload():
         'news': news,
         'live_strip': live_strip,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL
+        'what_matters_now': what_matters,
     }
 
 
@@ -1007,9 +1098,810 @@ async def assistant_chat(request: Request):
         return {'status': 'error', 'action': 'none', 'value': '', 'reply': f'Assistant error: {str(e)}', 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
 
 
-DASHBOARD_HTML = '''<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>D.O.N.N.A v5.0</title><style>
-*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#08111f;--bg2:#0d1830;--panel:#162441;--line:rgba(255,255,255,.10);--text:#edf4ff;--muted:#a3b5d4;--blue:#5f95ff;--blue2:#3972f6;--green:#43f7ad;--yellow:#ffd557;--red:#ff6b86;--shadow:0 18px 48px rgba(0,0,0,.28);--radius:22px}html,body{min-height:100%}body{font-family:Inter,Arial,sans-serif;color:var(--text);background:radial-gradient(circle at 5% 95%, rgba(67,247,173,.10), transparent 20%),radial-gradient(circle at 100% 0%, rgba(95,149,255,.18), transparent 25%),linear-gradient(180deg,var(--bg2),var(--bg));padding:24px}body,.panel,.card,table,th,td,.live-strip,.hero,.row,.badge,.tab-btn,.ghost-btn{caret-color:transparent}.wrap{max-width:1560px;margin:0 auto}button{font:inherit}input,textarea,select{caret-color:auto}input,textarea{user-select:text}button,.tab-btn,.ghost-btn{cursor:pointer}.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:14px}.brand h1{font-size:52px;line-height:1;font-weight:900;letter-spacing:4px}.brand p{margin-top:8px;color:var(--muted);font-size:13px}.top-right{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}.online{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:999px;background:rgba(67,247,173,.08);border:1px solid rgba(67,247,173,.24);font-weight:900;color:#b7ffd9;font-size:13px;user-select:none}.dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 14px rgba(67,247,173,.8)}.nav{display:flex;gap:10px;flex-wrap:wrap;user-select:none}.tab-btn{border:none;padding:12px 16px;border-radius:14px;background:rgba(255,255,255,.04);color:#edf4ff;font-weight:800;border:1px solid rgba(255,255,255,.08);transition:.18s ease}.tab-btn.active{background:linear-gradient(135deg,var(--blue),var(--blue2));box-shadow:var(--shadow)}.tab-btn:hover{transform:translateY(-1px)}.live-row{display:grid;grid-template-columns:190px 1fr 220px;gap:12px;align-items:center;margin-bottom:16px}.live-pill,.session-pill,.ticker-wrap{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}.live-pill{padding:14px 16px;color:#ffc7d2;border-color:rgba(255,107,134,.24);background:rgba(255,107,134,.08);font-size:12px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase}.session-pill{padding:14px 16px;text-align:center}.session-pill .lab{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}.session-pill .val{margin-top:6px;font-size:18px;font-weight:900}.ticker-wrap{overflow:hidden;position:relative;min-height:52px;display:flex;align-items:center}.ticker-track{display:inline-flex;white-space:nowrap;padding-left:100%;animation:tickerMove 26s linear infinite;will-change:transform}@keyframes tickerMove{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}.ticker-item{padding-right:40px;color:#e7efff;font-size:13px;font-weight:700}.ticker-item b{color:#fff}.panel,.card{background:linear-gradient(180deg, rgba(27,44,75,.95), rgba(21,36,65,.98));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px;user-select:none}.kicker{font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin-bottom:12px}.hero{display:grid;grid-template-columns:1.45fr 1fr;gap:16px;margin-bottom:16px}.hero-title{font-size:32px;font-weight:900;line-height:1.07}.hero-sub{margin-top:12px;color:var(--muted);font-size:15px;line-height:1.55}.side-stack{display:grid;gap:14px}.mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mini{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:14px}.mini .lab{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px}.mini .val{font-size:16px;font-weight:900;margin-top:8px;line-height:1.25}.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}.stat-card .lab{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.7px;margin-bottom:14px}.stat-card .val{font-size:46px;font-weight:900;line-height:1;text-transform:uppercase}.stat-card .sub{margin-top:10px;color:var(--muted);font-size:14px}.low{color:var(--green)} .medium{color:var(--yellow)} .high{color:var(--red)}.page{display:none}.page.active{display:block}.grid-2{display:grid;grid-template-columns:1.15fr .85fr;gap:16px}.stack{display:grid;gap:16px}.row{display:flex;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.08)}.row:last-child{border-bottom:none}.row .k{color:#dce8ff}.row .v{color:var(--muted);text-align:right}.feed-item{padding:13px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.5;color:#e9f1ff}.feed-item:last-child{border-bottom:none}.badges{display:flex;gap:10px;flex-wrap:wrap}.badge{padding:9px 12px;border-radius:999px;font-size:12px;font-weight:800;background:rgba(255,107,134,.08);border:1px solid rgba(255,107,134,.24);color:#ffc7d2}.table-card table{width:100%;border-collapse:collapse}.table-card th{color:var(--muted);text-align:left;padding:0 0 12px 0;border-bottom:1px solid rgba(255,255,255,.10);font-size:12px;text-transform:uppercase;letter-spacing:1.4px}.table-card td{padding:12px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:14px;font-weight:700}.table-card tr:last-child td{border-bottom:none}.up{color:var(--green)} .down{color:var(--red)}.strip-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.soft-note{margin-top:12px;color:var(--muted);font-size:14px;line-height:1.55}.action-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.ghost-btn{border:none;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);color:#edf4ff;border:1px solid rgba(255,255,255,.08)}.assistant-output{min-height:220px;max-height:460px;overflow:auto;border-radius:18px;background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.08);padding:14px;user-select:text;caret-color:auto}.msg{margin-bottom:12px;padding:12px 13px;border-radius:14px;line-height:1.5;font-size:14px}.msg.user{background:rgba(95,149,255,.14);border:1px solid rgba(95,149,255,.24)}.msg.assistant{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}.msg .role{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.1px;margin-bottom:6px}.text-input{width:100%;padding:13px 14px;margin-top:12px;border-radius:14px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:#fff;outline:none;user-select:text}.footer{margin-top:18px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px}@media(max-width:1200px){.hero,.grid-2,.strip-grid{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(2,1fr)}.live-row{grid-template-columns:1fr}}@media(max-width:760px){body{padding:16px}.brand h1{font-size:38px}.stat-grid{grid-template-columns:1fr}}</style></head><body><div class="wrap"><div class="topbar"><div class="brand"><h1>D.O.N.N.A</h1><p>Dynamic Operational Neural Network Assistant // Live Market Core</p></div><div class="top-right"><div class="nav"><button class="tab-btn active" data-page="dashboard">Dashboard</button><button class="tab-btn" data-page="trading">Trading</button><button class="tab-btn" data-page="news">News</button><button class="tab-btn" data-page="assistant">Assistant</button></div><div class="online"><span class="dot"></span>ONLINE</div></div></div><div class="live-row"><div class="live-pill">Live Intelligence</div><div class="ticker-wrap"><div class="ticker-track" id="liveStrip"></div></div><div class="session-pill"><div class="lab">Current Session</div><div class="val" id="sessionVal">-</div></div></div><div class="hero"><div class="panel"><div class="kicker">Donna Overview</div><div class="hero-title" id="heroTitle">Loading...</div><div class="hero-sub" id="heroSub">Loading...</div></div><div class="panel side-stack"><div><div class="kicker">Morning Edge</div><div style="font-size:20px;font-weight:900" id="morningBias">-</div><div class="soft-note" id="morningRead">-</div></div><div class="mini-grid"><div class="mini"><div class="lab">Donna Time</div><div class="val" id="donnaTime">-</div></div><div class="mini"><div class="lab">Open Quality</div><div class="val" id="openQuality">-</div></div></div><div><div class="kicker">Main Threat</div><div style="font-size:18px;font-weight:900" id="mainThreat">-</div><div class="soft-note" id="focusRead">-</div></div></div></div><div class="stat-grid"><div class="card stat-card"><div class="lab">Macro Risk</div><div class="val medium" id="macroRisk">-</div><div class="sub">Event timing and macro pressure</div></div><div class="card stat-card"><div class="lab">Headline Risk</div><div class="val medium" id="headlineRisk">-</div><div class="sub">Breaking-news sensitivity</div></div><div class="card stat-card"><div class="lab">Market Risk</div><div class="val medium" id="marketRisk">-</div><div class="sub">Company and sector catalyst pressure</div></div><div class="card stat-card"><div class="lab">Session Significance</div><div class="val" style="font-size:20px;line-height:1.15" id="sessionSignificance">-</div><div class="sub" id="sessionSub">-</div></div></div><div class="page active" id="page-dashboard"><div class="grid-2"><div class="stack"><div class="panel"><div class="kicker">Market Driver Engine</div><div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant">-</div></div><div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div><div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div><div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div><div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div><div class="soft-note" id="driverSummary">-</div></div><div class="panel table-card"><div class="kicker">Major Indexes</div><table><thead><tr><th>Index</th><th>Last</th><th>Chg</th><th>%Chg</th></tr></thead><tbody id="majorIndexesTable"></tbody></table></div><div class="panel"><div class="kicker">Active Warnings</div><div class="badges" id="warnings"></div></div></div><div class="stack"><div class="panel table-card"><div class="kicker">Likely Market Movers</div><table><thead><tr><th>Ticker</th><th>Impact</th><th>Why</th></tr></thead><tbody id="likelyMoversTable"></tbody></table></div><div class="strip-grid"><div class="panel table-card"><div class="kicker">Top Movers</div><table><thead><tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr></thead><tbody id="topMoversTable"></tbody></table></div><div class="panel table-card"><div class="kicker">Bottom Movers</div><table><thead><tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr></thead><tbody id="bottomMoversTable"></tbody></table></div></div><div class="panel"><div class="kicker">Top Story</div><div style="font-size:24px;font-weight:900;line-height:1.18" id="topStory">-</div><div class="soft-note" id="topStoryNote">-</div></div></div></div></div><div class="page" id="page-trading"><div class="grid-2"><div class="stack"><div class="panel"><div class="kicker">What Matters Right Now</div><div style="font-size:28px;font-weight:900;line-height:1.12" id="tradingHeadline">-</div><div class="soft-note" id="tradingSummary">-</div><div class="action-row" id="watchFirstRow"></div></div><div class="panel"><div class="kicker">Recent Alerts</div><div id="recentAlerts"></div></div></div><div class="stack"><div class="panel table-card"><div class="kicker">Futures + Macro Pulse</div><table><thead><tr><th>Asset</th><th>Last</th><th>Chg</th><th>%Chg</th></tr></thead><tbody id="tradingPulseTable"></tbody></table></div><div class="panel"><div class="kicker">Trade Intelligence</div><div class="row"><div class="k">Bias</div><div class="v" id="tradeBias">-</div></div><div class="row"><div class="k">Open Quality</div><div class="v" id="tradeOpenQuality">-</div></div><div class="row"><div class="k">Main Threat</div><div class="v" id="tradeThreat">-</div></div><div class="row"><div class="k">Focus</div><div class="v" id="tradeFocus">-</div></div><div class="soft-note" id="tradeNote">-</div></div></div></div></div><div class="page" id="page-news"><div class="grid-2"><div class="stack"><div class="panel"><div class="kicker">Macro Story</div><div style="font-size:28px;font-weight:900;line-height:1.12" id="newsMacroTitle">-</div><div class="soft-note" id="newsMacroNote">-</div></div><div class="panel"><div class="kicker">Market Catalyst</div><div style="font-size:24px;font-weight:900;line-height:1.18" id="newsMarketTitle">-</div><div class="soft-note" id="newsMarketNote">-</div></div><div class="panel"><div class="kicker">Latest News</div><div id="newsList"></div></div></div><div class="stack"><div class="panel table-card"><div class="kicker">Leaders</div><table><thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead><tbody id="leadersTable"></tbody></table></div><div class="panel table-card"><div class="kicker">Threat Names</div><table><thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead><tbody id="threatsTable"></tbody></table></div><div class="panel table-card"><div class="kicker">Next To Watch</div><table><thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead><tbody id="nextWatchTable"></tbody></table></div></div></div></div><div class="page" id="page-assistant"><div class="grid-2"><div class="panel"><div class="kicker">Donna AI Assistant</div><div class="assistant-output" id="assistantOutput"><div class="msg assistant"><span class="role">Donna</span>Donna online. Ask what matters now, whether the session was significant, or which names can move the market.</div></div><textarea class="text-input" id="assistantInput" placeholder="Ask Donna something..."></textarea><div class="action-row"><button class="tab-btn" id="assistantSend">Send</button><button class="ghost-btn" data-prompt="What matters right now?">What matters now?</button><button class="ghost-btn" data-prompt="Was this a significant NY session move?">Session significance</button><button class="ghost-btn" data-prompt="What companies are most likely to move the market?">Likely movers</button></div></div><div class="stack"><div class="panel"><div class="kicker">Daily Focus</div><div style="font-size:20px;font-weight:900" id="dailyFocus">-</div><input class="text-input" id="focusInput" placeholder="Set daily focus" /><div class="action-row"><button class="tab-btn" id="setFocusBtn">Set Focus</button></div></div><div class="panel"><div class="kicker">Tasks</div><div id="taskList"></div><input class="text-input" id="taskInput" placeholder="Add task" /><div class="action-row"><button class="tab-btn" id="addTaskBtn">Add Task</button><button class="ghost-btn" id="clearTasksBtn">Clear Tasks</button></div></div><div class="panel"><div class="kicker">Reminders</div><div id="reminderList"></div><input class="text-input" id="reminderInput" placeholder="Add reminder" /><div class="action-row"><button class="tab-btn" id="addReminderBtn">Add Reminder</button><button class="ghost-btn" id="clearRemindersBtn">Clear Reminders</button></div></div></div></div></div><div class="footer"><div>Donna v5.0 Live Market Core</div><div id="footerUpdated">last update: -</div></div></div><script>let state=null;const byId=id=>document.getElementById(id);function toRiskClass(v){v=String(v||'').toLowerCase();if(v==='high')return'high';if(v==='medium')return'medium';return'low'}function showPage(name){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn[data-page]').forEach(b=>b.classList.remove('active'));byId('page-'+name).classList.add('active');document.querySelector('.tab-btn[data-page="'+name+'"]').classList.add('active')}document.querySelectorAll('.tab-btn[data-page]').forEach(btn=>btn.addEventListener('click',()=>showPage(btn.dataset.page)));function renderSimpleRows(rows,targetId){byId(targetId).innerHTML=rows.map(r=>`<tr><td>${r.symbol}</td><td>${r.last}</td><td class="${r.dir||(String(r.chg).startsWith('-')?'down':'up')}">${r.chg}</td><td class="${r.dir||(String(r.pct).startsWith('-')?'down':'up')}">${r.pct}</td></tr>`).join('')}function renderLikelyMovers(rows,targetId){byId(targetId).innerHTML=rows.map(r=>`<tr><td>${r.ticker}</td><td>${r.impact}</td><td>${r.why_it_matters}</td></tr>`).join('')}function renderTriple(rows,targetId){byId(targetId).innerHTML=rows.map(r=>`<tr><td>${r.ticker}</td><td>${r.impact}</td><td>${r.index_exposure}</td></tr>`).join('')}function renderAlerts(alerts){if(!alerts||!alerts.length){byId('recentAlerts').innerHTML='<div class="feed-item">No alerts yet</div>';return}byId('recentAlerts').innerHTML=alerts.map(a=>`<div class="feed-item"><b>${a.ticker}</b> // ${a.signal} // ${a.verdict} // ${a.confidence}<br/><span style="color:var(--muted)">${a.session} | TF ${a.timeframe} | Price ${a.price}</span><br/>${a.summary}</div>`).join('')}function renderNews(news){if(!news||!news.length){byId('newsList').innerHTML='<div class="feed-item">No live news available</div>';return}byId('newsList').innerHTML=news.map(n=>`<div class="feed-item"><b>${n.headline}</b><br/><span style="color:var(--muted)">${n.source}</span><br/>${n.summary||''}</div>`).join('')}function renderTasks(list,targetId,route){if(!list||!list.length){byId(targetId).innerHTML='<div class="feed-item">None</div>';return}byId(targetId).innerHTML=list.map((item,idx)=>`<div class="feed-item">${item}<div class="action-row"><button class="ghost-btn" onclick="deleteIndexed('${route}', ${idx})">Delete</button></div></div>`).join('')}function buildTicker(items){byId('liveStrip').innerHTML=items.map(item=>`<div class="ticker-item"><b>${item.label}:</b> ${item.value}</div>`).join('')}async function api(url,options={}){const res=await fetch(url,{headers:{'Content-Type':'application/json'},...options});const data=await res.json().catch(()=>({}));if(!res.ok) throw new Error(data.detail||data.reply||'Request failed');return data}function addAssistantMessage(role,text){const wrap=byId('assistantOutput');const div=document.createElement('div');div.className='msg '+role;div.innerHTML=`<span class="role">${role==='user'?'You':'Donna'}</span>${text}`;wrap.appendChild(div);wrap.scrollTop=wrap.scrollHeight}async function sendAssistant(message=null){const input=byId('assistantInput');const text=message||input.value.trim();if(!text)return;addAssistantMessage('user',text);if(!message)input.value='';try{const data=await api('/assistant/chat',{method:'POST',body:JSON.stringify({message:text})});addAssistantMessage('assistant',data.reply||'No reply.');await refresh()}catch(err){addAssistantMessage('assistant','Assistant error: '+err.message)}}async function deleteIndexed(route,index){try{await api(route,{method:'POST',body:JSON.stringify({index})});await refresh()}catch(err){alert(err.message)}}async function setFocus(){const value=byId('focusInput').value.trim();if(!value)return;await api('/assistant/set-focus',{method:'POST',body:JSON.stringify({daily_focus:value})});byId('focusInput').value='';await refresh()}async function addTask(){const value=byId('taskInput').value.trim();if(!value)return;await api('/assistant/add-task',{method:'POST',body:JSON.stringify({task:value})});byId('taskInput').value='';await refresh()}async function addReminder(){const value=byId('reminderInput').value.trim();if(!value)return;await api('/assistant/add-reminder',{method:'POST',body:JSON.stringify({reminder:value})});byId('reminderInput').value='';await refresh()}async function refresh(){state=await api('/dashboard-data');const risk=state.risk,driver=state.driver,morning=state.morning_edge,sig=state.session_significance,movers=state.market_movers_engine;buildTicker(state.live_strip);byId('sessionVal').textContent=risk.donna_session;byId('heroTitle').textContent=`${driver.dominant_driver} is driving current conditions.`;byId('heroSub').textContent=driver.market_summary;byId('morningBias').textContent=morning.today_bias;byId('morningRead').textContent=morning.first_read;byId('donnaTime').textContent=risk.donna_time_ny;byId('openQuality').textContent=morning.open_quality;byId('mainThreat').textContent=morning.main_threat;byId('focusRead').textContent=`Focus: ${morning.focus}`;let macro=byId('macroRisk');macro.textContent=String(risk.macro_risk).toUpperCase();macro.className='val '+toRiskClass(risk.macro_risk);let headline=byId('headlineRisk');headline.textContent=String(risk.headline_risk).toUpperCase();headline.className='val '+toRiskClass(risk.headline_risk);let market=byId('marketRisk');market.textContent=String(risk.market_news_risk).toUpperCase();market.className='val '+toRiskClass(risk.market_news_risk);byId('sessionSignificance').textContent=sig.label;byId('sessionSub').textContent=sig.summary;byId('driverDominant').textContent=driver.dominant_driver;byId('driverSecondary').textContent=driver.secondary_driver;byId('driverRegime').textContent=driver.market_regime;byId('driverThreat').textContent=driver.market_threat||morning.main_threat;byId('driverConfidence').textContent=driver.market_confidence;byId('driverSummary').textContent=driver.market_summary;byId('warnings').innerHTML=(risk.active_warnings||[]).map(x=>`<span class="badge">${x}</span>`).join('');renderSimpleRows(state.major_indexes,'majorIndexesTable');renderLikelyMovers(movers.leaders.concat(movers.next_to_watch),'likelyMoversTable');renderSimpleRows(state.live_movers.gainers||[],'topMoversTable');renderSimpleRows(state.live_movers.losers||[],'bottomMoversTable');byId('topStory').textContent=risk.last_headline;byId('topStoryNote').textContent=risk.headline_guidance;byId('tradingHeadline').textContent=`${sig.label} // ${morning.focus}`;byId('tradingSummary').textContent=sig.summary;const coreFocus = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER'];
-byId('watchFirstRow').innerHTML = coreFocus.map(x => `<button class="ghost-btn">${x}</button>`).join('');byId('tradeBias').textContent=morning.today_bias;byId('tradeOpenQuality').textContent=morning.open_quality;byId('tradeThreat').textContent=morning.main_threat;byId('tradeFocus').textContent=morning.focus;byId('tradeNote').textContent=morning.first_read;renderSimpleRows(state.futures_macro_pulse || [], 'tradingPulseTable');renderAlerts(state.alerts);byId('newsMacroTitle').textContent=state.calendar.next_event||risk.next_event;byId('newsMacroNote').textContent=`Source: ${state.calendar.source}. Minutes to event: ${state.calendar.minutes_to_event??'n/a'}`;byId('newsMarketTitle').textContent=risk.last_market_headline;byId('newsMarketNote').textContent=risk.last_market_guidance;renderNews(state.news);renderTriple(movers.leaders,'leadersTable');renderTriple(movers.threats,'threatsTable');renderTriple(movers.next_to_watch,'nextWatchTable');byId('dailyFocus').textContent=state.assistant.daily_focus;renderTasks(state.assistant.tasks,'taskList','/assistant/delete-task');renderTasks(state.assistant.reminders,'reminderList','/assistant/delete-reminder');byId('footerUpdated').textContent='last update: '+risk.donna_time_ny}document.querySelectorAll('.ghost-btn[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>sendAssistant(btn.dataset.prompt)));byId('assistantSend').addEventListener('click',()=>sendAssistant());byId('assistantInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendAssistant()}});byId('setFocusBtn').addEventListener('click',setFocus);byId('addTaskBtn').addEventListener('click',addTask);byId('addReminderBtn').addEventListener('click',addReminder);byId('clearTasksBtn').addEventListener('click',async()=>{await api('/assistant/clear-tasks',{method:'POST'});await refresh()});byId('clearRemindersBtn').addEventListener('click',async()=>{await api('/assistant/clear-reminders',{method:'POST'});await refresh()});refresh();setInterval(refresh,15000);</script></body></html>'''
+DASHBOARD_HTML = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>D.O.N.N.A v5.0</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#08111f;
+  --bg2:#0d1830;
+  --panel:#162441;
+  --line:rgba(255,255,255,.10);
+  --text:#edf4ff;
+  --muted:#a3b5d4;
+  --blue:#5f95ff;
+  --blue2:#3972f6;
+  --green:#43f7ad;
+  --yellow:#ffd557;
+  --red:#ff6b86;
+  --shadow:0 18px 48px rgba(0,0,0,.28);
+  --radius:22px
+}
+html,body{min-height:100%}
+body{
+  font-family:Inter,Arial,sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(circle at 5% 95%, rgba(67,247,173,.10), transparent 20%),
+    radial-gradient(circle at 100% 0%, rgba(95,149,255,.18), transparent 25%),
+    linear-gradient(180deg,var(--bg2),var(--bg));
+  padding:24px
+}
+body,.panel,.card,table,th,td,.hero,.row,.badge,.tab-btn,.ghost-btn{caret-color:transparent}
+.wrap{max-width:1420px;margin:0 auto}
+button{font:inherit}
+input,textarea,select{caret-color:auto}
+input,textarea{user-select:text}
+button,.tab-btn,.ghost-btn{cursor:pointer}
+
+.topbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:18px;
+  flex-wrap:wrap;
+  margin-bottom:14px
+}
+.brand h1{font-size:52px;line-height:1;font-weight:900;letter-spacing:4px}
+.brand p{margin-top:8px;color:var(--muted);font-size:13px}
+.top-right{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.online{
+  display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:999px;
+  background:rgba(67,247,173,.08);border:1px solid rgba(67,247,173,.24);
+  font-weight:900;color:#b7ffd9;font-size:13px;user-select:none
+}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 14px rgba(67,247,173,.8)}
+.nav{display:flex;gap:10px;flex-wrap:wrap;user-select:none}
+.tab-btn{
+  border:none;padding:12px 16px;border-radius:14px;background:rgba(255,255,255,.04);
+  color:#edf4ff;font-weight:800;border:1px solid rgba(255,255,255,.08);transition:.18s ease
+}
+.tab-btn.active{background:linear-gradient(135deg,var(--blue),var(--blue2));box-shadow:var(--shadow)}
+.tab-btn:hover{transform:translateY(-1px)}
+
+.live-row{
+  display:grid;
+  grid-template-columns:180px 1fr 220px;
+  gap:12px;
+  align-items:center;
+  margin-bottom:16px
+}
+.live-pill,.session-pill,.ticker-wrap{
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--line);
+  border-radius:16px;
+  box-shadow:var(--shadow)
+}
+.live-pill{
+  padding:14px 16px;color:#ffc7d2;border-color:rgba(255,107,134,.24);
+  background:rgba(255,107,134,.08);font-size:12px;font-weight:900;
+  letter-spacing:1.4px;text-transform:uppercase
+}
+.session-pill{padding:14px 16px;text-align:center}
+.session-pill .lab{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.session-pill .val{margin-top:6px;font-size:18px;font-weight:900}
+.ticker-wrap{overflow:hidden;position:relative;min-height:52px;display:flex;align-items:center}
+.ticker-track{
+  display:inline-flex;white-space:nowrap;padding-left:100%;
+  animation:tickerMove 30s linear infinite;will-change:transform
+}
+@keyframes tickerMove{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
+.ticker-item{padding-right:40px;color:#e7efff;font-size:13px;font-weight:700}
+.ticker-item b{color:#fff}
+
+.panel,.card{
+  background:linear-gradient(180deg, rgba(27,44,75,.95), rgba(21,36,65,.98));
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:22px;
+  user-select:none
+}
+.kicker{
+  font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
+  margin-bottom:12px
+}
+.hero{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:16px;
+  margin-bottom:16px
+}
+.hero-title{font-size:34px;font-weight:900;line-height:1.07}
+.hero-sub{margin-top:12px;color:var(--muted);font-size:15px;line-height:1.55}
+
+.summary-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  margin-bottom:16px
+}
+.summary-mini{
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:16px;
+  padding:16px
+}
+.summary-mini .lab{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px}
+.summary-mini .val{font-size:18px;font-weight:900;margin-top:8px;line-height:1.25}
+
+.stat-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:16px;
+  margin-bottom:16px
+}
+.stat-card .lab{
+  font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.7px;margin-bottom:14px
+}
+.stat-card .val{font-size:42px;font-weight:900;line-height:1;text-transform:uppercase}
+.stat-card .sub{margin-top:10px;color:var(--muted);font-size:14px}
+.low{color:var(--green)}
+.medium{color:var(--yellow)}
+.high{color:var(--red)}
+
+.page{display:none}
+.page.active{display:block}
+
+.vertical-stack{display:grid;gap:16px}
+.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.triple-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+
+.row{
+  display:flex;justify-content:space-between;gap:14px;padding:14px 0;
+  border-bottom:1px solid rgba(255,255,255,.08)
+}
+.row:last-child{border-bottom:none}
+.row .k{color:#dce8ff}
+.row .v{color:var(--muted);text-align:right}
+
+.feed-item{
+  padding:13px 0;border-bottom:1px solid rgba(255,255,255,.08);
+  line-height:1.5;color:#e9f1ff
+}
+.feed-item:last-child{border-bottom:none}
+
+.badges{display:flex;gap:10px;flex-wrap:wrap}
+.badge{
+  padding:9px 12px;border-radius:999px;font-size:12px;font-weight:800;
+  background:rgba(255,107,134,.08);border:1px solid rgba(255,107,134,.24);
+  color:#ffc7d2
+}
+
+.table-card table{width:100%;border-collapse:collapse}
+.table-card th{
+  color:var(--muted);text-align:left;padding:0 0 12px 0;border-bottom:1px solid rgba(255,255,255,.10);
+  font-size:12px;text-transform:uppercase;letter-spacing:1.4px
+}
+.table-card td{
+  padding:12px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:14px;font-weight:700
+}
+.table-card tr:last-child td{border-bottom:none}
+.up{color:var(--green)}
+.down{color:var(--red)}
+
+.soft-note{margin-top:12px;color:var(--muted);font-size:14px;line-height:1.55}
+.action-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.ghost-btn{
+  border:none;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);
+  color:#edf4ff;border:1px solid rgba(255,255,255,.08)
+}
+.assistant-output{
+  min-height:220px;max-height:460px;overflow:auto;border-radius:18px;background:rgba(0,0,0,.16);
+  border:1px solid rgba(255,255,255,.08);padding:14px;user-select:text;caret-color:auto
+}
+.msg{margin-bottom:12px;padding:12px 13px;border-radius:14px;line-height:1.5;font-size:14px}
+.msg.user{background:rgba(95,149,255,.14);border:1px solid rgba(95,149,255,.24)}
+.msg.assistant{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.msg .role{
+  display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.1px;margin-bottom:6px
+}
+.text-input{
+  width:100%;padding:13px 14px;margin-top:12px;border-radius:14px;
+  border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:#fff;outline:none;user-select:text
+}
+.footer{
+  margin-top:18px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px
+}
+
+@media(max-width:1200px){
+  .live-row,.summary-grid,.dual-grid,.triple-grid,.stat-grid{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  body{padding:16px}
+  .brand h1{font-size:38px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <h1>D.O.N.N.A</h1>
+      <p>Dynamic Operational Neural Network Assistant // Live Market Core</p>
+    </div>
+    <div class="top-right">
+      <div class="nav">
+        <button class="tab-btn active" data-page="dashboard">Dashboard</button>
+        <button class="tab-btn" data-page="trading">Trading</button>
+        <button class="tab-btn" data-page="news">News</button>
+        <button class="tab-btn" data-page="assistant">Assistant</button>
+      </div>
+      <div class="online"><span class="dot"></span>ONLINE</div>
+    </div>
+  </div>
+
+  <div class="live-row">
+    <div class="live-pill">Live Intelligence</div>
+    <div class="ticker-wrap"><div class="ticker-track" id="liveStrip"></div></div>
+    <div class="session-pill">
+      <div class="lab">Current Session</div>
+      <div class="val" id="sessionVal">-</div>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="panel">
+      <div class="kicker">Donna Overview</div>
+      <div class="hero-title" id="heroTitle">Loading...</div>
+      <div class="hero-sub" id="heroSub">Loading...</div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-mini">
+        <div class="lab">Donna Time</div>
+        <div class="val" id="donnaTime">-</div>
+      </div>
+      <div class="summary-mini">
+        <div class="lab">Open Quality</div>
+        <div class="val" id="openQuality">-</div>
+      </div>
+      <div class="summary-mini">
+        <div class="lab">Morning Bias</div>
+        <div class="val" id="morningBias">-</div>
+      </div>
+      <div class="summary-mini">
+        <div class="lab">Main Threat</div>
+        <div class="val" id="mainThreat">-</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="card stat-card">
+      <div class="lab">Macro Risk</div>
+      <div class="val medium" id="macroRisk">-</div>
+      <div class="sub">Event timing and macro pressure</div>
+    </div>
+    <div class="card stat-card">
+      <div class="lab">Headline Risk</div>
+      <div class="val medium" id="headlineRisk">-</div>
+      <div class="sub">Breaking-news sensitivity</div>
+    </div>
+    <div class="card stat-card">
+      <div class="lab">Market Risk</div>
+      <div class="val medium" id="marketRisk">-</div>
+      <div class="sub">Company and sector catalyst pressure</div>
+    </div>
+    <div class="card stat-card">
+      <div class="lab">Session Significance</div>
+      <div class="val" style="font-size:20px;line-height:1.15" id="sessionSignificance">-</div>
+      <div class="sub" id="sessionSub">-</div>
+    </div>
+  </div>
+
+  <div class="page active" id="page-dashboard">
+    <div class="vertical-stack">
+
+      <div class="panel">
+        <div class="kicker">Market Driver Engine</div>
+        <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant">-</div></div>
+        <div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div>
+        <div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div>
+        <div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div>
+        <div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div>
+        <div class="soft-note" id="driverSummary">-</div>
+      </div>
+
+      <div class="dual-grid">
+        <div class="panel table-card">
+          <div class="kicker">Major Indexes</div>
+          <table>
+            <thead>
+              <tr><th>Index</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+            </thead>
+            <tbody id="majorIndexesTable"></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="kicker">Active Warnings</div>
+          <div class="badges" id="warnings"></div>
+          <div class="soft-note" id="morningRead">-</div>
+          <div class="soft-note" id="focusRead">-</div>
+        </div>
+      </div>
+
+      <div class="panel table-card">
+        <div class="kicker">Likely Market Movers</div>
+        <table>
+          <thead>
+            <tr><th>Ticker</th><th>Impact</th><th>Why</th></tr>
+          </thead>
+          <tbody id="likelyMoversTable"></tbody>
+        </table>
+      </div>
+
+      <div class="dual-grid">
+        <div class="panel table-card">
+          <div class="kicker">Top Movers</div>
+          <table>
+            <thead>
+              <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+            </thead>
+            <tbody id="topMoversTable"></tbody>
+          </table>
+        </div>
+
+        <div class="panel table-card">
+          <div class="kicker">Bottom Movers</div>
+          <table>
+            <thead>
+              <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+            </thead>
+            <tbody id="bottomMoversTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="kicker">Top Story</div>
+        <div style="font-size:24px;font-weight:900;line-height:1.18" id="topStory">-</div>
+        <div class="soft-note" id="topStoryNote">-</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="page" id="page-trading">
+    <div class="vertical-stack">
+
+      <div class="panel">
+        <div class="kicker">What Matters Right Now</div>
+        <div style="font-size:28px;font-weight:900;line-height:1.12" id="tradingHeadline">-</div>
+        <div class="soft-note" id="tradingSummary">-</div>
+        <div class="action-row" id="watchFirstRow"></div>
+      </div>
+
+      <div class="panel table-card">
+        <div class="kicker">Futures + Macro Pulse</div>
+        <table>
+          <thead>
+            <tr><th>Asset</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+          </thead>
+          <tbody id="tradingPulseTable"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="kicker">Trade Intelligence</div>
+        <div class="row"><div class="k">Bias</div><div class="v" id="tradeBias">-</div></div>
+        <div class="row"><div class="k">Open Quality</div><div class="v" id="tradeOpenQuality">-</div></div>
+        <div class="row"><div class="k">Main Threat</div><div class="v" id="tradeThreat">-</div></div>
+        <div class="row"><div class="k">Focus</div><div class="v" id="tradeFocus">-</div></div>
+        <div class="soft-note" id="tradeNote">-</div>
+      </div>
+
+      <div class="panel">
+        <div class="kicker">Recent Alerts</div>
+        <div id="recentAlerts"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="page" id="page-news">
+    <div class="vertical-stack">
+
+      <div class="panel">
+        <div class="kicker">Macro Story</div>
+        <div style="font-size:28px;font-weight:900;line-height:1.12" id="newsMacroTitle">-</div>
+        <div class="soft-note" id="newsMacroNote">-</div>
+      </div>
+
+      <div class="panel">
+        <div class="kicker">Market Catalyst</div>
+        <div style="font-size:24px;font-weight:900;line-height:1.18" id="newsMarketTitle">-</div>
+        <div class="soft-note" id="newsMarketNote">-</div>
+      </div>
+
+      <div class="panel">
+        <div class="kicker">Latest News</div>
+        <div id="newsList"></div>
+      </div>
+
+      <div class="dual-grid">
+        <div class="panel table-card">
+          <div class="kicker">Leaders</div>
+          <table>
+            <thead>
+              <tr><th>Ticker</th><th>Impact</th><th>Index</th></tr>
+            </thead>
+            <tbody id="leadersTable"></tbody>
+          </table>
+        </div>
+
+        <div class="panel table-card">
+          <div class="kicker">Threat Names</div>
+          <table>
+            <thead>
+              <tr><th>Ticker</th><th>Impact</th><th>Index</th></tr>
+            </thead>
+            <tbody id="threatsTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel table-card">
+        <div class="kicker">Next To Watch</div>
+        <table>
+          <thead>
+            <tr><th>Ticker</th><th>Impact</th><th>Index</th></tr>
+          </thead>
+          <tbody id="nextWatchTable"></tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="page" id="page-assistant">
+    <div class="vertical-stack">
+
+      <div class="panel">
+        <div class="kicker">Donna AI Assistant</div>
+        <div class="assistant-output" id="assistantOutput">
+          <div class="msg assistant">
+            <span class="role">Donna</span>
+            Donna online. Ask what matters now, whether the session was significant, or which names can move the market.
+          </div>
+        </div>
+        <textarea class="text-input" id="assistantInput" placeholder="Ask Donna something..."></textarea>
+        <div class="action-row">
+          <button class="tab-btn" id="assistantSend">Send</button>
+          <button class="ghost-btn" data-prompt="What matters right now?">What matters now?</button>
+          <button class="ghost-btn" data-prompt="Was this a significant NY session move?">Session significance</button>
+          <button class="ghost-btn" data-prompt="What companies are most likely to move the market?">Likely movers</button>
+        </div>
+      </div>
+
+      <div class="dual-grid">
+        <div class="panel">
+          <div class="kicker">Daily Focus</div>
+          <div style="font-size:20px;font-weight:900" id="dailyFocus">-</div>
+          <input class="text-input" id="focusInput" placeholder="Set daily focus" />
+          <div class="action-row">
+            <button class="tab-btn" id="setFocusBtn">Set Focus</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="kicker">Tasks</div>
+          <div id="taskList"></div>
+          <input class="text-input" id="taskInput" placeholder="Add task" />
+          <div class="action-row">
+            <button class="tab-btn" id="addTaskBtn">Add Task</button>
+            <button class="ghost-btn" id="clearTasksBtn">Clear Tasks</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="kicker">Reminders</div>
+        <div id="reminderList"></div>
+        <input class="text-input" id="reminderInput" placeholder="Add reminder" />
+        <div class="action-row">
+          <button class="tab-btn" id="addReminderBtn">Add Reminder</button>
+          <button class="ghost-btn" id="clearRemindersBtn">Clear Reminders</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footer">
+    <div>Donna v5.0 Live Market Core</div>
+    <div id="footerUpdated">last update: -</div>
+  </div>
+
+</div>
+
+<script>
+let state=null;
+const byId=id=>document.getElementById(id);
+
+function toRiskClass(v){
+  v=String(v||'').toLowerCase();
+  if(v==='high') return 'high';
+  if(v==='medium') return 'medium';
+  return 'low';
+}
+
+function showPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn[data-page]').forEach(b=>b.classList.remove('active'));
+  byId('page-'+name).classList.add('active');
+  document.querySelector('.tab-btn[data-page="'+name+'"]').classList.add('active');
+}
+document.querySelectorAll('.tab-btn[data-page]').forEach(btn=>btn.addEventListener('click',()=>showPage(btn.dataset.page)));
+
+function renderSimpleRows(rows,targetId){
+  byId(targetId).innerHTML=(rows||[]).map(r=>`
+    <tr>
+      <td>${r.symbol}</td>
+      <td>${r.last}</td>
+      <td class="${r.dir||(String(r.chg).startsWith('-')?'down':'up')}">${r.chg}</td>
+      <td class="${r.dir||(String(r.pct).startsWith('-')?'down':'up')}">${r.pct}</td>
+    </tr>
+  `).join('');
+}
+
+function renderLikelyMovers(rows,targetId){
+  byId(targetId).innerHTML=(rows||[]).map(r=>`
+    <tr>
+      <td>${r.ticker}</td>
+      <td>${r.impact}</td>
+      <td>${r.why_it_matters}</td>
+    </tr>
+  `).join('');
+}
+
+function renderTriple(rows,targetId){
+  byId(targetId).innerHTML=(rows||[]).map(r=>`
+    <tr>
+      <td>${r.ticker}</td>
+      <td>${r.impact}</td>
+      <td>${r.index_exposure}</td>
+    </tr>
+  `).join('');
+}
+
+function renderAlerts(alerts){
+  if(!alerts||!alerts.length){
+    byId('recentAlerts').innerHTML='<div class="feed-item">No alerts yet</div>';
+    return;
+  }
+  byId('recentAlerts').innerHTML=alerts.map(a=>`
+    <div class="feed-item">
+      <b>${a.ticker}</b> // ${a.signal} // ${a.verdict} // ${a.confidence}<br/>
+      <span style="color:var(--muted)">${a.session} | TF ${a.timeframe} | Price ${a.price}</span><br/>
+      ${a.summary}
+    </div>
+  `).join('');
+}
+
+function renderNews(news){
+  if(!news||!news.length){
+    byId('newsList').innerHTML='<div class="feed-item">No live news available</div>';
+    return;
+  }
+  byId('newsList').innerHTML=news.map(n=>`
+    <div class="feed-item">
+      <b>${n.headline}</b><br/>
+      <span style="color:var(--muted)">${n.source}</span><br/>
+      ${n.summary||''}
+    </div>
+  `).join('');
+}
+
+function renderTasks(list,targetId,route){
+  if(!list||!list.length){
+    byId(targetId).innerHTML='<div class="feed-item">None</div>';
+    return;
+  }
+  byId(targetId).innerHTML=list.map((item,idx)=>`
+    <div class="feed-item">
+      ${item}
+      <div class="action-row">
+        <button class="ghost-btn" onclick="deleteIndexed('${route}', ${idx})">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function buildTicker(items){
+  byId('liveStrip').innerHTML=(items||[]).map(item=>`
+    <div class="ticker-item"><b>${item.label}:</b> ${item.value}</div>
+  `).join('');
+}
+
+async function api(url,options={}){
+  const res=await fetch(url,{headers:{'Content-Type':'application/json'},...options});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.detail||data.reply||'Request failed');
+  return data;
+}
+
+function addAssistantMessage(role,text){
+  const wrap=byId('assistantOutput');
+  const div=document.createElement('div');
+  div.className='msg '+role;
+  div.innerHTML=`<span class="role">${role==='user'?'You':'Donna'}</span>${text}`;
+  wrap.appendChild(div);
+  wrap.scrollTop=wrap.scrollHeight;
+}
+
+async function sendAssistant(message=null){
+  const input=byId('assistantInput');
+  const text=message||input.value.trim();
+  if(!text) return;
+  addAssistantMessage('user',text);
+  if(!message) input.value='';
+  try{
+    const data=await api('/assistant/chat',{method:'POST',body:JSON.stringify({message:text})});
+    addAssistantMessage('assistant',data.reply||'No reply.');
+    await refresh();
+  }catch(err){
+    addAssistantMessage('assistant','Assistant error: '+err.message);
+  }
+}
+
+async function deleteIndexed(route,index){
+  try{
+    await api(route,{method:'POST',body:JSON.stringify({index})});
+    await refresh();
+  }catch(err){
+    alert(err.message);
+  }
+}
+
+async function setFocus(){
+  const value=byId('focusInput').value.trim();
+  if(!value) return;
+  await api('/assistant/set-focus',{method:'POST',body:JSON.stringify({daily_focus:value})});
+  byId('focusInput').value='';
+  await refresh();
+}
+
+async function addTask(){
+  const value=byId('taskInput').value.trim();
+  if(!value) return;
+  await api('/assistant/add-task',{method:'POST',body:JSON.stringify({task:value})});
+  byId('taskInput').value='';
+  await refresh();
+}
+
+async function addReminder(){
+  const value=byId('reminderInput').value.trim();
+  if(!value) return;
+  await api('/assistant/add-reminder',{method:'POST',body:JSON.stringify({reminder:value})});
+  byId('reminderInput').value='';
+  await refresh();
+}
+
+async function refresh(){
+  state=await api('/dashboard-data');
+
+  const risk=state.risk||{};
+  const driver=state.driver||{};
+  const morning=state.morning_edge||{};
+  const sig=state.session_significance||{};
+  const movers=state.market_movers_engine||{};
+  const whatMatters=state.what_matters_now||{};
+
+  buildTicker(state.live_strip||[]);
+  byId('sessionVal').textContent=risk.donna_session||'-';
+
+  byId('heroTitle').textContent=
+    whatMatters.headline||
+    `${driver.dominant_driver||'Balanced Conditions'} is driving current conditions.`;
+
+  byId('heroSub').textContent=
+    whatMatters.summary||
+    driver.market_summary||
+    '-';
+
+  byId('morningBias').textContent=morning.today_bias||'-';
+  byId('morningRead').textContent=morning.first_read||'-';
+  byId('donnaTime').textContent=risk.donna_time_ny||'-';
+  byId('openQuality').textContent=morning.open_quality||'-';
+  byId('mainThreat').textContent=morning.main_threat||'-';
+  byId('focusRead').textContent=`Focus: ${morning.focus||'-'}`;
+
+  let macro=byId('macroRisk');
+  macro.textContent=String(risk.macro_risk||'-').toUpperCase();
+  macro.className='val '+toRiskClass(risk.macro_risk);
+
+  let headline=byId('headlineRisk');
+  headline.textContent=String(risk.headline_risk||'-').toUpperCase();
+  headline.className='val '+toRiskClass(risk.headline_risk);
+
+  let market=byId('marketRisk');
+  market.textContent=String(risk.market_news_risk||'-').toUpperCase();
+  market.className='val '+toRiskClass(risk.market_news_risk);
+
+  byId('sessionSignificance').textContent=sig.label||'-';
+  byId('sessionSub').textContent=sig.summary||'-';
+
+  byId('driverDominant').textContent=driver.dominant_driver||'-';
+  byId('driverSecondary').textContent=driver.secondary_driver||'-';
+  byId('driverRegime').textContent=driver.market_regime||'-';
+  byId('driverThreat').textContent=driver.market_threat||morning.main_threat||'-';
+  byId('driverConfidence').textContent=driver.market_confidence||'-';
+  byId('driverSummary').textContent=driver.market_summary||'-';
+
+  byId('warnings').innerHTML=(risk.active_warnings||[]).map(x=>`<span class="badge">${x}</span>`).join('');
+
+  renderSimpleRows(state.major_indexes||[],'majorIndexesTable');
+  renderLikelyMovers((movers.leaders||[]).concat(movers.next_to_watch||[]),'likelyMoversTable');
+  renderSimpleRows((state.live_movers||{}).gainers||[],'topMoversTable');
+  renderSimpleRows((state.live_movers||{}).losers||[],'bottomMoversTable');
+
+  byId('topStory').textContent=risk.last_headline||'-';
+  byId('topStoryNote').textContent=risk.headline_guidance||'-';
+
+  byId('tradingHeadline').textContent=
+    whatMatters.headline||
+    `${sig.label||'Session'} // ${morning.focus||'Balanced'}`;
+
+  byId('tradingSummary').textContent=
+    whatMatters.summary||
+    sig.summary||
+    '-';
+
+  byId('watchFirstRow').innerHTML=(whatMatters.watch||['NQ','ES','OIL','GOLD','SILVER'])
+    .map(x=>`<button class="ghost-btn">${x}</button>`)
+    .join('');
+
+  byId('tradeBias').textContent=morning.today_bias||'-';
+  byId('tradeOpenQuality').textContent=morning.open_quality||'-';
+  byId('tradeThreat').textContent=morning.main_threat||'-';
+  byId('tradeFocus').textContent=morning.focus||'-';
+  byId('tradeNote').textContent=morning.first_read||'-';
+
+  renderSimpleRows(state.futures_macro_pulse||[],'tradingPulseTable');
+  renderAlerts(state.alerts||[]);
+
+  byId('newsMacroTitle').textContent=(state.calendar||{}).next_event||risk.next_event||'-';
+  byId('newsMacroNote').textContent=`Source: ${(state.calendar||{}).source||'-'}. Minutes to event: ${(state.calendar||{}).minutes_to_event ?? 'n/a'}`;
+  byId('newsMarketTitle').textContent=risk.last_market_headline||'-';
+  byId('newsMarketNote').textContent=risk.last_market_guidance||'-';
+  renderNews(state.news||[]);
+  renderTriple(movers.leaders||[],'leadersTable');
+  renderTriple(movers.threats||[],'threatsTable');
+  renderTriple(movers.next_to_watch||[],'nextWatchTable');
+
+  byId('dailyFocus').textContent=(state.assistant||{}).daily_focus||'-';
+  renderTasks((state.assistant||{}).tasks||[],'taskList','/assistant/delete-task');
+  renderTasks((state.assistant||{}).reminders||[],'reminderList','/assistant/delete-reminder');
+
+  byId('footerUpdated').textContent='last update: '+(risk.donna_time_ny||'-');
+}
+
+document.querySelectorAll('.ghost-btn[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>sendAssistant(btn.dataset.prompt)));
+byId('assistantSend').addEventListener('click',()=>sendAssistant());
+byId('assistantInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){
+    e.preventDefault();
+    sendAssistant();
+  }
+});
+byId('setFocusBtn').addEventListener('click',setFocus);
+byId('addTaskBtn').addEventListener('click',addTask);
+byId('addReminderBtn').addEventListener('click',addReminder);
+byId('clearTasksBtn').addEventListener('click',async()=>{await api('/assistant/clear-tasks',{method:'POST'});await refresh()});
+byId('clearRemindersBtn').addEventListener('click',async()=>{await api('/assistant/clear-reminders',{method:'POST'});await refresh()});
+
+refresh();
+setInterval(refresh,15000);
+</script>
+</body>
+</html>'''
 
 
 @app.get('/dashboard', response_class=HTMLResponse)
