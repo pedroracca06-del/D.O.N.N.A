@@ -681,24 +681,34 @@ def apply_assistant_action(action, value):
 
 
 def build_dashboard_payload():
-    risk, driver, morning, significance = load_risk_state(), build_market_driver_engine(load_risk_state()), build_morning_edge(load_risk_state()), build_session_significance(load_risk_state())
-    movers, alerts, assistant, settings = build_market_movers_engine(), load_alert_history()[:10], load_assistant_state(), load_settings()
-     live_market = get_live_market_data()
+    risk = load_risk_state()
+    driver = build_market_driver_engine(risk)
+    morning = build_morning_edge(risk)
+    significance = build_session_significance(risk)
+
+    movers = build_market_movers_engine()
+    alerts = load_alert_history()[:10]
+    assistant = load_assistant_state()
+    settings = load_settings()
+
+    live_market = get_live_market_data()
     calendar = get_live_calendar()
     earnings = get_live_earnings()
     news = get_live_news()
     live_movers = get_live_movers()
     futures_macro_pulse = get_live_futures_macro_pulse()
+
     live_strip = [
-        {'label': 'Macro', 'value': str(risk.get('macro_risk','-')).upper()},
-        {'label': 'Headline', 'value': str(risk.get('headline_risk','-')).upper()},
-        {'label': 'Market', 'value': str(risk.get('market_news_risk','-')).upper()},
+        {'label': 'Macro', 'value': str(risk.get('macro_risk', '-')).upper()},
+        {'label': 'Headline', 'value': str(risk.get('headline_risk', '-')).upper()},
+        {'label': 'Market', 'value': str(risk.get('market_news_risk', '-')).upper()},
         {'label': 'Driver', 'value': driver['dominant_driver']},
         {'label': 'Threat', 'value': morning['main_threat']},
         {'label': 'Open Quality', 'value': morning['open_quality']},
         {'label': 'Session', 'value': risk.get('donna_session', session_label())},
-        {'label': 'Headline', 'value': risk.get('last_headline','')},
+        {'label': 'Headline', 'value': risk.get('last_headline', '')},
     ]
+
     return {
         'status': 'online',
         'risk': risk,
@@ -706,7 +716,7 @@ def build_dashboard_payload():
         'morning_edge': morning,
         'session_significance': significance,
         'market_movers_engine': movers,
-            'alerts': alerts,
+        'alerts': alerts,
         'assistant': assistant,
         'settings': settings,
         'major_indexes': live_market['major_indexes'],
@@ -718,7 +728,7 @@ def build_dashboard_payload():
         'news': news,
         'live_strip': live_strip,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL
-}
+    }
 
 
 async def news_loop():
