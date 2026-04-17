@@ -60,7 +60,7 @@ SETTINGS_FILE = BASE_DIR / 'donna_settings.json'
 MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
 CACHE = {}
 
-AULT_RISK_STATE = {
+DEFAULT_RISK_STATE = {
     'macro_risk': 'medium',
     'headline_risk': 'medium',
     'market_news_risk': 'medium',
