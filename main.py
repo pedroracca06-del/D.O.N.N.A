@@ -332,8 +332,8 @@ def get_quote_with_fallback(symbol, alt_symbol=None):
     
 def get_futures_quote(symbol_alias):
     futures_map = {
-        'NQ': ['NQ=F', 'MNQ=F', 'NQ'],
-        'ES': ['ES=F', 'MES=F', 'ES'],
+        'NQ': ['NQ=F', '^NDX', '^IXIC', 'QQQ'],
+        'ES': ['ES=F', '^GSPC', 'SPY'],
         'OIL': ['CL=F', 'USO'],
         'GOLD': ['GC=F', 'GLD'],
         'SILVER': ['SI=F', 'SLV'],
@@ -346,7 +346,6 @@ def get_futures_quote(symbol_alias):
             return q
 
     return None
-
 def fetch_fmp_market_movers(kind):
     if not FMP_API_KEY:
         return []
@@ -395,14 +394,42 @@ def get_live_major_indexes():
     c = cache_get('major_indexes')
     if c:
         return c
-    mapping = [('NASDAQ', 'QQQ', 'QQQ'), ('S&P 500', 'SPY', 'SPY'), ('DJIA', 'DIA', 'DIA'), ('VIX', '^VIX', None), ('US 10Y', '^TNX', None), ('DXY', 'DX-Y.NYB', None)]
+
+    mapping = [
+        ('NASDAQ', ['^IXIC', '^NDX', 'QQQ'], 'NASDAQ'),
+        ('S&P 500', ['^GSPC', '^SPX', 'SPY'], 'SPX'),
+        ('DJIA', ['^DJI', 'DIA'], 'DJIA'),
+        ('VIX', ['^VIX'], 'VIX'),
+        ('US 10Y', ['^TNX'], 'US10Y'),
+        ('DXY', ['DX-Y.NYB'], 'DXY'),
+    ]
+
     fallback = load_risk_state().get('market_snapshot', {})
-    fallback_map = {'NASDAQ': fallback.get('NASDAQ', {}), 'S&P 500': fallback.get('SPX', {}), 'DJIA': fallback.get('DJIA', {}), 'VIX': fallback.get('VIX', {}), 'US 10Y': fallback.get('US10Y', {}), 'DXY': fallback.get('DXY', {})}
     rows = []
-    for label, primary, alt in mapping:
-        q = get_quote_with_fallback(primary, alt) or fallback_map.get(label, {})
-        pct = safe_float(q.get('pct', 0))
-        rows.append({'symbol': label, 'last': q.get('last', '-'), 'chg': q.get('chg', '-'), 'pct': f'{pct:+.2f}%', 'dir': 'up' if pct >= 0 else 'down'})
+
+    for label, candidates, fallback_key in mapping:
+        q = None
+        for sym in candidates:
+            q = get_quote_with_fallback(sym)
+            if q and q.get('last') not in (None, '-', 0):
+                break
+
+        if not q:
+            q = fallback.get(fallback_key, {})
+
+        last = (q or {}).get('last', '-')
+        chg = (q or {}).get('chg', '-')
+        pct_raw = (q or {}).get('pct', None)
+        pct_num = safe_float(pct_raw, None) if pct_raw is not None else None
+
+        rows.append({
+            'symbol': label,
+            'last': last if last not in (None, 0) else '-',
+            'chg': chg if chg not in (None, 0) else '-',
+            'pct': f'{pct_num:+.2f}%' if pct_num is not None and last not in (None, '-', 0) else '-',
+            'dir': 'up' if (pct_num is not None and pct_num >= 0) else 'down'
+        })
+
     cache_set('major_indexes', rows, 20)
     return rows
 
