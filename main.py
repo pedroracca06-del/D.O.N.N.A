@@ -882,6 +882,7 @@ def build_dashboard_payload():
         'driver': driver,
         'morning_edge': morning,
         'session_significance': significance,
+        'what_matters_now': what_matters,
         'market_movers_engine': movers,
         'alerts': alerts,
         'assistant': assistant,
@@ -894,11 +895,8 @@ def build_dashboard_payload():
         'earnings': earnings,
         'news': news,
         'live_strip': live_strip,
-        'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL
-        'what_matters_now': what_matters,
+        'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
     }
-
-
 async def news_loop():
     while True:
         try: await asyncio.to_thread(process_news_guard_cycle)
