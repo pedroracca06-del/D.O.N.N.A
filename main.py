@@ -677,68 +677,80 @@ def build_what_matters_now(risk=None):
     vix_pct = pct('VIX')
     us10y_pct = pct('US10Y')
 
-    headline = 'What matters now is unclear'
+    headline = 'Balanced conditions'
     summary = 'Donna does not yet see one dominant cross-asset force.'
     watch = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER']
     mode = 'balanced'
+    risk_to_conviction = 'Normal'
+    focus_reason = 'No single asset is overpowering the tape yet.'
 
-    # 1. High-risk macro / volatility regime
     if str(state.get('macro_risk', '')).lower() == 'high' or (vix_pct is not None and vix_pct >= 4):
         headline = 'Macro risk is in control right now'
         summary = f"{state.get('next_event', 'Macro timing matters')} is the main threat. Respect reaction risk over conviction."
         watch = ['NQ', 'ES', 'DXY', 'US10Y', 'VIX']
         mode = 'macro_risk'
+        risk_to_conviction = 'High'
+        focus_reason = 'Event timing and volatility expansion matter more than clean trend continuation.'
 
-    # 2. Oil shock / geopolitical commodity pressure
     elif oil_pct is not None and abs(oil_pct) >= 2.0:
         direction = 'surging' if oil_pct > 0 else 'breaking lower'
         headline = f'Oil is {direction} and changing the tone'
         summary = 'Energy is making a real move. Watch for cross-asset pressure, inflation/risk sentiment shifts, and index reaction.'
         watch = ['OIL', 'ES', 'NQ', 'DXY', 'US10Y']
         mode = 'oil_shock'
+        risk_to_conviction = 'Medium-High'
+        focus_reason = 'Crude is the dominant mover and can reshape equity tone fast.'
 
-    # 3. Precious metals momentum / defensive tone
     elif ((gold_pct is not None and abs(gold_pct) >= 1.0) or
           (silver_pct is not None and abs(silver_pct) >= 2.0)):
         headline = 'Metals are making a real move'
-        summary = 'Gold/silver strength is meaningful enough to matter. Watch for macro defensiveness, dollar relationships, and risk appetite shifts.'
+        summary = 'Gold and silver are active enough to matter for macro interpretation and defensive tone.'
         watch = ['GOLD', 'SILVER', 'DXY', 'US10Y', 'NQ']
         mode = 'metals'
+        risk_to_conviction = 'Medium'
+        focus_reason = 'Precious metals are signaling a macro/defensive shift worth respecting.'
 
-    # 4. Nasdaq-led trend expansion
     elif nq_pct is not None and nq_pct >= 0.75:
         headline = 'Nasdaq momentum is still leading'
         summary = sig['summary']
         watch = ['NQ', 'ES', 'NVDA', 'MSFT', 'AMD']
         mode = 'nq_momentum'
+        risk_to_conviction = 'Medium'
+        focus_reason = 'Nasdaq leadership is strong enough to stay front and center.'
 
-    # 5. Broad downside / risk-off
     elif ((nq_pct is not None and nq_pct <= -0.75) or
           (es_pct is not None and es_pct <= -0.60)):
         headline = 'Risk-off pressure is leading this tape'
-        summary = 'Index pressure is strong enough to matter. Watch whether this is just rotation or true market stress.'
+        summary = 'Index pressure is strong enough to matter. Watch whether this is just rotation or true stress.'
         watch = ['NQ', 'ES', 'VIX', 'DXY', 'US10Y']
         mode = 'risk_off'
+        risk_to_conviction = 'High'
+        focus_reason = 'Downside pressure plus defensive confirmation raises fragility.'
 
-    # 6. Rates / dollar pressure
     elif ((dxy_pct is not None and abs(dxy_pct) >= 0.40) or
           (us10y_pct is not None and abs(us10y_pct) >= 1.00)):
         headline = 'Macro pressure is coming from dollar / rates'
-        summary = 'DXY or yields are moving enough to affect equities and metals. Respect cross-asset pressure before forcing directional trades.'
+        summary = 'DXY or yields are moving enough to affect equities and metals. Respect cross-asset pressure first.'
         watch = ['DXY', 'US10Y', 'NQ', 'ES', 'GOLD']
         mode = 'rates_fx'
+        risk_to_conviction = 'Medium-High'
+        focus_reason = 'Rates and dollar movement are strong enough to distort clean equity reads.'
 
     else:
         headline = f"{driver['dominant_driver']} is driving current conditions."
         summary = driver['market_summary']
         watch = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER']
         mode = 'balanced'
+        risk_to_conviction = 'Normal'
+        focus_reason = 'Donna sees a tradable environment, but not one overwhelming cross-asset driver.'
 
     return {
         'headline': headline,
         'summary': summary,
         'watch': watch,
-        'mode': mode
+        'mode': mode,
+        'risk_to_conviction': risk_to_conviction,
+        'focus_reason': focus_reason,
     }
 
 def build_market_movers_engine():
@@ -1610,6 +1622,9 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
         <div class="kicker">What Matters Right Now</div>
         <div style="font-size:28px;font-weight:900;line-height:1.12" id="tradingHeadline">-</div>
         <div class="soft-note" id="tradingSummary">-</div>
+        <div class="row"><div class="k">Donna Mode</div><div class="v" id="tradingMode">-</div></div>
+        <div class="row"><div class="k">Risk To Conviction</div><div class="v" id="tradingRiskToConviction">-</div></div>
+        <div class="soft-note" id="tradingFocusReason">-</div>
         <div class="action-row" id="watchFirstRow"></div>
       </div>
 
@@ -1993,19 +2008,27 @@ async function refresh(){
   byId('topStory').textContent=risk.last_headline||'-';
   byId('topStoryNote').textContent=risk.headline_guidance||'-';
 
-  byId('tradingHeadline').textContent=
-    whatMatters.headline||
-    `${sig.label||'Session'} // ${morning.focus||'Balanced'}`;
+byId('tradingHeadline').textContent =
+  whatMatters.headline ||
+  `${sig.label || 'Session'} // ${morning.focus || 'Balanced'}`;
 
-  byId('tradingSummary').textContent=
-    whatMatters.summary||
-    sig.summary||
-    '-';
+byId('tradingSummary').textContent =
+  whatMatters.summary ||
+  sig.summary ||
+  '-';
 
-  byId('watchFirstRow').innerHTML=(whatMatters.watch||['NQ','ES','OIL','GOLD','SILVER'])
-    .map(x=>`<button class="ghost-btn">${x}</button>`)
-    .join('');
+byId('tradingMode').textContent =
+  whatMatters.mode || '-';
 
+byId('tradingRiskToConviction').textContent =
+  whatMatters.risk_to_conviction || '-';
+
+byId('tradingFocusReason').textContent =
+  whatMatters.focus_reason || '-';
+
+byId('watchFirstRow').innerHTML = (whatMatters.watch || ['NQ','ES','OIL','GOLD','SILVER'])
+  .map(x => `<button class="ghost-btn">${x}</button>`)
+  .join('');
   byId('tradeBias').textContent=morning.today_bias||'-';
   byId('tradeOpenQuality').textContent=morning.open_quality||'-';
   byId('tradeThreat').textContent=morning.main_threat||'-';
