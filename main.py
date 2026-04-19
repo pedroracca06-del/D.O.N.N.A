@@ -1615,21 +1615,46 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
     </div>
   </div>
 
-  <div class="page" id="page-trading">
-    <div class="vertical-stack">
+<div class="page" id="page-trading">
+  <div class="vertical-stack">
 
-      <div class="panel">
-        <div class="kicker">What Matters Right Now</div>
-        <div style="font-size:28px;font-weight:900;line-height:1.12" id="tradingHeadline">-</div>
-        <div class="soft-note" id="tradingSummary">-</div>
-        <div class="row"><div class="k">Donna Mode</div><div class="v" id="tradingMode">-</div></div>
-        <div class="row"><div class="k">Risk To Conviction</div><div class="v" id="tradingRiskToConviction">-</div></div>
-        <div class="soft-note" id="tradingFocusReason">-</div>
-        <div class="action-row" id="watchFirstRow"></div>
+    <div class="panel trading-hero">
+      <div class="kicker">Trading Command</div>
+      <div class="hero-row">
+        <div class="hero-left">
+          <div class="hero-eyebrow">What Matters Right Now</div>
+          <div class="trading-hero-title" id="tradingHeadline">-</div>
+          <div class="trading-hero-summary" id="tradingSummary">-</div>
+        </div>
+        <div class="hero-right">
+          <div class="metric-chip">
+            <span class="metric-chip-label">Donna Mode</span>
+            <span class="metric-chip-value" id="tradingMode">-</span>
+          </div>
+          <div class="metric-chip">
+            <span class="metric-chip-label">Risk To Conviction</span>
+            <span class="metric-chip-value" id="tradingRiskToConviction">-</span>
+          </div>
+        </div>
       </div>
 
-      <div class="panel table-card">
-        <div class="kicker">Futures + Macro Pulse</div>
+      <div class="trading-focus-reason" id="tradingFocusReason">-</div>
+
+      <div class="focus-toolbar">
+        <div class="focus-toolbar-label">Quick Focus</div>
+        <div class="action-row" id="watchFirstRow"></div>
+      </div>
+    </div>
+
+    <div class="dual-grid trading-mid-grid">
+
+      <div class="panel table-card trading-pulse-card">
+        <div class="card-topline">
+          <div>
+            <div class="kicker">Live Pulse</div>
+            <div class="card-title">Futures + Macro Pulse</div>
+          </div>
+        </div>
         <table>
           <thead>
             <tr><th>Asset</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
@@ -1638,24 +1663,34 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
         </table>
       </div>
 
-      <div class="panel">
-        <div class="kicker">Trade Intelligence</div>
+      <div class="panel trading-intel-card">
+        <div class="card-topline">
+          <div>
+            <div class="kicker">Execution View</div>
+            <div class="card-title">Trade Intelligence</div>
+          </div>
+        </div>
         <div class="row"><div class="k">Bias</div><div class="v" id="tradeBias">-</div></div>
         <div class="row"><div class="k">Open Quality</div><div class="v" id="tradeOpenQuality">-</div></div>
         <div class="row"><div class="k">Main Threat</div><div class="v" id="tradeThreat">-</div></div>
         <div class="row"><div class="k">Focus</div><div class="v" id="tradeFocus">-</div></div>
-        <div class="soft-note" id="tradeNote">-</div>
-      </div>
-
-      <div class="panel">
-        <div class="kicker">Recent Alerts</div>
-        <div id="recentAlerts"></div>
+        <div class="trading-note" id="tradeNote">-</div>
       </div>
 
     </div>
-  </div>
 
-  <div class="page" id="page-news">
+    <div class="panel trading-observation-card">
+      <div class="card-topline">
+        <div>
+          <div class="kicker">Donna Feed</div>
+          <div class="card-title">Recent Alerts & Observations</div>
+        </div>
+      </div>
+      <div id="recentAlerts"></div>
+    </div>
+
+  </div>
+</div>
     <div class="vertical-stack">
 
       <div class="panel">
@@ -1953,7 +1988,144 @@ function formatPctValue(value){
   if (Number.isNaN(num)) return String(value);
   return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
 }
+.trading-hero{
+  padding:28px;
+  border:1px solid rgba(95,149,255,.18);
+  background:
+    radial-gradient(circle at top right, rgba(95,149,255,.14), transparent 28%),
+    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
+}
 
+.hero-row{
+  display:grid;
+  grid-template-columns:1.35fr .65fr;
+  gap:18px;
+  align-items:start;
+}
+
+.hero-eyebrow{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.8px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+
+.trading-hero-title{
+  font-size:34px;
+  line-height:1.08;
+  font-weight:900;
+  letter-spacing:-.02em;
+}
+
+.trading-hero-summary{
+  margin-top:12px;
+  font-size:15px;
+  line-height:1.65;
+  color:var(--muted);
+  max-width:90ch;
+}
+
+.hero-right{
+  display:grid;
+  gap:12px;
+}
+
+.metric-chip{
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+  border-radius:16px;
+  padding:14px 16px;
+}
+
+.metric-chip-label{
+  display:block;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:1.4px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+
+.metric-chip-value{
+  display:block;
+  font-size:18px;
+  font-weight:900;
+  color:var(--text);
+}
+
+.trading-focus-reason{
+  margin-top:16px;
+  padding:14px 16px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.03);
+  color:var(--muted);
+  line-height:1.6;
+}
+
+.focus-toolbar{
+  margin-top:18px;
+}
+
+.focus-toolbar-label{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.5px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+
+.card-topline{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:12px;
+}
+
+.card-title{
+  font-size:22px;
+  font-weight:900;
+  line-height:1.15;
+}
+
+.trading-mid-grid{
+  align-items:start;
+}
+
+.trading-pulse-card,
+.trading-intel-card,
+.trading-observation-card{
+  background:
+    linear-gradient(180deg, rgba(27,44,75,.95), rgba(19,33,58,.98));
+}
+
+.trading-note{
+  margin-top:14px;
+  color:var(--muted);
+  line-height:1.6;
+}
+
+#watchFirstRow .ghost-btn{
+  padding:11px 14px;
+  border-radius:14px;
+  background:rgba(95,149,255,.08);
+  border:1px solid rgba(95,149,255,.18);
+  transition:.18s ease;
+}
+
+#watchFirstRow .ghost-btn:hover{
+  transform:translateY(-1px);
+  background:rgba(95,149,255,.14);
+  border-color:rgba(95,149,255,.30);
+}
+
+@media(max-width:1200px){
+  .hero-row{
+    grid-template-columns:1fr;
+  }
+}
 function getPulseMap(){
   const rows = (state && state.futures_macro_pulse) ? state.futures_macro_pulse : [];
   const out = {};
