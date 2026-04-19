@@ -1947,6 +1947,81 @@ async function addReminder(){
   await refresh();
 }
 
+function formatPctValue(value){
+  if (value === null || value === undefined) return '-';
+  const num = Number(String(value).replace('%','').replace('+','').trim());
+  if (Number.isNaN(num)) return String(value);
+  return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
+}
+
+function getPulseMap(){
+  const rows = (state && state.futures_macro_pulse) ? state.futures_macro_pulse : [];
+  const out = {};
+  rows.forEach(r => {
+    out[r.symbol] = r;
+  });
+  return out;
+}
+
+function quickFocusInstrument(symbol){
+  if (!state) return;
+
+  const pulseMap = getPulseMap();
+  const row = pulseMap[symbol] || {};
+  const pctRaw = row.pct || '-';
+  const last = row.last || '-';
+  const chg = row.chg || '-';
+
+  let summary = `${symbol} last ${last}, change ${chg}, pct ${pctRaw}.`;
+  let mode = symbol.toLowerCase();
+  let risk = 'Normal';
+  let reason = `${symbol} is in focus because it is part of Donna's current watch set.`;
+
+  const pctNum = Number(String(pctRaw).replace('%','').replace('+','').trim());
+
+  if (symbol === 'OIL') {
+    mode = 'oil_focus';
+    risk = Math.abs(pctNum) >= 2 ? 'Medium-High' : 'Medium';
+    reason = 'Crude can reshape equity tone, inflation expectations, and cross-asset sentiment quickly.';
+    summary = `Oil is trading at ${last} with ${chg} (${pctRaw}). Watch ES, NQ, DXY, and rates for cross-asset reaction.`;
+  } else if (symbol === 'NQ') {
+    mode = 'nq_focus';
+    risk = Math.abs(pctNum) >= 1 ? 'Medium-High' : 'Medium';
+    reason = 'Nasdaq leadership is one of the clearest reads for growth, risk appetite, and mega-cap pressure.';
+    summary = `NQ is trading at ${last} with ${chg} (${pctRaw}). Watch whether leadership is expanding, stalling, or diverging from ES.`;
+  } else if (symbol === 'ES') {
+    mode = 'es_focus';
+    risk = Math.abs(pctNum) >= 1 ? 'Medium-High' : 'Medium';
+    reason = 'ES tells you whether participation is broad or if the move is too concentrated in Nasdaq leadership.';
+    summary = `ES is trading at ${last} with ${chg} (${pctRaw}). Watch whether broad participation is confirming or lagging the tape.`;
+  } else if (symbol === 'DXY') {
+    mode = 'dxy_focus';
+    risk = 'Medium';
+    reason = 'Dollar movement can pressure equities, commodities, and metals all at once.';
+    summary = `DXY is trading at ${last} with ${chg} (${pctRaw}). Watch for pressure or support across NQ, ES, gold, and oil.`;
+  } else if (symbol === 'US10Y') {
+    mode = 'rates_focus';
+    risk = 'Medium';
+    reason = 'Yields matter for valuation-sensitive assets and overall macro pressure.';
+    summary = `US10Y is trading at ${last} with ${chg} (${pctRaw}). Watch whether rates are reinforcing or fighting the current equity move.`;
+  } else if (symbol === 'GOLD') {
+    mode = 'gold_focus';
+    risk = 'Medium';
+    reason = 'Gold helps read macro defensiveness, real-rate pressure, and dollar relationships.';
+    summary = `Gold is trading at ${last} with ${chg} (${pctRaw}). Watch whether metals strength is signaling defensiveness or macro rotation.`;
+  } else if (symbol === 'SILVER') {
+    mode = 'silver_focus';
+    risk = 'Medium';
+    reason = 'Silver often expands harder and can reflect more aggressive commodity participation.';
+    summary = `Silver is trading at ${last} with ${chg} (${pctRaw}). Watch whether the move is confirming broader metals momentum.`;
+  }
+
+  byId('tradingHeadline').textContent = `${symbol} Quick Focus`;
+  byId('tradingSummary').textContent = summary;
+  byId('tradingMode').textContent = mode;
+  byId('tradingRiskToConviction').textContent = risk;
+  byId('tradingFocusReason').textContent = reason;
+}
 async function refresh(){
   state=await api('/dashboard-data');
 
@@ -2027,7 +2102,7 @@ byId('tradingFocusReason').textContent =
   whatMatters.focus_reason || '-';
 
 byId('watchFirstRow').innerHTML = (whatMatters.watch || ['NQ','ES','OIL','GOLD','SILVER'])
-  .map(x => `<button class="ghost-btn">${x}</button>`)
+  .map(x => `<button class="ghost-btn" onclick="quickFocusInstrument('${x}')">${x}</button>`)
   .join('');
   byId('tradeBias').textContent=morning.today_bias||'-';
   byId('tradeOpenQuality').textContent=morning.open_quality||'-';
