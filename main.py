@@ -1808,7 +1808,16 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 
 <script>
 let state=null;
-const byId=id=>document.getElementById(id);
+const byId=id=>document.getElementById(id);\
+function setText(id, value){
+  const el = byId(id);
+  if (el) el.textContent = value ?? '-';
+}
+
+function setHTML(id, value){
+  const el = byId(id);
+  if (el) el.innerHTML = value ?? '';
+}
 
 function toRiskClass(v){
   v=String(v||'').toLowerCase();
@@ -2195,132 +2204,134 @@ function quickFocusInstrument(symbol){
   byId('tradingFocusReason').textContent = reason;
 }
 async function refresh(){
-  state=await api('/dashboard-data');
+  try{
+    state = await api('/dashboard-data');
 
-  const risk=state.risk||{};
-  const driver=state.driver||{};
-  const morning=state.morning_edge||{};
-  const sig=state.session_significance||{};
-  const movers=state.market_movers_engine||{};
-  const whatMatters=state.what_matters_now||{};
+    const risk = state.risk || {};
+    const driver = state.driver || {};
+    const morning = state.morning_edge || {};
+    const sig = state.session_significance || {};
+    const movers = state.market_movers_engine || {};
+    const whatMatters = state.what_matters_now || {};
 
-  buildTicker(state.live_strip||[]);
-  byId('sessionVal').textContent=risk.donna_session||'-';
+    buildTicker(state.live_strip || []);
 
-  byId('heroTitle').textContent=
-    whatMatters.headline||
-    `${driver.dominant_driver||'Balanced Conditions'} is driving current conditions.`;
+    setText('sessionVal', risk.donna_session || '-');
 
-  byId('heroSub').textContent=
-    whatMatters.summary||
-    driver.market_summary||
-    '-';
+    setText(
+      'heroTitle',
+      whatMatters.headline ||
+      `${driver.dominant_driver || 'Balanced Conditions'} is driving current conditions.`
+    );
 
-  byId('morningBias').textContent=morning.today_bias||'-';
-  byId('morningRead').textContent=morning.first_read||'-';
-  byId('donnaTime').textContent=risk.donna_time_ny||'-';
-  byId('openQuality').textContent=morning.open_quality||'-';
-  byId('mainThreat').textContent=morning.main_threat||'-';
-  byId('focusRead').textContent=`Focus: ${morning.focus||'-'}`;
+    setText(
+      'heroSub',
+      whatMatters.summary ||
+      driver.market_summary ||
+      '-'
+    );
 
-  let macro=byId('macroRisk');
-  macro.textContent=String(risk.macro_risk||'-').toUpperCase();
-  macro.className='val '+toRiskClass(risk.macro_risk);
+    setText('morningBias', morning.today_bias || '-');
+    setText('morningRead', morning.first_read || '-');
+    setText('donnaTime', risk.donna_time_ny || '-');
+    setText('openQuality', morning.open_quality || '-');
+    setText('mainThreat', morning.main_threat || '-');
+    setText('focusRead', `Focus: ${morning.focus || '-'}`);
 
-  let headline=byId('headlineRisk');
-  headline.textContent=String(risk.headline_risk||'-').toUpperCase();
-  headline.className='val '+toRiskClass(risk.headline_risk);
+    const macro = byId('macroRisk');
+    if (macro){
+      macro.textContent = String(risk.macro_risk || '-').toUpperCase();
+      macro.className = 'val ' + toRiskClass(risk.macro_risk);
+    }
 
-  let market=byId('marketRisk');
-  market.textContent=String(risk.market_news_risk||'-').toUpperCase();
-  market.className='val '+toRiskClass(risk.market_news_risk);
+    const headline = byId('headlineRisk');
+    if (headline){
+      headline.textContent = String(risk.headline_risk || '-').toUpperCase();
+      headline.className = 'val ' + toRiskClass(risk.headline_risk);
+    }
 
-  byId('sessionSignificance').textContent=sig.label||'-';
-  byId('sessionSub').textContent=sig.summary||'-';
+    const market = byId('marketRisk');
+    if (market){
+      market.textContent = String(risk.market_news_risk || '-').toUpperCase();
+      market.className = 'val ' + toRiskClass(risk.market_news_risk);
+    }
 
-  byId('driverDominant').textContent=driver.dominant_driver||'-';
-  byId('driverSecondary').textContent=driver.secondary_driver||'-';
-  byId('driverRegime').textContent=driver.market_regime||'-';
-  byId('driverThreat').textContent=driver.market_threat||morning.main_threat||'-';
-  byId('driverConfidence').textContent=driver.market_confidence||'-';
-  byId('driverSummary').textContent=driver.market_summary||'-';
+    setText('sessionSignificance', sig.label || '-');
+    setText('sessionSub', sig.summary || '-');
 
-  byId('warnings').innerHTML=(risk.active_warnings||[]).map(x=>`<span class="badge">${x}</span>`).join('');
+    setText('driverDominant', driver.dominant_driver || '-');
+    setText('driverSecondary', driver.secondary_driver || '-');
+    setText('driverRegime', driver.market_regime || '-');
+    setText('driverThreat', driver.market_threat || morning.main_threat || '-');
+    setText('driverConfidence', driver.market_confidence || '-');
+    setText('driverSummary', driver.market_summary || '-');
 
-  renderSimpleRows(state.major_indexes||[],'majorIndexesTable');
-  renderLikelyMovers((movers.leaders||[]).concat(movers.next_to_watch||[]),'likelyMoversTable');
-  renderSimpleRows((state.live_movers||{}).gainers||[],'topMoversTable');
-  renderSimpleRows((state.live_movers||{}).losers||[],'bottomMoversTable');
+    setHTML(
+      'warnings',
+      (risk.active_warnings || []).map(x => `<span class="badge">${x}</span>`).join('')
+    );
 
-  byId('topStory').textContent=risk.last_headline||'-';
-  byId('topStoryNote').textContent=risk.headline_guidance||'-';
+    renderSimpleRows(state.major_indexes || [], 'majorIndexesTable');
+    renderLikelyMovers((movers.leaders || []).concat(movers.next_to_watch || []), 'likelyMoversTable');
+    renderSimpleRows((state.live_movers || {}).gainers || [], 'topMoversTable');
+    renderSimpleRows((state.live_movers || {}).losers || [], 'bottomMoversTable');
 
-byId('tradingHeadline').textContent =
-  whatMatters.headline ||
-  `${sig.label || 'Session'} // ${morning.focus || 'Balanced'}`;
+    setText('topStory', risk.last_headline || '-');
+    setText('topStoryNote', risk.headline_guidance || '-');
 
-byId('tradingSummary').textContent =
-  whatMatters.summary ||
-  sig.summary ||
-  '-';
+    setText(
+      'tradingHeadline',
+      whatMatters.headline ||
+      `${sig.label || 'Session'} // ${morning.focus || 'Balanced'}`
+    );
+    setText(
+      'tradingSummary',
+      whatMatters.summary ||
+      sig.summary ||
+      '-'
+    );
+    setText('tradingMode', whatMatters.mode || '-');
+    setText('tradingRiskToConviction', whatMatters.risk_to_conviction || '-');
+    setText('tradingFocusReason', whatMatters.focus_reason || '-');
 
-byId('tradingMode').textContent =
-  whatMatters.mode || '-';
+    setHTML(
+      'watchFirstRow',
+      (whatMatters.watch || ['NQ','ES','OIL','GOLD','SILVER'])
+        .map(x => `<button class="ghost-btn" onclick="quickFocusInstrument('${x}')">${x}</button>`)
+        .join('')
+    );
 
-byId('tradingRiskToConviction').textContent =
-  whatMatters.risk_to_conviction || '-';
+    setText('tradeBias', morning.today_bias || '-');
+    setText('tradeOpenQuality', morning.open_quality || '-');
+    setText('tradeThreat', morning.main_threat || '-');
+    setText('tradeFocus', morning.focus || '-');
+    setText('tradeNote', morning.first_read || '-');
 
-byId('tradingFocusReason').textContent =
-  whatMatters.focus_reason || '-';
+    renderSimpleRows(state.futures_macro_pulse || [], 'tradingPulseTable');
+    renderAlerts(state.alerts || []);
 
-byId('watchFirstRow').innerHTML = (whatMatters.watch || ['NQ','ES','OIL','GOLD','SILVER'])
-  .map(x => `<button class="ghost-btn" onclick="quickFocusInstrument('${x}')">${x}</button>`)
-  .join('');
-  byId('tradeBias').textContent=morning.today_bias||'-';
-  byId('tradeOpenQuality').textContent=morning.open_quality||'-';
-  byId('tradeThreat').textContent=morning.main_threat||'-';
-  byId('tradeFocus').textContent=morning.focus||'-';
-  byId('tradeNote').textContent=morning.first_read||'-';
+    setText('newsMacroTitle', (state.calendar || {}).next_event || risk.next_event || '-');
+    setText(
+      'newsMacroNote',
+      `Source: ${(state.calendar || {}).source || '-'}. Minutes to event: ${(state.calendar || {}).minutes_to_event ?? 'n/a'}`
+    );
+    setText('newsMarketTitle', risk.last_market_headline || '-');
+    setText('newsMarketNote', risk.last_market_guidance || '-');
 
-  renderSimpleRows(state.futures_macro_pulse||[],'tradingPulseTable');
-  renderAlerts(state.alerts||[]);
+    renderNews(state.news || []);
+    renderTriple(movers.leaders || [], 'leadersTable');
+    renderTriple(movers.threats || [], 'threatsTable');
+    renderTriple(movers.next_to_watch || [], 'nextWatchTable');
 
-  byId('newsMacroTitle').textContent=(state.calendar||{}).next_event||risk.next_event||'-';
-  byId('newsMacroNote').textContent=`Source: ${(state.calendar||{}).source||'-'}. Minutes to event: ${(state.calendar||{}).minutes_to_event ?? 'n/a'}`;
-  byId('newsMarketTitle').textContent=risk.last_market_headline||'-';
-  byId('newsMarketNote').textContent=risk.last_market_guidance||'-';
-  renderNews(state.news||[]);
-  renderTriple(movers.leaders||[],'leadersTable');
-  renderTriple(movers.threats||[],'threatsTable');
-  renderTriple(movers.next_to_watch||[],'nextWatchTable');
+    setText('dailyFocus', (state.assistant || {}).daily_focus || '-');
+    renderTasks((state.assistant || {}).tasks || [], 'taskList', '/assistant/delete-task');
+    renderTasks((state.assistant || {}).reminders || [], 'reminderList', '/assistant/delete-reminder');
 
-  byId('dailyFocus').textContent=(state.assistant||{}).daily_focus||'-';
-  renderTasks((state.assistant||{}).tasks||[],'taskList','/assistant/delete-task');
-  renderTasks((state.assistant||{}).reminders||[],'reminderList','/assistant/delete-reminder');
-
-  byId('footerUpdated').textContent='last update: '+(risk.donna_time_ny||'-');
-}
-
-document.querySelectorAll('.ghost-btn[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>sendAssistant(btn.dataset.prompt)));
-byId('assistantSend').addEventListener('click',()=>sendAssistant());
-byId('assistantInput').addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!e.shiftKey){
-    e.preventDefault();
-    sendAssistant();
+    setText('footerUpdated', 'last update: ' + (risk.donna_time_ny || '-'));
+  } catch (err) {
+    console.error('Donna refresh failed:', err);
   }
-});
-byId('setFocusBtn').addEventListener('click',setFocus);
-byId('addTaskBtn').addEventListener('click',addTask);
-byId('addReminderBtn').addEventListener('click',addReminder);
-byId('clearTasksBtn').addEventListener('click',async()=>{await api('/assistant/clear-tasks',{method:'POST'});await refresh()});
-byId('clearRemindersBtn').addEventListener('click',async()=>{await api('/assistant/clear-reminders',{method:'POST'});await refresh()});
-
-refresh();
-setInterval(refresh,15000);
-</script>
-</body>
-</html>'''
-
+}
 
 @app.get('/dashboard', response_class=HTMLResponse)
 async def dashboard():
