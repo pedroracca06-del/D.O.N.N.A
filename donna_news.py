@@ -314,11 +314,12 @@ def get_priority_events(events: list[dict]) -> list[dict]:
     out = []
 
     for e in events:
-        title = str(e.get("title", ""))
-        impact = str(e.get("impact", "")).lower()
+        title = str(e.get("title", "")).strip()
+        impact = str(e.get("impact", "")).lower().strip()
+        country = str(e.get("country", "")).upper().strip()
         dt_raw = str(e.get("datetime", "")).strip()
 
-        if not dt_raw:
+        if not dt_raw or not title:
             continue
 
         try:
@@ -326,16 +327,58 @@ def get_priority_events(events: list[dict]) -> list[dict]:
         except Exception:
             continue
 
-        if impact == "high" or contains_high_impact(title):
+        title_lower = title.lower()
+
+        score = 0
+        lane = "ignore"
+
+        # ======================
+        # USD = PRIMARY LANE
+        # ======================
+        if country == "USD":
+            lane = "usd_macro"
+
+            if impact == "high":
+                score += 5
+
+            if contains_high_impact(title):
+                score += 5
+
+        # ======================
+        # CAD = OIL LINK
+        # ======================
+        elif country == "CAD":
+            lane = "oil_macro"
+
+            if impact == "high":
+                score += 2
+
+            if "rate" in title_lower or "employment" in title_lower:
+                score += 1
+
+        # ======================
+        # EUR / GBP / JPY = SECONDARY
+        # ======================
+        elif country in {"EUR", "GBP", "JPY"}:
+            lane = "global_secondary"
+
+            if impact == "high":
+                score += 1
+
+        # ======================
+        # KEEP ONLY RELEVANT
+        # ======================
+        if score > 0:
             out.append({
                 "title": title,
-                "country": str(e.get("country", "")),
+                "country": country,
                 "impact": impact,
                 "datetime": event_dt,
+                "score": score,
+                "lane": lane,
             })
 
-    return sorted(out, key=lambda x: x["datetime"])
-
+    return sorted(out, key=lambda x: (-x["score"], x["datetime"]))
 
 def find_relevant_event(events: list[dict]):
     now = now_ny()
