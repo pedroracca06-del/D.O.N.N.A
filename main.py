@@ -1057,7 +1057,7 @@ async def headline_loop():
     while True:
         try: await asyncio.to_thread(process_headlines_cycle)
         except Exception as e: print('Headline loop error:', str(e))
-        await asyncio.sleep(300)
+        await asyncio.sleep(900)
 
 
 async def finnhub_loop():
