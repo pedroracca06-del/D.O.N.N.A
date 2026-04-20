@@ -1257,16 +1257,17 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
   --bg:#08111f;
   --bg2:#0d1830;
   --panel:#162441;
+  --panel2:#1a2b4d;
   --line:rgba(255,255,255,.10);
   --text:#edf4ff;
-  --muted:#a3b5d4;
+  --muted:#9eb2d6;
   --blue:#5f95ff;
   --blue2:#3972f6;
   --green:#43f7ad;
   --yellow:#ffd557;
   --red:#ff6b86;
   --shadow:0 18px 48px rgba(0,0,0,.28);
-  --radius:22px
+  --radius:22px;
 }
 html,body{min-height:100%}
 body{
@@ -1276,9 +1277,8 @@ body{
     radial-gradient(circle at 5% 95%, rgba(67,247,173,.10), transparent 20%),
     radial-gradient(circle at 100% 0%, rgba(95,149,255,.18), transparent 25%),
     linear-gradient(180deg,var(--bg2),var(--bg));
-  padding:24px
+  padding:24px;
 }
-body,.panel,.card,table,th,td,.hero,.row,.badge,.tab-btn,.ghost-btn{caret-color:transparent}
 .wrap{max-width:1420px;margin:0 auto}
 button{font:inherit}
 input,textarea,select{caret-color:auto}
@@ -1291,7 +1291,7 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   align-items:flex-start;
   gap:18px;
   flex-wrap:wrap;
-  margin-bottom:14px
+  margin-bottom:14px;
 }
 .brand h1{font-size:52px;line-height:1;font-weight:900;letter-spacing:4px}
 .brand p{margin-top:8px;color:var(--muted);font-size:13px}
@@ -1346,7 +1346,6 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:22px;
-  user-select:none
 }
 .kicker{
   font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
@@ -1396,7 +1395,6 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 
 .vertical-stack{display:grid;gap:16px}
 .dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.triple-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 
 .row{
   display:flex;justify-content:space-between;gap:14px;padding:14px 0;
@@ -1437,6 +1435,12 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   border:none;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);
   color:#edf4ff;border:1px solid rgba(255,255,255,.08)
 }
+.ghost-btn:hover{
+  transform:translateY(-1px);
+  background:rgba(95,149,255,.12);
+  border-color:rgba(95,149,255,.22)
+}
+
 .assistant-output{
   min-height:220px;max-height:460px;overflow:auto;border-radius:18px;background:rgba(0,0,0,.16);
   border:1px solid rgba(255,255,255,.08);padding:14px;user-select:text;caret-color:auto
@@ -1455,8 +1459,121 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   margin-top:18px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px
 }
 
+/* premium trading */
+.trading-hero{
+  padding:28px;
+  border:1px solid rgba(95,149,255,.18);
+  background:
+    radial-gradient(circle at top right, rgba(95,149,255,.14), transparent 28%),
+    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
+}
+.hero-row{
+  display:grid;
+  grid-template-columns:1.35fr .65fr;
+  gap:18px;
+  align-items:start;
+}
+.hero-eyebrow{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.8px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+.trading-hero-title{
+  font-size:34px;
+  line-height:1.08;
+  font-weight:900;
+  letter-spacing:-.02em;
+}
+.trading-hero-summary{
+  margin-top:12px;
+  font-size:15px;
+  line-height:1.65;
+  color:var(--muted);
+  max-width:90ch;
+}
+.hero-right{display:grid;gap:12px}
+.metric-chip{
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+  border-radius:16px;
+  padding:14px 16px;
+}
+.metric-chip-label{
+  display:block;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:1.4px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+.metric-chip-value{
+  display:block;
+  font-size:18px;
+  font-weight:900;
+  color:var(--text);
+}
+.trading-focus-reason{
+  margin-top:16px;
+  padding:14px 16px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.03);
+  color:var(--muted);
+  line-height:1.6;
+}
+.focus-toolbar{margin-top:18px}
+.focus-toolbar-label{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.5px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+.card-topline{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:12px;
+}
+.card-title{
+  font-size:22px;
+  font-weight:900;
+  line-height:1.15;
+}
+.trading-mid-grid{align-items:start}
+.trading-pulse-card,
+.trading-intel-card,
+.trading-observation-card{
+  background:linear-gradient(180deg, rgba(27,44,75,.95), rgba(19,33,58,.98));
+}
+.trading-note{
+  margin-top:14px;
+  color:var(--muted);
+  line-height:1.6;
+}
+#watchFirstRow .ghost-btn{
+  padding:11px 14px;
+  border-radius:14px;
+  background:rgba(95,149,255,.08);
+  border:1px solid rgba(95,149,255,.18);
+  transition:.18s ease;
+}
+#watchFirstRow .ghost-btn:hover{
+  transform:translateY(-1px);
+  background:rgba(95,149,255,.14);
+  border-color:rgba(95,149,255,.30);
+}
+#watchFirstRow .ghost-btn.active-focus{
+  background:linear-gradient(135deg,var(--blue),var(--blue2));
+  border-color:rgba(95,149,255,.55);
+  box-shadow:0 8px 22px rgba(57,114,246,.28);
+}
+
 @media(max-width:1200px){
-  .live-row,.summary-grid,.dual-grid,.triple-grid,.stat-grid{grid-template-columns:1fr}
+  .live-row,.summary-grid,.dual-grid,.stat-grid,.hero-row{grid-template-columns:1fr}
 }
 @media(max-width:760px){
   body{padding:16px}
@@ -1544,7 +1661,6 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 
   <div class="page active" id="page-dashboard">
     <div class="vertical-stack">
-
       <div class="panel">
         <div class="kicker">Market Driver Engine</div>
         <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant">-</div></div>
@@ -1611,88 +1727,85 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
         <div style="font-size:24px;font-weight:900;line-height:1.18" id="topStory">-</div>
         <div class="soft-note" id="topStoryNote">-</div>
       </div>
-
     </div>
   </div>
 
-<div class="page" id="page-trading">
-  <div class="vertical-stack">
-
-    <div class="panel trading-hero">
-      <div class="kicker">Trading Command</div>
-      <div class="hero-row">
-        <div class="hero-left">
-          <div class="hero-eyebrow">What Matters Right Now</div>
-          <div class="trading-hero-title" id="tradingHeadline">-</div>
-          <div class="trading-hero-summary" id="tradingSummary">-</div>
-        </div>
-        <div class="hero-right">
-          <div class="metric-chip">
-            <span class="metric-chip-label">Donna Mode</span>
-            <span class="metric-chip-value" id="tradingMode">-</span>
-          </div>
-          <div class="metric-chip">
-            <span class="metric-chip-label">Risk To Conviction</span>
-            <span class="metric-chip-value" id="tradingRiskToConviction">-</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="trading-focus-reason" id="tradingFocusReason">-</div>
-
-      <div class="focus-toolbar">
-        <div class="focus-toolbar-label">Quick Focus</div>
-        <div class="action-row" id="watchFirstRow"></div>
-      </div>
-    </div>
-
-    <div class="dual-grid trading-mid-grid">
-
-      <div class="panel table-card trading-pulse-card">
-        <div class="card-topline">
-          <div>
-            <div class="kicker">Live Pulse</div>
-            <div class="card-title">Futures + Macro Pulse</div>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr><th>Asset</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-          </thead>
-          <tbody id="tradingPulseTable"></tbody>
-        </table>
-      </div>
-
-      <div class="panel trading-intel-card">
-        <div class="card-topline">
-          <div>
-            <div class="kicker">Execution View</div>
-            <div class="card-title">Trade Intelligence</div>
-          </div>
-        </div>
-        <div class="row"><div class="k">Bias</div><div class="v" id="tradeBias">-</div></div>
-        <div class="row"><div class="k">Open Quality</div><div class="v" id="tradeOpenQuality">-</div></div>
-        <div class="row"><div class="k">Main Threat</div><div class="v" id="tradeThreat">-</div></div>
-        <div class="row"><div class="k">Focus</div><div class="v" id="tradeFocus">-</div></div>
-        <div class="trading-note" id="tradeNote">-</div>
-      </div>
-
-    </div>
-
-    <div class="panel trading-observation-card">
-      <div class="card-topline">
-        <div>
-          <div class="kicker">Donna Feed</div>
-          <div class="card-title">Recent Alerts & Observations</div>
-        </div>
-      </div>
-      <div id="recentAlerts"></div>
-    </div>
-
-  </div>
-</div>
+  <div class="page" id="page-trading">
     <div class="vertical-stack">
 
+      <div class="panel trading-hero">
+        <div class="kicker">Trading Command</div>
+        <div class="hero-row">
+          <div class="hero-left">
+            <div class="hero-eyebrow">What Matters Right Now</div>
+            <div class="trading-hero-title" id="tradingHeadline">-</div>
+            <div class="trading-hero-summary" id="tradingSummary">-</div>
+          </div>
+          <div class="hero-right">
+            <div class="metric-chip">
+              <span class="metric-chip-label">Donna Mode</span>
+              <span class="metric-chip-value" id="tradingMode">-</span>
+            </div>
+            <div class="metric-chip">
+              <span class="metric-chip-label">Risk To Conviction</span>
+              <span class="metric-chip-value" id="tradingRiskToConviction">-</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="trading-focus-reason" id="tradingFocusReason">-</div>
+
+        <div class="focus-toolbar">
+          <div class="focus-toolbar-label">Quick Focus</div>
+          <div class="action-row" id="watchFirstRow"></div>
+        </div>
+      </div>
+
+      <div class="dual-grid trading-mid-grid">
+        <div class="panel table-card trading-pulse-card">
+          <div class="card-topline">
+            <div>
+              <div class="kicker">Live Pulse</div>
+              <div class="card-title">Futures + Macro Pulse</div>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Asset</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+            </thead>
+            <tbody id="tradingPulseTable"></tbody>
+          </table>
+        </div>
+
+        <div class="panel trading-intel-card">
+          <div class="card-topline">
+            <div>
+              <div class="kicker">Execution View</div>
+              <div class="card-title">Trade Intelligence</div>
+            </div>
+          </div>
+          <div class="row"><div class="k">Bias</div><div class="v" id="tradeBias">-</div></div>
+          <div class="row"><div class="k">Open Quality</div><div class="v" id="tradeOpenQuality">-</div></div>
+          <div class="row"><div class="k">Main Threat</div><div class="v" id="tradeThreat">-</div></div>
+          <div class="row"><div class="k">Focus</div><div class="v" id="tradeFocus">-</div></div>
+          <div class="trading-note" id="tradeNote">-</div>
+        </div>
+      </div>
+
+      <div class="panel trading-observation-card">
+        <div class="card-topline">
+          <div>
+            <div class="kicker">Donna Feed</div>
+            <div class="card-title">Recent Alerts & Observations</div>
+          </div>
+        </div>
+        <div id="recentAlerts"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-news">
+    <div class="vertical-stack">
       <div class="panel">
         <div class="kicker">Macro Story</div>
         <div style="font-size:28px;font-weight:900;line-height:1.12" id="newsMacroTitle">-</div>
@@ -1741,13 +1854,11 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
           <tbody id="nextWatchTable"></tbody>
         </table>
       </div>
-
     </div>
   </div>
 
   <div class="page" id="page-assistant">
     <div class="vertical-stack">
-
       <div class="panel">
         <div class="kicker">Donna AI Assistant</div>
         <div class="assistant-output" id="assistantOutput">
@@ -1795,7 +1906,6 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
           <button class="ghost-btn" id="clearRemindersBtn">Clear Reminders</button>
         </div>
       </div>
-
     </div>
   </div>
 
@@ -1803,12 +1913,13 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
     <div>Donna v5.0 Live Market Core</div>
     <div id="footerUpdated">last update: -</div>
   </div>
-
 </div>
 
 <script>
-let state=null;
-const byId=id=>document.getElementById(id);\
+let state = null;
+let activeFocusSymbol = null;
+const byId = id => document.getElementById(id);
+
 function setText(id, value){
   const el = byId(id);
   if (el) el.textContent = value ?? '-';
@@ -1820,58 +1931,69 @@ function setHTML(id, value){
 }
 
 function toRiskClass(v){
-  v=String(v||'').toLowerCase();
-  if(v==='high') return 'high';
-  if(v==='medium') return 'medium';
+  v = String(v || '').toLowerCase();
+  if (v === 'high') return 'high';
+  if (v === 'medium') return 'medium';
   return 'low';
 }
 
 function showPage(name){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn[data-page]').forEach(b=>b.classList.remove('active'));
-  byId('page-'+name).classList.add('active');
-  document.querySelector('.tab-btn[data-page="'+name+'"]').classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn[data-page]').forEach(b => b.classList.remove('active'));
+  const page = byId('page-' + name);
+  if (page) page.classList.add('active');
+  const tab = document.querySelector('.tab-btn[data-page="' + name + '"]');
+  if (tab) tab.classList.add('active');
 }
 document.querySelectorAll('.tab-btn[data-page]').forEach(btn=>btn.addEventListener('click',()=>showPage(btn.dataset.page)));
 
 function renderSimpleRows(rows,targetId){
-  byId(targetId).innerHTML=(rows||[]).map(r=>`
+  const el = byId(targetId);
+  if (!el) return;
+  el.innerHTML = (rows || []).map(r => `
     <tr>
-      <td>${r.symbol}</td>
-      <td>${r.last}</td>
-      <td class="${r.dir||(String(r.chg).startsWith('-')?'down':'up')}">${r.chg}</td>
-      <td class="${r.dir||(String(r.pct).startsWith('-')?'down':'up')}">${r.pct}</td>
+      <td>${r.symbol ?? '-'}</td>
+      <td>${r.last ?? '-'}</td>
+      <td class="${r.dir || (String(r.chg).startsWith('-') ? 'down' : 'up')}">${r.chg ?? '-'}</td>
+      <td class="${r.dir || (String(r.pct).startsWith('-') ? 'down' : 'up')}">${r.pct ?? '-'}</td>
     </tr>
   `).join('');
 }
 
 function renderLikelyMovers(rows,targetId){
-  byId(targetId).innerHTML=(rows||[]).map(r=>`
+  const el = byId(targetId);
+  if (!el) return;
+  el.innerHTML = (rows || []).map(r => `
     <tr>
-      <td>${r.ticker}</td>
-      <td>${r.impact}</td>
-      <td>${r.why_it_matters}</td>
+      <td>${r.ticker ?? '-'}</td>
+      <td>${r.impact ?? '-'}</td>
+      <td>${r.why_it_matters ?? '-'}</td>
     </tr>
   `).join('');
 }
 
 function renderTriple(rows,targetId){
-  byId(targetId).innerHTML=(rows||[]).map(r=>`
+  const el = byId(targetId);
+  if (!el) return;
+  el.innerHTML = (rows || []).map(r => `
     <tr>
-      <td>${r.ticker}</td>
-      <td>${r.impact}</td>
-      <td>${r.index_exposure}</td>
+      <td>${r.ticker ?? '-'}</td>
+      <td>${r.impact ?? '-'}</td>
+      <td>${r.index_exposure ?? '-'}</td>
     </tr>
   `).join('');
 }
 
 function renderAlerts(alerts){
-  if(!alerts || !alerts.length){
-    byId('recentAlerts').innerHTML = '<div class="feed-item">No Donna alerts or observations yet</div>';
+  const el = byId('recentAlerts');
+  if (!el) return;
+
+  if (!alerts || !alerts.length){
+    el.innerHTML = '<div class="feed-item">No Donna alerts or observations yet</div>';
     return;
   }
 
-  byId('recentAlerts').innerHTML = alerts.map(a => {
+  el.innerHTML = alerts.map(a => {
     if (a.type === 'observation') {
       return `
         <div class="feed-item">
@@ -1884,34 +2006,42 @@ function renderAlerts(alerts){
 
     return `
       <div class="feed-item">
-        <b>${a.ticker}</b> // ${a.signal} // ${a.verdict} // ${a.confidence}<br/>
-        <span style="color:var(--muted)">${a.session} | TF ${a.timeframe} | Price ${a.price}</span><br/>
-        ${a.summary}
+        <b>${a.ticker ?? '-'}</b> // ${a.signal ?? '-'} // ${a.verdict ?? '-'} // ${a.confidence ?? '-'}<br/>
+        <span style="color:var(--muted)">${a.session ?? '-'} | TF ${a.timeframe ?? '-'} | Price ${a.price ?? '-'}</span><br/>
+        ${a.summary ?? '-'}
       </div>
     `;
   }).join('');
 }
 
 function renderNews(news){
-  if(!news||!news.length){
-    byId('newsList').innerHTML='<div class="feed-item">No live news available</div>';
+  const el = byId('newsList');
+  if (!el) return;
+
+  if (!news || !news.length){
+    el.innerHTML = '<div class="feed-item">No live news available</div>';
     return;
   }
-  byId('newsList').innerHTML=news.map(n=>`
+
+  el.innerHTML = news.map(n => `
     <div class="feed-item">
-      <b>${n.headline}</b><br/>
-      <span style="color:var(--muted)">${n.source}</span><br/>
-      ${n.summary||''}
+      <b>${n.headline ?? '-'}</b><br/>
+      <span style="color:var(--muted)">${n.source ?? '-'}</span><br/>
+      ${n.summary || ''}
     </div>
   `).join('');
 }
 
 function renderTasks(list,targetId,route){
-  if(!list||!list.length){
-    byId(targetId).innerHTML='<div class="feed-item">None</div>';
+  const el = byId(targetId);
+  if (!el) return;
+
+  if (!list || !list.length){
+    el.innerHTML = '<div class="feed-item">None</div>';
     return;
   }
-  byId(targetId).innerHTML=list.map((item,idx)=>`
+
+  el.innerHTML = list.map((item,idx)=>`
     <div class="feed-item">
       ${item}
       <div class="action-row">
@@ -1922,39 +2052,44 @@ function renderTasks(list,targetId,route){
 }
 
 function buildTicker(items){
-  byId('liveStrip').innerHTML=(items||[]).map(item=>`
-    <div class="ticker-item"><b>${item.label}:</b> ${item.value}</div>
+  const el = byId('liveStrip');
+  if (!el) return;
+  el.innerHTML = (items || []).map(item => `
+    <div class="ticker-item"><b>${item.label ?? '-' }:</b> ${item.value ?? '-'}</div>
   `).join('');
 }
 
 async function api(url,options={}){
-  const res=await fetch(url,{headers:{'Content-Type':'application/json'},...options});
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.detail||data.reply||'Request failed');
+  const res = await fetch(url,{headers:{'Content-Type':'application/json'},...options});
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.detail || data.reply || 'Request failed');
   return data;
 }
 
 function addAssistantMessage(role,text){
-  const wrap=byId('assistantOutput');
-  const div=document.createElement('div');
-  div.className='msg '+role;
-  div.innerHTML=`<span class="role">${role==='user'?'You':'Donna'}</span>${text}`;
+  const wrap = byId('assistantOutput');
+  if (!wrap) return;
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = `<span class="role">${role === 'user' ? 'You' : 'Donna'}</span>${text}`;
   wrap.appendChild(div);
-  wrap.scrollTop=wrap.scrollHeight;
+  wrap.scrollTop = wrap.scrollHeight;
 }
 
 async function sendAssistant(message=null){
-  const input=byId('assistantInput');
-  const text=message||input.value.trim();
+  const input = byId('assistantInput');
+  const text = message || (input ? input.value.trim() : '');
   if(!text) return;
+
   addAssistantMessage('user',text);
-  if(!message) input.value='';
+  if(!message && input) input.value='';
+
   try{
-    const data=await api('/assistant/chat',{method:'POST',body:JSON.stringify({message:text})});
-    addAssistantMessage('assistant',data.reply||'No reply.');
+    const data = await api('/assistant/chat',{method:'POST',body:JSON.stringify({message:text})});
+    addAssistantMessage('assistant',data.reply || 'No reply.');
     await refresh();
   }catch(err){
-    addAssistantMessage('assistant','Assistant error: '+err.message);
+    addAssistantMessage('assistant','Assistant error: ' + err.message);
   }
 }
 
@@ -1968,184 +2103,50 @@ async function deleteIndexed(route,index){
 }
 
 async function setFocus(){
-  const value=byId('focusInput').value.trim();
+  const input = byId('focusInput');
+  const value = input ? input.value.trim() : '';
   if(!value) return;
   await api('/assistant/set-focus',{method:'POST',body:JSON.stringify({daily_focus:value})});
-  byId('focusInput').value='';
+  if (input) input.value='';
   await refresh();
 }
 
 async function addTask(){
-  const value=byId('taskInput').value.trim();
+  const input = byId('taskInput');
+  const value = input ? input.value.trim() : '';
   if(!value) return;
   await api('/assistant/add-task',{method:'POST',body:JSON.stringify({task:value})});
-  byId('taskInput').value='';
+  if (input) input.value='';
   await refresh();
 }
 
 async function addReminder(){
-  const value=byId('reminderInput').value.trim();
+  const input = byId('reminderInput');
+  const value = input ? input.value.trim() : '';
   if(!value) return;
   await api('/assistant/add-reminder',{method:'POST',body:JSON.stringify({reminder:value})});
-  byId('reminderInput').value='';
+  if (input) input.value='';
   await refresh();
 }
 
-function formatPctValue(value){
-  if (value === null || value === undefined) return '-';
-  const num = Number(String(value).replace('%','').replace('+','').trim());
-  if (Number.isNaN(num)) return String(value);
-  return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
-}
-.trading-hero{
-  padding:28px;
-  border:1px solid rgba(95,149,255,.18);
-  background:
-    radial-gradient(circle at top right, rgba(95,149,255,.14), transparent 28%),
-    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
-}
-
-.hero-row{
-  display:grid;
-  grid-template-columns:1.35fr .65fr;
-  gap:18px;
-  align-items:start;
-}
-
-.hero-eyebrow{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.8px;
-  color:var(--muted);
-  margin-bottom:10px;
-}
-
-.trading-hero-title{
-  font-size:34px;
-  line-height:1.08;
-  font-weight:900;
-  letter-spacing:-.02em;
-}
-
-.trading-hero-summary{
-  margin-top:12px;
-  font-size:15px;
-  line-height:1.65;
-  color:var(--muted);
-  max-width:90ch;
-}
-
-.hero-right{
-  display:grid;
-  gap:12px;
-}
-
-.metric-chip{
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-  border-radius:16px;
-  padding:14px 16px;
-}
-
-.metric-chip-label{
-  display:block;
-  font-size:10px;
-  text-transform:uppercase;
-  letter-spacing:1.4px;
-  color:var(--muted);
-  margin-bottom:8px;
-}
-
-.metric-chip-value{
-  display:block;
-  font-size:18px;
-  font-weight:900;
-  color:var(--text);
-}
-
-.trading-focus-reason{
-  margin-top:16px;
-  padding:14px 16px;
-  border-radius:16px;
-  border:1px solid rgba(255,255,255,.07);
-  background:rgba(255,255,255,.03);
-  color:var(--muted);
-  line-height:1.6;
-}
-
-.focus-toolbar{
-  margin-top:18px;
-}
-
-.focus-toolbar-label{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.5px;
-  color:var(--muted);
-  margin-bottom:10px;
-}
-
-.card-topline{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:12px;
-  margin-bottom:12px;
-}
-
-.card-title{
-  font-size:22px;
-  font-weight:900;
-  line-height:1.15;
-}
-
-.trading-mid-grid{
-  align-items:start;
-}
-
-.trading-pulse-card,
-.trading-intel-card,
-.trading-observation-card{
-  background:
-    linear-gradient(180deg, rgba(27,44,75,.95), rgba(19,33,58,.98));
-}
-
-.trading-note{
-  margin-top:14px;
-  color:var(--muted);
-  line-height:1.6;
-}
-
-#watchFirstRow .ghost-btn{
-  padding:11px 14px;
-  border-radius:14px;
-  background:rgba(95,149,255,.08);
-  border:1px solid rgba(95,149,255,.18);
-  transition:.18s ease;
-}
-
-#watchFirstRow .ghost-btn:hover{
-  transform:translateY(-1px);
-  background:rgba(95,149,255,.14);
-  border-color:rgba(95,149,255,.30);
-}
-
-@media(max-width:1200px){
-  .hero-row{
-    grid-template-columns:1fr;
-  }
-}
 function getPulseMap(){
   const rows = (state && state.futures_macro_pulse) ? state.futures_macro_pulse : [];
   const out = {};
-  rows.forEach(r => {
-    out[r.symbol] = r;
-  });
+  rows.forEach(r => { out[r.symbol] = r; });
   return out;
+}
+
+function renderWatchButtons(watch){
+  const buttons = (watch || ['NQ','ES','OIL','GOLD','SILVER']).map(symbol => {
+    const activeClass = activeFocusSymbol === symbol ? 'active-focus' : '';
+    return `<button class="ghost-btn ${activeClass}" onclick="quickFocusInstrument('${symbol}')">${symbol}</button>`;
+  }).join('');
+  setHTML('watchFirstRow', buttons);
 }
 
 function quickFocusInstrument(symbol){
   if (!state) return;
+  activeFocusSymbol = symbol;
 
   const pulseMap = getPulseMap();
   const row = pulseMap[symbol] || {};
@@ -2197,12 +2198,14 @@ function quickFocusInstrument(symbol){
     summary = `Silver is trading at ${last} with ${chg} (${pctRaw}). Watch whether the move is confirming broader metals momentum.`;
   }
 
-  byId('tradingHeadline').textContent = `${symbol} Quick Focus`;
-  byId('tradingSummary').textContent = summary;
-  byId('tradingMode').textContent = mode;
-  byId('tradingRiskToConviction').textContent = risk;
-  byId('tradingFocusReason').textContent = reason;
+  setText('tradingHeadline', `${symbol} Quick Focus`);
+  setText('tradingSummary', summary);
+  setText('tradingMode', mode);
+  setText('tradingRiskToConviction', risk);
+  setText('tradingFocusReason', reason);
+  renderWatchButtons((state.what_matters_now || {}).watch);
 }
+
 async function refresh(){
   try{
     state = await api('/dashboard-data');
@@ -2215,21 +2218,16 @@ async function refresh(){
     const whatMatters = state.what_matters_now || {};
 
     buildTicker(state.live_strip || []);
-
     setText('sessionVal', risk.donna_session || '-');
 
     setText(
       'heroTitle',
-      whatMatters.headline ||
-      `${driver.dominant_driver || 'Balanced Conditions'} is driving current conditions.`
+      driver.dominant_driver
+        ? `${driver.dominant_driver} is driving current conditions.`
+        : 'Balanced Conditions are driving current conditions.'
     );
 
-    setText(
-      'heroSub',
-      whatMatters.summary ||
-      driver.market_summary ||
-      '-'
-    );
+    setText('heroSub', driver.market_summary || '-');
 
     setText('morningBias', morning.today_bias || '-');
     setText('morningRead', morning.first_read || '-');
@@ -2279,28 +2277,21 @@ async function refresh(){
     setText('topStory', risk.last_headline || '-');
     setText('topStoryNote', risk.headline_guidance || '-');
 
-    setText(
-      'tradingHeadline',
-      whatMatters.headline ||
-      `${sig.label || 'Session'} // ${morning.focus || 'Balanced'}`
-    );
-    setText(
-      'tradingSummary',
-      whatMatters.summary ||
-      sig.summary ||
-      '-'
-    );
-    setText('tradingMode', whatMatters.mode || '-');
-    setText('tradingRiskToConviction', whatMatters.risk_to_conviction || '-');
-    setText('tradingFocusReason', whatMatters.focus_reason || '-');
+    if (!activeFocusSymbol) {
+      setText(
+        'tradingHeadline',
+        whatMatters.headline || `${sig.label || 'Session'} // ${morning.focus || 'Balanced'}`
+      );
+      setText(
+        'tradingSummary',
+        whatMatters.summary || sig.summary || '-'
+      );
+      setText('tradingMode', whatMatters.mode || '-');
+      setText('tradingRiskToConviction', whatMatters.risk_to_conviction || '-');
+      setText('tradingFocusReason', whatMatters.focus_reason || '-');
+    }
 
-    setHTML(
-      'watchFirstRow',
-      (whatMatters.watch || ['NQ','ES','OIL','GOLD','SILVER'])
-        .map(x => `<button class="ghost-btn" onclick="quickFocusInstrument('${x}')">${x}</button>`)
-        .join('')
-    );
-
+    renderWatchButtons(whatMatters.watch);
     setText('tradeBias', morning.today_bias || '-');
     setText('tradeOpenQuality', morning.open_quality || '-');
     setText('tradeThreat', morning.main_threat || '-');
@@ -2333,6 +2324,22 @@ async function refresh(){
   }
 }
 
-@app.get('/dashboard', response_class=HTMLResponse)
-async def dashboard():
-    return HTMLResponse(content=DASHBOARD_HTML)
+document.querySelectorAll('.ghost-btn[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>sendAssistant(btn.dataset.prompt)));
+byId('assistantSend')?.addEventListener('click',()=>sendAssistant());
+byId('assistantInput')?.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){
+    e.preventDefault();
+    sendAssistant();
+  }
+});
+byId('setFocusBtn')?.addEventListener('click',setFocus);
+byId('addTaskBtn')?.addEventListener('click',addTask);
+byId('addReminderBtn')?.addEventListener('click',addReminder);
+byId('clearTasksBtn')?.addEventListener('click',async()=>{await api('/assistant/clear-tasks',{method:'POST'});await refresh()});
+byId('clearRemindersBtn')?.addEventListener('click',async()=>{await api('/assistant/clear-reminders',{method:'POST'});await refresh()});
+
+refresh();
+setInterval(refresh,15000);
+</script>
+</body>
+</html>'''
