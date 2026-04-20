@@ -386,7 +386,6 @@ def find_relevant_event(events: list[dict]):
     if not events:
         return None
 
-    # Prefer events within the nearby actionable window
     window_start = now - timedelta(minutes=30)
     window_end = now + timedelta(hours=24)
 
@@ -398,12 +397,23 @@ def find_relevant_event(events: list[dict]):
     if relevant:
         return sorted(
             relevant,
-            key=lambda x: abs((x["datetime"] - now).total_seconds())
+            key=lambda x: (
+                -int(x.get("score", 0)),
+                abs((x["datetime"] - now).total_seconds())
+            )
         )[0]
 
     future = [e for e in events if e["datetime"] >= now]
-    return future[0] if future else None
+    if future:
+        return sorted(
+            future,
+            key=lambda x: (
+                -int(x.get("score", 0)),
+                x["datetime"]
+            )
+        )[0]
 
+    return None
 
 def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int | None, str]:
     now = now_ny()
@@ -411,39 +421,103 @@ def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int
     if not next_event:
         return "low", [], "", None, ""
 
-    event_name = next_event["title"]
-    event_time = next_event["datetime"]
+    event_name = str(next_event.get("title", "")).strip()
+    event_time = next_event.get("datetime")
+    event_lane = str(next_event.get("lane", "ignore")).strip()
+    event_score = int(next_event.get("score", 0))
+    event_country = str(next_event.get("country", "")).upper().strip()
+
+    if not event_name or not event_time:
+        return "low", [], "", None, ""
+
     event_time_label = event_time.strftime("%Y-%m-%d %I:%M %p %Z")
     minutes = int((event_time - now).total_seconds() / 60)
 
     warnings = []
 
+    # ======================
+    # LANE WEIGHTS
+    # ======================
+    lane_weight = 0
+    if event_lane == "usd_macro":
+        lane_weight = 3
+    elif event_lane == "oil_macro":
+        lane_weight = 2
+    elif event_lane == "global_secondary":
+        lane_weight = 1
+
+    # ======================
+    # TIME WEIGHTS
+    # ======================
+    time_weight = 0
     if -5 <= minutes <= 5:
-        risk = "high"
-        warnings.append("Macro event live now — volatility elevated")
-        warnings.append(f"{event_name} active")
-        return risk, warnings, event_name, 0, event_time_label
+        time_weight = 4
+    elif 0 < minutes <= 15:
+        time_weight = 3
+    elif 15 < minutes <= 60:
+        time_weight = 2
+    elif 60 < minutes <= 24 * 60:
+        time_weight = 1
+    elif -30 <= minutes < -5:
+        time_weight = 2
+    else:
+        time_weight = 0
 
-    if 0 < minutes <= 15:
-        risk = "high"
-        warnings.append("High-impact event approaching — reduce size")
-        warnings.append(f"{event_name} in {minutes}m")
-        return risk, warnings, event_name, minutes, event_time_label
+    total_score = event_score + lane_weight + time_weight
 
-    if 15 < minutes <= 60:
-        risk = "medium"
-        warnings.append("High-impact macro event approaching")
-        warnings.append(f"{event_name} in {minutes}m")
-        return risk, warnings, event_name, minutes, event_time_label
+    # ======================
+    # RISK CLASSIFICATION
+    # ======================
+    risk = "low"
 
-    if -30 <= minutes < -5:
-        risk = "medium"
-        warnings.append("Post-event volatility window active")
-        warnings.append(f"{event_name} recently released")
-        return risk, warnings, event_name, 0, event_time_label
+    if event_lane == "usd_macro":
+        if -5 <= minutes <= 5:
+            risk = "high"
+            warnings.append("USD macro event live now — volatility elevated")
+            warnings.append(f"{event_name} active")
+        elif 0 < minutes <= 15:
+            risk = "high"
+            warnings.append("High-impact USD event approaching — reduce size")
+            warnings.append(f"{event_name} in {minutes}m")
+        elif 15 < minutes <= 60:
+            risk = "medium"
+            warnings.append("Relevant USD macro event approaching")
+            warnings.append(f"{event_name} in {minutes}m")
+        elif -30 <= minutes < -5:
+            risk = "medium"
+            warnings.append("Post-event USD volatility window active")
+            warnings.append(f"{event_name} recently released")
+        else:
+            risk = "low"
 
-    return "low", [], event_name, max(minutes, 0), event_time_label
+    elif event_lane == "oil_macro":
+        if -5 <= minutes <= 5 and total_score >= 6:
+            risk = "medium"
+            warnings.append("Oil-linked macro event live now")
+            warnings.append(f"{event_name} active")
+        elif 0 < minutes <= 15 and total_score >= 5:
+            risk = "medium"
+            warnings.append("Oil-linked macro event approaching")
+            warnings.append(f"{event_name} in {minutes}m")
+        elif -30 <= minutes < -5:
+            risk = "low"
+            warnings.append(f"{event_name} recently released")
+        else:
+            risk = "low"
 
+    elif event_lane == "global_secondary":
+        if -5 <= minutes <= 5 and total_score >= 5:
+            risk = "low"
+            warnings.append("Secondary global macro event live")
+            warnings.append(f"{event_name} active")
+        elif 0 < minutes <= 15 and total_score >= 4:
+            risk = "low"
+            warnings.append("Secondary macro event approaching")
+            warnings.append(f"{event_name} in {minutes}m")
+        else:
+            risk = "low"
+
+    return risk, warnings, event_name, max(minutes, 0) if minutes > 0 else (0 if -30 <= minutes <= 5 else minutes), event_time_label
 # ==================================================
 # MAIN CYCLE
 # ==================================================
