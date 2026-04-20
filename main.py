@@ -1094,6 +1094,10 @@ async def check_env():
 async def dashboard_data():
     return build_dashboard_payload()
 
+@app.get('/dashboard', response_class=HTMLResponse)
+async def dashboard():
+    return HTMLResponse(content=DASHBOARD_HTML)
+
 
 @app.get('/market-data')
 async def market_data():
