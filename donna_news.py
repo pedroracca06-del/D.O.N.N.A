@@ -414,6 +414,26 @@ def find_relevant_event(events: list[dict]):
         )[0]
 
     return None
+    
+def classify_macro_theme(title: str) -> tuple[str, str]:
+    t = str(title or "").lower()
+
+    if any(x in t for x in ["cpi", "core cpi", "ppi", "pce", "inflation", "prices paid"]):
+        return "inflation", "Rates / tech sensitivity"
+
+    if any(x in t for x in ["nfp", "nonfarm", "payrolls", "jobless", "employment", "unemployment"]):
+        return "labor", "Broad macro / yields / USD"
+
+    if any(x in t for x in ["fomc", "powell", "fed", "interest rate", "rate decision", "minutes"]):
+        return "fed", "Highest policy sensitivity"
+
+    if any(x in t for x in ["gdp", "retail sales", "consumer confidence", "ism", "pmi", "durable goods"]):
+        return "growth", "Economic growth expectations"
+
+    if any(x in t for x in ["crude", "oil", "inventories", "eia"]):
+        return "energy", "Oil / inflation cross-asset"
+
+    return "general", "General macro conditions"
 
 def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int | None, str]:
     now = now_ny()
@@ -435,45 +455,6 @@ def build_macro_state(next_event: dict | None) -> tuple[str, list[str], str, int
 
     warnings = []
     theme, theme_note = classify_macro_theme(event_name)
-
-def classify_macro_theme(title: str) -> tuple[str, str]:
-    t = title.lower()
-
-    # Inflation
-    if any(x in t for x in [
-        "cpi", "core cpi", "ppi", "pce",
-        "inflation", "prices paid"
-    ]):
-        return "inflation", "Rates / tech sensitivity"
-
-    # Labor
-    if any(x in t for x in [
-        "nfp", "nonfarm", "payrolls",
-        "jobless", "employment", "unemployment"
-    ]):
-        return "labor", "Broad macro / yields / USD"
-
-    # Fed / Rates
-    if any(x in t for x in [
-        "fomc", "powell", "fed", "interest rate",
-        "rate decision", "minutes"
-    ]):
-        return "fed", "Highest policy sensitivity"
-
-    # Growth / Consumer
-    if any(x in t for x in [
-        "gdp", "retail sales", "consumer confidence",
-        "ism", "pmi", "durable goods"
-    ]):
-        return "growth", "Economic growth expectations"
-
-    # Energy
-    if any(x in t for x in [
-        "crude", "oil", "inventories", "eia"
-    ]):
-        return "energy", "Oil / inflation cross-asset"
-
-    return "general", "General macro conditions"
 
     # ======================
     # LANE WEIGHTS
