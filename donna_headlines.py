@@ -361,7 +361,108 @@ def build_guidance(title: str, description: str, severity: str, lane: str) -> st
 # ==================================================
 # MAIN CYCLE
 # ==================================================
+import time
+import requests
+
+NEWSAPI_COOLDOWN_UNTIL = 0.0
+
+
 def process_headlines_cycle() -> None:
+    global NEWSAPI_COOLDOWN_UNTIL
+
+    now = time.time()
+    if now < NEWSAPI_COOLDOWN_UNTIL:
+        remaining = int((NEWSAPI_COOLDOWN_UNTIL - now) // 60)
+        print(f"Donna Headline Guard cooldown active. Skipping cycle for ~{remaining} more min.")
+        return
+
+    try:
+        articles = fetch_headlines()
+
+        best_score = -999
+        best_title = ""
+        best_description = ""
+        best_source = ""
+        best_risk = "low"
+        best_severity = "BACKGROUND"
+        best_guidance = ""
+        best_lane = "background"
+
+        for article in articles:
+            title = str(article.get("title", "")).strip()
+            description = str(article.get("description", "")).strip()
+
+            source = article.get("source", {}) or {}
+            source_id = str(source.get("id", "")).strip()
+            source_name = str(source.get("name", "")).strip()
+
+            if not title:
+                continue
+
+            norm_title = normalize(title)
+            if norm_title in seen_titles:
+                continue
+
+            score, lane = score_headline(title, description, source_id, source_name)
+            risk, severity = map_score_to_risk(score, lane)
+            guidance = build_guidance(title, description, severity, lane)
+
+            if score > best_score:
+                best_score = score
+                best_title = title
+                best_description = description
+                best_source = source_name or source_id or "Unknown"
+                best_risk = risk
+                best_severity = severity
+                best_guidance = guidance
+                best_lane = lane
+
+        state = load_state()
+
+        existing = state.get("active_warnings", [])
+        keep = [w for w in existing if not str(w).startswith("HEADLINE:")]
+
+        warnings = []
+        if best_severity == "CRITICAL":
+            warnings.append("HEADLINE: Critical global headline risk active")
+        elif best_severity == "HIGH":
+            warnings.append("HEADLINE: High-impact headline risk active")
+        elif best_severity == "MEDIUM":
+            warnings.append("HEADLINE: Moderate headline pressure active")
+
+        state["headline_risk"] = best_risk
+        state["active_warnings"] = keep + warnings
+        state["last_headline"] = best_title
+        state["headline_severity"] = best_severity
+        state["headline_guidance"] = best_guidance
+        state["headline_source"] = best_source
+
+        save_state(state)
+
+        if best_title:
+            seen_titles.add(normalize(best_title))
+
+        print(
+            "Donna Headlines:",
+            best_severity,
+            "|",
+            best_lane,
+            "|",
+            best_title if best_title else "No major headline",
+        )
+
+    except requests.HTTPError as e:
+        status = getattr(e.response, "status_code", None)
+
+        if status == 429:
+            NEWSAPI_COOLDOWN_UNTIL = time.time() + 3600
+            print("Donna Headline Guard rate-limited by NewsAPI. Cooling down for 60 minutes.")
+            return
+
+        print("Donna Headline Guard HTTP error:", str(e))
+
+    except Exception as e:
+        print("Donna Headline Guard error:", str(e))
     try:
         articles = fetch_headlines()
 
