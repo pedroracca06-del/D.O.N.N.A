@@ -1582,6 +1582,99 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 @media(max-width:760px){
   body{padding:16px}
   .brand h1{font-size:38px}
+
+.vertical-stack{
+  display:grid;
+  gap:18px;
+}
+
+.trading-hero{
+  padding:30px;
+  border-radius:24px;
+  border:1px solid rgba(95,149,255,.18);
+  background:
+    radial-gradient(circle at top right, rgba(95,149,255,.14), transparent 28%),
+    linear-gradient(180deg, rgba(28,46,80,.98), rgba(18,31,56,.98));
+}
+
+.hero-row{
+  display:grid;
+  grid-template-columns:1.35fr .65fr;
+  gap:18px;
+  align-items:start;
+}
+
+.hero-eyebrow{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.7px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+
+.trading-hero-title{
+  font-size:36px;
+  line-height:1.06;
+  font-weight:900;
+}
+
+.trading-hero-summary{
+  margin-top:14px;
+  font-size:15px;
+  line-height:1.65;
+  color:var(--muted);
+}
+
+.hero-right{
+  display:grid;
+  gap:12px;
+}
+
+.metric-chip{
+  border-radius:16px;
+  padding:14px 16px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+}
+
+.metric-chip-label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:1.3px;
+  color:var(--muted);
+  display:block;
+  margin-bottom:8px;
+}
+
+.metric-chip-value{
+  font-size:18px;
+  font-weight:900;
+}
+
+.trading-focus-reason{
+  margin-top:16px;
+  padding:14px 16px;
+  border-radius:16px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  color:var(--muted);
+  line-height:1.6;
+}
+
+.alert-card{
+  padding:14px;
+  border-radius:16px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  margin-bottom:12px;
+}
+
+@media(max-width:1200px){
+  .hero-row{
+    grid-template-columns:1fr;
+  }
+}
+
 }
 </style>
 </head>
