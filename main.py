@@ -1676,6 +1676,155 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 }
 
 }
+/* ===== PASS B: DASHBOARD PREMIUM HIERARCHY ===== */
+.dashboard-hero{
+  padding:28px;
+  border-radius:24px;
+  border:1px solid rgba(95,149,255,.16);
+  background:
+    radial-gradient(circle at top right, rgba(95,149,255,.12), transparent 26%),
+    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
+}
+
+.dashboard-hero-grid{
+  display:grid;
+  grid-template-columns:1.2fr .8fr;
+  gap:18px;
+  align-items:start;
+}
+
+.dashboard-eyebrow{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.7px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+
+.dashboard-hero-title{
+  font-size:36px;
+  line-height:1.06;
+  font-weight:900;
+}
+
+.dashboard-hero-summary{
+  margin-top:14px;
+  font-size:15px;
+  line-height:1.65;
+  color:var(--muted);
+  max-width:88ch;
+}
+
+.dashboard-chip-stack{
+  display:grid;
+  gap:12px;
+}
+
+.dashboard-chip{
+  border-radius:16px;
+  padding:14px 16px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+}
+
+.dashboard-chip-label{
+  display:block;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:1.3px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+
+.dashboard-chip-value{
+  display:block;
+  font-size:18px;
+  font-weight:900;
+  color:var(--text);
+}
+
+.dashboard-main-grid{
+  display:grid;
+  grid-template-columns:1.15fr .85fr;
+  gap:18px;
+  align-items:start;
+}
+
+.dashboard-stack{
+  display:grid;
+  gap:18px;
+}
+
+.dashboard-card-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:12px;
+}
+
+.dashboard-card-title{
+  font-size:22px;
+  font-weight:900;
+  line-height:1.15;
+}
+
+.dashboard-driver-card,
+.dashboard-index-card,
+.dashboard-warnings-card,
+.dashboard-story-card,
+.dashboard-movers-card{
+  background:
+    linear-gradient(180deg, rgba(27,44,75,.95), rgba(19,33,58,.98));
+}
+
+.warning-list{
+  display:grid;
+  gap:10px;
+}
+
+.warning-item{
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  color:#e9f1ff;
+  line-height:1.5;
+}
+
+.story-card-headline{
+  font-size:28px;
+  font-weight:900;
+  line-height:1.1;
+}
+
+.story-card-note{
+  margin-top:12px;
+  color:var(--muted);
+  line-height:1.6;
+}
+
+.movers-split{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+
+.compact-table th{
+  padding-bottom:10px;
+}
+
+.compact-table td{
+  padding:10px 0;
+}
+
+@media(max-width:1200px){
+  .dashboard-hero-grid,
+  .dashboard-main-grid,
+  .movers-split{
+    grid-template-columns:1fr;
+  }
+}
 </style>
 </head>
 <body>
@@ -1756,21 +1905,60 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
     </div>
   </div>
 
-  <div class="page active" id="page-dashboard">
-    <div class="vertical-stack">
-      <div class="panel">
-        <div class="kicker">Market Driver Engine</div>
-        <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant">-</div></div>
-        <div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div>
-        <div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div>
-        <div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div>
-        <div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div>
-        <div class="soft-note" id="driverSummary">-</div>
-      </div>
+<div class="page active" id="page-dashboard">
+  <div class="vertical-stack">
 
-      <div class="dual-grid">
-        <div class="panel table-card">
-          <div class="kicker">Major Indexes</div>
+    <div class="panel dashboard-hero">
+      <div class="dashboard-hero-grid">
+        <div>
+          <div class="dashboard-eyebrow">Command Overview</div>
+          <div class="dashboard-hero-title" id="heroTitle">Loading...</div>
+          <div class="dashboard-hero-summary" id="heroSub">Loading...</div>
+        </div>
+
+        <div class="dashboard-chip-stack">
+          <div class="dashboard-chip">
+            <span class="dashboard-chip-label">Dominant Driver</span>
+            <span class="dashboard-chip-value" id="driverDominant">-</span>
+          </div>
+          <div class="dashboard-chip">
+            <span class="dashboard-chip-label">Main Threat</span>
+            <span class="dashboard-chip-value" id="driverThreat">-</span>
+          </div>
+          <div class="dashboard-chip">
+            <span class="dashboard-chip-label">Open Quality</span>
+            <span class="dashboard-chip-value" id="openQuality">-</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dashboard-main-grid">
+
+      <div class="dashboard-stack">
+
+        <div class="panel dashboard-driver-card">
+          <div class="dashboard-card-top">
+            <div>
+              <div class="kicker">Market Driver Engine</div>
+              <div class="dashboard-card-title">Regime + Context</div>
+            </div>
+          </div>
+          <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant">-</div></div>
+          <div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div>
+          <div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div>
+          <div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div>
+          <div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div>
+          <div class="soft-note" id="driverSummary">-</div>
+        </div>
+
+        <div class="panel dashboard-index-card table-card compact-table">
+          <div class="dashboard-card-top">
+            <div>
+              <div class="kicker">Market Board</div>
+              <div class="dashboard-card-title">Major Indexes</div>
+            </div>
+          </div>
           <table>
             <thead>
               <tr><th>Index</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
@@ -1779,55 +1967,78 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
           </table>
         </div>
 
-        <div class="panel">
-          <div class="kicker">Active Warnings</div>
-          <div class="badges" id="warnings"></div>
+        <div class="panel dashboard-movers-card">
+          <div class="dashboard-card-top">
+            <div>
+              <div class="kicker">Mover Intelligence</div>
+              <div class="dashboard-card-title">Likely Market Movers</div>
+            </div>
+          </div>
+
+          <div class="panel table-card compact-table" style="padding:0;background:transparent;border:none;box-shadow:none">
+            <table>
+              <thead>
+                <tr><th>Ticker</th><th>Impact</th><th>Why</th></tr>
+              </thead>
+              <tbody id="likelyMoversTable"></tbody>
+            </table>
+          </div>
+
+          <div class="movers-split" style="margin-top:16px;">
+            <div class="panel table-card compact-table" style="padding:18px;">
+              <div class="kicker">Top Movers</div>
+              <table>
+                <thead>
+                  <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+                </thead>
+                <tbody id="topMoversTable"></tbody>
+              </table>
+            </div>
+
+            <div class="panel table-card compact-table" style="padding:18px;">
+              <div class="kicker">Bottom Movers</div>
+              <table>
+                <thead>
+                  <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+                </thead>
+                <tbody id="bottomMoversTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="dashboard-stack">
+
+        <div class="panel dashboard-warnings-card">
+          <div class="dashboard-card-top">
+            <div>
+              <div class="kicker">Risk Board</div>
+              <div class="dashboard-card-title">Active Warnings</div>
+            </div>
+          </div>
+          <div class="warning-list" id="warnings"></div>
           <div class="soft-note" id="morningRead">-</div>
           <div class="soft-note" id="focusRead">-</div>
         </div>
-      </div>
 
-      <div class="panel table-card">
-        <div class="kicker">Likely Market Movers</div>
-        <table>
-          <thead>
-            <tr><th>Ticker</th><th>Impact</th><th>Why</th></tr>
-          </thead>
-          <tbody id="likelyMoversTable"></tbody>
-        </table>
-      </div>
-
-      <div class="dual-grid">
-        <div class="panel table-card">
-          <div class="kicker">Top Movers</div>
-          <table>
-            <thead>
-              <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-            </thead>
-            <tbody id="topMoversTable"></tbody>
-          </table>
+        <div class="panel dashboard-story-card">
+          <div class="dashboard-card-top">
+            <div>
+              <div class="kicker">Top Story</div>
+              <div class="dashboard-card-title">Primary Catalyst</div>
+            </div>
+          </div>
+          <div class="story-card-headline" id="topStory">-</div>
+          <div class="story-card-note" id="topStoryNote">-</div>
         </div>
 
-        <div class="panel table-card">
-          <div class="kicker">Bottom Movers</div>
-          <table>
-            <thead>
-              <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-            </thead>
-            <tbody id="bottomMoversTable"></tbody>
-          </table>
-        </div>
       </div>
 
-      <div class="panel">
-        <div class="kicker">Top Story</div>
-        <div style="font-size:24px;font-weight:900;line-height:1.18" id="topStory">-</div>
-        <div class="soft-note" id="topStoryNote">-</div>
-      </div>
     </div>
   </div>
-
-  <div class="page" id="page-trading">
+</div>
     <div class="vertical-stack">
 
       <div class="panel trading-hero">
@@ -2361,10 +2572,12 @@ async function refresh(){
     setText('driverConfidence', driver.market_confidence || '-');
     setText('driverSummary', driver.market_summary || '-');
 
-    setHTML(
-      'warnings',
-      (risk.active_warnings || []).map(x => `<span class="badge">${x}</span>`).join('')
-    );
+setHTML(
+  'warnings',
+  (risk.active_warnings || []).length
+    ? (risk.active_warnings || []).map(x => `<div class="warning-item">${x}</div>`).join('')
+    : '<div class="warning-item">No active warnings</div>'
+);
 
     renderSimpleRows(state.major_indexes || [], 'majorIndexesTable');
     renderLikelyMovers((movers.leaders || []).concat(movers.next_to_watch || []), 'likelyMoversTable');
