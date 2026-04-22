@@ -1273,6 +1273,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
   --shadow:0 18px 48px rgba(0,0,0,.28);
   --radius:22px;
 }
+
 html,body{min-height:100%}
 body{
   font-family:Inter,Arial,sans-serif;
@@ -1283,7 +1284,8 @@ body{
     linear-gradient(180deg,var(--bg2),var(--bg));
   padding:24px;
 }
-.wrap{max-width:1420px;margin:0 auto}
+
+.wrap{max-width:1480px;margin:0 auto}
 button{font:inherit}
 input,textarea,select{caret-color:auto}
 input,textarea{user-select:text}
@@ -1319,7 +1321,7 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   grid-template-columns:180px 1fr 220px;
   gap:12px;
   align-items:center;
-  margin-bottom:16px
+  margin-bottom:18px;
 }
 .live-pill,.session-pill,.ticker-wrap{
   background:rgba(255,255,255,.04);
@@ -1355,50 +1357,11 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
   margin-bottom:12px
 }
-.hero{
-  display:grid;
-  grid-template-columns:1fr;
-  gap:16px;
-  margin-bottom:16px
-}
-.hero-title{font-size:34px;font-weight:900;line-height:1.07}
-.hero-sub{margin-top:12px;color:var(--muted);font-size:15px;line-height:1.55}
-
-.summary-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:16px;
-  margin-bottom:16px
-}
-.summary-mini{
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.07);
-  border-radius:16px;
-  padding:16px
-}
-.summary-mini .lab{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px}
-.summary-mini .val{font-size:18px;font-weight:900;margin-top:8px;line-height:1.25}
-
-.stat-grid{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:16px;
-  margin-bottom:16px
-}
-.stat-card .lab{
-  font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.7px;margin-bottom:14px
-}
-.stat-card .val{font-size:42px;font-weight:900;line-height:1;text-transform:uppercase}
-.stat-card .sub{margin-top:10px;color:var(--muted);font-size:14px}
-.low{color:var(--green)}
-.medium{color:var(--yellow)}
-.high{color:var(--red)}
-
 .page{display:none}
 .page.active{display:block}
-
-.vertical-stack{display:grid;gap:16px}
-.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.vertical-stack{display:grid;gap:18px}
+.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.triple-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 
 .row{
   display:flex;justify-content:space-between;gap:14px;padding:14px 0;
@@ -1410,7 +1373,7 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 
 .feed-item{
   padding:13px 0;border-bottom:1px solid rgba(255,255,255,.08);
-  line-height:1.5;color:#e9f1ff
+  line-height:1.55;color:#e9f1ff
 }
 .feed-item:last-child{border-bottom:none}
 
@@ -1419,6 +1382,15 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   padding:9px 12px;border-radius:999px;font-size:12px;font-weight:800;
   background:rgba(255,107,134,.08);border:1px solid rgba(255,107,134,.24);
   color:#ffc7d2
+}
+.warning-list{display:grid;gap:10px}
+.warning-item{
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  color:#e9f1ff;
+  line-height:1.5;
 }
 
 .table-card table{width:100%;border-collapse:collapse}
@@ -1433,11 +1405,11 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 .up{color:var(--green)}
 .down{color:var(--red)}
 
-.soft-note{margin-top:12px;color:var(--muted);font-size:14px;line-height:1.55}
+.soft-note{margin-top:12px;color:var(--muted);font-size:14px;line-height:1.6}
 .action-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 .ghost-btn{
   border:none;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);
-  color:#edf4ff;border:1px solid rgba(255,255,255,.08)
+  color:#edf4ff;border:1px solid rgba(255,255,255,.08);transition:.18s ease
 }
 .ghost-btn:hover{
   transform:translateY(-1px);
@@ -1463,7 +1435,99 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   margin-top:18px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px
 }
 
-/* premium trading */
+/* ===== DASHBOARD ===== */
+.dashboard-hero{
+  padding:28px;
+  border-radius:24px;
+  border:1px solid rgba(95,149,255,.16);
+  background:
+    radial-gradient(circle at top right, rgba(95,149,255,.12), transparent 26%),
+    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
+}
+.dashboard-hero-grid{
+  display:grid;
+  grid-template-columns:1.2fr .8fr;
+  gap:18px;
+  align-items:start;
+}
+.dashboard-eyebrow{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1.7px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+.dashboard-hero-title{
+  font-size:36px;
+  line-height:1.06;
+  font-weight:900;
+}
+.dashboard-hero-summary{
+  margin-top:14px;
+  font-size:15px;
+  line-height:1.65;
+  color:var(--muted);
+  max-width:88ch;
+}
+.dashboard-chip-stack{display:grid;gap:12px}
+.dashboard-chip{
+  border-radius:16px;
+  padding:14px 16px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+}
+.dashboard-chip-label{
+  display:block;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:1.3px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+.dashboard-chip-value{
+  display:block;
+  font-size:18px;
+  font-weight:900;
+  color:var(--text);
+}
+.dashboard-main-grid{
+  display:grid;
+  grid-template-columns:1.15fr .85fr;
+  gap:18px;
+  align-items:start;
+}
+.dashboard-stack{display:grid;gap:18px}
+.dashboard-card-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:12px;
+}
+.dashboard-card-title{
+  font-size:22px;
+  font-weight:900;
+  line-height:1.15;
+}
+.story-card-headline{
+  font-size:28px;
+  font-weight:900;
+  line-height:1.1;
+}
+.story-card-note{
+  margin-top:12px;
+  color:var(--muted);
+  line-height:1.6;
+}
+.movers-split{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.compact-table th{padding-bottom:10px}
+.compact-table td{padding:10px 0}
+
+/* ===== TRADING ===== */
 .trading-hero{
   padding:28px;
   border:1px solid rgba(95,149,255,.18);
@@ -1548,11 +1612,6 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
   line-height:1.15;
 }
 .trading-mid-grid{align-items:start}
-.trading-pulse-card,
-.trading-intel-card,
-.trading-observation-card{
-  background:linear-gradient(180deg, rgba(27,44,75,.95), rgba(19,33,58,.98));
-}
 .trading-note{
   margin-top:14px;
   color:var(--muted);
@@ -1577,253 +1636,15 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
 }
 
 @media(max-width:1200px){
-  .live-row,.summary-grid,.dual-grid,.stat-grid,.hero-row{grid-template-columns:1fr}
+  .live-row,.summary-grid,.dual-grid,.triple-grid,.stat-grid,
+  .dashboard-hero-grid,.dashboard-main-grid,.movers-split,.hero-row{
+    grid-template-columns:1fr;
+  }
 }
 @media(max-width:760px){
   body{padding:16px}
   .brand h1{font-size:38px}
-
-.vertical-stack{
-  display:grid;
-  gap:18px;
-}
-
-.trading-hero{
-  padding:30px;
-  border-radius:24px;
-  border:1px solid rgba(95,149,255,.18);
-  background:
-    radial-gradient(circle at top right, rgba(95,149,255,.14), transparent 28%),
-    linear-gradient(180deg, rgba(28,46,80,.98), rgba(18,31,56,.98));
-}
-
-.hero-row{
-  display:grid;
-  grid-template-columns:1.35fr .65fr;
-  gap:18px;
-  align-items:start;
-}
-
-.hero-eyebrow{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.7px;
-  color:var(--muted);
-  margin-bottom:10px;
-}
-
-.trading-hero-title{
-  font-size:36px;
-  line-height:1.06;
-  font-weight:900;
-}
-
-.trading-hero-summary{
-  margin-top:14px;
-  font-size:15px;
-  line-height:1.65;
-  color:var(--muted);
-}
-
-.hero-right{
-  display:grid;
-  gap:12px;
-}
-
-.metric-chip{
-  border-radius:16px;
-  padding:14px 16px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-}
-
-.metric-chip-label{
-  font-size:10px;
-  text-transform:uppercase;
-  letter-spacing:1.3px;
-  color:var(--muted);
-  display:block;
-  margin-bottom:8px;
-}
-
-.metric-chip-value{
-  font-size:18px;
-  font-weight:900;
-}
-
-.trading-focus-reason{
-  margin-top:16px;
-  padding:14px 16px;
-  border-radius:16px;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.07);
-  color:var(--muted);
-  line-height:1.6;
-}
-
-.alert-card{
-  padding:14px;
-  border-radius:16px;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.07);
-  margin-bottom:12px;
-}
-
-@media(max-width:1200px){
-  .hero-row{
-    grid-template-columns:1fr;
-  }
-}
-
-}
-/* ===== PASS B: DASHBOARD PREMIUM HIERARCHY ===== */
-.dashboard-hero{
-  padding:28px;
-  border-radius:24px;
-  border:1px solid rgba(95,149,255,.16);
-  background:
-    radial-gradient(circle at top right, rgba(95,149,255,.12), transparent 26%),
-    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
-}
-
-.dashboard-hero-grid{
-  display:grid;
-  grid-template-columns:1.2fr .8fr;
-  gap:18px;
-  align-items:start;
-}
-
-.dashboard-eyebrow{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.7px;
-  color:var(--muted);
-  margin-bottom:10px;
-}
-
-.dashboard-hero-title{
-  font-size:36px;
-  line-height:1.06;
-  font-weight:900;
-}
-
-.dashboard-hero-summary{
-  margin-top:14px;
-  font-size:15px;
-  line-height:1.65;
-  color:var(--muted);
-  max-width:88ch;
-}
-
-.dashboard-chip-stack{
-  display:grid;
-  gap:12px;
-}
-
-.dashboard-chip{
-  border-radius:16px;
-  padding:14px 16px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-}
-
-.dashboard-chip-label{
-  display:block;
-  font-size:10px;
-  text-transform:uppercase;
-  letter-spacing:1.3px;
-  color:var(--muted);
-  margin-bottom:8px;
-}
-
-.dashboard-chip-value{
-  display:block;
-  font-size:18px;
-  font-weight:900;
-  color:var(--text);
-}
-
-.dashboard-main-grid{
-  display:grid;
-  grid-template-columns:1.15fr .85fr;
-  gap:18px;
-  align-items:start;
-}
-
-.dashboard-stack{
-  display:grid;
-  gap:18px;
-}
-
-.dashboard-card-top{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:12px;
-  margin-bottom:12px;
-}
-
-.dashboard-card-title{
-  font-size:22px;
-  font-weight:900;
-  line-height:1.15;
-}
-
-.dashboard-driver-card,
-.dashboard-index-card,
-.dashboard-warnings-card,
-.dashboard-story-card,
-.dashboard-movers-card{
-  background:
-    linear-gradient(180deg, rgba(27,44,75,.95), rgba(19,33,58,.98));
-}
-
-.warning-list{
-  display:grid;
-  gap:10px;
-}
-
-.warning-item{
-  padding:12px 14px;
-  border-radius:14px;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.07);
-  color:#e9f1ff;
-  line-height:1.5;
-}
-
-.story-card-headline{
-  font-size:28px;
-  font-weight:900;
-  line-height:1.1;
-}
-
-.story-card-note{
-  margin-top:12px;
-  color:var(--muted);
-  line-height:1.6;
-}
-
-.movers-split{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:16px;
-}
-
-.compact-table th{
-  padding-bottom:10px;
-}
-
-.compact-table td{
-  padding:10px 0;
-}
-
-@media(max-width:1200px){
-  .dashboard-hero-grid,
-  .dashboard-main-grid,
-  .movers-split{
-    grid-template-columns:1fr;
-  }
+  .dashboard-hero-title,.trading-hero-title{font-size:30px}
 }
 </style>
 </head>
@@ -1855,190 +1676,166 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
     </div>
   </div>
 
-  <div class="hero">
-    <div class="panel">
-      <div class="kicker">Donna Overview</div>
-      <div class="hero-title" id="heroTitle">Loading...</div>
-      <div class="hero-sub" id="heroSub">Loading...</div>
-    </div>
+  <div class="page active" id="page-dashboard">
+    <div class="vertical-stack">
 
-    <div class="summary-grid">
-      <div class="summary-mini">
-        <div class="lab">Donna Time</div>
-        <div class="val" id="donnaTime">-</div>
-      </div>
-      <div class="summary-mini">
-        <div class="lab">Open Quality</div>
-        <div class="val" id="openQuality">-</div>
-      </div>
-      <div class="summary-mini">
-        <div class="lab">Morning Bias</div>
-        <div class="val" id="morningBias">-</div>
-      </div>
-      <div class="summary-mini">
-        <div class="lab">Main Threat</div>
-        <div class="val" id="mainThreat">-</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="stat-grid">
-    <div class="card stat-card">
-      <div class="lab">Macro Risk</div>
-      <div class="val medium" id="macroRisk">-</div>
-      <div class="sub">Event timing and macro pressure</div>
-    </div>
-    <div class="card stat-card">
-      <div class="lab">Headline Risk</div>
-      <div class="val medium" id="headlineRisk">-</div>
-      <div class="sub">Breaking-news sensitivity</div>
-    </div>
-    <div class="card stat-card">
-      <div class="lab">Market Risk</div>
-      <div class="val medium" id="marketRisk">-</div>
-      <div class="sub">Company and sector catalyst pressure</div>
-    </div>
-    <div class="card stat-card">
-      <div class="lab">Session Significance</div>
-      <div class="val" style="font-size:20px;line-height:1.15" id="sessionSignificance">-</div>
-      <div class="sub" id="sessionSub">-</div>
-    </div>
-  </div>
-
-<div class="page active" id="page-dashboard">
-  <div class="vertical-stack">
-
-    <div class="panel dashboard-hero">
-      <div class="dashboard-hero-grid">
-        <div>
-          <div class="dashboard-eyebrow">Command Overview</div>
-          <div class="dashboard-hero-title" id="heroTitle">Loading...</div>
-          <div class="dashboard-hero-summary" id="heroSub">Loading...</div>
-        </div>
-
-        <div class="dashboard-chip-stack">
-          <div class="dashboard-chip">
-            <span class="dashboard-chip-label">Dominant Driver</span>
-            <span class="dashboard-chip-value" id="driverDominant">-</span>
+      <div class="panel dashboard-hero">
+        <div class="dashboard-hero-grid">
+          <div>
+            <div class="dashboard-eyebrow">Command Overview</div>
+            <div class="dashboard-hero-title" id="heroTitle">Loading...</div>
+            <div class="dashboard-hero-summary" id="heroSub">Loading...</div>
           </div>
-          <div class="dashboard-chip">
-            <span class="dashboard-chip-label">Main Threat</span>
-            <span class="dashboard-chip-value" id="driverThreat">-</span>
-          </div>
-          <div class="dashboard-chip">
-            <span class="dashboard-chip-label">Open Quality</span>
-            <span class="dashboard-chip-value" id="openQuality">-</span>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <div class="dashboard-main-grid">
-
-      <div class="dashboard-stack">
-
-        <div class="panel dashboard-driver-card">
-          <div class="dashboard-card-top">
-            <div>
-              <div class="kicker">Market Driver Engine</div>
-              <div class="dashboard-card-title">Regime + Context</div>
+          <div class="dashboard-chip-stack">
+            <div class="dashboard-chip">
+              <span class="dashboard-chip-label">Dominant Driver</span>
+              <span class="dashboard-chip-value" id="driverDominant">-</span>
+            </div>
+            <div class="dashboard-chip">
+              <span class="dashboard-chip-label">Main Threat</span>
+              <span class="dashboard-chip-value" id="mainThreat">-</span>
+            </div>
+            <div class="dashboard-chip">
+              <span class="dashboard-chip-label">Open Quality</span>
+              <span class="dashboard-chip-value" id="openQuality">-</span>
+            </div>
+            <div class="dashboard-chip">
+              <span class="dashboard-chip-label">Morning Bias</span>
+              <span class="dashboard-chip-value" id="morningBias">-</span>
             </div>
           </div>
-          <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant">-</div></div>
-          <div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div>
-          <div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div>
-          <div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div>
-          <div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div>
-          <div class="soft-note" id="driverSummary">-</div>
         </div>
+      </div>
 
-        <div class="panel dashboard-index-card table-card compact-table">
-          <div class="dashboard-card-top">
-            <div>
-              <div class="kicker">Market Board</div>
-              <div class="dashboard-card-title">Major Indexes</div>
-            </div>
-          </div>
-          <table>
-            <thead>
-              <tr><th>Index</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-            </thead>
-            <tbody id="majorIndexesTable"></tbody>
-          </table>
+      <div class="stat-grid">
+        <div class="card stat-card">
+          <div class="lab">Macro Risk</div>
+          <div class="val medium" id="macroRisk">-</div>
+          <div class="sub">Event timing and macro pressure</div>
         </div>
+        <div class="card stat-card">
+          <div class="lab">Headline Risk</div>
+          <div class="val medium" id="headlineRisk">-</div>
+          <div class="sub">Breaking-news sensitivity</div>
+        </div>
+        <div class="card stat-card">
+          <div class="lab">Market Risk</div>
+          <div class="val medium" id="marketRisk">-</div>
+          <div class="sub">Company and sector catalyst pressure</div>
+        </div>
+        <div class="card stat-card">
+          <div class="lab">Session Significance</div>
+          <div class="val" style="font-size:20px;line-height:1.15" id="sessionSignificance">-</div>
+          <div class="sub" id="sessionSub">-</div>
+        </div>
+      </div>
 
-        <div class="panel dashboard-movers-card">
-          <div class="dashboard-card-top">
-            <div>
-              <div class="kicker">Mover Intelligence</div>
-              <div class="dashboard-card-title">Likely Market Movers</div>
+      <div class="dashboard-main-grid">
+
+        <div class="dashboard-stack">
+          <div class="panel table-card compact-table">
+            <div class="dashboard-card-top">
+              <div>
+                <div class="kicker">Market Driver Engine</div>
+                <div class="dashboard-card-title">Regime + Context</div>
+              </div>
             </div>
+            <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant2">-</div></div>
+            <div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div>
+            <div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div>
+            <div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div>
+            <div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div>
+            <div class="soft-note" id="driverSummary">-</div>
           </div>
 
-          <div class="panel table-card compact-table" style="padding:0;background:transparent;border:none;box-shadow:none">
+          <div class="panel table-card compact-table">
+            <div class="dashboard-card-top">
+              <div>
+                <div class="kicker">Market Board</div>
+                <div class="dashboard-card-title">Major Indexes</div>
+              </div>
+            </div>
             <table>
               <thead>
-                <tr><th>Ticker</th><th>Impact</th><th>Why</th></tr>
+                <tr><th>Index</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
               </thead>
-              <tbody id="likelyMoversTable"></tbody>
+              <tbody id="majorIndexesTable"></tbody>
             </table>
           </div>
 
-          <div class="movers-split" style="margin-top:16px;">
-            <div class="panel table-card compact-table" style="padding:18px;">
-              <div class="kicker">Top Movers</div>
+          <div class="panel">
+            <div class="dashboard-card-top">
+              <div>
+                <div class="kicker">Mover Intelligence</div>
+                <div class="dashboard-card-title">Likely Market Movers</div>
+              </div>
+            </div>
+
+            <div class="table-card compact-table">
               <table>
                 <thead>
-                  <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+                  <tr><th>Ticker</th><th>Impact</th><th>Why</th></tr>
                 </thead>
-                <tbody id="topMoversTable"></tbody>
+                <tbody id="likelyMoversTable"></tbody>
               </table>
             </div>
 
-            <div class="panel table-card compact-table" style="padding:18px;">
-              <div class="kicker">Bottom Movers</div>
-              <table>
-                <thead>
-                  <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-                </thead>
-                <tbody id="bottomMoversTable"></tbody>
-              </table>
+            <div class="movers-split" style="margin-top:16px;">
+              <div class="panel table-card compact-table" style="padding:18px;">
+                <div class="kicker">Top Movers</div>
+                <table>
+                  <thead>
+                    <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+                  </thead>
+                  <tbody id="topMoversTable"></tbody>
+                </table>
+              </div>
+
+              <div class="panel table-card compact-table" style="padding:18px;">
+                <div class="kicker">Bottom Movers</div>
+                <table>
+                  <thead>
+                    <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
+                  </thead>
+                  <tbody id="bottomMoversTable"></tbody>
+                </table>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <div class="dashboard-stack">
+          <div class="panel">
+            <div class="dashboard-card-top">
+              <div>
+                <div class="kicker">Risk Board</div>
+                <div class="dashboard-card-title">Active Warnings</div>
+              </div>
+            </div>
+            <div class="warning-list" id="warnings"></div>
+            <div class="soft-note" id="morningRead">-</div>
+            <div class="soft-note" id="focusRead">-</div>
+            <div class="soft-note" id="donnaTime">-</div>
+          </div>
+
+          <div class="panel">
+            <div class="dashboard-card-top">
+              <div>
+                <div class="kicker">Top Story</div>
+                <div class="dashboard-card-title">Primary Catalyst</div>
+              </div>
+            </div>
+            <div class="story-card-headline" id="topStory">-</div>
+            <div class="story-card-note" id="topStoryNote">-</div>
           </div>
         </div>
 
       </div>
-
-      <div class="dashboard-stack">
-
-        <div class="panel dashboard-warnings-card">
-          <div class="dashboard-card-top">
-            <div>
-              <div class="kicker">Risk Board</div>
-              <div class="dashboard-card-title">Active Warnings</div>
-            </div>
-          </div>
-          <div class="warning-list" id="warnings"></div>
-          <div class="soft-note" id="morningRead">-</div>
-          <div class="soft-note" id="focusRead">-</div>
-        </div>
-
-        <div class="panel dashboard-story-card">
-          <div class="dashboard-card-top">
-            <div>
-              <div class="kicker">Top Story</div>
-              <div class="dashboard-card-title">Primary Catalyst</div>
-            </div>
-          </div>
-          <div class="story-card-headline" id="topStory">-</div>
-          <div class="story-card-note" id="topStoryNote">-</div>
-        </div>
-
-      </div>
-
     </div>
   </div>
-</div>
+
+  <div class="page" id="page-trading">
     <div class="vertical-stack">
 
       <div class="panel trading-hero">
@@ -2070,7 +1867,7 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
       </div>
 
       <div class="dual-grid trading-mid-grid">
-        <div class="panel table-card trading-pulse-card">
+        <div class="panel table-card">
           <div class="card-topline">
             <div>
               <div class="kicker">Live Pulse</div>
@@ -2085,7 +1882,7 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
           </table>
         </div>
 
-        <div class="panel trading-intel-card">
+        <div class="panel">
           <div class="card-topline">
             <div>
               <div class="kicker">Execution View</div>
@@ -2100,7 +1897,7 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
         </div>
       </div>
 
-      <div class="panel trading-observation-card">
+      <div class="panel">
         <div class="card-topline">
           <div>
             <div class="kicker">Donna Feed</div>
@@ -2162,494 +1959,4 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
           <tbody id="nextWatchTable"></tbody>
         </table>
       </div>
-    </div>
-  </div>
-
-  <div class="page" id="page-assistant">
-    <div class="vertical-stack">
-      <div class="panel">
-        <div class="kicker">Donna AI Assistant</div>
-        <div class="assistant-output" id="assistantOutput">
-          <div class="msg assistant">
-            <span class="role">Donna</span>
-            Donna online. Ask what matters now, whether the session was significant, or which names can move the market.
-          </div>
-        </div>
-        <textarea class="text-input" id="assistantInput" placeholder="Ask Donna something..."></textarea>
-        <div class="action-row">
-          <button class="tab-btn" id="assistantSend">Send</button>
-          <button class="ghost-btn" data-prompt="What matters right now?">What matters now?</button>
-          <button class="ghost-btn" data-prompt="Was this a significant NY session move?">Session significance</button>
-          <button class="ghost-btn" data-prompt="What companies are most likely to move the market?">Likely movers</button>
-        </div>
-      </div>
-
-      <div class="dual-grid">
-        <div class="panel">
-          <div class="kicker">Daily Focus</div>
-          <div style="font-size:20px;font-weight:900" id="dailyFocus">-</div>
-          <input class="text-input" id="focusInput" placeholder="Set daily focus" />
-          <div class="action-row">
-            <button class="tab-btn" id="setFocusBtn">Set Focus</button>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="kicker">Tasks</div>
-          <div id="taskList"></div>
-          <input class="text-input" id="taskInput" placeholder="Add task" />
-          <div class="action-row">
-            <button class="tab-btn" id="addTaskBtn">Add Task</button>
-            <button class="ghost-btn" id="clearTasksBtn">Clear Tasks</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="kicker">Reminders</div>
-        <div id="reminderList"></div>
-        <input class="text-input" id="reminderInput" placeholder="Add reminder" />
-        <div class="action-row">
-          <button class="tab-btn" id="addReminderBtn">Add Reminder</button>
-          <button class="ghost-btn" id="clearRemindersBtn">Clear Reminders</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="footer">
-    <div>Donna v5.0 Live Market Core</div>
-    <div id="footerUpdated">last update: -</div>
-  </div>
-</div>
-
-<script>
-let state = null;
-let activeFocusSymbol = null;
-const byId = id => document.getElementById(id);
-
-function setText(id, value){
-  const el = byId(id);
-  if (el) el.textContent = value ?? '-';
-}
-
-function setHTML(id, value){
-  const el = byId(id);
-  if (el) el.innerHTML = value ?? '';
-}
-
-function toRiskClass(v){
-  v = String(v || '').toLowerCase();
-  if (v === 'high') return 'high';
-  if (v === 'medium') return 'medium';
-  return 'low';
-}
-
-function showPage(name){
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn[data-page]').forEach(b => b.classList.remove('active'));
-  const page = byId('page-' + name);
-  if (page) page.classList.add('active');
-  const tab = document.querySelector('.tab-btn[data-page="' + name + '"]');
-  if (tab) tab.classList.add('active');
-}
-document.querySelectorAll('.tab-btn[data-page]').forEach(btn=>btn.addEventListener('click',()=>showPage(btn.dataset.page)));
-
-function renderSimpleRows(rows,targetId){
-  const el = byId(targetId);
-  if (!el) return;
-  el.innerHTML = (rows || []).map(r => `
-    <tr>
-      <td>${r.symbol ?? '-'}</td>
-      <td>${r.last ?? '-'}</td>
-      <td class="${r.dir || (String(r.chg).startsWith('-') ? 'down' : 'up')}">${r.chg ?? '-'}</td>
-      <td class="${r.dir || (String(r.pct).startsWith('-') ? 'down' : 'up')}">${r.pct ?? '-'}</td>
-    </tr>
-  `).join('');
-}
-
-function renderLikelyMovers(rows,targetId){
-  const el = byId(targetId);
-  if (!el) return;
-  el.innerHTML = (rows || []).map(r => `
-    <tr>
-      <td>${r.ticker ?? '-'}</td>
-      <td>${r.impact ?? '-'}</td>
-      <td>${r.why_it_matters ?? '-'}</td>
-    </tr>
-  `).join('');
-}
-
-function renderTriple(rows,targetId){
-  const el = byId(targetId);
-  if (!el) return;
-  el.innerHTML = (rows || []).map(r => `
-    <tr>
-      <td>${r.ticker ?? '-'}</td>
-      <td>${r.impact ?? '-'}</td>
-      <td>${r.index_exposure ?? '-'}</td>
-    </tr>
-  `).join('');
-}
-
-function renderAlerts(alerts){
-  const el = byId('recentAlerts');
-  if (!el) return;
-
-  if (!alerts || !alerts.length){
-    el.innerHTML = '<div class="feed-item">No Donna alerts or observations yet</div>';
-    return;
-  }
-
-  el.innerHTML = alerts.map(a => {
-    if (a.type === 'observation') {
-      return `
-        <div class="feed-item">
-          <b>${a.title}</b><br/>
-          <span style="color:var(--muted)">Donna Observation // ${String(a.priority || 'low').toUpperCase()}</span><br/>
-          ${a.summary}
-        </div>
-      `;
-    }
-
-    return `
-      <div class="feed-item">
-        <b>${a.ticker ?? '-'}</b> // ${a.signal ?? '-'} // ${a.verdict ?? '-'} // ${a.confidence ?? '-'}<br/>
-        <span style="color:var(--muted)">${a.session ?? '-'} | TF ${a.timeframe ?? '-'} | Price ${a.price ?? '-'}</span><br/>
-        ${a.summary ?? '-'}
-      </div>
-    `;
-  }).join('');
-}
-
-function renderNews(news){
-  const el = byId('newsList');
-  if (!el) return;
-
-  if (!news || !news.length){
-    el.innerHTML = '<div class="feed-item">No live news available</div>';
-    return;
-  }
-
-  el.innerHTML = news.map(n => `
-    <div class="feed-item">
-      <b>${n.headline ?? '-'}</b><br/>
-      <span style="color:var(--muted)">${n.source ?? '-'}</span><br/>
-      ${n.summary || ''}
-    </div>
-  `).join('');
-}
-
-function renderTasks(list,targetId,route){
-  const el = byId(targetId);
-  if (!el) return;
-
-  if (!list || !list.length){
-    el.innerHTML = '<div class="feed-item">None</div>';
-    return;
-  }
-
-  el.innerHTML = list.map((item,idx)=>`
-    <div class="feed-item">
-      ${item}
-      <div class="action-row">
-        <button class="ghost-btn" onclick="deleteIndexed('${route}', ${idx})">Delete</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-function buildTicker(items){
-  const el = byId('liveStrip');
-  if (!el) return;
-  el.innerHTML = (items || []).map(item => `
-    <div class="ticker-item"><b>${item.label ?? '-' }:</b> ${item.value ?? '-'}</div>
-  `).join('');
-}
-
-async function api(url,options={}){
-  const res = await fetch(url,{headers:{'Content-Type':'application/json'},...options});
-  const data = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.detail || data.reply || 'Request failed');
-  return data;
-}
-
-function addAssistantMessage(role,text){
-  const wrap = byId('assistantOutput');
-  if (!wrap) return;
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-  div.innerHTML = `<span class="role">${role === 'user' ? 'You' : 'Donna'}</span>${text}`;
-  wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-async function sendAssistant(message=null){
-  const input = byId('assistantInput');
-  const text = message || (input ? input.value.trim() : '');
-  if(!text) return;
-
-  addAssistantMessage('user',text);
-  if(!message && input) input.value='';
-
-  try{
-    const data = await api('/assistant/chat',{method:'POST',body:JSON.stringify({message:text})});
-    addAssistantMessage('assistant',data.reply || 'No reply.');
-    await refresh();
-  }catch(err){
-    addAssistantMessage('assistant','Assistant error: ' + err.message);
-  }
-}
-
-async function deleteIndexed(route,index){
-  try{
-    await api(route,{method:'POST',body:JSON.stringify({index})});
-    await refresh();
-  }catch(err){
-    alert(err.message);
-  }
-}
-
-async function setFocus(){
-  const input = byId('focusInput');
-  const value = input ? input.value.trim() : '';
-  if(!value) return;
-  await api('/assistant/set-focus',{method:'POST',body:JSON.stringify({daily_focus:value})});
-  if (input) input.value='';
-  await refresh();
-}
-
-async function addTask(){
-  const input = byId('taskInput');
-  const value = input ? input.value.trim() : '';
-  if(!value) return;
-  await api('/assistant/add-task',{method:'POST',body:JSON.stringify({task:value})});
-  if (input) input.value='';
-  await refresh();
-}
-
-async function addReminder(){
-  const input = byId('reminderInput');
-  const value = input ? input.value.trim() : '';
-  if(!value) return;
-  await api('/assistant/add-reminder',{method:'POST',body:JSON.stringify({reminder:value})});
-  if (input) input.value='';
-  await refresh();
-}
-
-function getPulseMap(){
-  const rows = (state && state.futures_macro_pulse) ? state.futures_macro_pulse : [];
-  const out = {};
-  rows.forEach(r => { out[r.symbol] = r; });
-  return out;
-}
-
-function renderWatchButtons(watch){
-  const buttons = (watch || ['NQ','ES','OIL','GOLD','SILVER']).map(symbol => {
-    const activeClass = activeFocusSymbol === symbol ? 'active-focus' : '';
-    return `<button class="ghost-btn ${activeClass}" onclick="quickFocusInstrument('${symbol}')">${symbol}</button>`;
-  }).join('');
-  setHTML('watchFirstRow', buttons);
-}
-
-function quickFocusInstrument(symbol){
-  if (!state) return;
-  activeFocusSymbol = symbol;
-
-  const pulseMap = getPulseMap();
-  const row = pulseMap[symbol] || {};
-  const pctRaw = row.pct || '-';
-  const last = row.last || '-';
-  const chg = row.chg || '-';
-
-  let summary = `${symbol} last ${last}, change ${chg}, pct ${pctRaw}.`;
-  let mode = symbol.toLowerCase();
-  let risk = 'Normal';
-  let reason = `${symbol} is in focus because it is part of Donna's current watch set.`;
-
-  const pctNum = Number(String(pctRaw).replace('%','').replace('+','').trim());
-
-  if (symbol === 'OIL') {
-    mode = 'oil_focus';
-    risk = Math.abs(pctNum) >= 2 ? 'Medium-High' : 'Medium';
-    reason = 'Crude can reshape equity tone, inflation expectations, and cross-asset sentiment quickly.';
-    summary = `Oil is trading at ${last} with ${chg} (${pctRaw}). Watch ES, NQ, DXY, and rates for cross-asset reaction.`;
-  } else if (symbol === 'NQ') {
-    mode = 'nq_focus';
-    risk = Math.abs(pctNum) >= 1 ? 'Medium-High' : 'Medium';
-    reason = 'Nasdaq leadership is one of the clearest reads for growth, risk appetite, and mega-cap pressure.';
-    summary = `NQ is trading at ${last} with ${chg} (${pctRaw}). Watch whether leadership is expanding, stalling, or diverging from ES.`;
-  } else if (symbol === 'ES') {
-    mode = 'es_focus';
-    risk = Math.abs(pctNum) >= 1 ? 'Medium-High' : 'Medium';
-    reason = 'ES tells you whether participation is broad or if the move is too concentrated in Nasdaq leadership.';
-    summary = `ES is trading at ${last} with ${chg} (${pctRaw}). Watch whether broad participation is confirming or lagging the tape.`;
-  } else if (symbol === 'DXY') {
-    mode = 'dxy_focus';
-    risk = 'Medium';
-    reason = 'Dollar movement can pressure equities, commodities, and metals all at once.';
-    summary = `DXY is trading at ${last} with ${chg} (${pctRaw}). Watch for pressure or support across NQ, ES, gold, and oil.`;
-  } else if (symbol === 'US10Y') {
-    mode = 'rates_focus';
-    risk = 'Medium';
-    reason = 'Yields matter for valuation-sensitive assets and overall macro pressure.';
-    summary = `US10Y is trading at ${last} with ${chg} (${pctRaw}). Watch whether rates are reinforcing or fighting the current equity move.`;
-  } else if (symbol === 'GOLD') {
-    mode = 'gold_focus';
-    risk = 'Medium';
-    reason = 'Gold helps read macro defensiveness, real-rate pressure, and dollar relationships.';
-    summary = `Gold is trading at ${last} with ${chg} (${pctRaw}). Watch whether metals strength is signaling defensiveness or macro rotation.`;
-  } else if (symbol === 'SILVER') {
-    mode = 'silver_focus';
-    risk = 'Medium';
-    reason = 'Silver often expands harder and can reflect more aggressive commodity participation.';
-    summary = `Silver is trading at ${last} with ${chg} (${pctRaw}). Watch whether the move is confirming broader metals momentum.`;
-  }
-
-  setText('tradingHeadline', `${symbol} Quick Focus`);
-  setText('tradingSummary', summary);
-  setText('tradingMode', mode);
-  setText('tradingRiskToConviction', risk);
-  setText('tradingFocusReason', reason);
-  renderWatchButtons((state.what_matters_now || {}).watch);
-}
-
-async function refresh(){
-  try{
-    state = await api('/dashboard-data');
-
-    const risk = state.risk || {};
-    const driver = state.driver || {};
-    const morning = state.morning_edge || {};
-    const sig = state.session_significance || {};
-    const movers = state.market_movers_engine || {};
-    const whatMatters = state.what_matters_now || {};
-
-    buildTicker(state.live_strip || []);
-    setText('sessionVal', risk.donna_session || '-');
-
-    setText(
-      'heroTitle',
-      driver.dominant_driver
-        ? `${driver.dominant_driver} is driving current conditions.`
-        : 'Balanced Conditions are driving current conditions.'
-    );
-
-    setText('heroSub', driver.market_summary || '-');
-
-    setText('morningBias', morning.today_bias || '-');
-    setText('morningRead', morning.first_read || '-');
-    setText('donnaTime', risk.donna_time_ny || '-');
-    setText('openQuality', morning.open_quality || '-');
-    setText('mainThreat', morning.main_threat || '-');
-    setText('focusRead', `Focus: ${morning.focus || '-'}`);
-
-    const macro = byId('macroRisk');
-    if (macro){
-      macro.textContent = String(risk.macro_risk || '-').toUpperCase();
-      macro.className = 'val ' + toRiskClass(risk.macro_risk);
-    }
-
-    const headline = byId('headlineRisk');
-    if (headline){
-      headline.textContent = String(risk.headline_risk || '-').toUpperCase();
-      headline.className = 'val ' + toRiskClass(risk.headline_risk);
-    }
-
-    const market = byId('marketRisk');
-    if (market){
-      market.textContent = String(risk.market_news_risk || '-').toUpperCase();
-      market.className = 'val ' + toRiskClass(risk.market_news_risk);
-    }
-
-    setText('sessionSignificance', sig.label || '-');
-    setText('sessionSub', sig.summary || '-');
-
-    setText('driverDominant', driver.dominant_driver || '-');
-    setText('driverSecondary', driver.secondary_driver || '-');
-    setText('driverRegime', driver.market_regime || '-');
-    setText('driverThreat', driver.market_threat || morning.main_threat || '-');
-    setText('driverConfidence', driver.market_confidence || '-');
-    setText('driverSummary', driver.market_summary || '-');
-
-setHTML(
-  'warnings',
-  (risk.active_warnings || []).length
-    ? (risk.active_warnings || []).map(x => `<div class="warning-item">${x}</div>`).join('')
-    : '<div class="warning-item">No active warnings</div>'
-);
-
-    renderSimpleRows(state.major_indexes || [], 'majorIndexesTable');
-    renderLikelyMovers((movers.leaders || []).concat(movers.next_to_watch || []), 'likelyMoversTable');
-    renderSimpleRows((state.live_movers || {}).gainers || [], 'topMoversTable');
-    renderSimpleRows((state.live_movers || {}).losers || [], 'bottomMoversTable');
-
-    setText('topStory', risk.last_headline || '-');
-    setText('topStoryNote', risk.headline_guidance || '-');
-
-    if (!activeFocusSymbol) {
-      setText(
-        'tradingHeadline',
-        whatMatters.headline || `${sig.label || 'Session'} // ${morning.focus || 'Balanced'}`
-      );
-      setText(
-        'tradingSummary',
-        whatMatters.summary || sig.summary || '-'
-      );
-      setText('tradingMode', whatMatters.mode || '-');
-      setText('tradingRiskToConviction', whatMatters.risk_to_conviction || '-');
-      setText('tradingFocusReason', whatMatters.focus_reason || '-');
-    }
-
-    renderWatchButtons(whatMatters.watch);
-    setText('tradeBias', morning.today_bias || '-');
-    setText('tradeOpenQuality', morning.open_quality || '-');
-    setText('tradeThreat', morning.main_threat || '-');
-    setText('tradeFocus', morning.focus || '-');
-    setText('tradeNote', morning.first_read || '-');
-
-    renderSimpleRows(state.futures_macro_pulse || [], 'tradingPulseTable');
-    renderAlerts(state.alerts || []);
-
-    setText('newsMacroTitle', (state.calendar || {}).next_event || risk.next_event || '-');
-    setText(
-      'newsMacroNote',
-      `Source: ${(state.calendar || {}).source || '-'}. Minutes to event: ${(state.calendar || {}).minutes_to_event ?? 'n/a'}`
-    );
-    setText('newsMarketTitle', risk.last_market_headline || '-');
-    setText('newsMarketNote', risk.last_market_guidance || '-');
-
-    renderNews(state.news || []);
-    renderTriple(movers.leaders || [], 'leadersTable');
-    renderTriple(movers.threats || [], 'threatsTable');
-    renderTriple(movers.next_to_watch || [], 'nextWatchTable');
-
-    setText('dailyFocus', (state.assistant || {}).daily_focus || '-');
-    renderTasks((state.assistant || {}).tasks || [], 'taskList', '/assistant/delete-task');
-    renderTasks((state.assistant || {}).reminders || [], 'reminderList', '/assistant/delete-reminder');
-
-    setText('footerUpdated', 'last update: ' + (risk.donna_time_ny || '-'));
-  } catch (err) {
-    console.error('Donna refresh failed:', err);
-  }
-}
-
-document.querySelectorAll('.ghost-btn[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>sendAssistant(btn.dataset.prompt)));
-byId('assistantSend')?.addEventListener('click',()=>sendAssistant());
-byId('assistantInput')?.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!e.shiftKey){
-    e.preventDefault();
-    sendAssistant();
-  }
-});
-byId('setFocusBtn')?.addEventListener('click',setFocus);
-byId('addTaskBtn')?.addEventListener('click',addTask);
-byId('addReminderBtn')?.addEventListener('click',addReminder);
-byId('clearTasksBtn')?.addEventListener('click',async()=>{await api('/assistant/clear-tasks',{method:'POST'});await refresh()});
-byId('clearRemindersBtn')?.addEventListener('click',async()=>{await api('/assistant/clear-reminders',{method:'POST'});await refresh()});
-
-refresh();
-setInterval(refresh,15000);
-</script>
-</body>
-</html>'''
+    </
