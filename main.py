@@ -1960,3 +1960,32 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
         </table>
       </div>
     </
+    </div>
+
+<div class="page" id="page-assistant">
+  <div class="vertical-stack">
+    <div class="panel">
+      <div class="kicker">Donna AI Assistant</div>
+      <div class="assistant-output" id="assistantOutput"></div>
+      <textarea class="text-input" id="assistantInput" placeholder="Ask Donna something..."></textarea>
+      <div class="action-row">
+        <button class="tab-btn" id="assistantSend">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <span>D.O.N.N.A v5.0 Live Market Core</span>
+  <span id="lastUpdated">Waiting...</span>
+</div>
+
+</div>
+
+<script>
+refresh();
+setInterval(refresh,15000);
+</script>
+</body>
+</html>
+'''
