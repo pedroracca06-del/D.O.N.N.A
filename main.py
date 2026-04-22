@@ -1255,406 +1255,369 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>D.O.N.N.A v5.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#08111f;
-  --bg2:#0d1830;
-  --panel:#162441;
-  --panel2:#1a2b4d;
-  --line:rgba(255,255,255,.10);
-  --text:#edf4ff;
-  --muted:#9eb2d6;
-  --blue:#5f95ff;
-  --blue2:#3972f6;
-  --green:#43f7ad;
-  --yellow:#ffd557;
-  --red:#ff6b86;
-  --shadow:0 18px 48px rgba(0,0,0,.28);
-  --radius:22px;
+  --bg:#060d1a;
+  --bg2:#091220;
+  --panel:#0e1c35;
+  --panel2:#122040;
+  --line:rgba(100,160,255,.10);
+  --line2:rgba(100,160,255,.06);
+  --text:#e8f2ff;
+  --muted:#7a99c8;
+  --muted2:#4d6a9a;
+  --blue:#4d8fff;
+  --blue2:#2563eb;
+  --blue3:#1a3f80;
+  --green:#00e5a0;
+  --green2:rgba(0,229,160,.12);
+  --yellow:#ffc93c;
+  --red:#ff4d6d;
+  --red2:rgba(255,77,109,.12);
+  --gold:#f0b429;
+  --shadow:0 24px 64px rgba(0,0,0,.45);
+  --shadow2:0 8px 24px rgba(0,0,0,.3);
+  --radius:18px;
+  --radius2:12px;
 }
 
-html,body{min-height:100%}
+html,body{min-height:100%;background:var(--bg)}
 body{
-  font-family:Inter,Arial,sans-serif;
+  font-family:'Inter',sans-serif;
   color:var(--text);
   background:
-    radial-gradient(circle at 5% 95%, rgba(67,247,173,.10), transparent 20%),
-    radial-gradient(circle at 100% 0%, rgba(95,149,255,.18), transparent 25%),
-    linear-gradient(180deg,var(--bg2),var(--bg));
-  padding:24px;
+    radial-gradient(ellipse at 0% 100%, rgba(0,229,160,.07) 0%, transparent 40%),
+    radial-gradient(ellipse at 100% 0%, rgba(37,99,235,.12) 0%, transparent 35%),
+    radial-gradient(ellipse at 50% 50%, rgba(14,28,53,.8) 0%, transparent 100%),
+    var(--bg);
+  padding:20px 24px 40px;
 }
+.wrap{max-width:1560px;margin:0 auto}
 
-.wrap{max-width:1480px;margin:0 auto}
-button{font:inherit}
-input,textarea,select{caret-color:auto}
-input,textarea{user-select:text}
-button,.tab-btn,.ghost-btn{cursor:pointer}
-
+/* ── TOPBAR ── */
 .topbar{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:18px;
-  flex-wrap:wrap;
-  margin-bottom:14px;
+  display:flex;justify-content:space-between;align-items:center;
+  gap:16px;flex-wrap:wrap;margin-bottom:16px;
 }
-.brand h1{font-size:52px;line-height:1;font-weight:900;letter-spacing:4px}
-.brand p{margin-top:8px;color:var(--muted);font-size:13px}
-.top-right{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.online{
-  display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:999px;
-  background:rgba(67,247,173,.08);border:1px solid rgba(67,247,173,.24);
-  font-weight:900;color:#b7ffd9;font-size:13px;user-select:none
+.brand{display:flex;align-items:baseline;gap:16px}
+.brand h1{
+  font-family:'Rajdhani',sans-serif;
+  font-size:42px;font-weight:700;letter-spacing:6px;
+  background:linear-gradient(135deg,#fff 30%,var(--blue) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  line-height:1;
 }
-.dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 14px rgba(67,247,173,.8)}
-.nav{display:flex;gap:10px;flex-wrap:wrap;user-select:none}
+.brand-tag{
+  font-family:'Space Mono',monospace;
+  font-size:10px;color:var(--muted2);letter-spacing:1px;
+  border:1px solid var(--line);padding:4px 8px;border-radius:6px;
+}
+.top-right{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.status-badge{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 14px;border-radius:999px;
+  background:rgba(0,229,160,.07);border:1px solid rgba(0,229,160,.2);
+  font-family:'Space Mono',monospace;font-size:11px;color:#00e5a0;font-weight:700;
+  letter-spacing:1px;
+}
+.dot{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 10px rgba(0,229,160,.9);
+  animation:pulse 2s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.85)}}
+.nav{display:flex;gap:8px}
 .tab-btn{
-  border:none;padding:12px 16px;border-radius:14px;background:rgba(255,255,255,.04);
-  color:#edf4ff;font-weight:800;border:1px solid rgba(255,255,255,.08);transition:.18s ease
+  font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;letter-spacing:1px;
+  border:1px solid var(--line);padding:9px 18px;border-radius:10px;
+  background:rgba(255,255,255,.03);color:var(--muted);
+  cursor:pointer;transition:all .2s ease;text-transform:uppercase;
 }
-.tab-btn.active{background:linear-gradient(135deg,var(--blue),var(--blue2));box-shadow:var(--shadow)}
-.tab-btn:hover{transform:translateY(-1px)}
+.tab-btn:hover{color:var(--text);border-color:rgba(77,143,255,.3);background:rgba(77,143,255,.07)}
+.tab-btn.active{
+  background:linear-gradient(135deg,var(--blue),var(--blue2));
+  border-color:transparent;color:#fff;
+  box-shadow:0 4px 20px rgba(37,99,235,.4);
+}
 
-.live-row{
-  display:grid;
-  grid-template-columns:180px 1fr 220px;
-  gap:12px;
-  align-items:center;
-  margin-bottom:18px;
+/* ── LIVE STRIP ── */
+.live-strip-row{
+  display:grid;grid-template-columns:160px 1fr 200px;gap:10px;
+  align-items:center;margin-bottom:16px;
 }
-.live-pill,.session-pill,.ticker-wrap{
-  background:rgba(255,255,255,.04);
-  border:1px solid var(--line);
-  border-radius:16px;
-  box-shadow:var(--shadow)
+.live-label{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  color:var(--red);text-transform:uppercase;
+  padding:12px 14px;border-radius:var(--radius2);
+  background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.18);
 }
-.live-pill{
-  padding:14px 16px;color:#ffc7d2;border-color:rgba(255,107,134,.24);
-  background:rgba(255,107,134,.08);font-size:12px;font-weight:900;
-  letter-spacing:1.4px;text-transform:uppercase
+.ticker-wrap{
+  overflow:hidden;border-radius:var(--radius2);
+  background:var(--panel);border:1px solid var(--line2);
+  height:42px;display:flex;align-items:center;position:relative;
 }
-.session-pill{padding:14px 16px;text-align:center}
-.session-pill .lab{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
-.session-pill .val{margin-top:6px;font-size:18px;font-weight:900}
-.ticker-wrap{overflow:hidden;position:relative;min-height:52px;display:flex;align-items:center}
+.ticker-wrap::before,.ticker-wrap::after{
+  content:'';position:absolute;top:0;bottom:0;width:40px;z-index:2;
+}
+.ticker-wrap::before{left:0;background:linear-gradient(to right,var(--panel),transparent)}
+.ticker-wrap::after{right:0;background:linear-gradient(to left,var(--panel),transparent)}
 .ticker-track{
   display:inline-flex;white-space:nowrap;padding-left:100%;
-  animation:tickerMove 30s linear infinite;will-change:transform
+  animation:tickerMove 35s linear infinite;
 }
 @keyframes tickerMove{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
-.ticker-item{padding-right:40px;color:#e7efff;font-size:13px;font-weight:700}
-.ticker-item b{color:#fff}
+.ticker-item{
+  padding-right:36px;font-family:'Space Mono',monospace;font-size:11px;
+  color:var(--muted);
+}
+.ticker-item b{color:var(--text);font-weight:700}
+.ticker-item .up{color:var(--green)}
+.ticker-item .dn{color:var(--red)}
+.session-chip{
+  font-family:'Rajdhani',sans-serif;
+  text-align:center;padding:10px 14px;border-radius:var(--radius2);
+  background:var(--panel);border:1px solid var(--line);
+}
+.session-chip .lab{font-size:10px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase}
+.session-chip .val{font-size:20px;font-weight:700;margin-top:2px;letter-spacing:1px}
 
+/* ── SHARED PANEL ── */
 .panel,.card{
-  background:linear-gradient(180deg, rgba(27,44,75,.95), rgba(21,36,65,.98));
-  border:1px solid var(--line);
-  border-radius:var(--radius);
-  box-shadow:var(--shadow);
-  padding:22px;
+  background:linear-gradient(180deg,rgba(16,32,64,.98),rgba(10,22,48,.99));
+  border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:22px;
 }
+.panel-sm{padding:16px 18px}
 .kicker{
-  font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
-  margin-bottom:12px
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:10px;
 }
-.page{display:none}
-.page.active{display:block}
-.vertical-stack{display:grid;gap:18px}
-.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-.triple-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.section-title{
+  font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;
+  letter-spacing:.5px;line-height:1.1;
+}
+.page{display:none}.page.active{display:block}
+.vstack{display:grid;gap:16px}
 
-.row{
-  display:flex;justify-content:space-between;gap:14px;padding:14px 0;
-  border-bottom:1px solid rgba(255,255,255,.08)
+/* ── TABLES ── */
+table{width:100%;border-collapse:collapse}
+th{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1.5px;
+  color:var(--muted2);text-transform:uppercase;text-align:left;
+  padding:0 0 10px;border-bottom:1px solid var(--line2);
 }
-.row:last-child{border-bottom:none}
-.row .k{color:#dce8ff}
-.row .v{color:var(--muted);text-align:right}
+td{
+  padding:11px 0;border-bottom:1px solid var(--line2);
+  font-size:14px;font-weight:600;
+}
+tr:last-child td{border-bottom:none}
+.up{color:var(--green)}.dn{color:var(--red)}
+.neutral{color:var(--muted)}
 
-.feed-item{
-  padding:13px 0;border-bottom:1px solid rgba(255,255,255,.08);
-  line-height:1.55;color:#e9f1ff
+/* ── RISK BADGES ── */
+.risk-badge{
+  display:inline-block;padding:4px 10px;border-radius:6px;
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase;
 }
-.feed-item:last-child{border-bottom:none}
+.risk-low{background:rgba(0,229,160,.12);color:var(--green);border:1px solid rgba(0,229,160,.25)}
+.risk-medium{background:rgba(255,201,60,.10);color:var(--yellow);border:1px solid rgba(255,201,60,.25)}
+.risk-high{background:rgba(255,77,109,.12);color:var(--red);border:1px solid rgba(255,77,109,.25)}
 
-.badges{display:flex;gap:10px;flex-wrap:wrap}
-.badge{
-  padding:9px 12px;border-radius:999px;font-size:12px;font-weight:800;
-  background:rgba(255,107,134,.08);border:1px solid rgba(255,107,134,.24);
-  color:#ffc7d2
+/* ── KV ROWS ── */
+.kv-row{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:11px 0;border-bottom:1px solid var(--line2);
 }
-.warning-list{display:grid;gap:10px}
-.warning-item{
-  padding:12px 14px;
-  border-radius:14px;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.07);
-  color:#e9f1ff;
-  line-height:1.5;
-}
+.kv-row:last-child{border-bottom:none}
+.kv-k{color:var(--muted);font-size:13px}
+.kv-v{color:var(--text);font-size:13px;font-weight:600;text-align:right;max-width:60%}
 
-.table-card table{width:100%;border-collapse:collapse}
-.table-card th{
-  color:var(--muted);text-align:left;padding:0 0 12px 0;border-bottom:1px solid rgba(255,255,255,.10);
-  font-size:12px;text-transform:uppercase;letter-spacing:1.4px
+/* ── OBSERVATION CARDS ── */
+.obs-item{
+  padding:13px 16px;border-radius:12px;margin-bottom:10px;
+  border-left:3px solid var(--blue);
+  background:rgba(77,143,255,.06);
 }
-.table-card td{
-  padding:12px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:14px;font-weight:700
-}
-.table-card tr:last-child td{border-bottom:none}
-.up{color:var(--green)}
-.down{color:var(--red)}
+.obs-item:last-child{margin-bottom:0}
+.obs-item.high{border-left-color:var(--red);background:rgba(255,77,109,.06)}
+.obs-item.medium{border-left-color:var(--yellow);background:rgba(255,201,60,.06)}
+.obs-item.low{border-left-color:var(--muted2);background:rgba(255,255,255,.03)}
+.obs-title{font-size:13px;font-weight:700;margin-bottom:4px}
+.obs-body{font-size:12px;color:var(--muted);line-height:1.5}
 
-.soft-note{margin-top:12px;color:var(--muted);font-size:14px;line-height:1.6}
-.action-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
-.ghost-btn{
-  border:none;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);
-  color:#edf4ff;border:1px solid rgba(255,255,255,.08);transition:.18s ease
-}
-.ghost-btn:hover{
-  transform:translateY(-1px);
-  background:rgba(95,149,255,.12);
-  border-color:rgba(95,149,255,.22)
-}
-
-.assistant-output{
-  min-height:220px;max-height:460px;overflow:auto;border-radius:18px;background:rgba(0,0,0,.16);
-  border:1px solid rgba(255,255,255,.08);padding:14px;user-select:text;caret-color:auto
-}
-.msg{margin-bottom:12px;padding:12px 13px;border-radius:14px;line-height:1.5;font-size:14px}
-.msg.user{background:rgba(95,149,255,.14);border:1px solid rgba(95,149,255,.24)}
-.msg.assistant{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
-.msg .role{
-  display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.1px;margin-bottom:6px
-}
-.text-input{
-  width:100%;padding:13px 14px;margin-top:12px;border-radius:14px;
-  border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:#fff;outline:none;user-select:text
-}
-.footer{
-  margin-top:18px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px
-}
-
-/* ===== DASHBOARD ===== */
-.dashboard-hero{
-  padding:28px;
-  border-radius:24px;
-  border:1px solid rgba(95,149,255,.16);
+/* ── HERO BANNER ── */
+.hero-banner{
+  padding:28px 30px;border-radius:20px;
+  border:1px solid rgba(77,143,255,.2);
   background:
-    radial-gradient(circle at top right, rgba(95,149,255,.12), transparent 26%),
-    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
-}
-.dashboard-hero-grid{
-  display:grid;
-  grid-template-columns:1.2fr .8fr;
-  gap:18px;
-  align-items:start;
-}
-.dashboard-eyebrow{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.7px;
-  color:var(--muted);
-  margin-bottom:10px;
-}
-.dashboard-hero-title{
-  font-size:36px;
-  line-height:1.06;
-  font-weight:900;
-}
-.dashboard-hero-summary{
-  margin-top:14px;
-  font-size:15px;
-  line-height:1.65;
-  color:var(--muted);
-  max-width:88ch;
-}
-.dashboard-chip-stack{display:grid;gap:12px}
-.dashboard-chip{
-  border-radius:16px;
-  padding:14px 16px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-}
-.dashboard-chip-label{
-  display:block;
-  font-size:10px;
-  text-transform:uppercase;
-  letter-spacing:1.3px;
-  color:var(--muted);
-  margin-bottom:8px;
-}
-.dashboard-chip-value{
-  display:block;
-  font-size:18px;
-  font-weight:900;
-  color:var(--text);
-}
-.dashboard-main-grid{
-  display:grid;
-  grid-template-columns:1.15fr .85fr;
-  gap:18px;
-  align-items:start;
-}
-.dashboard-stack{display:grid;gap:18px}
-.dashboard-card-top{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:12px;
-  margin-bottom:12px;
-}
-.dashboard-card-title{
-  font-size:22px;
-  font-weight:900;
-  line-height:1.15;
-}
-.story-card-headline{
-  font-size:28px;
-  font-weight:900;
-  line-height:1.1;
-}
-.story-card-note{
-  margin-top:12px;
-  color:var(--muted);
-  line-height:1.6;
-}
-.movers-split{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:16px;
-}
-.compact-table th{padding-bottom:10px}
-.compact-table td{padding:10px 0}
-
-/* ===== TRADING ===== */
-.trading-hero{
-  padding:28px;
-  border:1px solid rgba(95,149,255,.18);
-  background:
-    radial-gradient(circle at top right, rgba(95,149,255,.14), transparent 28%),
-    linear-gradient(180deg, rgba(29,47,82,.98), rgba(18,31,56,.98));
-}
-.hero-row{
-  display:grid;
-  grid-template-columns:1.35fr .65fr;
-  gap:18px;
-  align-items:start;
+    radial-gradient(circle at top right, rgba(37,99,235,.15) 0%, transparent 50%),
+    linear-gradient(180deg,rgba(16,32,64,.98),rgba(10,22,48,.99));
+  box-shadow:var(--shadow);
 }
 .hero-eyebrow{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.8px;
-  color:var(--muted);
-  margin-bottom:10px;
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2.5px;
+  color:var(--blue);text-transform:uppercase;margin-bottom:12px;
 }
-.trading-hero-title{
-  font-size:34px;
-  line-height:1.08;
-  font-weight:900;
-  letter-spacing:-.02em;
+.hero-title{
+  font-family:'Rajdhani',sans-serif;font-size:38px;font-weight:700;
+  line-height:1.05;letter-spacing:.5px;
 }
-.trading-hero-summary{
-  margin-top:12px;
-  font-size:15px;
-  line-height:1.65;
-  color:var(--muted);
-  max-width:90ch;
+.hero-sub{
+  margin-top:12px;font-size:14px;line-height:1.7;color:var(--muted);max-width:80ch;
 }
-.hero-right{display:grid;gap:12px}
-.metric-chip{
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-  border-radius:16px;
-  padding:14px 16px;
+.hero-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:20px;align-items:start}
+.chip-stack{display:grid;gap:10px}
+.chip{
+  border-radius:12px;padding:13px 15px;
+  border:1px solid var(--line);background:rgba(255,255,255,.03);
 }
-.metric-chip-label{
-  display:block;
-  font-size:10px;
-  text-transform:uppercase;
-  letter-spacing:1.4px;
-  color:var(--muted);
-  margin-bottom:8px;
+.chip-label{
+  display:block;font-family:'Space Mono',monospace;font-size:9px;
+  letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;
 }
-.metric-chip-value{
-  display:block;
-  font-size:18px;
-  font-weight:900;
-  color:var(--text);
-}
-.trading-focus-reason{
-  margin-top:16px;
-  padding:14px 16px;
-  border-radius:16px;
-  border:1px solid rgba(255,255,255,.07);
-  background:rgba(255,255,255,.03);
-  color:var(--muted);
-  line-height:1.6;
-}
-.focus-toolbar{margin-top:18px}
-.focus-toolbar-label{
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:1.5px;
-  color:var(--muted);
-  margin-bottom:10px;
-}
-.card-topline{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:12px;
-  margin-bottom:12px;
-}
-.card-title{
-  font-size:22px;
-  font-weight:900;
-  line-height:1.15;
-}
-.trading-mid-grid{align-items:start}
-.trading-note{
-  margin-top:14px;
-  color:var(--muted);
-  line-height:1.6;
-}
-#watchFirstRow .ghost-btn{
-  padding:11px 14px;
-  border-radius:14px;
-  background:rgba(95,149,255,.08);
-  border:1px solid rgba(95,149,255,.18);
-  transition:.18s ease;
-}
-#watchFirstRow .ghost-btn:hover{
-  transform:translateY(-1px);
-  background:rgba(95,149,255,.14);
-  border-color:rgba(95,149,255,.30);
-}
-#watchFirstRow .ghost-btn.active-focus{
-  background:linear-gradient(135deg,var(--blue),var(--blue2));
-  border-color:rgba(95,149,255,.55);
-  box-shadow:0 8px 22px rgba(57,114,246,.28);
+.chip-value{
+  display:block;font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700;letter-spacing:.3px;
 }
 
+/* ── STAT GRID ── */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.stat-card{text-align:center;padding:18px 14px}
+.stat-card .s-lab{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:10px;
+}
+.stat-card .s-val{
+  font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;letter-spacing:1px;
+  line-height:1;
+}
+.stat-card .s-sub{margin-top:6px;font-size:11px;color:var(--muted2);line-height:1.4}
+
+/* ── MAIN GRID ── */
+.main-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start}
+.left-stack,.right-stack{display:grid;gap:16px}
+
+/* ── NEWS ── */
+.news-item{
+  padding:14px 0;border-bottom:1px solid var(--line2);
+}
+.news-item:last-child{border-bottom:none}
+.news-headline{font-size:14px;font-weight:600;line-height:1.45;color:var(--text)}
+.news-meta{margin-top:5px;font-size:11px;color:var(--muted2)}
+.news-summary{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5}
+.news-link{color:var(--blue);font-size:11px;text-decoration:none}
+.news-link:hover{text-decoration:underline}
+
+/* ── ASSISTANT ── */
+.chat-wrap{
+  min-height:280px;max-height:480px;overflow-y:auto;
+  border-radius:14px;background:rgba(0,0,0,.2);
+  border:1px solid var(--line);padding:14px;margin-bottom:12px;
+}
+.msg{margin-bottom:10px;padding:12px 14px;border-radius:12px;line-height:1.55;font-size:13px}
+.msg.user{background:rgba(77,143,255,.12);border:1px solid rgba(77,143,255,.2)}
+.msg.assistant{background:rgba(255,255,255,.04);border:1px solid var(--line2)}
+.msg .role{
+  display:block;font-family:'Space Mono',monospace;font-size:9px;
+  letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;
+}
+.chat-input-row{display:flex;gap:10px}
+.chat-input{
+  flex:1;padding:12px 14px;border-radius:12px;
+  border:1px solid var(--line);background:rgba(255,255,255,.04);
+  color:var(--text);font-family:'Inter',sans-serif;font-size:13px;
+  outline:none;transition:border-color .2s;
+}
+.chat-input:focus{border-color:rgba(77,143,255,.4)}
+.send-btn{
+  padding:12px 20px;border-radius:12px;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--blue),var(--blue2));
+  color:#fff;font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;
+  letter-spacing:1px;transition:all .2s;white-space:nowrap;
+}
+.send-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(37,99,235,.4)}
+.send-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.asst-state-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.state-list-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px;
+}
+.state-list-item:last-child{border-bottom:none}
+.del-btn{
+  background:none;border:none;color:var(--muted2);cursor:pointer;
+  font-size:15px;padding:2px 6px;border-radius:6px;transition:all .15s;
+}
+.del-btn:hover{background:var(--red2);color:var(--red)}
+.add-row{display:flex;gap:8px;margin-top:10px}
+.add-input{
+  flex:1;padding:9px 12px;border-radius:10px;
+  border:1px solid var(--line);background:rgba(255,255,255,.04);
+  color:var(--text);font-size:13px;outline:none;
+}
+.add-input:focus{border-color:rgba(77,143,255,.35)}
+.add-btn{
+  padding:9px 14px;border-radius:10px;border:1px solid rgba(77,143,255,.3);
+  background:rgba(77,143,255,.1);color:var(--blue);
+  cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;
+}
+.add-btn:hover{background:rgba(77,143,255,.18)}
+
+/* ── ALERT ITEMS ── */
+.alert-item{
+  padding:12px 14px;border-radius:12px;margin-bottom:10px;
+  border:1px solid var(--line);background:rgba(255,255,255,.03);
+}
+.alert-item:last-child{margin-bottom:0}
+.alert-header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.alert-ticker{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px}
+.alert-signal{
+  font-family:'Space Mono',monospace;font-size:10px;padding:3px 8px;border-radius:6px;
+  background:rgba(77,143,255,.12);border:1px solid rgba(77,143,255,.22);color:var(--blue);
+}
+.alert-meta{font-size:11px;color:var(--muted2);margin-bottom:6px}
+.alert-body{font-size:12px;color:var(--muted);line-height:1.5}
+.verdict-TAKE{color:var(--green)}
+.verdict-CAUTION{color:var(--yellow)}
+.verdict-SKIP{color:var(--red)}
+
+/* ── FOOTER ── */
+.footer{
+  margin-top:24px;display:flex;justify-content:space-between;
+  gap:12px;flex-wrap:wrap;
+  font-family:'Space Mono',monospace;font-size:10px;color:var(--muted2);
+  letter-spacing:.5px;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(77,143,255,.2);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:rgba(77,143,255,.35)}
+
+/* ── RESPONSIVE ── */
 @media(max-width:1200px){
-  .live-row,.summary-grid,.dual-grid,.triple-grid,.stat-grid,
-  .dashboard-hero-grid,.dashboard-main-grid,.movers-split,.hero-row{
-    grid-template-columns:1fr;
-  }
+  .hero-grid,.main-grid,.stat-grid{grid-template-columns:1fr 1fr}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
 }
 @media(max-width:760px){
-  body{padding:16px}
-  .brand h1{font-size:38px}
-  .dashboard-hero-title,.trading-hero-title{font-size:30px}
+  body{padding:12px}
+  .brand h1{font-size:32px}
+  .hero-title{font-size:26px}
+  .hero-grid,.main-grid,.stat-grid,.asst-state-grid,.live-strip-row{grid-template-columns:1fr}
 }
 </style>
 </head>
 <body>
 <div class="wrap">
 
+  <!-- TOPBAR -->
   <div class="topbar">
     <div class="brand">
       <h1>D.O.N.N.A</h1>
-      <p>Dynamic Operational Neural Network Assistant // Live Market Core</p>
+      <span class="brand-tag">v5.0 // LIVE MARKET CORE</span>
     </div>
     <div class="top-right">
       <div class="nav">
@@ -1663,329 +1626,705 @@ button,.tab-btn,.ghost-btn{cursor:pointer}
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
       </div>
-      <div class="online"><span class="dot"></span>ONLINE</div>
+      <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
   </div>
 
-  <div class="live-row">
-    <div class="live-pill">Live Intelligence</div>
-    <div class="ticker-wrap"><div class="ticker-track" id="liveStrip"></div></div>
-    <div class="session-pill">
+  <!-- LIVE STRIP -->
+  <div class="live-strip-row">
+    <div class="live-label">⬤ LIVE INTELLIGENCE</div>
+    <div class="ticker-wrap">
+      <div class="ticker-track" id="liveStrip">Loading...</div>
+    </div>
+    <div class="session-chip">
       <div class="lab">Current Session</div>
-      <div class="val" id="sessionVal">-</div>
+      <div class="val" id="sessionVal">—</div>
     </div>
   </div>
 
+  <!-- ════════════════════ DASHBOARD ════════════════════ -->
   <div class="page active" id="page-dashboard">
-    <div class="vertical-stack">
+    <div class="vstack">
 
-      <div class="panel dashboard-hero">
-        <div class="dashboard-hero-grid">
+      <!-- HERO -->
+      <div class="hero-banner">
+        <div class="hero-eyebrow">Command Overview</div>
+        <div class="hero-grid">
           <div>
-            <div class="dashboard-eyebrow">Command Overview</div>
-            <div class="dashboard-hero-title" id="heroTitle">Loading...</div>
-            <div class="dashboard-hero-summary" id="heroSub">Loading...</div>
+            <div class="hero-title" id="heroTitle">Loading market intelligence...</div>
+            <div class="hero-sub" id="heroSub">Connecting to live data feeds.</div>
           </div>
-
-          <div class="dashboard-chip-stack">
-            <div class="dashboard-chip">
-              <span class="dashboard-chip-label">Dominant Driver</span>
-              <span class="dashboard-chip-value" id="driverDominant">-</span>
+          <div class="chip-stack">
+            <div class="chip">
+              <span class="chip-label">Dominant Driver</span>
+              <span class="chip-value" id="driverDominant">—</span>
             </div>
-            <div class="dashboard-chip">
-              <span class="dashboard-chip-label">Main Threat</span>
-              <span class="dashboard-chip-value" id="mainThreat">-</span>
+            <div class="chip">
+              <span class="chip-label">Main Threat</span>
+              <span class="chip-value" id="mainThreat">—</span>
             </div>
-            <div class="dashboard-chip">
-              <span class="dashboard-chip-label">Open Quality</span>
-              <span class="dashboard-chip-value" id="openQuality">-</span>
+            <div class="chip">
+              <span class="chip-label">Open Quality</span>
+              <span class="chip-value" id="openQuality">—</span>
             </div>
-            <div class="dashboard-chip">
-              <span class="dashboard-chip-label">Morning Bias</span>
-              <span class="dashboard-chip-value" id="morningBias">-</span>
+            <div class="chip">
+              <span class="chip-label">Morning Bias</span>
+              <span class="chip-value" id="morningBias">—</span>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- STAT GRID -->
       <div class="stat-grid">
         <div class="card stat-card">
-          <div class="lab">Macro Risk</div>
-          <div class="val medium" id="macroRisk">-</div>
-          <div class="sub">Event timing and macro pressure</div>
+          <div class="s-lab">Macro Risk</div>
+          <div class="s-val" id="macroRisk">—</div>
+          <div class="s-sub">Event timing &amp; macro pressure</div>
         </div>
         <div class="card stat-card">
-          <div class="lab">Headline Risk</div>
-          <div class="val medium" id="headlineRisk">-</div>
-          <div class="sub">Breaking-news sensitivity</div>
+          <div class="s-lab">Headline Risk</div>
+          <div class="s-val" id="headlineRisk">—</div>
+          <div class="s-sub">Breaking-news sensitivity</div>
         </div>
         <div class="card stat-card">
-          <div class="lab">Market Risk</div>
-          <div class="val medium" id="marketRisk">-</div>
-          <div class="sub">Company and sector catalyst pressure</div>
+          <div class="s-lab">Market Risk</div>
+          <div class="s-val" id="marketRisk">—</div>
+          <div class="s-sub">Company &amp; sector catalyst pressure</div>
         </div>
         <div class="card stat-card">
-          <div class="lab">Session Significance</div>
-          <div class="val" style="font-size:20px;line-height:1.15" id="sessionSignificance">-</div>
-          <div class="sub" id="sessionSub">-</div>
+          <div class="s-lab">Session Significance</div>
+          <div class="s-val" id="sessionSig" style="font-size:18px;line-height:1.2">—</div>
+          <div class="s-sub" id="sessionSigSub">—</div>
         </div>
       </div>
 
-      <div class="dashboard-main-grid">
+      <!-- MAIN GRID -->
+      <div class="main-grid">
 
-        <div class="dashboard-stack">
-          <div class="panel table-card compact-table">
-            <div class="dashboard-card-top">
-              <div>
-                <div class="kicker">Market Driver Engine</div>
-                <div class="dashboard-card-title">Regime + Context</div>
-              </div>
-            </div>
-            <div class="row"><div class="k">Dominant Driver</div><div class="v" id="driverDominant2">-</div></div>
-            <div class="row"><div class="k">Secondary Driver</div><div class="v" id="driverSecondary">-</div></div>
-            <div class="row"><div class="k">Regime</div><div class="v" id="driverRegime">-</div></div>
-            <div class="row"><div class="k">Threat</div><div class="v" id="driverThreat">-</div></div>
-            <div class="row"><div class="k">Confidence</div><div class="v" id="driverConfidence">-</div></div>
-            <div class="soft-note" id="driverSummary">-</div>
+        <!-- LEFT -->
+        <div class="left-stack">
+
+          <!-- MARKET DRIVER ENGINE -->
+          <div class="panel">
+            <div class="kicker">Market Driver Engine</div>
+            <div class="section-title" style="margin-bottom:14px">Regime + Context</div>
+            <div class="kv-row"><span class="kv-k">Dominant Driver</span><span class="kv-v" id="driverDominant2">—</span></div>
+            <div class="kv-row"><span class="kv-k">Secondary Driver</span><span class="kv-v" id="driverSecondary">—</span></div>
+            <div class="kv-row"><span class="kv-k">Regime</span><span class="kv-v" id="driverRegime">—</span></div>
+            <div class="kv-row"><span class="kv-k">Threat</span><span class="kv-v" id="driverThreat">—</span></div>
+            <div class="kv-row"><span class="kv-k">Confidence</span><span class="kv-v" id="driverConfidence">—</span></div>
+            <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.6" id="driverSummary">—</div>
           </div>
 
-          <div class="panel table-card compact-table">
-            <div class="dashboard-card-top">
-              <div>
-                <div class="kicker">Market Board</div>
-                <div class="dashboard-card-title">Major Indexes</div>
-              </div>
-            </div>
+          <!-- MAJOR INDEXES -->
+          <div class="panel">
+            <div class="kicker">Market Board</div>
+            <div class="section-title" style="margin-bottom:14px">Major Indexes</div>
             <table>
-              <thead>
-                <tr><th>Index</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-              </thead>
+              <thead><tr><th>Index</th><th>Last</th><th>Chg</th><th>% Chg</th></tr></thead>
               <tbody id="majorIndexesTable"></tbody>
             </table>
           </div>
 
+          <!-- MARKET MOVERS (Live) -->
           <div class="panel">
-            <div class="dashboard-card-top">
+            <div class="kicker">Live Movers</div>
+            <div class="section-title" style="margin-bottom:14px">Top Gainers &amp; Losers</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
               <div>
-                <div class="kicker">Mover Intelligence</div>
-                <div class="dashboard-card-title">Likely Market Movers</div>
-              </div>
-            </div>
-
-            <div class="table-card compact-table">
-              <table>
-                <thead>
-                  <tr><th>Ticker</th><th>Impact</th><th>Why</th></tr>
-                </thead>
-                <tbody id="likelyMoversTable"></tbody>
-              </table>
-            </div>
-
-            <div class="movers-split" style="margin-top:16px;">
-              <div class="panel table-card compact-table" style="padding:18px;">
-                <div class="kicker">Top Movers</div>
+                <div class="kicker" style="margin-bottom:8px;color:var(--green)">Gainers</div>
                 <table>
-                  <thead>
-                    <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-                  </thead>
-                  <tbody id="topMoversTable"></tbody>
+                  <thead><tr><th>Sym</th><th>Last</th><th>%Chg</th></tr></thead>
+                  <tbody id="gainersTable"></tbody>
                 </table>
               </div>
-
-              <div class="panel table-card compact-table" style="padding:18px;">
-                <div class="kicker">Bottom Movers</div>
+              <div>
+                <div class="kicker" style="margin-bottom:8px;color:var(--red)">Losers</div>
                 <table>
-                  <thead>
-                    <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-                  </thead>
-                  <tbody id="bottomMoversTable"></tbody>
+                  <thead><tr><th>Sym</th><th>Last</th><th>%Chg</th></tr></thead>
+                  <tbody id="losersTable"></tbody>
                 </table>
               </div>
             </div>
           </div>
+
         </div>
 
-        <div class="dashboard-stack">
+        <!-- RIGHT -->
+        <div class="right-stack">
+
+          <!-- ACTIVE WARNINGS -->
           <div class="panel">
-            <div class="dashboard-card-top">
-              <div>
-                <div class="kicker">Risk Board</div>
-                <div class="dashboard-card-title">Active Warnings</div>
-              </div>
-            </div>
-            <div class="warning-list" id="warnings"></div>
-            <div class="soft-note" id="morningRead">-</div>
-            <div class="soft-note" id="focusRead">-</div>
-            <div class="soft-note" id="donnaTime">-</div>
+            <div class="kicker">Risk Board</div>
+            <div class="section-title" style="margin-bottom:14px">Active Warnings</div>
+            <div id="warningsList"></div>
+            <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.6" id="morningRead">—</div>
+            <div style="margin-top:10px;font-size:12px;color:var(--muted2);line-height:1.6" id="donnaTime">—</div>
           </div>
 
+          <!-- DONNA OBSERVATIONS -->
           <div class="panel">
-            <div class="dashboard-card-top">
-              <div>
-                <div class="kicker">Top Story</div>
-                <div class="dashboard-card-title">Primary Catalyst</div>
-              </div>
-            </div>
-            <div class="story-card-headline" id="topStory">-</div>
-            <div class="story-card-note" id="topStoryNote">-</div>
+            <div class="kicker">Donna Feed</div>
+            <div class="section-title" style="margin-bottom:14px">Live Observations</div>
+            <div id="observationsList"></div>
           </div>
+
+          <!-- TOP STORY -->
+          <div class="panel">
+            <div class="kicker">Primary Catalyst</div>
+            <div style="font-size:24px;font-weight:700;font-family:Rajdhani,sans-serif;line-height:1.1;margin-bottom:10px" id="topStory">—</div>
+            <div style="font-size:13px;color:var(--muted);line-height:1.6" id="topStoryNote">—</div>
+          </div>
+
         </div>
 
       </div>
     </div>
   </div>
 
+  <!-- ════════════════════ TRADING ════════════════════ -->
   <div class="page" id="page-trading">
-    <div class="vertical-stack">
+    <div class="vstack">
 
-      <div class="panel trading-hero">
-        <div class="kicker">Trading Command</div>
-        <div class="hero-row">
-          <div class="hero-left">
-            <div class="hero-eyebrow">What Matters Right Now</div>
-            <div class="trading-hero-title" id="tradingHeadline">-</div>
-            <div class="trading-hero-summary" id="tradingSummary">-</div>
+      <!-- HERO -->
+      <div class="hero-banner">
+        <div class="hero-eyebrow">What Matters Right Now</div>
+        <div class="hero-grid">
+          <div>
+            <div class="hero-title" id="tradingHeadline">—</div>
+            <div class="hero-sub" id="tradingSummary">—</div>
+            <div style="margin-top:14px;padding:12px 14px;border-radius:12px;font-size:13px;color:var(--muted);line-height:1.6;background:rgba(255,255,255,.03);border:1px solid var(--line2)" id="tradingFocusReason">—</div>
           </div>
-          <div class="hero-right">
-            <div class="metric-chip">
-              <span class="metric-chip-label">Donna Mode</span>
-              <span class="metric-chip-value" id="tradingMode">-</span>
+          <div class="chip-stack">
+            <div class="chip">
+              <span class="chip-label">Donna Mode</span>
+              <span class="chip-value" id="tradingMode">—</span>
             </div>
-            <div class="metric-chip">
-              <span class="metric-chip-label">Risk To Conviction</span>
-              <span class="metric-chip-value" id="tradingRiskToConviction">-</span>
+            <div class="chip">
+              <span class="chip-label">Risk To Conviction</span>
+              <span class="chip-value" id="tradingRtC">—</span>
             </div>
           </div>
         </div>
-
-        <div class="trading-focus-reason" id="tradingFocusReason">-</div>
-
-        <div class="focus-toolbar">
-          <div class="focus-toolbar-label">Quick Focus</div>
-          <div class="action-row" id="watchFirstRow"></div>
+        <div style="margin-top:16px">
+          <div class="kicker" style="margin-bottom:10px">Quick Focus</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" id="watchFirstRow"></div>
         </div>
       </div>
 
-      <div class="dual-grid trading-mid-grid">
-        <div class="panel table-card">
-          <div class="card-topline">
-            <div>
-              <div class="kicker">Live Pulse</div>
-              <div class="card-title">Futures + Macro Pulse</div>
-            </div>
-          </div>
+      <!-- MID GRID -->
+      <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:16px;align-items:start">
+
+        <!-- FUTURES/MACRO PULSE -->
+        <div class="panel">
+          <div class="kicker">Live Pulse</div>
+          <div class="section-title" style="margin-bottom:14px">Futures + Macro Pulse</div>
           <table>
-            <thead>
-              <tr><th>Asset</th><th>Last</th><th>Chg</th><th>%Chg</th></tr>
-            </thead>
+            <thead><tr><th>Asset</th><th>Last</th><th>Chg</th><th>% Chg</th></tr></thead>
             <tbody id="tradingPulseTable"></tbody>
           </table>
         </div>
 
+        <!-- TRADE INTELLIGENCE -->
         <div class="panel">
-          <div class="card-topline">
-            <div>
-              <div class="kicker">Execution View</div>
-              <div class="card-title">Trade Intelligence</div>
-            </div>
-          </div>
-          <div class="row"><div class="k">Bias</div><div class="v" id="tradeBias">-</div></div>
-          <div class="row"><div class="k">Open Quality</div><div class="v" id="tradeOpenQuality">-</div></div>
-          <div class="row"><div class="k">Main Threat</div><div class="v" id="tradeThreat">-</div></div>
-          <div class="row"><div class="k">Focus</div><div class="v" id="tradeFocus">-</div></div>
-          <div class="trading-note" id="tradeNote">-</div>
+          <div class="kicker">Execution View</div>
+          <div class="section-title" style="margin-bottom:14px">Trade Intelligence</div>
+          <div class="kv-row"><span class="kv-k">Bias</span><span class="kv-v" id="tradeBias">—</span></div>
+          <div class="kv-row"><span class="kv-k">Open Quality</span><span class="kv-v" id="tradeOpenQuality">—</span></div>
+          <div class="kv-row"><span class="kv-k">Main Threat</span><span class="kv-v" id="tradeThreat">—</span></div>
+          <div class="kv-row"><span class="kv-k">Focus</span><span class="kv-v" id="tradeFocus">—</span></div>
+          <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.6" id="tradeNote">—</div>
         </div>
+
       </div>
 
+      <!-- RECENT ALERTS -->
       <div class="panel">
-        <div class="card-topline">
-          <div>
-            <div class="kicker">Donna Feed</div>
-            <div class="card-title">Recent Alerts & Observations</div>
-          </div>
-        </div>
+        <div class="kicker">Alert History</div>
+        <div class="section-title" style="margin-bottom:14px">Recent Alerts &amp; Observations</div>
         <div id="recentAlerts"></div>
       </div>
+
     </div>
   </div>
 
+  <!-- ════════════════════ NEWS ════════════════════ -->
   <div class="page" id="page-news">
-    <div class="vertical-stack">
-      <div class="panel">
-        <div class="kicker">Macro Story</div>
-        <div style="font-size:28px;font-weight:900;line-height:1.12" id="newsMacroTitle">-</div>
-        <div class="soft-note" id="newsMacroNote">-</div>
+    <div class="vstack">
+
+      <div class="hero-banner">
+        <div class="hero-eyebrow">Macro Story</div>
+        <div class="hero-title" id="newsMacroTitle">—</div>
+        <div class="hero-sub" id="newsMacroNote">—</div>
       </div>
 
       <div class="panel">
         <div class="kicker">Market Catalyst</div>
-        <div style="font-size:24px;font-weight:900;line-height:1.18" id="newsMarketTitle">-</div>
-        <div class="soft-note" id="newsMarketNote">-</div>
+        <div class="section-title" style="margin-bottom:6px" id="newsMarketTitle">—</div>
+        <div style="font-size:13px;color:var(--muted);line-height:1.6" id="newsMarketNote">—</div>
       </div>
 
       <div class="panel">
-        <div class="kicker">Latest News</div>
+        <div class="kicker">Latest Headlines</div>
+        <div class="section-title" style="margin-bottom:14px">Live Market News</div>
         <div id="newsList"></div>
       </div>
 
-      <div class="dual-grid">
-        <div class="panel table-card">
-          <div class="kicker">Leaders</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+        <div class="panel">
+          <div class="kicker" style="color:var(--green)">Leaders</div>
           <table>
-            <thead>
-              <tr><th>Ticker</th><th>Impact</th><th>Index</th></tr>
-            </thead>
+            <thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead>
             <tbody id="leadersTable"></tbody>
           </table>
         </div>
-
-        <div class="panel table-card">
-          <div class="kicker">Threat Names</div>
+        <div class="panel">
+          <div class="kicker" style="color:var(--red)">Threat Names</div>
           <table>
-            <thead>
-              <tr><th>Ticker</th><th>Impact</th><th>Index</th></tr>
-            </thead>
+            <thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead>
             <tbody id="threatsTable"></tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <div class="kicker" style="color:var(--yellow)">Next To Watch</div>
+          <table>
+            <thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead>
+            <tbody id="nextWatchTable"></tbody>
           </table>
         </div>
       </div>
 
-      <div class="panel table-card">
-        <div class="kicker">Next To Watch</div>
-        <table>
-          <thead>
-            <tr><th>Ticker</th><th>Impact</th><th>Index</th></tr>
-          </thead>
-          <tbody id="nextWatchTable"></tbody>
-        </table>
-      </div>
-    </
-    </div>
-
-<div class="page" id="page-assistant">
-  <div class="vertical-stack">
-    <div class="panel">
-      <div class="kicker">Donna AI Assistant</div>
-      <div class="assistant-output" id="assistantOutput"></div>
-      <textarea class="text-input" id="assistantInput" placeholder="Ask Donna something..."></textarea>
-      <div class="action-row">
-        <button class="tab-btn" id="assistantSend">Send</button>
-      </div>
     </div>
   </div>
-</div>
 
-<div class="footer">
-  <span>D.O.N.N.A v5.0 Live Market Core</span>
-  <span id="lastUpdated">Waiting...</span>
-</div>
+  <!-- ════════════════════ ASSISTANT ════════════════════ -->
+  <div class="page" id="page-assistant">
+    <div class="vstack">
+
+      <!-- CHAT -->
+      <div class="panel">
+        <div class="kicker">Donna AI</div>
+        <div class="section-title" style="margin-bottom:14px">Command Interface</div>
+        <div class="chat-wrap" id="assistantOutput"></div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="assistantInput" type="text" placeholder="Ask Donna anything about the market..." />
+          <button class="send-btn" id="assistantSend">SEND</button>
+        </div>
+      </div>
+
+      <!-- ASSISTANT STATE -->
+      <div class="asst-state-grid">
+
+        <!-- FOCUS + TASKS -->
+        <div class="panel">
+          <div class="kicker">Daily Agenda</div>
+          <div class="section-title" style="margin-bottom:8px">Focus &amp; Tasks</div>
+          <div style="padding:10px 12px;border-radius:10px;background:rgba(77,143,255,.07);border:1px solid rgba(77,143,255,.15);font-size:13px;color:var(--text);margin-bottom:14px" id="dailyFocus">—</div>
+          <div id="tasksList"></div>
+          <div class="add-row">
+            <input class="add-input" id="taskInput" type="text" placeholder="Add a task..." />
+            <button class="add-btn" id="addTaskBtn">+ Add</button>
+          </div>
+        </div>
+
+        <!-- REMINDERS -->
+        <div class="panel">
+          <div class="kicker">Reminders</div>
+          <div class="section-title" style="margin-bottom:14px">Active Reminders</div>
+          <div id="remindersList"></div>
+          <div class="add-row">
+            <input class="add-input" id="reminderInput" type="text" placeholder="Add a reminder..." />
+            <button class="add-btn" id="addReminderBtn">+ Add</button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <span>D.O.N.N.A v5.0 // LIVE MARKET CORE</span>
+    <span id="lastUpdated">Connecting...</span>
+  </div>
 
 </div>
 
 <script>
+// ════════ TAB NAVIGATION ════════
+document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn[data-page]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('page-' + btn.dataset.page).classList.add('active');
+  });
+});
+
+// ════════ HELPERS ════════
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val || '—';
+}
+function setHtml(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = val || '';
+}
+function riskClass(level) {
+  const l = (level || '').toLowerCase();
+  if (l === 'high') return 'risk-high';
+  if (l === 'medium') return 'risk-medium';
+  return 'risk-low';
+}
+function riskBadge(level) {
+  return `<span class="risk-badge ${riskClass(level)}">${(level||'—').toUpperCase()}</span>`;
+}
+function dirClass(pct) {
+  const n = parseFloat(String(pct).replace('%',''));
+  if (isNaN(n)) return '';
+  return n >= 0 ? 'up' : 'dn';
+}
+
+// ════════ LIVE STRIP ════════
+function buildStrip(items) {
+  if (!items || !items.length) return '';
+  return items.map(item => {
+    const val = item.value || '—';
+    return `<span class="ticker-item"><b>${item.label}:</b> ${val}</span>`;
+  }).join('');
+}
+
+// ════════ RENDER DASHBOARD ════════
+function renderDashboard(d) {
+  const risk = d.risk || {};
+  const driver = d.driver || {};
+  const morning = d.morning_edge || {};
+  const sig = d.session_significance || {};
+  const wm = d.what_matters_now || {};
+  const obs = d.observations || [];
+  const alerts = d.raw_trade_alerts || [];
+  const movers = d.market_movers_engine || {};
+  const liveMovers = d.live_movers || {};
+  const news = d.news || [];
+
+  // Session / strip
+  setText('sessionVal', risk.donna_session || '—');
+  setHtml('liveStrip', buildStrip(d.live_strip || []));
+
+  // Hero
+  setText('heroTitle', wm.headline || driver.dominant_driver || '—');
+  setText('heroSub', wm.summary || driver.market_summary || '—');
+  setText('driverDominant', driver.dominant_driver || '—');
+  setText('mainThreat', morning.main_threat || '—');
+  setText('openQuality', morning.open_quality || '—');
+  setText('morningBias', morning.today_bias || '—');
+
+  // Stat cards
+  setHtml('macroRisk', riskBadge(risk.macro_risk));
+  setHtml('headlineRisk', riskBadge(risk.headline_risk));
+  setHtml('marketRisk', riskBadge(risk.market_news_risk));
+  setText('sessionSig', sig.label || '—');
+  setText('sessionSigSub', sig.nq_points ? `NQ ${sig.nq_points}pts  ES ${sig.es_points}pts` : '—');
+
+  // Driver engine
+  setText('driverDominant2', driver.dominant_driver || '—');
+  setText('driverSecondary', driver.secondary_driver || '—');
+  setText('driverRegime', driver.market_regime || '—');
+  setText('driverThreat', driver.market_threat || '—');
+  setText('driverConfidence', driver.market_confidence || '—');
+  setText('driverSummary', driver.market_summary || '—');
+
+  // Major indexes
+  const idx = d.major_indexes || [];
+  setHtml('majorIndexesTable', idx.map(r => `
+    <tr>
+      <td>${r.symbol}</td>
+      <td class="${dirClass(r.pct)}">${r.last}</td>
+      <td class="${dirClass(r.pct)}">${r.chg}</td>
+      <td class="${dirClass(r.pct)}">${r.pct}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="neutral">No data</td></tr>');
+
+  // Gainers / Losers
+  const gainers = (liveMovers.gainers || []).slice(0, 5);
+  const losers = (liveMovers.losers || []).slice(0, 5);
+  setHtml('gainersTable', gainers.map(r => `
+    <tr>
+      <td class="up">${r.symbol}</td>
+      <td>${r.last}</td>
+      <td class="up">${r.pct}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
+  setHtml('losersTable', losers.map(r => `
+    <tr>
+      <td class="dn">${r.symbol}</td>
+      <td>${r.last}</td>
+      <td class="dn">${r.pct}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
+
+  // Warnings
+  const warnings = risk.active_warnings || [];
+  setHtml('warningsList', warnings.map(w => `
+    <div class="obs-item medium">
+      <div class="obs-title">${w}</div>
+    </div>`).join('') || '<div class="obs-item low"><div class="obs-body">No active warnings.</div></div>');
+  setText('morningRead', morning.first_read || '—');
+  setText('donnaTime', `Updated: ${risk.donna_time_ny ? risk.donna_time_ny.substring(0,19).replace('T',' ') + ' ET' : '—'}`);
+
+  // Observations
+  setHtml('observationsList', obs.map(o => `
+    <div class="obs-item ${o.priority || 'low'}">
+      <div class="obs-title">${o.title || '—'}</div>
+      <div class="obs-body">${o.summary || ''}</div>
+    </div>`).join('') || '<div class="obs-item low"><div class="obs-body">No observations yet.</div></div>');
+
+  // Top story
+  setText('topStory', risk.last_headline || wm.headline || '—');
+  setText('topStoryNote', risk.headline_guidance || wm.summary || '—');
+
+  // Footer
+  setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
+}
+
+// ════════ RENDER TRADING ════════
+function renderTrading(d) {
+  const wm = d.what_matters_now || {};
+  const morning = d.morning_edge || {};
+  const pulse = d.futures_macro_pulse || [];
+  const alerts = d.raw_trade_alerts || [];
+  const obs = d.observations || [];
+
+  setText('tradingHeadline', wm.headline || '—');
+  setText('tradingSummary', wm.summary || '—');
+  setText('tradingFocusReason', wm.focus_reason || '—');
+  setText('tradingMode', (wm.mode || '—').replace(/_/g,' ').toUpperCase());
+  setText('tradingRtC', wm.risk_to_conviction || '—');
+
+  // Watch-first buttons
+  const watchFirst = morning.watch_first || wm.watch || [];
+  setHtml('watchFirstRow', watchFirst.map(sym => `
+    <button class="tab-btn" style="font-size:13px;padding:8px 14px;letter-spacing:1px"
+      onclick="this.classList.toggle('active')">${sym}</button>
+  `).join(''));
+
+  // Pulse table
+  setHtml('tradingPulseTable', pulse.map(r => `
+    <tr>
+      <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${r.symbol}</td>
+      <td class="${dirClass(r.pct)}">${r.last}</td>
+      <td class="${dirClass(r.pct)}">${r.chg}</td>
+      <td class="${dirClass(r.pct)}">${r.pct}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="neutral">No pulse data</td></tr>');
+
+  // Trade intel
+  setText('tradeBias', morning.today_bias || '—');
+  setText('tradeOpenQuality', morning.open_quality || '—');
+  setText('tradeThreat', morning.main_threat || '—');
+  setText('tradeFocus', morning.focus || '—');
+  setText('tradeNote', morning.first_read || '—');
+
+  // Alerts + observations merged
+  const combined = alerts.length ? alerts : obs;
+  setHtml('recentAlerts', combined.slice(0, 8).map(item => {
+    if (item.ticker) {
+      // Trade alert
+      const v = item.verdict || '';
+      return `
+        <div class="alert-item">
+          <div class="alert-header">
+            <span class="alert-ticker">${item.ticker}</span>
+            <span class="alert-signal">${item.signal || ''}</span>
+          </div>
+          <div class="alert-meta">${item.session || ''} | ${item.timeframe || ''} | $${item.price || ''}</div>
+          <div class="alert-body">
+            Verdict: <span class="verdict-${v}">${v}</span> &nbsp;·&nbsp;
+            Confidence: ${item.confidence || '—'} &nbsp;·&nbsp;
+            ${item.summary || ''}
+          </div>
+        </div>`;
+    } else {
+      // Observation
+      return `
+        <div class="obs-item ${item.priority || 'low'}">
+          <div class="obs-title">${item.title || '—'}</div>
+          <div class="obs-body">${item.summary || ''}</div>
+        </div>`;
+    }
+  }).join('') || '<div class="obs-item low"><div class="obs-body">No recent alerts.</div></div>');
+}
+
+// ════════ RENDER NEWS ════════
+function renderNews(d) {
+  const risk = d.risk || {};
+  const movers = d.market_movers_engine || {};
+  const news = d.news || [];
+
+  setText('newsMacroTitle', risk.last_headline || '—');
+  setText('newsMacroNote', risk.headline_guidance || '—');
+  setText('newsMarketTitle', risk.last_market_headline || '—');
+  setText('newsMarketNote', risk.last_market_guidance || '—');
+
+  setHtml('newsList', news.map(n => `
+    <div class="news-item">
+      <div class="news-headline">${n.headline || '—'}</div>
+      <div class="news-meta">${n.source || '—'}</div>
+      ${n.summary ? `<div class="news-summary">${n.summary}</div>` : ''}
+      ${n.url ? `<a class="news-link" href="${n.url}" target="_blank" rel="noopener">Read more →</a>` : ''}
+    </div>`).join('') || '<div class="obs-item low"><div class="obs-body">No live news loaded yet.</div></div>');
+
+  const leaders = movers.leaders || [];
+  const threats = movers.threats || [];
+  const nextWatch = movers.next_to_watch || [];
+
+  const moverRow = (m) => `
+    <tr>
+      <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${m.ticker}</td>
+      <td><span class="risk-badge" style="background:rgba(77,143,255,.1);border-color:rgba(77,143,255,.2);color:var(--blue)">${m.impact}</span></td>
+      <td style="font-size:11px;color:var(--muted2)">${m.index_exposure || '—'}</td>
+    </tr>`;
+
+  setHtml('leadersTable', leaders.map(moverRow).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
+  setHtml('threatsTable', threats.map(moverRow).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
+  setHtml('nextWatchTable', nextWatch.map(moverRow).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
+}
+
+// ════════ RENDER ASSISTANT STATE ════════
+function renderAssistantState(asst) {
+  if (!asst) return;
+  setText('dailyFocus', asst.daily_focus || '—');
+
+  const tasks = asst.tasks || [];
+  setHtml('tasksList', tasks.map((t, i) => `
+    <div class="state-list-item">
+      <span style="font-size:13px">${t}</span>
+      <button class="del-btn" onclick="deleteTask(${i})" title="Remove">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted2);font-size:13px;padding:8px 0">No tasks.</div>');
+
+  const reminders = asst.reminders || [];
+  setHtml('remindersList', reminders.map((r, i) => `
+    <div class="state-list-item">
+      <span style="font-size:13px">${r}</span>
+      <button class="del-btn" onclick="deleteReminder(${i})" title="Remove">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted2);font-size:13px;padding:8px 0">No reminders.</div>');
+}
+
+// ════════ MAIN REFRESH ════════
+async function refresh() {
+  try {
+    const res = await fetch('/dashboard-data');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+
+    renderDashboard(d);
+    renderTrading(d);
+    renderNews(d);
+    renderAssistantState(d.assistant);
+
+  } catch (err) {
+    console.error('Donna refresh error:', err);
+    setText('lastUpdated', 'Sync error — retrying...');
+  }
+}
+
+// ════════ ASSISTANT CHAT ════════
+const chatOutput = document.getElementById('assistantOutput');
+const chatInput = document.getElementById('assistantInput');
+const sendBtn = document.getElementById('assistantSend');
+
+function appendMsg(role, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + role;
+  el.innerHTML = `<span class="role">${role === 'user' ? 'You' : 'Donna'}</span>${text}`;
+  chatOutput.appendChild(el);
+  chatOutput.scrollTop = chatOutput.scrollHeight;
+}
+
+async function sendChat() {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  chatInput.value = '';
+  sendBtn.disabled = true;
+  appendMsg('user', msg);
+  try {
+    const res = await fetch('/assistant/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({message: msg})
+    });
+    const data = await res.json();
+    appendMsg('assistant', data.reply || 'No response.');
+    if (data.assistant) renderAssistantState(data.assistant);
+  } catch (err) {
+    appendMsg('assistant', 'Connection error. Please try again.');
+  }
+  sendBtn.disabled = false;
+  chatInput.focus();
+}
+
+sendBtn.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+// ════════ TASK / REMINDER ACTIONS ════════
+async function deleteTask(index) {
+  try {
+    const res = await fetch('/assistant/delete-task', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({index})
+    });
+    const data = await res.json();
+    if (data.assistant) renderAssistantState(data.assistant);
+  } catch(e) { console.error(e); }
+}
+
+async function deleteReminder(index) {
+  try {
+    const res = await fetch('/assistant/delete-reminder', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({index})
+    });
+    const data = await res.json();
+    if (data.assistant) renderAssistantState(data.assistant);
+  } catch(e) { console.error(e); }
+}
+
+document.getElementById('addTaskBtn').addEventListener('click', async () => {
+  const val = document.getElementById('taskInput').value.trim();
+  if (!val) return;
+  document.getElementById('taskInput').value = '';
+  try {
+    const res = await fetch('/assistant/add-task', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({task: val})
+    });
+    const data = await res.json();
+    if (data.assistant) renderAssistantState(data.assistant);
+  } catch(e) { console.error(e); }
+});
+
+document.getElementById('addReminderBtn').addEventListener('click', async () => {
+  const val = document.getElementById('reminderInput').value.trim();
+  if (!val) return;
+  document.getElementById('reminderInput').value = '';
+  try {
+    const res = await fetch('/assistant/add-reminder', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({reminder: val})
+    });
+    const data = await res.json();
+    if (data.assistant) renderAssistantState(data.assistant);
+  } catch(e) { console.error(e); }
+});
+
+document.getElementById('taskInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addTaskBtn').click();
+});
+document.getElementById('reminderInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addReminderBtn').click();
+});
+
+// ════════ BOOT ════════
 refresh();
-setInterval(refresh,15000);
+setInterval(refresh, 15000);
 </script>
 </body>
-</html>
-'''
+</html>'''
