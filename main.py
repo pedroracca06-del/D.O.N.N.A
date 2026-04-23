@@ -1088,7 +1088,7 @@ async def root_head():
 
 @app.get('/check-env')
 async def check_env():
-    return {'anthropic_key_found': bool(ANTHROPIC_API_KEY), 'telegram_found': bool(TELEGRAM_BOT_TOKEN), 'finnhub_found': bool(FINNHUB_API_KEY), 'fmp_found': bool(FMP_API_KEY), 'alpha_vantage_found': bool(ALPHA_VANTAGE_API_KEY), 'forex_factory_notes_url_set': bool(FOREX_FACTORY_NOTES_URL), 'risk_file_exists': RISK_STATE_FILE.exists(), 'alerts_file_exists': ALERTS_FILE.exists(), 'assistant_file_exists': ASSISTANT_FILE.exists(), 'settings_file_exists': SETTINGS_FILE.exists(), 'macro_events_file_exists': MACRO_EVENTS_FILE.exists(), 'telegram_alert_mode': TELEGRAM_ALERT_MODE, 'model': ANTHROPIC_MODEL}
+    return {'anthropic_key_found': bool(ANTHROPIC_API_KEY), 'telegram_found': bool(TELEGRAM_BOT_TOKEN), 'finnhub_found': bool(FINNHUB_API_KEY), 'fmp_found': bool(FMP_API_KEY), 'alpha_vantage_found': bool(ALPHA_VANTAGE_API_KEY), 'forex_factory_notes_url_set': bool(FOREX_FACTORY_NOTES_URL), 'risk_file_exists': RISK_STATE_FILE.exists(), 'alerts_file_exists': ALERTS_FILE.exists(), 'assistant_file_exists': ASSISTANT_FILE.exists(), 'settings_file_exists': SETTINGS_FILE.exists(), 'macro_events_file_exists': MACRO_EVENTS_FILE.exists(), 'telegram_alert_mode': TELEGRAM_ALERT_MODE, 'chat_model': ANTHROPIC_ASSISTANT_MODEL, 'fast_model': ANTHROPIC_MODEL}
 
 
 @app.get('/dashboard-data')
