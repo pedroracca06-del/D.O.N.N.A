@@ -21,10 +21,9 @@ BASE_DIR = Path(__file__).parent
 RISK_STATE_FILE = BASE_DIR / 'donna_risk_state.json'
 NY_TZ = ZoneInfo('America/New_York')
 
-FINNHUB_API_KEY  = os.getenv('FINNHUB_API_KEY', '').strip()
-FMP_API_KEY      = os.getenv('FMP_API_KEY', '').strip()
-OPENAI_API_KEY   = os.getenv('OPENAI_API_KEY', '').strip()
-OPENAI_MODEL     = os.getenv('OPENAI_MODEL', 'gpt-4.1-mini').strip()
+FINNHUB_API_KEY   = os.getenv('FINNHUB_API_KEY', '').strip()
+FMP_API_KEY       = os.getenv('FMP_API_KEY', '').strip()
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '').strip()
 
 # ── helpers ──────────────────────────────────────────────────
 def _now_ny():
@@ -247,15 +246,16 @@ def _get_next_event_from_file() -> tuple[str, int | None]:
 # ── LLM headline classifier (optional upgrade) ───────────────
 def _llm_classify(headlines: list[str]) -> dict | None:
     """
-    If OpenAI is available, use it to extract a smarter headline read.
+    If Anthropic is available, use Claude Haiku to extract a smarter headline read.
     Returns dict with keys: macro_headline, market_headline, macro_guidance,
     market_guidance, macro_severity. Falls back to None on any error.
     """
-    if not OPENAI_API_KEY:
+    if not ANTHROPIC_API_KEY:
         return None
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
         headlines_text = '\n'.join(f'- {h}' for h in headlines[:12])
         prompt = f"""You are DONNA's news classifier. Given these market headlines, extract:
@@ -263,7 +263,7 @@ def _llm_classify(headlines: list[str]) -> dict | None:
 Headlines:
 {headlines_text}
 
-Return JSON only:
+Return JSON only (no other text):
 {{
   "macro_headline": "single most important macro headline or story (max 18 words)",
   "market_headline": "single most important company/sector headline (max 18 words)",
@@ -274,14 +274,15 @@ Return JSON only:
   "market_severity": "LOW | MEDIUM | HIGH"
 }}"""
 
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=280,
-            temperature=0.2,
-            response_format={"type": "json_object"}
         )
-        raw = response.choices[0].message.content or ''
+        raw = response.content[0].text or ''
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            raw = match.group(0)
         data = json.loads(raw)
         return data
     except Exception as e:
