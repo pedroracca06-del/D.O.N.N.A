@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -60,6 +60,7 @@ ASSISTANT_FILE = BASE_DIR / 'donna_assistant_state.json'
 SETTINGS_FILE = BASE_DIR / 'donna_settings.json'
 MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
 CACHE = {}
+_sse_clients: list[asyncio.Queue] = []
 
 DEFAULT_RISK_STATE = {
     'macro_risk': 'medium',
@@ -1376,7 +1377,49 @@ async def webhook(request: Request):
     result = process_signal(payload)
     if result.get('status') != 'ok':
         raise HTTPException(status_code=500, detail=result.get('error', 'Signal processing failed'))
+    # Broadcast to all SSE clients
+    if _sse_clients:
+        evt = json.dumps({
+            'type':       'signal',
+            'ticker':     result['data'].get('ticker', ''),
+            'signal':     result['data'].get('signal', ''),
+            'verdict':    result['parsed'].get('verdict', ''),
+            'confidence': result['parsed'].get('confidence', ''),
+            'summary':    result['parsed'].get('summary', ''),
+        })
+        for q in list(_sse_clients):
+            try:
+                q.put_nowait(evt)
+            except Exception:
+                pass
     return result
+
+
+@app.get('/stream')
+async def stream():
+    queue: asyncio.Queue = asyncio.Queue()
+    _sse_clients.append(queue)
+
+    async def event_generator():
+        try:
+            yield 'data: {"type":"connected"}\n\n'
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=25)
+                    yield f'data: {data}\n\n'
+                except asyncio.TimeoutError:
+                    yield ': ping\n\n'
+        finally:
+            try:
+                _sse_clients.remove(queue)
+            except ValueError:
+                pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
 
 
 @app.post('/assistant/set-focus')
@@ -1924,6 +1967,31 @@ tr:last-child td{border-bottom:none}
 @media(max-width:1100px) {
   .harvey-top-grid, .harvey-mid-grid, .harvey-bot-grid, .verdict-grid { grid-template-columns: 1fr }
 }
+
+/* ── SSE signal dot on nav button ── */
+.harvey-btn { position: relative }
+.signal-dot {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  display: none;
+  box-shadow: 0 0 6px var(--green);
+}
+.signal-dot.active { display: block; animation: dot-pulse 1.2s ease-in-out 3 forwards }
+@keyframes dot-pulse {
+  0%,100% { opacity: 1; transform: scale(1) }
+  50%      { opacity: .4; transform: scale(1.6) }
+}
+
+/* ── verdict banner flash on new signal ── */
+@keyframes banner-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(0,229,160,.6) }
+  50%  { box-shadow: 0 0 0 18px rgba(0,229,160,0) }
+  100% { box-shadow: 0 0 0 0 rgba(0,229,160,0) }
+}
+.verdict-banner.flash { animation: banner-flash .7s ease-out }
 </style>
 </head>
 <body>
@@ -1941,7 +2009,7 @@ tr:last-child td{border-bottom:none}
         <button class="tab-btn" data-page="trading">Trading</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
-        <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y</button>
+        <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -2872,9 +2940,48 @@ document.getElementById('reminderInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('addReminderBtn').click();
 });
 
+// ════════ SSE — REAL-TIME SIGNAL STREAM ════════
+function connectSSE() {
+  const es = new EventSource('/stream');
+
+  es.onmessage = function(e) {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch(_) { return; }
+    if (msg.type !== 'signal') return;
+
+    // Immediately refresh HARVEY data
+    refreshHarvey();
+
+    // Flash verdict banner
+    const banner = document.getElementById('harveyVerdict');
+    if (banner) {
+      banner.classList.remove('flash');
+      void banner.offsetWidth; // reflow to restart animation
+      banner.classList.add('flash');
+      banner.addEventListener('animationend', () => banner.classList.remove('flash'), { once: true });
+    }
+
+    // Pulse the nav dot
+    const dot = document.getElementById('harveySignalDot');
+    if (dot) {
+      dot.classList.remove('active');
+      void dot.offsetWidth;
+      dot.classList.add('active');
+      dot.addEventListener('animationend', () => dot.classList.remove('active'), { once: true });
+    }
+  };
+
+  es.onerror = function() {
+    es.close();
+    // Auto-reconnect after 3 s
+    setTimeout(connectSSE, 3000);
+  };
+}
+
 // ════════ BOOT ════════
 refresh();
 setInterval(refresh, 15000);
+connectSSE();
 </script>
 </body>
 </html>'''
