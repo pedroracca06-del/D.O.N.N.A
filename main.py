@@ -40,6 +40,7 @@ load_dotenv(BASE_DIR / '.env')
 
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '').strip()
 ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001').strip()
+ANTHROPIC_ASSISTANT_MODEL = os.getenv('ANTHROPIC_ASSISTANT_MODEL', 'claude-sonnet-4-6').strip()
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '').strip()
 TELEGRAM_ALERT_MODE = os.getenv('TELEGRAM_ALERT_MODE', 'critical').strip().lower()
@@ -1239,7 +1240,7 @@ async def assistant_chat(request: Request):
         else: reply = f"Donna fallback: Bias is {morning['today_bias']}. Focus is {morning['focus']}."
         return {'status': 'ok', 'action': 'none', 'value': '', 'reply': reply, 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
     try:
-        response = client.messages.create(model=ANTHROPIC_MODEL, system=ASSISTANT_SYSTEM_PROMPT, messages=[{"role": "user", "content": f"User message:\n{message}\n\nSystem context:\n{summarize_system_context()}"}], max_tokens=220)
+        response = client.messages.create(model=ANTHROPIC_ASSISTANT_MODEL, system=ASSISTANT_SYSTEM_PROMPT, messages=[{"role": "user", "content": f"User message:\n{message}\n\nSystem context:\n{summarize_system_context()}"}], max_tokens=220)
         parsed = parse_json_loose(response.content[0].text, fallback)
         action, value = str(parsed.get('action', 'none')).strip().lower(), str(parsed.get('value', '')).strip()
         reply = str(parsed.get('reply', '')).strip() or 'Donna processed the request.'
