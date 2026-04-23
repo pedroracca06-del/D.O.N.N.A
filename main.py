@@ -853,7 +853,10 @@ def build_harvey_payload(risk=None):
     event_phase = str(state.get('event_phase', '')).upper()
     if event_phase in ('LIVE', 'IMMINENT'):
         verdict = 'WAIT'
-        verdict_reason = f"Event is {event_phase}. Do not trade into {state.get('next_event','macro event')}. Wait for reaction."
+        next_ev = state.get('next_event', 'macro event')
+        mins    = state.get('minutes_to_event')
+        timing  = 'is live now' if (mins is not None and int(mins) <= 0) else f'in {mins} min' if mins is not None else 'is imminent'
+        verdict_reason = f"{next_ev} {timing}. Do not trade into the release — wait for the initial reaction to resolve before reading direction."
         verdict_color  = 'yellow'
     elif macro == 'high' and bias_score < 60:
         verdict = 'WAIT'
@@ -871,9 +874,23 @@ def build_harvey_payload(risk=None):
         verdict = 'WAIT'
         verdict_reason = 'ORB not yet set. No clean entries until the opening range is established.'
         verdict_color  = 'yellow'
+    elif orb_quality == 'WAIT' and orb_status == 'RANGING':
+        verdict = 'WAIT'
+        try:
+            nq_lvl   = float(str(nq_last).replace(',', ''))
+            break_up = f'{nq_lvl * 1.005:,.2f}'
+            break_dn = f'{nq_lvl * 0.995:,.2f}'
+            verdict_reason = (f'NQ is ranging near {nq_last} with no directional break. '
+                              f'A sustained move above {break_up} opens the long; below {break_dn} confirms the short. '
+                              f'Stay out until price commits.')
+        except Exception:
+            verdict_reason = f'NQ is ranging near {nq_last} inside the opening range. Wait for a clean directional break before entering.'
+        verdict_color  = 'yellow'
     else:
         verdict = 'WAIT'
-        verdict_reason = 'No dominant signal. Conditions are mixed. Patience over forcing a trade.'
+        needed  = 68 - bias_score
+        verdict_reason = (f'Bias is {bias_score}/100 — {needed} points short of a BUY signal (threshold: 68). '
+                          f'No dominant directional edge yet. Wait for momentum to build before committing size.')
         verdict_color  = 'yellow'
 
     # ── KEY LEVELS ──────────────────────────────────────────
