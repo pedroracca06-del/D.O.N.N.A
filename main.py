@@ -1065,7 +1065,7 @@ async def finnhub_loop():
     while True:
         try: await asyncio.to_thread(process_finnhub_cycle)
         except Exception as e: print('Finnhub loop error:', str(e))
-        await asyncio.sleep(180)
+        await asyncio.sleep(300)
 
 
 @app.on_event('startup')

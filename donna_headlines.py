@@ -55,6 +55,13 @@ def _write_json(path, data):
 
 
 # ── importance scoring ────────────────────────────────────────
+_NON_FINANCIAL = {
+    'holiday', 'christmas', 'thanksgiving', 'easter', 'new year', 'independence day',
+    'memorial day', 'labor day', 'martin luther king', 'presidents day', 'columbus day',
+    'veterans day', 'good friday', 'daylight saving', 'daylight savings', 'clocks change',
+    'bank holiday', 'public holiday', 'market closed', 'exchange closed',
+}
+
 _HIGH_WORDS = {
     'fomc', 'fed rate', 'federal reserve', 'interest rate decision',
     'cpi', 'nonfarm payroll', 'nfp', 'gdp', 'pce', 'core inflation',
@@ -186,13 +193,19 @@ def _fetch_fmp_calendar() -> list[dict]:
 
 
 # ── filter to today's events ──────────────────────────────────
+def _is_financial(event: dict) -> bool:
+    t = event.get('title', '').lower()
+    if any(w in t for w in _NON_FINANCIAL):
+        return False
+    return event.get('importance') in ('high', 'medium')
+
 def _filter_today(events: list[dict]) -> list[dict]:
     today = _now_ny().strftime('%Y-%m-%d')
-    today_events = [e for e in events if e.get('date', '') == today]
+    today_events = [e for e in events if e.get('date', '') == today and _is_financial(e)]
     if today_events:
         return sorted(today_events, key=lambda e: e.get('time_et', ''))
-    # If no today events, return next 2 days of high/medium importance
-    upcoming = [e for e in events if e.get('importance') in ('high', 'medium')]
+    # If no today events, return upcoming high/medium financial events
+    upcoming = [e for e in events if _is_financial(e)]
     return sorted(upcoming, key=lambda e: (e.get('date', ''), e.get('time_et', '')))[:8]
 
 

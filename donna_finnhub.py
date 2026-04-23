@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
+import time
 import requests
 
 BASE_DIR          = Path(__file__).parent
@@ -159,7 +160,7 @@ def _compute_session_points(current_snapshot: dict, label: str, pct: float) -> f
 # ── main cycle ────────────────────────────────────────────────
 def process_finnhub_cycle():
     """
-    Main entry point — called by finnhub_loop() in main.py every 3 minutes.
+    Main entry point — called by finnhub_loop() in main.py every 5 minutes.
     Fetches live quotes and updates market_snapshot in donna_risk_state.json.
     """
     print(f'[donna_finnhub] Running cycle at {_now_ny().strftime("%H:%M:%S")} ET')
@@ -171,6 +172,7 @@ def process_finnhub_cycle():
 
     for label, primary, fallbacks, snap_key in SNAPSHOT_MAP:
         q = _quote(primary, fallbacks)
+        time.sleep(0.5)
         if q and q.get('last') not in (None, 0):
             snapshot[snap_key] = {
                 'last': q['last'],
