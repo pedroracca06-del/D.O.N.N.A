@@ -754,6 +754,207 @@ def build_what_matters_now(risk=None):
         'focus_reason': focus_reason,
     }
 
+def build_harvey_payload(risk=None):
+    """
+    HARVEY execution engine — builds the full payload for the HARVEY tab.
+    Reads live state, pulse, session significance, and alert history.
+    Returns everything the frontend needs to render the execution view.
+    """
+    state    = risk or load_risk_state()
+    sig      = build_session_significance(state)
+    driver   = build_market_driver_engine(state)
+    morning  = build_morning_edge(state)
+    wm       = build_what_matters_now(state)
+    pulse    = get_live_futures_macro_pulse()
+    alerts   = load_alert_history()
+
+    pulse_map = {r['symbol']: r for r in pulse}
+
+    def pct_float(sym):
+        raw = str(pulse_map.get(sym, {}).get('pct', '')).replace('%','').replace('+','').strip()
+        try: return float(raw)
+        except: return None
+
+    nq_pct  = pct_float('NQ')
+    es_pct  = pct_float('ES')
+    vix_pct = pct_float('VIX')
+    nq_last = pulse_map.get('NQ', {}).get('last', '-')
+    es_last = pulse_map.get('ES', {}).get('last', '-')
+
+    # ── BIAS SCORE ──────────────────────────────────────────
+    bias_score = 50
+    bias_direction = 'NEUTRAL'
+
+    sig_label = str(sig.get('label', '')).upper()
+    nq_pts = safe_float(sig.get('nq_points', 0))
+    if 'MAJOR' in sig_label:     bias_score += 20
+    elif 'NOTABLE' in sig_label: bias_score += 12
+    elif 'ACTIVE' in sig_label:  bias_score += 6
+
+    if nq_pct is not None:
+        if nq_pct >= 1.5:    bias_score += 18
+        elif nq_pct >= 0.75: bias_score += 10
+        elif nq_pct >= 0.3:  bias_score += 5
+        elif nq_pct <= -1.5: bias_score -= 18
+        elif nq_pct <= -0.75:bias_score -= 10
+        elif nq_pct <= -0.3: bias_score -= 5
+
+    if es_pct is not None:
+        if es_pct >= 0.5:   bias_score += 6
+        elif es_pct <= -0.5: bias_score -= 6
+
+    macro = str(state.get('macro_risk', 'medium')).lower()
+    if macro == 'high':     bias_score -= 15
+    elif macro == 'medium': bias_score -= 5
+
+    if vix_pct is not None and vix_pct >= 4: bias_score -= 12
+
+    bias_score = max(0, min(100, bias_score))
+
+    if bias_score >= 72:   bias_direction = 'LONG'
+    elif bias_score >= 58: bias_direction = 'LEAN LONG'
+    elif bias_score >= 42: bias_direction = 'NEUTRAL'
+    elif bias_score >= 28: bias_direction = 'LEAN SHORT'
+    else:                  bias_direction = 'SHORT'
+
+    # ── ORB STATUS ──────────────────────────────────────────
+    session = str(state.get('donna_session', '')).upper()
+    now_ny_obj = now_ny()
+    market_open_mins = (now_ny_obj.hour * 60 + now_ny_obj.minute) - (9 * 60 + 30)
+
+    if session != 'NEW_YORK_CASH':
+        orb_status  = 'PRE-MARKET'
+        orb_note    = 'Cash session not open. ORB forms at 9:30 ET open.'
+        orb_quality = 'PENDING'
+    elif market_open_mins < 0:
+        orb_status  = 'PRE-MARKET'
+        orb_note    = 'Waiting for 9:30 ET open.'
+        orb_quality = 'PENDING'
+    elif market_open_mins <= 5:
+        orb_status  = 'FORMING'
+        orb_note    = f'ORB forming — {5 - market_open_mins} min remaining in opening range.'
+        orb_quality = 'WAIT'
+    elif market_open_mins <= 15:
+        orb_status  = 'SET'
+        orb_note    = 'ORB is set. Watch for breakout or breakdown confirmation.'
+        orb_quality = 'WATCH'
+    else:
+        if nq_pct is not None and abs(nq_pct) >= 0.5:
+            direction = 'BULLISH BREAK' if nq_pct > 0 else 'BEARISH BREAK'
+            orb_status  = direction
+            orb_note    = f'NQ has broken {"above" if nq_pct > 0 else "below"} the opening range. Look for continuation or failure.'
+            orb_quality = 'ACTIVE'
+        else:
+            orb_status  = 'RANGING'
+            orb_note    = 'NQ is ranging inside or near ORB bounds. Wait for a clean break.'
+            orb_quality = 'WAIT'
+
+    # ── VERDICT ─────────────────────────────────────────────
+    event_phase = str(state.get('event_phase', '')).upper()
+    if event_phase in ('LIVE', 'IMMINENT'):
+        verdict = 'WAIT'
+        verdict_reason = f"Event is {event_phase}. Do not trade into {state.get('next_event','macro event')}. Wait for reaction."
+        verdict_color  = 'yellow'
+    elif macro == 'high' and bias_score < 60:
+        verdict = 'WAIT'
+        verdict_reason = 'Macro risk HIGH. Conviction is compressed. Let the market show its hand first.'
+        verdict_color  = 'yellow'
+    elif bias_score >= 68 and orb_quality in ('ACTIVE', 'WATCH') and macro != 'high':
+        verdict = 'BUY'
+        verdict_reason = f'Bias {bias_score}/100 LONG. {sig.get("summary","Session supports momentum.")} Confirm with leadership.'
+        verdict_color  = 'green'
+    elif bias_score <= 32 and orb_quality in ('ACTIVE', 'WATCH') and macro != 'high':
+        verdict = 'SELL'
+        verdict_reason = f'Bias {bias_score}/100 SHORT. Downside pressure confirmed. Respect breakdown until proven otherwise.'
+        verdict_color  = 'red'
+    elif orb_quality in ('FORMING', 'PENDING'):
+        verdict = 'WAIT'
+        verdict_reason = 'ORB not yet set. No clean entries until the opening range is established.'
+        verdict_color  = 'yellow'
+    else:
+        verdict = 'WAIT'
+        verdict_reason = 'No dominant signal. Conditions are mixed. Patience over forcing a trade.'
+        verdict_color  = 'yellow'
+
+    # ── KEY LEVELS ──────────────────────────────────────────
+    snap = state.get('market_snapshot', {})
+    nq_data = snap.get('NQ', {})
+    es_data = snap.get('ES', {})
+    nq_price = safe_float(nq_data.get('last', 0))
+    es_price = safe_float(es_data.get('last', 0))
+
+    def fib_levels(price, pct_range=0.02):
+        if not price: return {}
+        swing = price * pct_range
+        high  = price + swing
+        low   = price - swing
+        return {
+            'high':     round(high, 2),
+            'fib_786':  round(high - swing * 0.214, 2),
+            'fib_618':  round(high - swing * 0.382, 2),
+            'fib_500':  round(high - swing * 0.500, 2),
+            'fib_382':  round(high - swing * 0.618, 2),
+            'fib_236':  round(high - swing * 0.764, 2),
+            'low':      round(low, 2),
+        }
+
+    nq_fibs = fib_levels(nq_price) if nq_price else {}
+    es_fibs  = fib_levels(es_price) if es_price else {}
+
+    # ── DIVERGENCE ──────────────────────────────────────────
+    divergence = None
+    if nq_pct is not None and es_pct is not None:
+        diff = abs(nq_pct - es_pct)
+        if diff >= 0.8:
+            stronger = 'NQ' if nq_pct > es_pct else 'ES'
+            weaker   = 'ES' if stronger == 'NQ' else 'NQ'
+            divergence = {
+                'active': True,
+                'note': f'{stronger} significantly outperforming {weaker} ({diff:.2f}% spread). Watch for convergence or acceleration.',
+                'spread': round(diff, 2),
+            }
+
+    session_context = {
+        'session':       session,
+        'time_ny':       state.get('donna_time_ny', ''),
+        'day':           state.get('donna_day', ''),
+        'next_event':    state.get('next_event', ''),
+        'event_phase':   event_phase,
+        'mins_to_event': state.get('minutes_to_event'),
+    }
+
+    return {
+        'status':               'ok',
+        'bias_score':           bias_score,
+        'bias_direction':       bias_direction,
+        'verdict':              verdict,
+        'verdict_reason':       verdict_reason,
+        'verdict_color':        verdict_color,
+        'orb_status':           orb_status,
+        'orb_note':             orb_note,
+        'orb_quality':          orb_quality,
+        'nq_fibs':              nq_fibs,
+        'es_fibs':              es_fibs,
+        'nq_last':              nq_last,
+        'es_last':              es_last,
+        'nq_pct':               nq_pct,
+        'es_pct':               es_pct,
+        'divergence':           divergence,
+        'session_significance': sig,
+        'morning_edge':         morning,
+        'what_matters':         wm,
+        'last_signals':         alerts[:10],
+        'session_context':      session_context,
+        'macro_risk':           state.get('macro_risk', 'medium'),
+        'headline':             state.get('last_headline', ''),
+    }
+
+
+@app.get('/harvey-data')
+async def harvey_data():
+    return build_harvey_payload()
+
+
 def build_market_movers_engine():
     return {
         'leaders': [
@@ -1609,6 +1810,103 @@ tr:last-child td{border-bottom:none}
   .hero-title{font-size:26px}
   .hero-grid,.main-grid,.stat-grid,.asst-state-grid,.live-strip-row{grid-template-columns:1fr}
 }
+
+/* ═══════════════════════════════════════
+   H.A.R.V.E.Y EXECUTION TAB
+   ═══════════════════════════════════════ */
+
+.harvey-btn {
+  background: linear-gradient(135deg, rgba(0,229,160,.15), rgba(0,229,160,.05)) !important;
+  border-color: rgba(0,229,160,.3) !important;
+  color: var(--green) !important;
+}
+.harvey-btn.active {
+  background: linear-gradient(135deg, #047857, #065f46) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: 0 4px 20px rgba(0,229,160,.35) !important;
+}
+
+.verdict-banner {
+  border-radius: 18px;
+  padding: 28px 30px;
+  border: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+}
+.verdict-banner::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  opacity: .06;
+  border-radius: 18px;
+}
+.verdict-banner.green { border-color: rgba(0,229,160,.35); background: linear-gradient(135deg, rgba(4,120,87,.15), rgba(10,22,48,.99)); }
+.verdict-banner.green::before { background: var(--green) }
+.verdict-banner.red { border-color: rgba(255,77,109,.35); background: linear-gradient(135deg, rgba(153,27,27,.15), rgba(10,22,48,.99)); }
+.verdict-banner.red::before { background: var(--red) }
+.verdict-banner.yellow { border-color: rgba(255,201,60,.3); background: linear-gradient(135deg, rgba(180,83,9,.12), rgba(10,22,48,.99)); }
+.verdict-banner.yellow::before { background: var(--yellow) }
+
+.verdict-label { font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px; color: var(--muted2); }
+.verdict-word { font-family: 'Rajdhani', sans-serif; font-size: 72px; font-weight: 700; line-height: 1; letter-spacing: 2px; }
+.verdict-banner.green .verdict-word { color: var(--green) }
+.verdict-banner.red   .verdict-word { color: var(--red) }
+.verdict-banner.yellow .verdict-word { color: var(--yellow) }
+.verdict-reason { margin-top: 14px; font-size: 14px; line-height: 1.65; color: var(--muted); max-width: 80ch; }
+.verdict-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 18px; align-items: start; }
+
+.bias-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.bias-gauge { width: 100%; height: 14px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }
+.bias-fill { height: 100%; border-radius: 999px; transition: width .6s ease; }
+.bias-score-big { font-family: 'Rajdhani', sans-serif; font-size: 52px; font-weight: 700; line-height: 1; }
+.bias-direction { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 2px; }
+
+.orb-card { border-radius: var(--radius); padding: 20px 22px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(16,32,64,.98), rgba(10,22,48,.99)); }
+.orb-status-pill { display: inline-block; padding: 5px 14px; border-radius: 999px; font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
+.orb-FORMING    { background: rgba(255,201,60,.12); border: 1px solid rgba(255,201,60,.3); color: var(--yellow) }
+.orb-SET        { background: rgba(77,143,255,.12);  border: 1px solid rgba(77,143,255,.3);  color: var(--blue) }
+.orb-ACTIVE     { background: rgba(0,229,160,.12);   border: 1px solid rgba(0,229,160,.3);   color: var(--green) }
+.orb-WATCH      { background: rgba(77,143,255,.12);  border: 1px solid rgba(77,143,255,.3);  color: var(--blue) }
+.orb-WAIT       { background: rgba(255,255,255,.06); border: 1px solid var(--line);          color: var(--muted) }
+.orb-PENDING    { background: rgba(255,255,255,.04); border: 1px solid var(--line2);         color: var(--muted2) }
+.orb-PRE-MARKET { background: rgba(255,255,255,.04); border: 1px solid var(--line2);         color: var(--muted2) }
+.orb-RANGING    { background: rgba(255,201,60,.08);  border: 1px solid rgba(255,201,60,.2);  color: var(--yellow) }
+
+.orb-status-label { font-family: 'Rajdhani', sans-serif; font-size: 26px; font-weight: 700; margin-bottom: 8px; }
+.orb-note { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+.fib-table { width: 100%; border-collapse: collapse }
+.fib-table td { padding: 8px 0; border-bottom: 1px solid var(--line2); font-size: 13px; font-weight: 600; }
+.fib-table tr:last-child td { border-bottom: none }
+.fib-label { font-family: 'Space Mono', monospace; font-size: 10px; color: var(--muted2); letter-spacing: 1px; }
+.fib-price { text-align: right; color: var(--text) }
+.fib-high  { color: var(--green) }
+.fib-low   { color: var(--red) }
+
+.signal-card { padding: 13px 16px; border-radius: 12px; border: 1px solid var(--line2); background: rgba(255,255,255,.03); margin-bottom: 8px; transition: background .15s; }
+.signal-card:last-child { margin-bottom: 0 }
+.signal-card:hover { background: rgba(255,255,255,.05) }
+.signal-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.signal-ticker { font-family: 'Rajdhani', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+.signal-verdict { font-family: 'Space Mono', monospace; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px; letter-spacing: 1px; }
+.sv-TAKE    { background: rgba(0,229,160,.15); color: var(--green); border: 1px solid rgba(0,229,160,.3) }
+.sv-CAUTION { background: rgba(255,201,60,.12); color: var(--yellow); border: 1px solid rgba(255,201,60,.25) }
+.sv-SKIP    { background: rgba(255,77,109,.12); color: var(--red); border: 1px solid rgba(255,77,109,.25) }
+.signal-meta { font-size: 11px; color: var(--muted2); margin-bottom: 4px }
+.signal-summary { font-size: 12px; color: var(--muted); line-height: 1.5 }
+
+.divergence-alert { padding: 12px 16px; border-radius: 12px; background: rgba(255,201,60,.07); border: 1px solid rgba(255,201,60,.2); display: flex; align-items: flex-start; gap: 12px; }
+.divergence-icon { font-size: 18px; flex-shrink: 0; margin-top: 2px; }
+.divergence-text { font-size: 13px; color: var(--yellow); line-height: 1.5; }
+
+.harvey-top-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 16px; align-items: start; }
+.harvey-mid-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
+.harvey-bot-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
+
+@media(max-width:1100px) {
+  .harvey-top-grid, .harvey-mid-grid, .harvey-bot-grid, .verdict-grid { grid-template-columns: 1fr }
+}
 </style>
 </head>
 <body>
@@ -1626,6 +1924,7 @@ tr:last-child td{border-bottom:none}
         <button class="tab-btn" data-page="trading">Trading</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
+        <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -1945,6 +2244,106 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
+  <!-- ════════════════════ H.A.R.V.E.Y ════════════════════ -->
+  <div class="page" id="page-harvey">
+    <div class="vstack">
+
+      <!-- VERDICT BANNER -->
+      <div class="verdict-banner yellow" id="harveyVerdict">
+        <div class="verdict-grid">
+          <div>
+            <div class="verdict-label">H.A.R.V.E.Y // Execution Verdict</div>
+            <div class="verdict-word" id="harveyVerdictWord">—</div>
+            <div class="verdict-reason" id="harveyVerdictReason">Loading execution intelligence...</div>
+          </div>
+          <div class="bias-wrap" style="padding:10px 0">
+            <div class="bias-score-big" id="harveyBiasScore">—</div>
+            <div class="bias-direction" id="harveyBiasDir">—</div>
+            <div style="width:100%;margin-top:8px">
+              <div style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;text-align:center">Bias Score / 100</div>
+              <div class="bias-gauge"><div class="bias-fill" id="harveyBiasFill" style="width:50%"></div></div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span style="font-family:Space Mono,monospace;font-size:9px;color:var(--red)">SHORT</span>
+                <span style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted2)">NEUTRAL</span>
+                <span style="font-family:Space Mono,monospace;font-size:9px;color:var(--green)">LONG</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ORB + SESSION ROW -->
+      <div class="harvey-top-grid">
+        <div class="orb-card">
+          <div class="kicker">Opening Range</div>
+          <div class="section-title" style="margin-bottom:14px">ORB Manager</div>
+          <div class="orb-status-pill orb-PENDING" id="harveyOrbPill">PENDING</div>
+          <div class="orb-status-label" id="harveyOrbStatus">—</div>
+          <div class="orb-note" id="harveyOrbNote">—</div>
+          <div style="margin-top:16px" id="harveyDivergence"></div>
+        </div>
+        <div class="panel">
+          <div class="kicker">Session</div>
+          <div class="section-title" style="margin-bottom:14px">Context</div>
+          <div class="kv-row"><span class="kv-k">Session</span><span class="kv-v" id="harveySession">—</span></div>
+          <div class="kv-row"><span class="kv-k">Day</span><span class="kv-v" id="harveyDay">—</span></div>
+          <div class="kv-row"><span class="kv-k">Next Event</span><span class="kv-v" id="harveyNextEvent">—</span></div>
+          <div class="kv-row"><span class="kv-k">Event Phase</span><span class="kv-v" id="harveyEventPhase">—</span></div>
+          <div class="kv-row"><span class="kv-k">Macro Risk</span><span class="kv-v" id="harveyMacroRisk">—</span></div>
+          <div class="kv-row"><span class="kv-k">Session Label</span><span class="kv-v" id="harveySessionLabel">—</span></div>
+          <div class="kv-row"><span class="kv-k">NQ Points</span><span class="kv-v up" id="harveyNqPts">—</span></div>
+          <div class="kv-row"><span class="kv-k">ES Points</span><span class="kv-v up" id="harveyEsPts">—</span></div>
+        </div>
+      </div>
+
+      <!-- FIB LEVELS + PULSE -->
+      <div class="harvey-mid-grid">
+        <div class="panel">
+          <div class="kicker" style="color:var(--green)">NQ Futures</div>
+          <div class="section-title" style="margin-bottom:4px">Key Levels</div>
+          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:14px" id="harveyNqLast">—</div>
+          <table class="fib-table" id="harveyNqFibs"><tr><td colspan="2" class="neutral" style="font-size:12px">Loading...</td></tr></table>
+        </div>
+        <div class="panel">
+          <div class="kicker" style="color:var(--blue)">ES Futures</div>
+          <div class="section-title" style="margin-bottom:4px">Key Levels</div>
+          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:14px" id="harveyEsLast">—</div>
+          <table class="fib-table" id="harveyEsFibs"><tr><td colspan="2" class="neutral" style="font-size:12px">Loading...</td></tr></table>
+        </div>
+        <div class="panel">
+          <div class="kicker">Execution View</div>
+          <div class="section-title" style="margin-bottom:14px">Trade Intel</div>
+          <div class="kv-row"><span class="kv-k">Bias</span><span class="kv-v" id="harveyMorningBias">—</span></div>
+          <div class="kv-row"><span class="kv-k">Open Quality</span><span class="kv-v" id="harveyOpenQuality">—</span></div>
+          <div class="kv-row"><span class="kv-k">Focus</span><span class="kv-v" id="harveyFocus">—</span></div>
+          <div class="kv-row"><span class="kv-k">Watch First</span><span class="kv-v" id="harveyWatchFirst">—</span></div>
+          <div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--line2);font-size:13px;color:var(--muted);line-height:1.6" id="harveyFirstRead">—</div>
+        </div>
+      </div>
+
+      <!-- SIGNAL HISTORY + WHAT MATTERS -->
+      <div class="harvey-bot-grid">
+        <div class="panel">
+          <div class="kicker">TradingView Feed</div>
+          <div class="section-title" style="margin-bottom:14px">Last 10 Signals</div>
+          <div id="harveySignals">
+            <div class="obs-item low"><div class="obs-body">No signals received yet. Connect your TradingView indicator to the webhook.</div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="kicker">Donna Intelligence</div>
+          <div class="section-title" style="margin-bottom:14px">What Matters Now</div>
+          <div style="font-size:15px;font-weight:600;line-height:1.5;margin-bottom:12px;color:var(--text)" id="harveyWmHeadline">—</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.65;margin-bottom:14px" id="harveyWmSummary">—</div>
+          <div class="kv-row"><span class="kv-k">Mode</span><span class="kv-v" id="harveyWmMode">—</span></div>
+          <div class="kv-row"><span class="kv-k">Risk to Conviction</span><span class="kv-v" id="harveyWmRtc">—</span></div>
+          <div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.12);font-size:13px;color:var(--muted);line-height:1.6" id="harveyWmFocus">—</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- FOOTER -->
   <div class="footer">
     <span>D.O.N.N.A v5.0 // LIVE MARKET CORE</span>
@@ -2154,6 +2553,137 @@ function renderTrading(d) {
   }).join('') || '<div class="obs-item low"><div class="obs-body">No recent alerts.</div></div>');
 }
 
+// ═══════════════════════════════════════
+// H.A.R.V.E.Y RENDERER
+// ═══════════════════════════════════════
+
+function renderHarvey(d) {
+  const bias      = d.bias_score      || 50;
+  const biasDir   = d.bias_direction  || 'NEUTRAL';
+  const verdict   = d.verdict         || 'WAIT';
+  const reason    = d.verdict_reason  || '—';
+  const vcolor    = d.verdict_color   || 'yellow';
+  const orb       = d.orb_status      || '—';
+  const orbNote   = d.orb_note        || '—';
+  const orbQ      = d.orb_quality     || 'PENDING';
+  const sig       = d.session_significance || {};
+  const morning   = d.morning_edge    || {};
+  const wm        = d.what_matters    || {};
+  const ctx       = d.session_context || {};
+  const signals   = d.last_signals    || d.raw_trade_alerts || [];
+  const div       = d.divergence      || null;
+  const nqFibs    = d.nq_fibs         || {};
+  const esFibs    = d.es_fibs         || {};
+
+  const vb = document.getElementById('harveyVerdict');
+  if (vb) vb.className = `verdict-banner ${vcolor}`;
+  setText('harveyVerdictWord',   verdict);
+  setText('harveyVerdictReason', reason);
+
+  const biasColor = bias >= 60 ? 'var(--green)' : bias <= 40 ? 'var(--red)' : 'var(--yellow)';
+  const bsEl = document.getElementById('harveyBiasScore');
+  if (bsEl) { bsEl.textContent = bias; bsEl.style.color = biasColor; }
+  const bdEl = document.getElementById('harveyBiasDir');
+  if (bdEl) { bdEl.textContent = biasDir; bdEl.style.color = biasColor; }
+  const bfEl = document.getElementById('harveyBiasFill');
+  if (bfEl) {
+    bfEl.style.width = bias + '%';
+    bfEl.style.background = `linear-gradient(90deg, ${bias >= 60 ? 'var(--green)' : bias <= 40 ? 'var(--red)' : 'var(--yellow)'}, ${bias >= 60 ? '#00b37a' : bias <= 40 ? '#cc2244' : '#d97706'})`;
+  }
+
+  const pillEl = document.getElementById('harveyOrbPill');
+  if (pillEl) { pillEl.className = `orb-status-pill orb-${orbQ}`; pillEl.textContent = orbQ; }
+  setText('harveyOrbStatus', orb);
+  setText('harveyOrbNote',   orbNote);
+
+  const divEl = document.getElementById('harveyDivergence');
+  if (divEl) {
+    divEl.innerHTML = (div && div.active) ? `
+      <div class="divergence-alert">
+        <div class="divergence-icon">⚠</div>
+        <div class="divergence-text"><strong>NQ/ES Divergence Detected</strong><br>${div.note}</div>
+      </div>` : '';
+  }
+
+  setText('harveySession',    ctx.session    || d.donna_session || '—');
+  setText('harveyDay',        ctx.day        || '—');
+  setText('harveyNextEvent',  ctx.next_event || '—');
+  setText('harveyEventPhase', ctx.event_phase|| '—');
+  setHtml('harveyMacroRisk',  riskBadge(d.macro_risk));
+  setText('harveySessionLabel', sig.label    || '—');
+  setText('harveyNqPts', sig.nq_points ? sig.nq_points + ' pts (' + (sig.nq_pct||0) + '%)' : '—');
+  setText('harveyEsPts', sig.es_points ? sig.es_points + ' pts (' + (sig.es_pct||0) + '%)' : '—');
+
+  function fibRows(fibs, highClass, lowClass) {
+    if (!fibs || !fibs.high) return '<tr><td colspan="2" class="neutral" style="font-size:12px">No price data</td></tr>';
+    return [
+      ['HIGH',  fibs.high,    highClass],
+      ['78.6%', fibs.fib_786, ''],
+      ['61.8%', fibs.fib_618, ''],
+      ['50.0%', fibs.fib_500, ''],
+      ['38.2%', fibs.fib_382, ''],
+      ['23.6%', fibs.fib_236, ''],
+      ['LOW',   fibs.low,     lowClass],
+    ].map(([label, price, cls]) => `
+      <tr>
+        <td class="fib-label">${label}</td>
+        <td class="fib-price ${cls}">${price ? price.toLocaleString('en-US',{minimumFractionDigits:2}) : '—'}</td>
+      </tr>`).join('');
+  }
+
+  const nqDir = (d.nq_pct || 0) >= 0 ? 'up' : 'dn';
+  const esDir = (d.es_pct || 0) >= 0 ? 'up' : 'dn';
+  const nqEl = document.getElementById('harveyNqLast');
+  if (nqEl) { nqEl.textContent = d.nq_last || '—'; nqEl.className = nqDir; }
+  const esEl = document.getElementById('harveyEsLast');
+  if (esEl) { esEl.textContent = d.es_last || '—'; esEl.className = esDir; }
+  setHtml('harveyNqFibs', fibRows(nqFibs, 'fib-high', 'fib-low'));
+  setHtml('harveyEsFibs', fibRows(esFibs, 'fib-high', 'fib-low'));
+
+  setText('harveyMorningBias',  morning.today_bias   || '—');
+  setText('harveyOpenQuality',  morning.open_quality || '—');
+  setText('harveyFocus',        morning.focus        || '—');
+  setText('harveyWatchFirst',   (morning.watch_first || []).slice(0,4).join('  ·  ') || '—');
+  setText('harveyFirstRead',    morning.first_read   || '—');
+
+  setText('harveyWmHeadline', wm.headline    || '—');
+  setText('harveyWmSummary',  wm.summary     || '—');
+  setText('harveyWmMode',     (wm.mode||'—').replace(/_/g,' ').toUpperCase());
+  setText('harveyWmRtc',      wm.risk_to_conviction || '—');
+  setText('harveyWmFocus',    wm.focus_reason || '—');
+
+  const sigEl = document.getElementById('harveySignals');
+  if (sigEl) {
+    if (signals && signals.length) {
+      sigEl.innerHTML = signals.slice(0,10).map(s => `
+        <div class="signal-card">
+          <div class="signal-top">
+            <span class="signal-ticker">${s.ticker || '—'}</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="font-family:Space Mono,monospace;font-size:10px;color:var(--muted2)">${s.timeframe||''}</span>
+              <span class="signal-verdict sv-${s.verdict||'SKIP'}">${s.verdict||'—'}</span>
+            </div>
+          </div>
+          <div class="signal-meta">${s.signal||''} · ${s.session||''} · $${s.price||'—'} · Confidence: ${s.confidence||'—'}</div>
+          <div class="signal-summary">${s.summary||''}</div>
+        </div>`).join('');
+    } else {
+      sigEl.innerHTML = '<div class="obs-item low"><div class="obs-body">No signals yet. Waiting for TradingView webhook.</div></div>';
+    }
+  }
+}
+
+async function refreshHarvey() {
+  try {
+    const res = await fetch('/harvey-data');
+    if (!res.ok) return;
+    const d = await res.json();
+    renderHarvey(d);
+  } catch(e) {
+    console.error('HARVEY refresh error:', e);
+  }
+}
+
 // ════════ RENDER NEWS ════════
 function renderNews(d) {
   const risk = d.risk || {};
@@ -2220,6 +2750,8 @@ async function refresh() {
     renderTrading(d);
     renderNews(d);
     renderAssistantState(d.assistant);
+    renderHarvey(d);
+    refreshHarvey();
 
   } catch (err) {
     console.error('Donna refresh error:', err);
