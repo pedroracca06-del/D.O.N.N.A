@@ -1429,6 +1429,49 @@ def build_donna_observations(risk=None):
 
     return observations[:6]
 
+def build_session_playbook(risk=None):
+    state = risk or load_risk_state()
+    session = str(state.get('donna_session', 'OFF_HOURS'))
+    macro = str(state.get('macro_risk', 'medium')).lower()
+    headline = str(state.get('headline_risk', 'medium')).lower()
+    driver = build_market_driver_engine(state)
+    morning = build_morning_edge(state)
+    events_data = load_macro_events()
+
+    session_map = {
+        'NEW_YORK_CASH': 'NY Cash (9:30–4:00 ET)',
+        'LONDON': 'London Open (3:00–9:30 ET)',
+        'ASIA': 'Asia Session (7:00 PM–3:00 ET)',
+        'OFF_HOURS': 'Off Hours',
+    }
+    session_type = session_map.get(session, session.replace('_', ' '))
+    dominant = driver.get('dominant_driver', 'Balanced')
+    today_events = [f"{e.get('time_et','?')} ET — {e.get('title','')}" for e in (events_data.get('events') or [])[:3]]
+
+    event_phase = str(state.get('event_phase', '')).upper()
+    if macro == 'high' and event_phase in ('LIVE', 'IMMINENT', 'APPROACHING'):
+        tactical = f"Event risk is active ({state.get('next_event', 'macro event')}). Reduce size and wait for clean post-event price action."
+    elif macro == 'high':
+        tactical = "Macro risk is elevated. Let the market show direction before committing to positions."
+    elif headline == 'high':
+        tactical = "Headline sensitivity is high. Avoid aggressive entries without confirmation from leadership."
+    elif session == 'NEW_YORK_CASH':
+        tactical = morning.get('first_read', 'Trade what the tape shows. Respect leadership and avoid forcing setups.')
+    elif session == 'LONDON':
+        tactical = "London open — respect early momentum, but wait for NY confirmation before adding size."
+    elif session == 'ASIA':
+        tactical = "Asia session — lower reliability for NQ signals. Use for context, not conviction trades."
+    else:
+        tactical = morning.get('first_read', 'No active session. Review plan, set alerts, and prepare for next open.')
+
+    return {
+        'session_type': session_type,
+        'dominant_driver': dominant,
+        'key_events': today_events,
+        'tactical_note': tactical,
+    }
+
+
 def build_dashboard_payload():
     risk = load_risk_state()
     driver = build_market_driver_engine(risk)
@@ -1437,6 +1480,7 @@ def build_dashboard_payload():
     what_matters = build_what_matters_now(risk)
     observations = build_donna_observations(risk)
 
+    session_playbook = build_session_playbook(risk)
     movers = build_market_movers_engine()
     alerts = load_alert_history()[:10]
     assistant = load_assistant_state()
@@ -1483,6 +1527,7 @@ def build_dashboard_payload():
         'earnings': earnings,
         'news': news,
         'live_strip': live_strip,
+        'session_playbook': session_playbook,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
     }
 def generate_morning_brief() -> str:
@@ -2295,6 +2340,33 @@ tr:last-child td{border-bottom:none}
   .harvey-top-grid, .harvey-mid-grid, .harvey-bot-grid, .verdict-grid { grid-template-columns: 1fr }
 }
 
+/* ── RISK BAR PULSE ── */
+@keyframes strip-pulse-red {
+  0%,100% { box-shadow:0 0 0 0 rgba(255,77,109,0);border-color:rgba(255,77,109,.2) }
+  50%      { box-shadow:0 0 14px 3px rgba(255,77,109,.35);border-color:rgba(255,77,109,.55) }
+}
+@keyframes strip-pulse-yellow {
+  0%,100% { box-shadow:0 0 0 0 rgba(255,201,60,0);border-color:rgba(255,201,60,.15) }
+  50%      { box-shadow:0 0 10px 2px rgba(255,201,60,.25);border-color:rgba(255,201,60,.45) }
+}
+.ticker-wrap.risk-high   { animation:strip-pulse-red    2s ease-in-out infinite }
+.ticker-wrap.risk-medium { animation:strip-pulse-yellow 2.5s ease-in-out infinite }
+
+/* ── SESSION PLAYBOOK CARD ── */
+.playbook-grid {
+  display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-items:start;
+}
+.playbook-cell { }
+.playbook-cell .pb-val {
+  font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;letter-spacing:.3px;
+  line-height:1.2;margin-top:4px;
+}
+.playbook-cell .pb-note {
+  font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px;
+}
+@media(max-width:900px){ .playbook-grid{grid-template-columns:1fr 1fr} }
+@media(max-width:540px){ .playbook-grid{grid-template-columns:1fr} }
+
 /* ── SSE signal dot on nav button ── */
 .harvey-btn { position: relative }
 .signal-dot {
@@ -2383,6 +2455,29 @@ tr:last-child td{border-bottom:none}
               <span class="chip-label">Morning Bias</span>
               <span class="chip-value" id="morningBias">—</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SESSION PLAYBOOK -->
+      <div class="panel panel-sm">
+        <div class="kicker" style="margin-bottom:12px">Session Playbook</div>
+        <div class="playbook-grid">
+          <div class="playbook-cell">
+            <div class="kicker" style="margin-bottom:4px">Session Type</div>
+            <div class="pb-val" id="playbookSession">—</div>
+          </div>
+          <div class="playbook-cell">
+            <div class="kicker" style="margin-bottom:4px">Dominant Driver</div>
+            <div class="pb-val" id="playbookDriver">—</div>
+          </div>
+          <div class="playbook-cell">
+            <div class="kicker" style="margin-bottom:4px">Key Events Today</div>
+            <div class="pb-note" id="playbookEvents">—</div>
+          </div>
+          <div class="playbook-cell">
+            <div class="kicker" style="margin-bottom:4px">Tactical Note</div>
+            <div class="pb-note" id="playbookTactical">—</div>
           </div>
         </div>
       </div>
@@ -2825,6 +2920,15 @@ function renderDashboard(d) {
   setText('sessionVal', risk.donna_session || '—');
   setHtml('liveStrip', buildStrip(d.live_strip || []));
 
+  // Color-coded risk bar pulse
+  const stripEl = document.querySelector('.ticker-wrap');
+  if (stripEl) {
+    const macroLevel = (risk.macro_risk || '').toLowerCase();
+    stripEl.classList.remove('risk-high', 'risk-medium');
+    if (macroLevel === 'high') stripEl.classList.add('risk-high');
+    else if (macroLevel === 'medium') stripEl.classList.add('risk-medium');
+  }
+
   // Hero
   setText('heroTitle', wm.headline || driver.dominant_driver || '—');
   setText('heroSub', wm.summary || driver.market_summary || '—');
@@ -2893,6 +2997,14 @@ function renderDashboard(d) {
   // Top story
   setText('topStory', risk.last_headline || wm.headline || '—');
   setText('topStoryNote', risk.headline_guidance || wm.summary || '—');
+
+  // Session playbook
+  const pb = d.session_playbook || {};
+  setText('playbookSession', pb.session_type || '—');
+  setText('playbookDriver', pb.dominant_driver || '—');
+  const evts = pb.key_events || [];
+  setHtml('playbookEvents', evts.length ? evts.map(e => `<div>${e}</div>`).join('') : '<div>No events scheduled</div>');
+  setText('playbookTactical', pb.tactical_note || '—');
 
   // Footer
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
@@ -3275,6 +3387,23 @@ function connectSSE() {
     let msg;
     try { msg = JSON.parse(e.data); } catch(_) { return; }
     if (msg.type !== 'signal') return;
+
+    // Alert audio ping — 440 Hz, 100ms, low volume
+    try {
+      const actx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc  = actx.createOscillator();
+      const gain = actx.createGain();
+      osc.connect(gain);
+      gain.connect(actx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 440;
+      gain.gain.setValueAtTime(0, actx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.07, actx.currentTime + 0.01);
+      gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.1);
+      osc.start(actx.currentTime);
+      osc.stop(actx.currentTime + 0.11);
+      osc.onended = () => actx.close();
+    } catch(_) {}
 
     // Immediately refresh HARVEY data
     refreshHarvey();
