@@ -59,6 +59,7 @@ ALERTS_FILE = BASE_DIR / 'donna_alert_history.json'
 ASSISTANT_FILE = BASE_DIR / 'donna_assistant_state.json'
 SETTINGS_FILE = BASE_DIR / 'donna_settings.json'
 MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
+MORNING_BRIEF_FILE = BASE_DIR / 'donna_morning_brief_state.json'
 CACHE = {}
 _sse_clients: list[asyncio.Queue] = []
 
@@ -1484,6 +1485,107 @@ def build_dashboard_payload():
         'live_strip': live_strip,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
     }
+def generate_morning_brief() -> str:
+    """Call Claude to produce a professional morning brief from live DONNA context."""
+    if not client:
+        return ''
+    risk = load_risk_state()
+    sig = build_session_significance(risk)
+    driver = build_market_driver_engine(risk)
+    morning = build_morning_edge(risk)
+    macro_events = load_macro_events()
+    pulse = get_live_futures_macro_pulse()
+    snap = risk.get('market_snapshot', {})
+
+    # Futures summary for the prompt
+    pulse_lines = []
+    for row in pulse:
+        sym = row.get('symbol', '')
+        last = row.get('last', '-')
+        pct = row.get('pct', '-')
+        if sym in ('NQ', 'ES', 'OIL', 'GOLD', 'DXY', 'VIX', 'US10Y'):
+            pulse_lines.append(f"  {sym}: {last}  ({pct}%)")
+    pulse_text = '\n'.join(pulse_lines) or '  (no live data)'
+
+    # Macro events for today
+    events = macro_events.get('events', [])
+    events_text = '\n'.join(f"  {e.get('time_et','?')} ET — {e.get('title','')} [{e.get('importance','').upper()}]" for e in events) or '  None scheduled'
+
+    today = now_ny()
+    date_str = today.strftime('%A, %B %-d, %Y')
+
+    context = f"""Date: {date_str}
+Overnight / pre-market snapshot:
+{pulse_text}
+
+Today's macro events:
+{events_text}
+
+Risk levels:
+  Macro: {risk.get('macro_risk','medium').upper()}
+  Headline: {risk.get('headline_risk','medium').upper()}
+  Market news: {risk.get('market_news_risk','medium').upper()}
+  Event phase: {risk.get('event_phase','unknown').upper()}
+  Next event: {risk.get('next_event','none')}
+
+Session significance: {sig.get('label','')} — NQ ~{int(sig.get('nq_points',0))} pts, ES ~{int(sig.get('es_points',0))} pts
+Dominant driver: {driver.get('dominant_driver','')}
+Market regime: {driver.get('market_regime','')}
+Market summary: {driver.get('market_summary','')}
+Today's bias: {morning.get('today_bias','')}
+First read: {morning.get('first_read','')}
+Watch first: {', '.join(morning.get('watch_first', []))}
+Last headline: {risk.get('last_headline','')}"""
+
+    system = (
+        "You are DONNA's morning desk analyst. Write a concise pre-market brief for a professional futures trader. "
+        "Rules: greet with date and day, summarize overnight moves for NQ/ES and key assets, list today's macro events with times, "
+        "state risk levels plainly, name the dominant market driver, list 3-4 instruments to watch first, "
+        "end with one sentence of execution guidance. "
+        "Tone: direct, factual, professional — like a trading desk morning note, not a chatbot. "
+        "Use emojis sparingly (max 5 total). Under 400 words. No bullet-point walls — mix short paragraphs and focused lists."
+    )
+
+    resp = client.messages.create(
+        model=ANTHROPIC_ASSISTANT_MODEL,
+        system=system,
+        messages=[{"role": "user", "content": f"Generate the morning brief using this context:\n\n{context}"}],
+        max_tokens=600,
+    )
+    return resp.content[0].text.strip() if resp.content else ''
+
+
+def send_morning_brief() -> dict:
+    """Generate and send the morning brief via Telegram. Returns status dict."""
+    try:
+        brief = generate_morning_brief()
+        if not brief:
+            return {'ok': False, 'error': 'Brief generation returned empty — check client/model config'}
+        result = send_telegram_message(brief)
+        state = {'last_sent_date': now_ny().strftime('%Y-%m-%d'), 'last_sent_utc': utc_now_iso()}
+        write_json_file(MORNING_BRIEF_FILE, state)
+        return {'ok': True, 'telegram': result, 'brief_length': len(brief)}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+
+async def morning_brief_loop():
+    while True:
+        try:
+            ny = now_ny()
+            # Fire once per day at 09:00 ET on weekdays only
+            if ny.weekday() < 5 and ny.hour == 9 and ny.minute == 0:
+                state = read_json_file(MORNING_BRIEF_FILE, {})
+                today_str = ny.strftime('%Y-%m-%d')
+                if state.get('last_sent_date') != today_str:
+                    print(f'DONNA morning brief: sending for {today_str}')
+                    result = await asyncio.to_thread(send_morning_brief)
+                    print(f'DONNA morning brief: {result}')
+        except Exception as e:
+            print(f'Morning brief loop error: {e}')
+        await asyncio.sleep(60)
+
+
 async def news_loop():
     while True:
         try: await asyncio.to_thread(process_news_guard_cycle)
@@ -1511,6 +1613,7 @@ async def startup():
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
+    asyncio.create_task(morning_brief_loop())
 
 
 @app.get('/')
@@ -1580,6 +1683,12 @@ async def assistant_data():
 @app.get('/test-telegram')
 async def test_telegram():
     return send_telegram_message('DONNA TEST MESSAGE')
+
+
+@app.get('/send-morning-brief')
+async def manual_morning_brief():
+    result = await asyncio.to_thread(send_morning_brief)
+    return result
 
 
 @app.post('/webhook')
