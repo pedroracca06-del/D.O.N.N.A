@@ -756,6 +756,82 @@ def build_what_matters_now(risk=None):
         'focus_reason': focus_reason,
     }
 
+
+def build_regime_engine(risk=None, sig=None, pulse=None, bias_score=50):
+    state = risk or load_risk_state()
+    sig = sig or build_session_significance(state)
+    if pulse is None:
+        pulse = get_live_futures_macro_pulse()
+
+    pulse_map = {r['symbol']: r for r in pulse}
+
+    def pct_float(sym):
+        raw = str(pulse_map.get(sym, {}).get('pct', '')).replace('%', '').replace('+', '').strip()
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    macro = str(state.get('macro_risk', 'medium')).lower()
+    headline = str(state.get('headline_risk', 'medium')).lower()
+    event_phase = str(state.get('event_phase', '')).upper()
+
+    nq_pct = pct_float('NQ')
+    vix_pct = pct_float('VIX')
+    nq_pts = safe_float(sig.get('nq_points', 0))
+    sig_label = str(sig.get('label', '')).upper()
+
+    # Priority order: EVENT_DRIVEN > RISK_OFF > TRENDING > RANGING > CONSOLIDATING
+    if event_phase in ('LIVE', 'IMMINENT', 'APPROACHING') or macro == 'high':
+        regime = 'EVENT_DRIVEN'
+    elif (vix_pct is not None and vix_pct >= 4.0) or \
+         (nq_pct is not None and nq_pct <= -0.75) or \
+         headline == 'high':
+        regime = 'RISK_OFF'
+    elif ('MAJOR' in sig_label or 'NOTABLE' in sig_label) and macro == 'low' and bias_score >= 65:
+        regime = 'TRENDING'
+    elif nq_pts < 80 and macro != 'high' and headline != 'high':
+        regime = 'RANGING'
+    else:
+        regime = 'CONSOLIDATING'
+
+    regime_props = {
+        'TRENDING':      {'regime_color': 'green',  'regime_confidence': 82, 'harvey_mode': 'AGGRESSIVE', 'bias_threshold': 60},
+        'RANGING':       {'regime_color': 'blue',   'regime_confidence': 68, 'harvey_mode': 'STANDARD',   'bias_threshold': 70},
+        'EVENT_DRIVEN':  {'regime_color': 'yellow', 'regime_confidence': 85, 'harvey_mode': 'DEFENSIVE',  'bias_threshold': 80},
+        'RISK_OFF':      {'regime_color': 'red',    'regime_confidence': 78, 'harvey_mode': 'DEFENSIVE',  'bias_threshold': 75},
+        'CONSOLIDATING': {'regime_color': 'muted',  'regime_confidence': 55, 'harvey_mode': 'STANDARD',   'bias_threshold': 68},
+    }
+    props = regime_props[regime]
+
+    if regime == 'TRENDING':
+        sig_word = sig_label.split()[0].capitalize()
+        regime_summary = f"NQ session is {sig_word} with macro risk low and bias confirmed — trend conditions are real."
+    elif regime == 'RANGING':
+        regime_summary = f"NQ has moved only {int(nq_pts)} points this session — balanced conditions with no clear directional edge."
+    elif regime == 'EVENT_DRIVEN':
+        next_ev = state.get('next_event', 'macro event')
+        regime_summary = f"Event timing is the dominant force ({next_ev}) — price action is reactive, not structural."
+    elif regime == 'RISK_OFF':
+        if vix_pct is not None and vix_pct >= 4.0:
+            regime_summary = f"VIX is expanding ({vix_pct:+.1f}%) — defensive conditions suppress conviction across the tape."
+        elif nq_pct is not None and nq_pct <= -0.75:
+            regime_summary = f"NQ is down {nq_pct:.1f}% — downside pressure marks this as a risk-off environment."
+        else:
+            regime_summary = "Headline risk is elevated — sentiment is fragile and reactive to news flow."
+    else:
+        regime_summary = "Conditions are mixed with no dominant regime — wait for one force to take control."
+
+    return {
+        'regime':             regime,
+        'regime_color':       props['regime_color'],
+        'regime_confidence':  props['regime_confidence'],
+        'regime_summary':     regime_summary,
+        'harvey_mode':        props['harvey_mode'],
+        'bias_threshold':     props['bias_threshold'],
+    }
+
+
 def build_harvey_payload(risk=None):
     """
     HARVEY execution engine — builds the full payload for the HARVEY tab.
@@ -819,6 +895,13 @@ def build_harvey_payload(risk=None):
     elif bias_score >= 28: bias_direction = 'LEAN SHORT'
     else:                  bias_direction = 'SHORT'
 
+    # ── REGIME ENGINE ────────────────────────────────────────
+    regime_data   = build_regime_engine(state, sig, pulse, bias_score)
+    regime        = regime_data['regime']
+    harvey_mode   = regime_data['harvey_mode']
+    bias_threshold = regime_data['bias_threshold']
+    sell_threshold = 100 - bias_threshold
+
     # ── ORB STATUS ──────────────────────────────────────────
     session = str(state.get('donna_session', '')).upper()
     now_ny_obj = now_ny()
@@ -851,7 +934,7 @@ def build_harvey_payload(risk=None):
             orb_note    = 'NQ is ranging inside or near ORB bounds. Wait for a clean break.'
             orb_quality = 'WAIT'
 
-    # ── VERDICT ─────────────────────────────────────────────
+    # ── VERDICT (regime-aware) ───────────────────────────────
     event_phase = str(state.get('event_phase', '')).upper()
     if event_phase in ('LIVE', 'IMMINENT'):
         verdict = 'WAIT'
@@ -860,17 +943,20 @@ def build_harvey_payload(risk=None):
         timing  = 'is live now' if (mins is not None and int(mins) <= 0) else f'in {mins} min' if mins is not None else 'is imminent'
         verdict_reason = f"{next_ev} {timing}. Do not trade into the release — wait for the initial reaction to resolve before reading direction."
         verdict_color  = 'yellow'
-    elif macro == 'high' and bias_score < 60:
+    elif regime == 'EVENT_DRIVEN' and bias_score < 85:
         verdict = 'WAIT'
-        verdict_reason = 'Macro risk HIGH. Conviction is compressed. Let the market show its hand first.'
+        verdict_reason = (f'Regime: EVENT_DRIVEN [{harvey_mode}]. Bias {bias_score}/100 — this regime requires 85+ for a signal. '
+                          f'Respect event timing over conviction.')
         verdict_color  = 'yellow'
-    elif bias_score >= 68 and orb_quality in ('ACTIVE', 'WATCH') and macro != 'high':
+    elif bias_score >= bias_threshold and orb_quality in ('ACTIVE', 'WATCH'):
         verdict = 'BUY'
-        verdict_reason = f'Bias {bias_score}/100 LONG. {sig.get("summary","Session supports momentum.")} Confirm with leadership.'
+        verdict_reason = (f'Bias {bias_score}/100 LONG [{harvey_mode} | {regime}]. '
+                          f'{sig.get("summary","Session supports momentum.")} Confirm with leadership.')
         verdict_color  = 'green'
-    elif bias_score <= 32 and orb_quality in ('ACTIVE', 'WATCH') and macro != 'high':
+    elif bias_score <= sell_threshold and orb_quality in ('ACTIVE', 'WATCH'):
         verdict = 'SELL'
-        verdict_reason = f'Bias {bias_score}/100 SHORT. Downside pressure confirmed. Respect breakdown until proven otherwise.'
+        verdict_reason = (f'Bias {bias_score}/100 SHORT [{harvey_mode} | {regime}]. '
+                          f'Downside pressure confirmed. Respect breakdown until proven otherwise.')
         verdict_color  = 'red'
     elif orb_quality in ('FORMING', 'PENDING'):
         verdict = 'WAIT'
@@ -890,8 +976,9 @@ def build_harvey_payload(risk=None):
         verdict_color  = 'yellow'
     else:
         verdict = 'WAIT'
-        needed  = 68 - bias_score
-        verdict_reason = (f'Bias is {bias_score}/100 — {needed} points short of a BUY signal (threshold: 68). '
+        needed  = bias_threshold - bias_score
+        verdict_reason = (f'Bias is {bias_score}/100 — {needed} points short of a BUY signal '
+                          f'(threshold: {bias_threshold} in {regime} regime [{harvey_mode}]). '
                           f'No dominant directional edge yet. Wait for momentum to build before committing size.')
         verdict_color  = 'yellow'
 
@@ -966,6 +1053,7 @@ def build_harvey_payload(risk=None):
         'session_context':      session_context,
         'macro_risk':           state.get('macro_risk', 'medium'),
         'headline':             state.get('last_headline', ''),
+        'regime':               regime_data,
     }
 
 
@@ -1479,6 +1567,7 @@ def build_dashboard_payload():
     significance = build_session_significance(risk)
     what_matters = build_what_matters_now(risk)
     observations = build_donna_observations(risk)
+    regime = build_regime_engine(risk, significance)
 
     session_playbook = build_session_playbook(risk)
     movers = build_market_movers_engine()
@@ -1529,6 +1618,7 @@ def build_dashboard_payload():
         'live_strip': live_strip,
         'session_playbook': session_playbook,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
+        'regime': regime,
     }
 def generate_morning_brief() -> str:
     """Call Claude to produce a professional morning brief from live DONNA context."""
@@ -2455,6 +2545,10 @@ tr:last-child td{border-bottom:none}
               <span class="chip-label">Morning Bias</span>
               <span class="chip-value" id="morningBias">—</span>
             </div>
+            <div class="chip" id="regimeChipWrap" style="border-color:rgba(255,255,255,.08)">
+              <span class="chip-label">Regime</span>
+              <span class="chip-value" id="regimeChipLabel">—</span>
+            </div>
           </div>
         </div>
       </div>
@@ -2760,7 +2854,16 @@ tr:last-child td{border-bottom:none}
         <div class="verdict-grid">
           <div>
             <div class="verdict-label">H.A.R.V.E.Y // Execution Verdict</div>
-            <div class="verdict-word" id="harveyVerdictWord">—</div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+              <div class="verdict-word" id="harveyVerdictWord">—</div>
+              <div id="harveyRegimeRow" style="display:flex;gap:8px;align-items:center;padding:4px 12px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+                <span style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase">Regime</span>
+                <span id="harveyRegimeLabel" style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">—</span>
+                <span style="color:var(--muted2);font-size:11px">·</span>
+                <span style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase">Mode</span>
+                <span id="harveyHarveyMode" style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">—</span>
+              </div>
+            </div>
             <div class="verdict-reason" id="harveyVerdictReason">Loading execution intelligence...</div>
           </div>
           <div class="bias-wrap" style="padding:10px 0">
@@ -2937,6 +3040,18 @@ function renderDashboard(d) {
   setText('openQuality', morning.open_quality || '—');
   setText('morningBias', morning.today_bias || '—');
 
+  // Regime chip
+  const regimeData = d.regime || {};
+  const rcColorMap = {green:'rgba(0,229,160,.35)',blue:'rgba(77,143,255,.35)',yellow:'rgba(255,201,60,.3)',red:'rgba(255,77,109,.35)',muted:'rgba(255,255,255,.08)'};
+  const rcTextMap  = {green:'var(--green)',blue:'var(--blue)',yellow:'var(--yellow)',red:'var(--red)',muted:'var(--muted)'};
+  const rcWrap = document.getElementById('regimeChipWrap');
+  if (rcWrap) rcWrap.style.borderColor = rcColorMap[regimeData.regime_color] || 'rgba(255,255,255,.08)';
+  const rcLabel = document.getElementById('regimeChipLabel');
+  if (rcLabel) {
+    rcLabel.textContent = regimeData.regime ? `${regimeData.regime}  ·  ${regimeData.harvey_mode}` : '—';
+    rcLabel.style.color = rcTextMap[regimeData.regime_color] || 'var(--text)';
+  }
+
   // Stat cards
   setHtml('macroRisk', riskBadge(risk.macro_risk));
   setHtml('headlineRisk', riskBadge(risk.headline_risk));
@@ -3103,6 +3218,15 @@ function renderHarvey(d) {
   if (vb) vb.className = `verdict-banner ${vcolor}`;
   setText('harveyVerdictWord',   verdict);
   setText('harveyVerdictReason', reason);
+
+  // Regime row in verdict banner
+  const regimePayload  = d.regime || {};
+  const hvRcTextMap = {green:'var(--green)',blue:'var(--blue)',yellow:'var(--yellow)',red:'var(--red)',muted:'var(--muted2)'};
+  const hvRcColor = hvRcTextMap[regimePayload.regime_color] || 'var(--text)';
+  const hvRegimeEl = document.getElementById('harveyRegimeLabel');
+  if (hvRegimeEl) { hvRegimeEl.textContent = regimePayload.regime || '—'; hvRegimeEl.style.color = hvRcColor; }
+  const hvModeEl = document.getElementById('harveyHarveyMode');
+  if (hvModeEl) { hvModeEl.textContent = regimePayload.harvey_mode || '—'; hvModeEl.style.color = hvRcColor; }
 
   const biasColor = bias >= 60 ? 'var(--green)' : bias <= 40 ? 'var(--red)' : 'var(--yellow)';
   const bsEl = document.getElementById('harveyBiasScore');
