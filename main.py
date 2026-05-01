@@ -2426,9 +2426,9 @@ body{
 .panel,.card{
   background:linear-gradient(180deg,rgba(16,32,64,.98),rgba(10,22,48,.99));
   border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:var(--shadow);padding:22px;
+  box-shadow:var(--shadow);padding:17px;
 }
-.panel-sm{padding:16px 18px}
+.panel-sm{padding:11px 14px}
 .kicker{
   font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
   color:var(--muted2);text-transform:uppercase;margin-bottom:10px;
@@ -2489,7 +2489,7 @@ tr:last-child td{border-bottom:none}
 
 /* ── HERO BANNER ── */
 .hero-banner{
-  padding:28px 30px;border-radius:20px;
+  padding:16px 20px;border-radius:16px;
   border:1px solid rgba(77,143,255,.2);
   background:
     radial-gradient(circle at top right, rgba(37,99,235,.15) 0%, transparent 50%),
@@ -2497,29 +2497,47 @@ tr:last-child td{border-bottom:none}
   box-shadow:var(--shadow);
 }
 .hero-eyebrow{
-  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2.5px;
-  color:var(--blue);text-transform:uppercase;margin-bottom:12px;
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2.5px;
+  color:var(--blue);text-transform:uppercase;margin-bottom:8px;
 }
 .hero-title{
-  font-family:'Rajdhani',sans-serif;font-size:38px;font-weight:700;
+  font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;
   line-height:1.05;letter-spacing:.5px;
 }
 .hero-sub{
-  margin-top:12px;font-size:14px;line-height:1.7;color:var(--muted);max-width:80ch;
+  margin-top:8px;font-size:13px;line-height:1.6;color:var(--muted);max-width:80ch;
 }
-.hero-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:20px;align-items:start}
-.chip-stack{display:grid;gap:10px}
+.hero-grid{display:grid;grid-template-columns:1.25fr .75fr;gap:16px;align-items:start}
+.chip-stack{display:grid;gap:8px}
 .chip{
-  border-radius:12px;padding:13px 15px;
+  border-radius:10px;padding:8px 12px;
   border:1px solid var(--line);background:rgba(255,255,255,.03);
 }
 .chip-label{
   display:block;font-family:'Space Mono',monospace;font-size:9px;
-  letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;
+  letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px;
 }
 .chip-value{
-  display:block;font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700;letter-spacing:.3px;
+  display:block;font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;letter-spacing:.3px;
 }
+/* ── HERO WARNINGS (inline in hero) ── */
+.hero-warn-list{margin-top:10px;border-top:1px solid var(--line2);padding-top:8px}
+.hw-item{display:flex;align-items:baseline;gap:7px;padding:3px 0;font-size:11px;color:var(--muted)}
+.hw-dot{width:5px;height:5px;border-radius:50%;background:var(--yellow);flex-shrink:0;margin-top:2px}
+/* ── PLAYBOOK BAR (slim single-row) ── */
+.playbook-bar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 16px;border-radius:10px;
+  background:var(--panel);border:1px solid var(--line2);
+  font-size:12px;
+}
+.pb-bar-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--muted2);text-transform:uppercase;margin-right:4px}
+.pb-bar-val{font-weight:600;color:var(--text)}
+.pb-bar-sep{color:var(--line);font-size:14px}
+.pb-bar-note{color:var(--muted);flex:1;font-size:11px}
+/* ── PLAYBOOK NAV BTN ── */
+.playbook-btn{background:linear-gradient(135deg,rgba(139,92,246,.12),rgba(139,92,246,.05))!important;border-color:rgba(139,92,246,.25)!important;color:#a78bfa!important}
+.playbook-btn.active{background:linear-gradient(135deg,#5b21b6,#4c1d95)!important;border-color:transparent!important;color:#fff!important;box-shadow:0 4px 20px rgba(139,92,246,.35)!important}
 
 /* ── STAT GRID ── */
 .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
@@ -2906,6 +2924,7 @@ tr:last-child td{border-bottom:none}
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
+        <button class="tab-btn playbook-btn" data-page="playbook">Playbook</button>
         <button class="tab-btn journal-btn" data-page="journal">Journal</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
@@ -2928,82 +2947,52 @@ tr:last-child td{border-bottom:none}
   <div class="page active" id="page-dashboard">
     <div class="vstack">
 
-      <!-- HERO -->
+      <!-- HERO (compact) -->
       <div class="hero-banner">
         <div class="hero-eyebrow">Command Overview</div>
         <div class="hero-grid">
           <div>
             <div class="hero-title" id="heroTitle">Loading market intelligence...</div>
             <div class="hero-sub" id="heroSub">Connecting to live data feeds.</div>
+            <div style="margin-top:8px;font-size:11px;color:var(--muted2)" id="donnaTime">—</div>
           </div>
-          <div class="chip-stack">
-            <div class="chip">
-              <span class="chip-label">Dominant Driver</span>
-              <span class="chip-value" id="driverDominant">—</span>
-            </div>
-            <div class="chip">
-              <span class="chip-label">Main Threat</span>
-              <span class="chip-value" id="mainThreat">—</span>
-            </div>
-            <div class="chip">
-              <span class="chip-label">Open Quality</span>
-              <span class="chip-value" id="openQuality">—</span>
-            </div>
-            <div class="chip">
-              <span class="chip-label">Morning Bias</span>
-              <span class="chip-value" id="morningBias">—</span>
-            </div>
-            <div class="chip" id="regimeChipWrap" style="border-color:rgba(255,255,255,.08)">
-              <span class="chip-label">Regime</span>
-              <span class="chip-value" id="regimeChipLabel">—</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SESSION PLAYBOOK -->
-      <div class="panel panel-sm">
-        <div class="kicker" style="margin-bottom:12px">Session Playbook</div>
-        <div class="playbook-grid">
-          <div class="playbook-cell">
-            <div class="kicker" style="margin-bottom:4px">Session Type</div>
-            <div class="pb-val" id="playbookSession">—</div>
-          </div>
-          <div class="playbook-cell">
-            <div class="kicker" style="margin-bottom:4px">Dominant Driver</div>
-            <div class="pb-val" id="playbookDriver">—</div>
-          </div>
-          <div class="playbook-cell">
-            <div class="kicker" style="margin-bottom:4px">Key Events Today</div>
-            <div class="pb-note" id="playbookEvents">—</div>
-          </div>
-          <div class="playbook-cell">
-            <div class="kicker" style="margin-bottom:4px">Tactical Note</div>
-            <div class="pb-note" id="playbookTactical">—</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SCENARIO ENGINE -->
-      <div class="panel">
-        <div class="scenario-header">
           <div>
-            <div class="kicker">AI Scenario Engine</div>
-            <div class="section-title">Today\'s Playbook</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:14px">
-            <div class="scenario-meta" id="scenarioMeta">—</div>
-            <button class="gen-btn" id="scenarioGenBtn">GENERATE</button>
-          </div>
-        </div>
-        <div id="scenarioGrid" class="scenario-grid">
-          <div class="scenario-card">
-            <div class="sc-reaction" style="color:var(--muted2)">Click GENERATE to build today\'s if/then playbook from live market conditions and macro calendar.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px">
+              <div class="chip">
+                <span class="chip-label">Driver</span>
+                <span class="chip-value" id="driverDominant">—</span>
+              </div>
+              <div class="chip">
+                <span class="chip-label">Bias</span>
+                <span class="chip-value" id="morningBias">—</span>
+              </div>
+              <div class="chip" id="regimeChipWrap" style="border-color:rgba(255,255,255,.08)">
+                <span class="chip-label">Regime</span>
+                <span class="chip-value" id="regimeChipLabel">—</span>
+              </div>
+              <div class="chip">
+                <span class="chip-label">Session</span>
+                <span class="chip-value" id="sessionSig" style="font-size:13px">—</span>
+              </div>
+            </div>
+            <div class="hero-warn-list" id="warningsList"></div>
+            <div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5" id="morningRead">—</div>
           </div>
         </div>
       </div>
 
-      <!-- STAT GRID -->
+      <!-- SESSION PLAYBOOK BAR -->
+      <div class="playbook-bar">
+        <span class="pb-bar-label">Session</span><span class="pb-bar-val" id="playbookSession">—</span>
+        <span class="pb-bar-sep">·</span>
+        <span class="pb-bar-label">Driver</span><span class="pb-bar-val" id="playbookDriver">—</span>
+        <span class="pb-bar-sep">·</span>
+        <span class="pb-bar-label">Events</span><span class="pb-bar-val" id="playbookEvents">—</span>
+        <span class="pb-bar-sep">·</span>
+        <span class="pb-bar-note" id="playbookTactical">—</span>
+      </div>
+
+      <!-- RISK STRIP -->
       <div class="stat-grid">
         <div class="card stat-card">
           <div class="s-lab">Macro Risk</div>
@@ -3021,8 +3010,8 @@ tr:last-child td{border-bottom:none}
           <div class="s-sub">Company &amp; sector catalyst pressure</div>
         </div>
         <div class="card stat-card">
-          <div class="s-lab">Session Significance</div>
-          <div class="s-val" id="sessionSig" style="font-size:18px;line-height:1.2">—</div>
+          <div class="s-lab">NQ Session</div>
+          <div class="s-val" id="sessionSigBig" style="font-size:18px;line-height:1.2">—</div>
           <div class="s-sub" id="sessionSigSub">—</div>
         </div>
       </div>
@@ -3033,22 +3022,23 @@ tr:last-child td{border-bottom:none}
         <!-- LEFT -->
         <div class="left-stack">
 
-          <!-- MARKET DRIVER ENGINE -->
+          <!-- MARKET DRIVER ENGINE (compressed) -->
           <div class="panel">
-            <div class="kicker">Market Driver Engine</div>
-            <div class="section-title" style="margin-bottom:14px">Regime + Context</div>
-            <div class="kv-row"><span class="kv-k">Dominant Driver</span><span class="kv-v" id="driverDominant2">—</span></div>
-            <div class="kv-row"><span class="kv-k">Secondary Driver</span><span class="kv-v" id="driverSecondary">—</span></div>
-            <div class="kv-row"><span class="kv-k">Regime</span><span class="kv-v" id="driverRegime">—</span></div>
-            <div class="kv-row"><span class="kv-k">Threat</span><span class="kv-v" id="driverThreat">—</span></div>
-            <div class="kv-row"><span class="kv-k">Confidence</span><span class="kv-v" id="driverConfidence">—</span></div>
-            <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.6" id="driverSummary">—</div>
+            <div class="kicker" style="margin-bottom:8px">Market Driver Engine</div>
+            <div class="kv-row" style="padding:7px 0">
+              <span class="kv-k">Regime</span>
+              <span class="kv-v" id="driverRegime">—</span>
+            </div>
+            <div class="kv-row" style="padding:7px 0">
+              <span class="kv-k">Driver</span>
+              <span class="kv-v" id="driverDominant2">—</span>
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.55" id="driverSummary">—</div>
           </div>
 
           <!-- MAJOR INDEXES -->
           <div class="panel">
-            <div class="kicker">Market Board</div>
-            <div class="section-title" style="margin-bottom:14px">Major Indexes</div>
+            <div class="kicker" style="margin-bottom:10px">Market Board</div>
             <table>
               <thead><tr><th>Index</th><th>Last</th><th>Chg</th><th>% Chg</th></tr></thead>
               <tbody id="majorIndexesTable"></tbody>
@@ -3057,18 +3047,17 @@ tr:last-child td{border-bottom:none}
 
           <!-- MARKET MOVERS (Live) -->
           <div class="panel">
-            <div class="kicker">Live Movers</div>
-            <div class="section-title" style="margin-bottom:14px">Top Gainers &amp; Losers</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="kicker" style="margin-bottom:10px">Live Movers</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
               <div>
-                <div class="kicker" style="margin-bottom:8px;color:var(--green)">Gainers</div>
+                <div class="kicker" style="margin-bottom:6px;color:var(--green)">Gainers</div>
                 <table>
                   <thead><tr><th>Sym</th><th>Last</th><th>%Chg</th></tr></thead>
                   <tbody id="gainersTable"></tbody>
                 </table>
               </div>
               <div>
-                <div class="kicker" style="margin-bottom:8px;color:var(--red)">Losers</div>
+                <div class="kicker" style="margin-bottom:6px;color:var(--red)">Losers</div>
                 <table>
                   <thead><tr><th>Sym</th><th>Last</th><th>%Chg</th></tr></thead>
                   <tbody id="losersTable"></tbody>
@@ -3082,27 +3071,17 @@ tr:last-child td{border-bottom:none}
         <!-- RIGHT -->
         <div class="right-stack">
 
-          <!-- ACTIVE WARNINGS -->
-          <div class="panel">
-            <div class="kicker">Risk Board</div>
-            <div class="section-title" style="margin-bottom:14px">Active Warnings</div>
-            <div id="warningsList"></div>
-            <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.6" id="morningRead">—</div>
-            <div style="margin-top:10px;font-size:12px;color:var(--muted2);line-height:1.6" id="donnaTime">—</div>
-          </div>
-
           <!-- DONNA OBSERVATIONS -->
           <div class="panel">
-            <div class="kicker">Donna Feed</div>
-            <div class="section-title" style="margin-bottom:14px">Live Observations</div>
+            <div class="kicker" style="margin-bottom:10px">Live Observations</div>
             <div id="observationsList"></div>
           </div>
 
           <!-- TOP STORY -->
           <div class="panel">
-            <div class="kicker">Primary Catalyst</div>
-            <div style="font-size:24px;font-weight:700;font-family:Rajdhani,sans-serif;line-height:1.1;margin-bottom:10px" id="topStory">—</div>
-            <div style="font-size:13px;color:var(--muted);line-height:1.6" id="topStoryNote">—</div>
+            <div class="kicker" style="margin-bottom:8px">Primary Catalyst</div>
+            <div style="font-size:20px;font-weight:700;font-family:Rajdhani,sans-serif;line-height:1.15;margin-bottom:8px" id="topStory">—</div>
+            <div style="font-size:12px;color:var(--muted);line-height:1.55" id="topStoryNote">—</div>
           </div>
 
         </div>
@@ -3381,6 +3360,33 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
+  <!-- ════════════════════ PLAYBOOK ════════════════════ -->
+  <div class="page" id="page-playbook">
+    <div class="vstack">
+
+      <div class="hero-banner">
+        <div class="hero-eyebrow">AI Scenario Engine</div>
+        <div class="scenario-header">
+          <div>
+            <div class="hero-title" style="color:#a78bfa">Today\'s Playbook</div>
+            <div class="hero-sub">If/then scenarios generated from live market conditions, active regime, and today\'s macro calendar.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
+            <div class="scenario-meta" id="scenarioMeta">—</div>
+            <button class="gen-btn" id="scenarioGenBtn">GENERATE</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="scenarioGrid" class="scenario-grid">
+        <div class="scenario-card">
+          <div class="sc-reaction" style="color:var(--muted2)">Click GENERATE to build today\'s if/then playbook from live market conditions and macro calendar.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ════════════════════ JOURNAL ════════════════════ -->
   <div class="page" id="page-journal">
     <div class="vstack">
@@ -3535,6 +3541,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
+    if (btn.dataset.page === 'playbook') refreshScenarios();
   });
 });
 
@@ -3584,11 +3591,11 @@ function renderDashboard(d) {
   const liveMovers = d.live_movers || {};
   const news = d.news || [];
 
-  // Session / strip
+  // Live strip + session
   setText('sessionVal', risk.donna_session || '—');
   setHtml('liveStrip', buildStrip(d.live_strip || []));
 
-  // Color-coded risk bar pulse
+  // Risk bar pulse
   const stripEl = document.querySelector('.ticker-wrap');
   if (stripEl) {
     const macroLevel = (risk.macro_risk || '').toLowerCase();
@@ -3597,15 +3604,14 @@ function renderDashboard(d) {
     else if (macroLevel === 'medium') stripEl.classList.add('risk-medium');
   }
 
-  // Hero
+  // Hero (compact)
   setText('heroTitle', wm.headline || driver.dominant_driver || '—');
   setText('heroSub', wm.summary || driver.market_summary || '—');
+  setText('donnaTime', risk.donna_time_ny ? risk.donna_time_ny.substring(0,19).replace('T',' ') + ' ET' : '—');
   setText('driverDominant', driver.dominant_driver || '—');
-  setText('mainThreat', morning.main_threat || '—');
-  setText('openQuality', morning.open_quality || '—');
   setText('morningBias', morning.today_bias || '—');
 
-  // Regime chip
+  // Regime chip (color-coded)
   const regimeData = d.regime || {};
   const rcColorMap = {green:'rgba(0,229,160,.35)',blue:'rgba(77,143,255,.35)',yellow:'rgba(255,201,60,.3)',red:'rgba(255,77,109,.35)',muted:'rgba(255,255,255,.08)'};
   const rcTextMap  = {green:'var(--green)',blue:'var(--blue)',yellow:'var(--yellow)',red:'var(--red)',muted:'var(--muted)'};
@@ -3617,19 +3623,28 @@ function renderDashboard(d) {
     rcLabel.style.color = rcTextMap[regimeData.regime_color] || 'var(--text)';
   }
 
-  // Stat cards
+  // Session chip (hero 2×2 grid, bottom-right)
+  const sessionSigEl = document.getElementById('sessionSig');
+  if (sessionSigEl) { sessionSigEl.textContent = sig.label || '—'; }
+
+  // Warnings — compact hw-item list inside hero
+  const warnings = risk.active_warnings || [];
+  setHtml('warningsList', warnings.slice(0,3).map(w =>
+    `<div class="hw-item"><span class="hw-dot"></span>${w}</div>`
+  ).join('') || '');
+  setText('morningRead', morning.first_read || '—');
+
+  // Risk stat strip
   setHtml('macroRisk', riskBadge(risk.macro_risk));
   setHtml('headlineRisk', riskBadge(risk.headline_risk));
   setHtml('marketRisk', riskBadge(risk.market_news_risk));
-  setText('sessionSig', sig.label || '—');
-  setText('sessionSigSub', sig.nq_points ? `NQ ${sig.nq_points}pts  ES ${sig.es_points}pts` : '—');
+  const sessionSigBig = document.getElementById('sessionSigBig');
+  if (sessionSigBig) sessionSigBig.textContent = sig.label || '—';
+  setText('sessionSigSub', sig.nq_points ? `NQ ${sig.nq_points}pts  ·  ES ${sig.es_points}pts` : '—');
 
-  // Driver engine
+  // Driver engine (compressed — 2 rows + summary)
   setText('driverDominant2', driver.dominant_driver || '—');
-  setText('driverSecondary', driver.secondary_driver || '—');
   setText('driverRegime', driver.market_regime || '—');
-  setText('driverThreat', driver.market_threat || '—');
-  setText('driverConfidence', driver.market_confidence || '—');
   setText('driverSummary', driver.market_summary || '—');
 
   // Major indexes
@@ -3644,28 +3659,15 @@ function renderDashboard(d) {
 
   // Gainers / Losers
   const gainers = (liveMovers.gainers || []).slice(0, 5);
-  const losers = (liveMovers.losers || []).slice(0, 5);
+  const losers  = (liveMovers.losers  || []).slice(0, 5);
   setHtml('gainersTable', gainers.map(r => `
     <tr>
-      <td class="up">${r.symbol}</td>
-      <td>${r.last}</td>
-      <td class="up">${r.pct}</td>
+      <td class="up">${r.symbol}</td><td>${r.last}</td><td class="up">${r.pct}</td>
     </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
   setHtml('losersTable', losers.map(r => `
     <tr>
-      <td class="dn">${r.symbol}</td>
-      <td>${r.last}</td>
-      <td class="dn">${r.pct}</td>
+      <td class="dn">${r.symbol}</td><td>${r.last}</td><td class="dn">${r.pct}</td>
     </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
-
-  // Warnings
-  const warnings = risk.active_warnings || [];
-  setHtml('warningsList', warnings.map(w => `
-    <div class="obs-item medium">
-      <div class="obs-title">${w}</div>
-    </div>`).join('') || '<div class="obs-item low"><div class="obs-body">No active warnings.</div></div>');
-  setText('morningRead', morning.first_read || '—');
-  setText('donnaTime', `Updated: ${risk.donna_time_ny ? risk.donna_time_ny.substring(0,19).replace('T',' ') + ' ET' : '—'}`);
 
   // Observations
   setHtml('observationsList', obs.map(o => `
@@ -3678,15 +3680,15 @@ function renderDashboard(d) {
   setText('topStory', risk.last_headline || wm.headline || '—');
   setText('topStoryNote', risk.headline_guidance || wm.summary || '—');
 
-  // Session playbook
+  // Session playbook bar (slim)
   const pb = d.session_playbook || {};
   setText('playbookSession', pb.session_type || '—');
   setText('playbookDriver', pb.dominant_driver || '—');
   const evts = pb.key_events || [];
-  setHtml('playbookEvents', evts.length ? evts.map(e => `<div>${e}</div>`).join('') : '<div>No events scheduled</div>');
+  setText('playbookEvents', evts.length ? evts.map(e => e.split('—').pop().trim()).join(' · ') : 'None');
   setText('playbookTactical', pb.tactical_note || '—');
 
-  // Scenario engine (only render if payload includes scenarios)
+  // Scenarios — update playbook page silently in background
   if (d.scenarios) renderScenarios(d.scenarios);
 
   // Footer
