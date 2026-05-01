@@ -1563,6 +1563,141 @@ def build_session_playbook(risk=None):
     }
 
 
+def build_scenario_engine(force: bool = False) -> dict:
+    """Generate 3-5 if/then playbook scenarios for today's session via Claude.
+    Results are cached for 30 minutes to avoid redundant API calls.
+    Returns a dict with keys: scenarios (list), generated_at (iso), source ('claude'|'fallback').
+    """
+    cache_key = 'scenario_engine'
+    if not force:
+        cached = cache_get(cache_key)
+        if cached:
+            return cached
+
+    risk          = load_risk_state()
+    sig           = build_session_significance(risk)
+    regime_data   = build_regime_engine(risk, sig)
+    macro_events  = load_macro_events()
+    pulse         = get_live_futures_macro_pulse()
+    snap          = risk.get('market_snapshot', {})
+
+    pulse_map = {r['symbol']: r for r in pulse}
+    def pulse_line(sym):
+        r = pulse_map.get(sym, {})
+        return f"{sym}: {r.get('last','-')} ({r.get('pct','-')})"
+
+    events_text = '\n'.join(
+        f"  {e.get('time_et','?')} ET — {e.get('title','')} [{e.get('importance','').upper()}]"
+        for e in macro_events.get('events', [])
+    ) or '  None scheduled'
+
+    nq_snap  = snap.get('NQ', {})
+    es_snap  = snap.get('ES', {})
+    nq_last  = nq_snap.get('last', 0)
+    es_last  = es_snap.get('last', 0)
+
+    context = f"""Date: {now_ny().strftime('%A, %B %-d, %Y')}
+Session: {risk.get('donna_session', '—')}
+Regime: {regime_data.get('regime','—')} | HARVEY Mode: {regime_data.get('harvey_mode','—')}
+Macro Risk: {risk.get('macro_risk','medium').upper()} | Event Phase: {risk.get('event_phase','—').upper()}
+Next Event: {risk.get('next_event','none')}
+
+Today's macro calendar:
+{events_text}
+
+Live futures & macro pulse:
+  {pulse_line('NQ')}
+  {pulse_line('ES')}
+  {pulse_line('OIL')}
+  {pulse_line('GOLD')}
+  {pulse_line('DXY')}
+  {pulse_line('VIX')}
+  {pulse_line('US10Y')}
+
+NQ price reference: {nq_last}
+ES price reference: {es_last}
+Session significance: {sig.get('label','—')} — NQ ~{int(sig.get('nq_points',0))} pts
+Last headline: {risk.get('last_headline','')}
+Dominant driver: {risk.get('donna_session','')}, macro={risk.get('macro_risk','')}"""
+
+    system = (
+        "You are DONNA's scenario planning engine. Generate exactly 3 to 5 if/then playbook scenarios "
+        "for today's trading session based on the context provided. "
+        "Return ONLY valid JSON — an array of scenario objects, nothing else. "
+        "Each object must have exactly these string keys: "
+        "trigger, expected_reaction, key_levels, watch_for, confidence. "
+        "confidence must be one of: HIGH, MEDIUM, LOW. "
+        "Be specific with price levels (use the NQ/ES reference prices to anchor levels). "
+        "Scenarios should cover: upside break, downside break, event-reaction, and range/consolidation cases. "
+        "key_levels should be a short slash-separated string like '19,380 / 19,450 / 19,520'. "
+        "Keep each field concise — one sentence max. No markdown, no extra keys."
+    )
+
+    fallback_scenarios = [
+        {
+            'trigger': f'If NQ breaks and holds above {int(safe_float(nq_last,19000)+100):,}',
+            'expected_reaction': 'Continuation toward next resistance. Leadership names accelerate.',
+            'key_levels': f'{int(safe_float(nq_last,19000)):,} / {int(safe_float(nq_last,19000)+100):,} / {int(safe_float(nq_last,19000)+200):,}',
+            'watch_for': 'NVDA and MSFT confirmation above their intraday highs.',
+            'confidence': 'MEDIUM',
+        },
+        {
+            'trigger': f'If NQ loses {int(safe_float(nq_last,19000)-100):,} and fails to reclaim',
+            'expected_reaction': 'Pressure toward lower support. Risk-off tone accelerates.',
+            'key_levels': f'{int(safe_float(nq_last,19000)-100):,} / {int(safe_float(nq_last,19000)-200):,} / {int(safe_float(nq_last,19000)-300):,}',
+            'watch_for': 'VIX expansion above 20 and DXY strength confirming the move.',
+            'confidence': 'MEDIUM',
+        },
+        {
+            'trigger': f'If macro event ({risk.get("next_event","scheduled event")}) surprises to the upside',
+            'expected_reaction': 'Sharp initial spike. Wait for first 5-minute reaction to resolve before entering.',
+            'key_levels': f'{int(safe_float(nq_last,19000)):,} / {int(safe_float(nq_last,19000)+150):,}',
+            'watch_for': 'Whether ES confirms the NQ move within 2 minutes of the print.',
+            'confidence': 'LOW',
+        },
+    ]
+
+    if not client:
+        result = {'scenarios': fallback_scenarios, 'generated_at': utc_now_iso(), 'source': 'fallback'}
+        cache_set(cache_key, result, 1800)
+        return result
+
+    try:
+        resp = client.messages.create(
+            model=ANTHROPIC_ASSISTANT_MODEL,
+            system=system,
+            messages=[{'role': 'user', 'content': f'Generate scenarios for today:\n\n{context}'}],
+            max_tokens=1200,
+        )
+        raw = resp.content[0].text.strip() if resp.content else '[]'
+        # Strip markdown fences if Claude wraps in ```json
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+        raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE)
+        scenarios = json.loads(raw)
+        if not isinstance(scenarios, list):
+            raise ValueError('Not a list')
+        # Sanitise — ensure required keys and confidence values
+        clean = []
+        for s in scenarios[:5]:
+            conf = str(s.get('confidence', 'MEDIUM')).upper()
+            if conf not in ('HIGH', 'MEDIUM', 'LOW'):
+                conf = 'MEDIUM'
+            clean.append({
+                'trigger':           str(s.get('trigger', '—')),
+                'expected_reaction': str(s.get('expected_reaction', '—')),
+                'key_levels':        str(s.get('key_levels', '—')),
+                'watch_for':         str(s.get('watch_for', '—')),
+                'confidence':        conf,
+            })
+        result = {'scenarios': clean or fallback_scenarios, 'generated_at': utc_now_iso(), 'source': 'claude'}
+    except Exception as e:
+        print(f'Scenario engine error: {e}')
+        result = {'scenarios': fallback_scenarios, 'generated_at': utc_now_iso(), 'source': 'fallback'}
+
+    cache_set(cache_key, result, 1800)
+    return result
+
+
 def build_dashboard_payload():
     risk = load_risk_state()
     driver = build_market_driver_engine(risk)
@@ -1584,6 +1719,7 @@ def build_dashboard_payload():
     news = get_live_news()
     live_movers = get_live_movers()
     futures_macro_pulse = get_live_futures_macro_pulse()
+    scenarios = build_scenario_engine()
 
     effective_alerts = alerts if alerts else observations
 
@@ -1622,6 +1758,7 @@ def build_dashboard_payload():
         'session_playbook': session_playbook,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
         'regime': regime,
+        'scenarios': scenarios,
     }
 def generate_morning_brief() -> str:
     """Call Claude to produce a professional morning brief from live DONNA context."""
@@ -1801,6 +1938,16 @@ async def calendar():
 @app.get('/earnings')
 async def earnings():
     return get_live_earnings()
+
+
+@app.get('/scenario-data')
+async def scenario_data():
+    return build_scenario_engine()
+
+
+@app.post('/scenario-data/refresh')
+async def scenario_data_refresh():
+    return build_scenario_engine(force=True)
 
 
 @app.get('/system-health')
@@ -2482,6 +2629,57 @@ tr:last-child td{border-bottom:none}
   letter-spacing:.5px;
 }
 
+/* ── SCENARIO ENGINE ── */
+.scenario-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-top:16px}
+.scenario-card{
+  padding:20px 22px;border-radius:16px;
+  border:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(16,32,64,.98),rgba(10,22,48,.99));
+  position:relative;overflow:hidden;
+  transition:border-color .2s,box-shadow .2s;
+}
+.scenario-card:hover{border-color:rgba(77,143,255,.25);box-shadow:0 8px 28px rgba(0,0,0,.3)}
+.scenario-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:16px 16px 0 0;
+}
+.scenario-card.conf-HIGH::before{background:linear-gradient(90deg,var(--green),rgba(0,229,160,.4))}
+.scenario-card.conf-MEDIUM::before{background:linear-gradient(90deg,var(--yellow),rgba(255,201,60,.4))}
+.scenario-card.conf-LOW::before{background:linear-gradient(90deg,var(--muted2),rgba(74,106,154,.4))}
+.sc-trigger{
+  font-family:'Rajdhani',sans-serif;font-size:17px;font-weight:700;
+  color:var(--yellow);line-height:1.3;margin-bottom:10px;
+}
+.sc-reaction{font-size:13px;color:var(--text);line-height:1.6;margin-bottom:10px}
+.sc-levels{
+  font-family:'Space Mono',monospace;font-size:11px;
+  color:var(--blue);letter-spacing:.5px;margin-bottom:10px;
+  padding:8px 10px;border-radius:8px;background:rgba(77,143,255,.06);
+  border:1px solid rgba(77,143,255,.12);
+}
+.sc-watch{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px}
+.sc-conf{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:'Space Mono',monospace;font-size:10px;font-weight:700;
+  letter-spacing:1px;padding:4px 10px;border-radius:6px;
+}
+.sc-conf.HIGH{background:rgba(0,229,160,.1);color:var(--green);border:1px solid rgba(0,229,160,.25)}
+.sc-conf.MEDIUM{background:rgba(255,201,60,.1);color:var(--yellow);border:1px solid rgba(255,201,60,.25)}
+.sc-conf.LOW{background:rgba(255,255,255,.04);color:var(--muted);border:1px solid var(--line)}
+.sc-conf-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.scenario-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+.scenario-meta{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);letter-spacing:1px}
+.gen-btn{
+  padding:8px 16px;border-radius:10px;border:1px solid rgba(77,143,255,.3);
+  background:rgba(77,143,255,.08);color:var(--blue);
+  cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;
+  letter-spacing:1px;transition:all .2s;white-space:nowrap;
+}
+.gen-btn:hover{background:rgba(77,143,255,.16);border-color:rgba(77,143,255,.5)}
+.gen-btn:disabled{opacity:.5;cursor:not-allowed}
+@keyframes spin{to{transform:rotate(360deg)}}
+.gen-btn.loading::after{content:' ⟳';display:inline-block;animation:spin .7s linear infinite}
+@media(max-width:900px){.scenario-grid{grid-template-columns:1fr}}
+
 /* ── JOURNAL TAB ── */
 .journal-btn {
   background:linear-gradient(135deg,rgba(240,180,41,.10),rgba(240,180,41,.04)) !important;
@@ -2782,6 +2980,25 @@ tr:last-child td{border-bottom:none}
           <div class="playbook-cell">
             <div class="kicker" style="margin-bottom:4px">Tactical Note</div>
             <div class="pb-note" id="playbookTactical">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SCENARIO ENGINE -->
+      <div class="panel">
+        <div class="scenario-header">
+          <div>
+            <div class="kicker">AI Scenario Engine</div>
+            <div class="section-title">Today\'s Playbook</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px">
+            <div class="scenario-meta" id="scenarioMeta">—</div>
+            <button class="gen-btn" id="scenarioGenBtn">GENERATE</button>
+          </div>
+        </div>
+        <div id="scenarioGrid" class="scenario-grid">
+          <div class="scenario-card">
+            <div class="sc-reaction" style="color:var(--muted2)">Click GENERATE to build today\'s if/then playbook from live market conditions and macro calendar.</div>
           </div>
         </div>
       </div>
@@ -3469,6 +3686,9 @@ function renderDashboard(d) {
   setHtml('playbookEvents', evts.length ? evts.map(e => `<div>${e}</div>`).join('') : '<div>No events scheduled</div>');
   setText('playbookTactical', pb.tactical_note || '—');
 
+  // Scenario engine (only render if payload includes scenarios)
+  if (d.scenarios) renderScenarios(d.scenarios);
+
   // Footer
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
 }
@@ -3905,6 +4125,58 @@ function connectSSE() {
     setTimeout(connectSSE, 3000);
   };
 }
+
+// ════════ SCENARIO ENGINE ════════
+function renderScenarios(data) {
+  const scenarios = data.scenarios || [];
+  const genAt = data.generated_at || '';
+  const source = data.source || '—';
+
+  // Meta line
+  const metaEl = document.getElementById('scenarioMeta');
+  if (metaEl && genAt) {
+    const ts = genAt.substring(0,16).replace('T',' ');
+    metaEl.textContent = `${source.toUpperCase()} · ${ts} UTC`;
+  }
+
+  if (!scenarios.length) {
+    setHtml('scenarioGrid', '<div class="scenario-card"><div class="sc-reaction" style="color:var(--muted2)">No scenarios available. Click GENERATE.</div></div>');
+    return;
+  }
+
+  setHtml('scenarioGrid', scenarios.map((s, i) => {
+    const conf = (s.confidence || 'MEDIUM').toUpperCase();
+    const confDot = conf === 'HIGH' ? '●' : conf === 'MEDIUM' ? '◉' : '○';
+    return `
+      <div class="scenario-card conf-${conf}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
+          <div style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase">Scenario ${i+1}</div>
+          <span class="sc-conf ${conf}"><span class="sc-conf-dot"></span>${conf}</span>
+        </div>
+        <div class="sc-trigger">${s.trigger || '—'}</div>
+        <div class="sc-reaction">${s.expected_reaction || '—'}</div>
+        <div class="sc-levels"><span style="color:var(--muted2);font-size:9px;letter-spacing:1px">KEY LEVELS &nbsp;</span>${s.key_levels || '—'}</div>
+        <div class="sc-watch"><span style="color:var(--muted2);font-size:10px;font-family:Space Mono,monospace;letter-spacing:.5px">WATCH FOR &nbsp;</span>${s.watch_for || '—'}</div>
+      </div>`;
+  }).join(''));
+}
+
+async function refreshScenarios(force = false) {
+  const btn = document.getElementById('scenarioGenBtn');
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = 'GENERATING'; }
+  try {
+    const url = force ? '/scenario-data/refresh' : '/scenario-data';
+    const res = await fetch(url, force ? {method:'POST'} : undefined);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderScenarios(data);
+  } catch(e) {
+    console.error('Scenario refresh error:', e);
+  }
+  if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = 'GENERATE'; }
+}
+
+document.getElementById('scenarioGenBtn').addEventListener('click', () => refreshScenarios(true));
 
 // ════════ JOURNAL ════════
 function renderJournal(data) {
