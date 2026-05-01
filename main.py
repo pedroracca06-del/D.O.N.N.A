@@ -60,6 +60,7 @@ ASSISTANT_FILE = BASE_DIR / 'donna_assistant_state.json'
 SETTINGS_FILE = BASE_DIR / 'donna_settings.json'
 MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
 MORNING_BRIEF_FILE = BASE_DIR / 'donna_morning_brief_state.json'
+JOURNAL_FILE = BASE_DIR / 'donna_journal.json'
 CACHE = {}
 _sse_clients: list[asyncio.Queue] = []
 
@@ -179,6 +180,8 @@ def ensure_files():
         write_json_file(SETTINGS_FILE, DEFAULT_SETTINGS)
     if not MACRO_EVENTS_FILE.exists():
         write_json_file(MACRO_EVENTS_FILE, DEFAULT_MACRO_EVENTS)
+    if not JOURNAL_FILE.exists():
+        write_json_file(JOURNAL_FILE, [])
 
 
 def load_risk_state():
@@ -1973,6 +1976,170 @@ async def assistant_chat(request: Request):
         return {'status': 'error', 'action': 'none', 'value': '', 'reply': f'Assistant error: {str(e)}', 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
 
 
+def load_journal():
+    data = read_json_file(JOURNAL_FILE, [])
+    return data if isinstance(data, list) else []
+
+
+def save_journal(trades):
+    write_json_file(JOURNAL_FILE, trades)
+
+
+def compute_journal_stats(trades):
+    if not trades:
+        return {
+            'total': 0, 'wins': 0, 'losses': 0, 'breakevens': 0,
+            'win_rate': 0.0, 'avg_win': 0.0, 'avg_loss': 0.0,
+            'profit_factor': 0.0, 'best_regime': '—', 'worst_regime': '—',
+            'by_regime': {}, 'by_session': {},
+        }
+
+    wins, losses, breakevens = 0, 0, 0
+    win_pnl, loss_pnl = [], []
+
+    regime_buckets: dict = {}
+    session_buckets: dict = {}
+
+    for t in trades:
+        outcome = str(t.get('outcome', '')).upper()
+        direction = str(t.get('direction', 'LONG')).upper()
+        try:
+            entry = float(t.get('entry_price', 0))
+            exit_ = float(t.get('exit_price', 0))
+            size  = float(t.get('size', 1))
+        except Exception:
+            entry, exit_, size = 0.0, 0.0, 1.0
+
+        pnl = (exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size
+
+        if outcome == 'WIN':
+            wins += 1
+            win_pnl.append(pnl)
+        elif outcome == 'LOSS':
+            losses += 1
+            loss_pnl.append(abs(pnl))
+        else:
+            breakevens += 1
+
+        regime = str(t.get('active_regime', 'UNKNOWN'))
+        session = str(t.get('session', 'UNKNOWN'))
+
+        for bucket, key in [(regime_buckets, regime), (session_buckets, session)]:
+            if key not in bucket:
+                bucket[key] = {'wins': 0, 'losses': 0, 'breakevens': 0}
+            if outcome == 'WIN':
+                bucket[key]['wins'] += 1
+            elif outcome == 'LOSS':
+                bucket[key]['losses'] += 1
+            else:
+                bucket[key]['breakevens'] += 1
+
+    total = len(trades)
+    win_rate = round(wins / total * 100, 1) if total else 0.0
+    avg_win  = round(sum(win_pnl) / len(win_pnl), 2) if win_pnl else 0.0
+    avg_loss = round(sum(loss_pnl) / len(loss_pnl), 2) if loss_pnl else 0.0
+    total_win_pnl  = sum(win_pnl)
+    total_loss_pnl = sum(loss_pnl)
+    profit_factor  = round(total_win_pnl / total_loss_pnl, 2) if total_loss_pnl else 0.0
+
+    def regime_wr(b):
+        t_ = b['wins'] + b['losses'] + b['breakevens']
+        return round(b['wins'] / t_ * 100, 1) if t_ else 0.0
+
+    by_regime  = {k: {**v, 'win_rate': regime_wr(v)} for k, v in regime_buckets.items()}
+    by_session = {k: {**v, 'win_rate': regime_wr(v)} for k, v in session_buckets.items()}
+
+    best_regime  = max(by_regime,  key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
+    worst_regime = min(by_regime,  key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
+
+    return {
+        'total': total, 'wins': wins, 'losses': losses, 'breakevens': breakevens,
+        'win_rate': win_rate, 'avg_win': avg_win, 'avg_loss': avg_loss,
+        'profit_factor': profit_factor, 'best_regime': best_regime, 'worst_regime': worst_regime,
+        'by_regime': by_regime, 'by_session': by_session,
+    }
+
+
+@app.get('/journal/data')
+async def journal_data():
+    trades = load_journal()
+    stats  = compute_journal_stats(trades)
+    return {'status': 'ok', 'trades': trades, 'stats': stats}
+
+
+@app.post('/journal/add')
+async def journal_add(request: Request):
+    body = await request.json()
+    required = ['ticker', 'direction', 'entry_price', 'exit_price', 'size', 'outcome']
+    for f in required:
+        if f not in body:
+            raise HTTPException(status_code=400, detail=f'Missing field: {f}')
+
+    direction = str(body.get('direction', 'LONG')).upper()
+    outcome   = str(body.get('outcome', 'WIN')).upper()
+    if direction not in ('LONG', 'SHORT'):
+        raise HTTPException(status_code=400, detail='direction must be LONG or SHORT')
+    if outcome not in ('WIN', 'LOSS', 'BREAKEVEN'):
+        raise HTTPException(status_code=400, detail='outcome must be WIN, LOSS, or BREAKEVEN')
+
+    state = load_risk_state()
+    harvey = build_harvey_payload()
+
+    try:
+        entry = float(body['entry_price'])
+        exit_ = float(body['exit_price'])
+        size  = float(body['size'])
+    except Exception:
+        raise HTTPException(status_code=400, detail='entry_price, exit_price, size must be numbers')
+
+    pnl = round((exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size, 2)
+    nq_pts = safe_float(state.get('market_snapshot', {}).get('NQ_SESSION_POINTS', 0))
+
+    trade = {
+        'ticker':         str(body.get('ticker', '')).upper(),
+        'direction':      direction,
+        'entry_price':    entry,
+        'exit_price':     exit_,
+        'size':           size,
+        'setup_type':     str(body.get('setup_type', '')),
+        'notes':          str(body.get('notes', '')),
+        'outcome':        outcome,
+        'pnl':            pnl,
+        'timestamp':      utc_now_iso(),
+        'active_regime':  harvey.get('regime', {}).get('regime', state.get('market_regime', 'UNKNOWN')),
+        'session':        session_label(),
+        'macro_risk':     state.get('macro_risk', 'medium'),
+        'bias_score':     harvey.get('bias_score', 50),
+        'harvey_verdict': harvey.get('verdict', 'WAIT'),
+        'nq_points':      nq_pts,
+    }
+
+    trades = load_journal()
+    trades.append(trade)
+    save_journal(trades)
+    stats = compute_journal_stats(trades)
+    return {'status': 'ok', 'trade': trade, 'stats': stats}
+
+
+@app.post('/journal/delete')
+async def journal_delete(request: Request):
+    body = await request.json()
+    idx = body.get('index')
+    if idx is None:
+        raise HTTPException(status_code=400, detail='index is required')
+    trades = load_journal()
+    try:
+        idx = int(idx)
+        if idx < 0 or idx >= len(trades):
+            raise HTTPException(status_code=400, detail='index out of range')
+        trades.pop(idx)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail='index must be an integer')
+    save_journal(trades)
+    stats = compute_journal_stats(trades)
+    return {'status': 'ok', 'stats': stats}
+
+
 DASHBOARD_HTML = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2315,6 +2482,48 @@ tr:last-child td{border-bottom:none}
   letter-spacing:.5px;
 }
 
+/* ── JOURNAL TAB ── */
+.journal-btn {
+  background:linear-gradient(135deg,rgba(240,180,41,.10),rgba(240,180,41,.04)) !important;
+  border-color:rgba(240,180,41,.25) !important;
+  color:var(--gold) !important;
+}
+.journal-btn.active {
+  background:linear-gradient(135deg,#92400e,#78350f) !important;
+  border-color:transparent !important;color:#fff !important;
+  box-shadow:0 4px 20px rgba(240,180,41,.3) !important;
+}
+.journal-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.journal-stat{text-align:center;padding:18px 14px}
+.journal-stat .js-lab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px}
+.journal-stat .js-val{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;letter-spacing:1px;line-height:1}
+.journal-stat .js-sub{margin-top:6px;font-size:11px;color:var(--muted2)}
+.trade-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;display:block}
+.trade-input,.trade-select{
+  width:100%;padding:10px 12px;border-radius:10px;
+  border:1px solid var(--line);background:rgba(255,255,255,.04);
+  color:var(--text);font-family:'Inter',sans-serif;font-size:13px;
+  outline:none;transition:border-color .2s;
+}
+.trade-input:focus,.trade-select:focus{border-color:rgba(77,143,255,.4)}
+.trade-select option{background:#0e1c35;color:var(--text)}
+.submit-trade-btn{
+  width:100%;padding:13px;border-radius:12px;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--gold),#d97706);
+  color:#000;font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;
+  letter-spacing:1px;transition:all .2s;margin-top:4px;
+}
+.submit-trade-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(240,180,41,.4)}
+.submit-trade-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.outcome-WIN{color:var(--green)}.outcome-LOSS{color:var(--red)}.outcome-BREAKEVEN{color:var(--yellow)}
+.regime-breakdown-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:12px}
+.regime-card{padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.03)}
+.regime-card .rc-name{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px}
+.regime-card .rc-wr{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1}
+.regime-card .rc-sub{font-size:11px;color:var(--muted2);margin-top:4px}
+@media(max-width:900px){.journal-stats-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:540px){.journal-stats-grid{grid-template-columns:1fr}}
+
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -2499,6 +2708,7 @@ tr:last-child td{border-bottom:none}
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
+        <button class="tab-btn journal-btn" data-page="journal">Journal</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -2954,6 +3164,142 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
+  <!-- ════════════════════ JOURNAL ════════════════════ -->
+  <div class="page" id="page-journal">
+    <div class="vstack">
+
+      <!-- HERO -->
+      <div class="hero-banner" style="padding:20px 28px">
+        <div class="hero-eyebrow">Edge Database</div>
+        <div class="hero-title" style="font-size:28px;color:var(--gold)">Trade Journal</div>
+        <div class="hero-sub" style="font-size:13px">Every trade logged builds DONNA\'s understanding of when you perform best. Tag, review, learn.</div>
+      </div>
+
+      <!-- STATS ROW -->
+      <div class="journal-stats-grid">
+        <div class="card journal-stat">
+          <div class="js-lab">Total Trades</div>
+          <div class="js-val" id="jTotalTrades">0</div>
+          <div class="js-sub">All logged entries</div>
+        </div>
+        <div class="card journal-stat">
+          <div class="js-lab">Win Rate</div>
+          <div class="js-val" id="jWinRate">0%</div>
+          <div class="js-sub" id="jWinRateSub">0W / 0L / 0BE</div>
+        </div>
+        <div class="card journal-stat">
+          <div class="js-lab">Profit Factor</div>
+          <div class="js-val" id="jProfitFactor">0.00</div>
+          <div class="js-sub" id="jAvgWinLoss">Avg W: — / Avg L: —</div>
+        </div>
+        <div class="card journal-stat">
+          <div class="js-lab">Best Regime</div>
+          <div class="js-val" id="jBestRegime" style="font-size:17px;line-height:1.2">—</div>
+          <div class="js-sub" id="jWorstRegime">Worst: —</div>
+        </div>
+      </div>
+
+      <!-- MAIN LAYOUT: history + form -->
+      <div style="display:grid;grid-template-columns:1.5fr .5fr;gap:16px;align-items:start">
+
+        <!-- TRADE HISTORY -->
+        <div class="panel">
+          <div class="kicker">History</div>
+          <div class="section-title" style="margin-bottom:14px">Trade Log</div>
+          <div style="overflow-x:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th><th>Ticker</th><th>Dir</th><th>Entry</th><th>Exit</th>
+                  <th>Size</th><th>P&amp;L</th><th>Setup</th><th>Regime</th><th>Session</th>
+                  <th>Bias</th><th>Verdict</th><th>Outcome</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="journalTableBody">
+                <tr><td colspan="14" class="neutral" style="text-align:center;padding:20px">No trades logged yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- QUICK ADD FORM -->
+        <div class="panel">
+          <div class="kicker">Log Trade</div>
+          <div class="section-title" style="margin-bottom:16px">Quick Add</div>
+          <div class="vstack" style="gap:12px">
+            <div>
+              <label class="trade-label">Ticker</label>
+              <input class="trade-input" id="jTicker" type="text" placeholder="e.g. MNQ1!, SPY" />
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label class="trade-label">Direction</label>
+                <select class="trade-select" id="jDirection">
+                  <option value="LONG">LONG</option>
+                  <option value="SHORT">SHORT</option>
+                </select>
+              </div>
+              <div>
+                <label class="trade-label">Outcome</label>
+                <select class="trade-select" id="jOutcome">
+                  <option value="WIN">WIN</option>
+                  <option value="LOSS">LOSS</option>
+                  <option value="BREAKEVEN">BREAKEVEN</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label class="trade-label">Entry Price</label>
+                <input class="trade-input" id="jEntry" type="number" step="any" placeholder="0.00" />
+              </div>
+              <div>
+                <label class="trade-label">Exit Price</label>
+                <input class="trade-input" id="jExit" type="number" step="any" placeholder="0.00" />
+              </div>
+            </div>
+            <div>
+              <label class="trade-label">Size (contracts / shares)</label>
+              <input class="trade-input" id="jSize" type="number" step="any" placeholder="1" />
+            </div>
+            <div>
+              <label class="trade-label">Setup Type</label>
+              <input class="trade-input" id="jSetup" type="text" placeholder="e.g. ORB, VWAP, Breakout" />
+            </div>
+            <div>
+              <label class="trade-label">Notes</label>
+              <input class="trade-input" id="jNotes" type="text" placeholder="Context, mistakes, lessons..." />
+            </div>
+            <button class="submit-trade-btn" id="jSubmitBtn">LOG TRADE</button>
+            <div id="jFormMsg" style="text-align:center;font-size:12px;display:none"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- REGIME BREAKDOWN -->
+      <div class="panel">
+        <div class="kicker">Edge Analysis</div>
+        <div class="section-title" style="margin-bottom:6px">Performance by Regime</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Which market regime do you trade best in? Auto-tagged at time of logging.</div>
+        <div class="regime-breakdown-grid" id="regimeBreakdownGrid">
+          <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
+        </div>
+      </div>
+
+      <!-- SESSION BREAKDOWN -->
+      <div class="panel">
+        <div class="kicker">Edge Analysis</div>
+        <div class="section-title" style="margin-bottom:6px">Performance by Session</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Asia, London, NY Cash — which session gives you the cleanest edge?</div>
+        <div class="regime-breakdown-grid" id="sessionBreakdownGrid">
+          <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- FOOTER -->
   <div class="footer">
     <span>D.O.N.N.A v5.0 // LIVE MARKET CORE</span>
@@ -2970,6 +3316,8 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
+    if (btn.dataset.page === 'journal') refreshJournal();
+    if (btn.dataset.page === 'harvey') refreshHarvey();
   });
 });
 
@@ -3558,9 +3906,163 @@ function connectSSE() {
   };
 }
 
+// ════════ JOURNAL ════════
+function renderJournal(data) {
+  const stats  = data.stats  || {};
+  const trades = data.trades || [];
+
+  // Stats row
+  setText('jTotalTrades', stats.total || 0);
+  const wr = stats.win_rate || 0;
+  const wrEl = document.getElementById('jWinRate');
+  if (wrEl) { wrEl.textContent = wr + '%'; wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : 'var(--red)'; }
+  setText('jWinRateSub', `${stats.wins||0}W / ${stats.losses||0}L / ${stats.breakevens||0}BE`);
+  const pf = stats.profit_factor || 0;
+  const pfEl = document.getElementById('jProfitFactor');
+  if (pfEl) { pfEl.textContent = pf.toFixed(2); pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : 'var(--red)'; }
+  setText('jAvgWinLoss', `Avg W: ${stats.avg_win ? '$'+stats.avg_win : '—'} / Avg L: ${stats.avg_loss ? '$'+stats.avg_loss : '—'}`);
+  setText('jBestRegime', stats.best_regime || '—');
+  setText('jWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
+
+  // Trade history — newest first
+  const reversed = trades.slice().reverse();
+  setHtml('journalTableBody', reversed.length ? reversed.map((t, ri) => {
+    const idx = trades.length - 1 - ri;
+    const outcome = (t.outcome || '').toUpperCase();
+    const pnl = t.pnl || 0;
+    const dir = (t.direction || '').toUpperCase();
+    const pnlColor = outcome === 'WIN' ? 'var(--green)' : outcome === 'LOSS' ? 'var(--red)' : 'var(--yellow)';
+    const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
+    const ts = t.timestamp ? t.timestamp.substring(0,16).replace('T',' ') : '—';
+    const vColor = t.harvey_verdict === 'BUY' ? 'var(--green)' : t.harvey_verdict === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+    return `
+      <tr>
+        <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${ts}</td>
+        <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${t.ticker||'—'}</td>
+        <td style="color:${dirColor};font-weight:700;font-size:12px">${dir}</td>
+        <td>${t.entry_price||'—'}</td>
+        <td>${t.exit_price||'—'}</td>
+        <td>${t.size||'—'}</td>
+        <td style="color:${pnlColor};font-weight:700">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+        <td style="font-size:12px;color:var(--muted)">${t.setup_type||'—'}</td>
+        <td style="font-size:11px">${t.active_regime||'—'}</td>
+        <td style="font-size:11px">${(t.session||'—').replace(/_/g,' ')}</td>
+        <td style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">${t.bias_score||'—'}</td>
+        <td style="font-size:11px;color:${vColor};font-weight:700">${t.harvey_verdict||'—'}</td>
+        <td><span class="risk-badge outcome-${outcome}" style="font-size:10px;padding:3px 7px">${outcome}</span></td>
+        <td><button class="del-btn" onclick="deleteTrade(${idx})" title="Delete">✕</button></td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="14" class="neutral" style="text-align:center;padding:20px">No trades logged yet. Log your first trade using the form.</td></tr>');
+
+  // Regime breakdown
+  const byRegime = stats.by_regime || {};
+  const regimeColorMap = {TRENDING:'var(--green)',RANGING:'var(--blue)',EVENT_DRIVEN:'var(--yellow)',RISK_OFF:'var(--red)',CONSOLIDATING:'var(--muted2)'};
+  const regimeCards = Object.entries(byRegime).sort((a,b) => b[1].win_rate - a[1].win_rate);
+  setHtml('regimeBreakdownGrid', regimeCards.length ? regimeCards.map(([regime, rb]) => {
+    const rwr = rb.win_rate || 0;
+    const rc = rwr >= 55 ? 'var(--green)' : rwr >= 45 ? 'var(--yellow)' : 'var(--red)';
+    const rtotal = (rb.wins||0) + (rb.losses||0) + (rb.breakevens||0);
+    const borderC = regimeColorMap[regime] || 'var(--line)';
+    return `<div class="regime-card" style="border-color:${borderC}44">
+      <div class="rc-name" style="color:${borderC}">${regime}</div>
+      <div class="rc-wr" style="color:${rc}">${rwr}%</div>
+      <div class="rc-sub">${rb.wins}W · ${rb.losses}L · ${rtotal} trades</div>
+    </div>`;
+  }).join('') : '<div class="regime-card"><div class="rc-sub">No trades yet.</div></div>');
+
+  // Session breakdown
+  const bySession = stats.by_session || {};
+  const sessionCards = Object.entries(bySession).sort((a,b) => b[1].win_rate - a[1].win_rate);
+  setHtml('sessionBreakdownGrid', sessionCards.length ? sessionCards.map(([sess, sb]) => {
+    const swr = sb.win_rate || 0;
+    const sc = swr >= 55 ? 'var(--green)' : swr >= 45 ? 'var(--yellow)' : 'var(--red)';
+    const stotal = (sb.wins||0) + (sb.losses||0) + (sb.breakevens||0);
+    return `<div class="regime-card">
+      <div class="rc-name">${sess.replace(/_/g,' ')}</div>
+      <div class="rc-wr" style="color:${sc}">${swr}%</div>
+      <div class="rc-sub">${sb.wins}W · ${sb.losses}L · ${stotal} trades</div>
+    </div>`;
+  }).join('') : '<div class="regime-card"><div class="rc-sub">No trades yet.</div></div>');
+}
+
+async function refreshJournal() {
+  try {
+    const res = await fetch('/journal/data');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderJournal(data);
+  } catch(e) { console.error('Journal refresh error:', e); }
+}
+
+async function deleteTrade(index) {
+  if (!confirm('Delete this trade entry?')) return;
+  try {
+    const res = await fetch('/journal/delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({index})
+    });
+    const data = await res.json();
+    if (data.status === 'ok') refreshJournal();
+  } catch(e) { console.error(e); }
+}
+
+document.getElementById('jSubmitBtn').addEventListener('click', async () => {
+  const ticker     = (document.getElementById('jTicker').value || '').trim().toUpperCase();
+  const direction  = document.getElementById('jDirection').value;
+  const outcome    = document.getElementById('jOutcome').value;
+  const entry_price = parseFloat(document.getElementById('jEntry').value);
+  const exit_price  = parseFloat(document.getElementById('jExit').value);
+  const size        = parseFloat(document.getElementById('jSize').value) || 1;
+  const setup_type  = (document.getElementById('jSetup').value || '').trim();
+  const notes       = (document.getElementById('jNotes').value || '').trim();
+
+  const msgEl = document.getElementById('jFormMsg');
+  function showMsg(text, color) {
+    msgEl.style.display = 'block';
+    msgEl.style.color = color;
+    msgEl.textContent = text;
+  }
+
+  if (!ticker || isNaN(entry_price) || isNaN(exit_price)) {
+    showMsg('Ticker, entry price, and exit price are required.', 'var(--red)');
+    return;
+  }
+
+  const btn = document.getElementById('jSubmitBtn');
+  btn.disabled = true; btn.textContent = 'LOGGING...';
+  msgEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/journal/add', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker, direction, outcome, entry_price, exit_price, size, setup_type, notes})
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      ['jTicker','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => { document.getElementById(id).value = ''; });
+      showMsg('Trade logged.', 'var(--green)');
+      setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
+      refreshJournal();
+    } else {
+      showMsg('Error: ' + (data.detail || 'Unknown error'), 'var(--red)');
+    }
+  } catch(e) {
+    showMsg('Connection error.', 'var(--red)');
+  }
+  btn.disabled = false; btn.textContent = 'LOG TRADE';
+});
+
+['jTicker','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('jSubmitBtn').click();
+  });
+});
+
 // ════════ BOOT ════════
 refresh();
 setInterval(refresh, 15000);
+refreshJournal();
+setInterval(refreshJournal, 30000);
 connectSSE();
 </script>
 </body>
