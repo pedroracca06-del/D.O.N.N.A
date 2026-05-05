@@ -2207,6 +2207,147 @@ def compute_journal_stats(trades):
     }
 
 
+def build_performance_memory() -> dict:
+    """Compute deep performance stats from the trade journal.
+    Stats are fresh each call (fast Python). Claude insight cached 1 hour by trade count.
+    """
+    trades = load_journal()
+    total = len(trades)
+
+    empty = {
+        'total': 0, 'wins': 0, 'losses': 0, 'breakevens': 0,
+        'win_rate': 0.0, 'profit_factor': 0.0, 'avg_win': 0.0,
+        'avg_loss': 0.0, 'avg_rr': 0.0,
+        'by_regime': {}, 'by_session': {}, 'by_setup': {},
+        'best_regime': '—', 'worst_regime': '—', 'best_session': '—', 'best_setup': '—',
+        'streak': {'type': 'NONE', 'count': 0},
+        'insight': '', 'insufficient_data': True,
+    }
+    if total == 0:
+        return empty
+
+    wins, losses, breakevens = 0, 0, 0
+    win_pnl, loss_pnl = [], []
+    regime_buckets: dict = {}
+    session_buckets: dict = {}
+    setup_buckets: dict = {}
+
+    for t in trades:
+        outcome = str(t.get('outcome', '')).upper()
+        direction = str(t.get('direction', 'LONG')).upper()
+        try:
+            entry = float(t.get('entry_price', 0))
+            exit_ = float(t.get('exit_price', 0))
+            size  = float(t.get('size', 1))
+        except Exception:
+            entry, exit_, size = 0.0, 0.0, 1.0
+
+        pnl = (exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size
+
+        if outcome == 'WIN':
+            wins += 1
+            win_pnl.append(abs(pnl))
+        elif outcome == 'LOSS':
+            losses += 1
+            loss_pnl.append(abs(pnl))
+        else:
+            breakevens += 1
+
+        regime = str(t.get('active_regime', 'UNKNOWN'))
+        session = str(t.get('session', 'UNKNOWN'))
+        setup   = str(t.get('setup_type', '') or 'UNKNOWN').strip() or 'UNKNOWN'
+
+        for bucket, key in [(regime_buckets, regime), (session_buckets, session), (setup_buckets, setup)]:
+            if key not in bucket:
+                bucket[key] = {'wins': 0, 'losses': 0, 'breakevens': 0}
+            if outcome == 'WIN':
+                bucket[key]['wins'] += 1
+            elif outcome == 'LOSS':
+                bucket[key]['losses'] += 1
+            else:
+                bucket[key]['breakevens'] += 1
+
+    win_rate      = round(wins / total * 100, 1) if total else 0.0
+    avg_win       = round(sum(win_pnl) / len(win_pnl), 2) if win_pnl else 0.0
+    avg_loss      = round(sum(loss_pnl) / len(loss_pnl), 2) if loss_pnl else 0.0
+    profit_factor = round(sum(win_pnl) / sum(loss_pnl), 2) if loss_pnl and sum(loss_pnl) > 0 else 0.0
+    avg_rr        = round(avg_win / avg_loss, 2) if avg_loss else 0.0
+
+    def enrich(buckets):
+        result = {}
+        for k, v in buckets.items():
+            t_ = v['wins'] + v['losses'] + v['breakevens']
+            result[k] = {**v, 'total': t_, 'win_rate': round(v['wins'] / t_ * 100, 1) if t_ else 0.0}
+        return result
+
+    by_regime  = enrich(regime_buckets)
+    by_session = enrich(session_buckets)
+    by_setup   = enrich(setup_buckets)
+
+    best_regime  = max(by_regime,  key=lambda k: (by_regime[k]['win_rate'],  by_regime[k]['total']),  default='—') if by_regime  else '—'
+    worst_regime = min(by_regime,  key=lambda k: by_regime[k]['win_rate'],   default='—') if by_regime  else '—'
+    best_session = max(by_session, key=lambda k: (by_session[k]['win_rate'], by_session[k]['total']), default='—') if by_session else '—'
+    best_setup   = max(by_setup,   key=lambda k: (by_setup[k]['win_rate'],   by_setup[k]['total']),   default='—') if by_setup   else '—'
+
+    # Current streak (skip breakevens)
+    streak_type: str | None = None
+    streak_count = 0
+    for t in reversed(trades):
+        o = str(t.get('outcome', '')).upper()
+        if o == 'BREAKEVEN':
+            continue
+        if streak_type is None:
+            streak_type = o
+            streak_count = 1
+        elif o == streak_type:
+            streak_count += 1
+        else:
+            break
+    streak = {'type': streak_type or 'NONE', 'count': streak_count}
+
+    # Claude insight — only when 5+ trades; cache 1 hour keyed by trade count
+    insight = ''
+    if total >= 5 and client:
+        insight_key = f'perf_insight::{total}'
+        insight = cache_get(insight_key) or ''
+        if not insight:
+            try:
+                regime_lines  = ', '.join(f'{k} {v["win_rate"]}% ({v["total"]}t)' for k, v in sorted(by_regime.items(),  key=lambda x: -x[1]['win_rate']))
+                session_lines = ', '.join(f'{k} {v["win_rate"]}%'                 for k, v in sorted(by_session.items(), key=lambda x: -x[1]['win_rate']))
+                setup_lines   = ', '.join(f'{k} {v["win_rate"]}%'                 for k, v in sorted(by_setup.items(),   key=lambda x: -x[1]['win_rate'])[:5]) or '—'
+                context = (
+                    f"{total} trades, {win_rate}% win rate, {profit_factor}x profit factor, "
+                    f"{avg_rr} avg RR. Regime: {regime_lines}. Session: {session_lines}. "
+                    f"Setup: {setup_lines}. Streak: {streak_count} {streak_type}."
+                )
+                resp = client.messages.create(
+                    model=ANTHROPIC_MODEL,
+                    system=(
+                        "You are DONNA's edge analyst. Given a trader's performance stats, "
+                        "write exactly ONE sentence (under 30 words) identifying their clearest "
+                        "statistical edge. Be specific, direct, and data-driven. No markdown."
+                    ),
+                    messages=[{'role': 'user', 'content': context}],
+                    max_tokens=80,
+                )
+                insight = resp.content[0].text.strip() if resp.content else ''
+                if insight:
+                    cache_set(insight_key, insight, 3600)
+            except Exception as e:
+                print(f'Performance insight error: {e}')
+
+    return {
+        'total': total, 'wins': wins, 'losses': losses, 'breakevens': breakevens,
+        'win_rate': win_rate, 'profit_factor': profit_factor,
+        'avg_win': avg_win, 'avg_loss': avg_loss, 'avg_rr': avg_rr,
+        'by_regime': by_regime, 'by_session': by_session, 'by_setup': by_setup,
+        'best_regime': best_regime, 'worst_regime': worst_regime,
+        'best_session': best_session, 'best_setup': best_setup,
+        'streak': streak, 'insight': insight,
+        'insufficient_data': total < 3,
+    }
+
+
 @app.get('/journal/data')
 async def journal_data():
     trades = load_journal()
@@ -2556,47 +2697,228 @@ tr:last-child td{border-bottom:none}
 .main-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start}
 .left-stack,.right-stack{display:grid;gap:16px}
 
-/* ── NEWS ── */
-.news-item{
-  padding:14px 0;border-bottom:1px solid var(--line2);
+/* ── NEWS (Bloomberg-CNBC redesign) ── */
+.breaking-bar{
+  display:flex;align-items:center;gap:0;overflow:hidden;
+  border-radius:10px;background:rgba(255,77,109,.08);
+  border:1px solid rgba(255,77,109,.25);height:38px;margin-bottom:0;
 }
-.news-item:last-child{border-bottom:none}
-.news-headline{font-size:14px;font-weight:600;line-height:1.45;color:var(--text)}
-.news-meta{margin-top:5px;font-size:11px;color:var(--muted2)}
-.news-summary{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5}
+.breaking-label{
+  flex-shrink:0;padding:0 14px;font-family:'Space Mono',monospace;
+  font-size:10px;letter-spacing:2px;color:var(--red);text-transform:uppercase;
+  border-right:1px solid rgba(255,77,109,.25);height:100%;
+  display:flex;align-items:center;background:rgba(255,77,109,.12);
+}
+.breaking-ticker-wrap{
+  flex:1;overflow:hidden;position:relative;height:100%;display:flex;align-items:center;
+}
+.breaking-ticker-track{
+  display:inline-flex;white-space:nowrap;padding-left:100%;
+  animation:tickerMove 50s linear infinite;font-size:12px;font-weight:600;color:var(--text);
+  gap:0;
+}
+.breaking-item{margin-right:60px;color:var(--text)}
+.breaking-item::before{content:'▸ ';color:var(--red);margin-right:4px}
+.index-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.index-tile{
+  padding:14px 16px;border-radius:14px;border:1px solid var(--line);
+  background:var(--panel);text-align:center;transition:border-color .2s;
+}
+.index-tile:hover{border-color:rgba(77,143,255,.3)}
+.index-tile-name{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:6px;
+}
+.index-tile-val{
+  font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;line-height:1;
+}
+.index-tile-chg{
+  margin-top:4px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.5px;
+}
+.index-tile.up{border-left:3px solid var(--green)}
+.index-tile.dn{border-left:3px solid var(--red)}
+.news-layout{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
+.feature-story{
+  padding:20px 22px;border-radius:16px;
+  border:1px solid rgba(77,143,255,.2);
+  background:radial-gradient(circle at top right,rgba(37,99,235,.15) 0%,transparent 50%),
+    linear-gradient(180deg,rgba(16,32,64,.98),rgba(10,22,48,.99));
+  box-shadow:var(--shadow);
+}
+.story-tag{
+  display:inline-block;padding:3px 10px;border-radius:6px;margin-bottom:10px;
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+  text-transform:uppercase;font-weight:700;
+}
+.story-tag.MACRO{background:rgba(77,143,255,.15);color:var(--blue);border:1px solid rgba(77,143,255,.3)}
+.story-tag.MARKET{background:rgba(0,229,160,.12);color:var(--green);border:1px solid rgba(0,229,160,.25)}
+.story-tag.ENERGY{background:rgba(240,180,41,.12);color:var(--gold);border:1px solid rgba(240,180,41,.25)}
+.story-tag.GEOPOLITICAL{background:rgba(255,77,109,.12);color:var(--red);border:1px solid rgba(255,77,109,.3)}
+.story-tag.CALENDAR{background:rgba(255,201,60,.1);color:var(--yellow);border:1px solid rgba(255,201,60,.25)}
+.feature-headline{
+  font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;
+  line-height:1.1;letter-spacing:.3px;margin-bottom:10px;
+}
+.feature-note{font-size:13px;color:var(--muted);line-height:1.6}
+.news-numbered-item{
+  display:flex;gap:12px;padding:13px 0;border-bottom:1px solid var(--line2);
+}
+.news-numbered-item:last-child{border-bottom:none}
+.news-num{
+  flex-shrink:0;width:22px;font-family:'Space Mono',monospace;
+  font-size:11px;color:var(--muted2);padding-top:2px;
+}
+.news-body{}
+.news-headline{font-size:13px;font-weight:600;line-height:1.45;color:var(--text)}
+.news-meta{margin-top:4px;font-size:11px;color:var(--muted2)}
+.news-summary{margin-top:5px;font-size:12px;color:var(--muted);line-height:1.5}
 .news-link{color:var(--blue);font-size:11px;text-decoration:none}
 .news-link:hover{text-decoration:underline}
-
-/* ── ASSISTANT ── */
-.chat-wrap{
-  min-height:280px;max-height:480px;overflow-y:auto;
-  border-radius:14px;background:rgba(0,0,0,.2);
-  border:1px solid var(--line);padding:14px;margin-bottom:12px;
+.news-sidebar-panel{
+  padding:18px;border-radius:16px;
+  border:1px solid var(--line);background:var(--panel);
+  box-shadow:var(--shadow2);
 }
-.msg{margin-bottom:10px;padding:12px 14px;border-radius:12px;line-height:1.55;font-size:13px}
-.msg.user{background:rgba(77,143,255,.12);border:1px solid rgba(77,143,255,.2)}
-.msg.assistant{background:rgba(255,255,255,.04);border:1px solid var(--line2)}
+.sidebar-section{margin-bottom:20px}
+.sidebar-section:last-child{margin-bottom:0}
+.sidebar-kicker{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:10px;
+  padding-bottom:6px;border-bottom:1px solid var(--line2);
+}
+.donna-read{font-size:12px;color:var(--muted);line-height:1.6}
+.risk-level-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:7px 0;border-bottom:1px solid var(--line2);
+}
+.risk-level-row:last-child{border-bottom:none}
+.risk-level-label{font-size:12px;color:var(--muted)}
+.watch-name{
+  display:inline-block;padding:3px 10px;border-radius:6px;margin:3px 3px 3px 0;
+  background:rgba(77,143,255,.1);border:1px solid rgba(77,143,255,.2);
+  font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--blue);
+}
+
+/* ── ASSISTANT (JARVIS redesign) ── */
+.donna-header{
+  text-align:center;padding:24px 20px 16px;
+  border-bottom:1px solid var(--line2);margin-bottom:0;
+}
+@keyframes donnaGlow{
+  0%,100%{text-shadow:0 0 20px rgba(0,229,160,.4),0 0 40px rgba(0,229,160,.15)}
+  50%{text-shadow:0 0 30px rgba(0,229,160,.7),0 0 60px rgba(0,229,160,.25)}
+}
+.donna-logo{
+  font-family:'Rajdhani',sans-serif;font-size:52px;font-weight:700;letter-spacing:12px;
+  background:linear-gradient(135deg,var(--green) 0%,var(--blue) 60%,#fff 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  animation:donnaGlow 3s ease-in-out infinite;line-height:1;
+}
+.donna-online-row{
+  display:flex;align-items:center;justify-content:center;gap:8px;margin-top:8px;
+}
+.donna-online-dot{
+  width:7px;height:7px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 8px rgba(0,229,160,.9);animation:pulse 2s ease-in-out infinite;
+}
+.donna-online-text{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2.5px;
+  color:var(--green);text-transform:uppercase;
+}
+.donna-tagline{
+  margin-top:6px;font-family:'Space Mono',monospace;font-size:9px;
+  letter-spacing:1.5px;color:var(--muted2);
+}
+.chat-terminal{
+  min-height:320px;max-height:500px;overflow-y:auto;
+  border-radius:14px;
+  background:rgba(0,5,12,.55);
+  border:1px solid rgba(0,229,160,.18);
+  box-shadow:0 0 30px rgba(0,229,160,.05),inset 0 0 40px rgba(0,0,0,.3);
+  padding:16px;margin-bottom:12px;
+}
+.chat-terminal::-webkit-scrollbar{width:4px}
+.chat-terminal::-webkit-scrollbar-track{background:transparent}
+.chat-terminal::-webkit-scrollbar-thumb{background:rgba(0,229,160,.25);border-radius:2px}
+.msg{margin-bottom:12px;max-width:82%;line-height:1.55;font-size:13px;clear:both}
+.msg.user{
+  float:right;text-align:right;
+  padding:10px 14px;border-radius:14px 14px 4px 14px;
+  background:rgba(77,143,255,.16);border:1px solid rgba(77,143,255,.3);
+  color:var(--text);
+}
+.msg.assistant{
+  float:left;
+  padding:10px 14px 10px 16px;border-radius:14px 14px 14px 4px;
+  background:rgba(0,229,160,.06);
+  border:1px solid rgba(0,229,160,.15);
+  border-left:3px solid var(--green);
+}
+.msg-clearfix{clear:both;display:table;width:100%}
 .msg .role{
   display:block;font-family:'Space Mono',monospace;font-size:9px;
-  letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;
+  letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
 }
+.msg.user .role{color:rgba(77,143,255,.7)}
+.msg.assistant .role{color:var(--green);opacity:.8}
+.msg-tag{
+  display:inline-block;margin-top:6px;padding:2px 8px;border-radius:5px;
+  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1.5px;
+  text-transform:uppercase;
+}
+.msg-tag.ANALYSIS{background:rgba(77,143,255,.15);color:var(--blue);border:1px solid rgba(77,143,255,.25)}
+.msg-tag.EXECUTION{background:rgba(0,229,160,.12);color:var(--green);border:1px solid rgba(0,229,160,.22)}
+.msg-tag.RISK{background:rgba(255,77,109,.12);color:var(--red);border:1px solid rgba(255,77,109,.22)}
+.msg-tag.CALENDAR{background:rgba(255,201,60,.1);color:var(--yellow);border:1px solid rgba(255,201,60,.22)}
+.typing-indicator{
+  float:left;clear:both;padding:10px 16px;border-radius:14px 14px 14px 4px;
+  background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.15);border-left:3px solid var(--green);
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--green);
+  display:none;margin-bottom:12px;
+}
+.typing-indicator.active{display:block}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+.typing-dots span{display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--green);margin:0 2px;animation:blink 1.4s infinite}
+.typing-dots span:nth-child(2){animation-delay:.2s}
+.typing-dots span:nth-child(3){animation-delay:.4s}
+.quick-cmds{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.quick-cmd-btn{
+  padding:8px 14px;border-radius:10px;cursor:pointer;
+  border:1px solid rgba(0,229,160,.2);background:rgba(0,229,160,.06);
+  color:var(--green);font-family:'Space Mono',monospace;font-size:10px;
+  letter-spacing:.5px;transition:all .2s;
+}
+.quick-cmd-btn:hover{background:rgba(0,229,160,.12);border-color:rgba(0,229,160,.4);
+  box-shadow:0 0 12px rgba(0,229,160,.15)}
 .chat-input-row{display:flex;gap:10px}
 .chat-input{
-  flex:1;padding:12px 14px;border-radius:12px;
-  border:1px solid var(--line);background:rgba(255,255,255,.04);
+  flex:1;padding:12px 16px;border-radius:12px;
+  border:1px solid rgba(0,229,160,.2);background:rgba(0,0,0,.3);
   color:var(--text);font-family:'Inter',sans-serif;font-size:13px;
-  outline:none;transition:border-color .2s;
+  outline:none;transition:border-color .2s,box-shadow .2s;
 }
-.chat-input:focus{border-color:rgba(77,143,255,.4)}
+.chat-input:focus{
+  border-color:rgba(0,229,160,.5);
+  box-shadow:0 0 16px rgba(0,229,160,.12);
+}
 .send-btn{
-  padding:12px 20px;border-radius:12px;border:none;cursor:pointer;
-  background:linear-gradient(135deg,var(--blue),var(--blue2));
-  color:#fff;font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;
+  padding:12px 22px;border-radius:12px;border:none;cursor:pointer;
+  background:linear-gradient(135deg,#00e5a0,#00c87a);
+  color:#060d1a;font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;
   letter-spacing:1px;transition:all .2s;white-space:nowrap;
 }
-.send-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(37,99,235,.4)}
+.send-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,229,160,.35)}
 .send-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
 .asst-state-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.state-card{
+  padding:10px 14px;border-radius:12px;
+  background:rgba(255,255,255,.03);border:1px solid var(--line2);
+  margin-bottom:8px;transition:border-color .2s;
+}
+.state-card:last-child{margin-bottom:0}
+.state-card:hover{border-color:rgba(77,143,255,.2)}
+.state-card-text{font-size:13px;color:var(--text);line-height:1.4;flex:1}
 .state-list-item{
   display:flex;justify-content:space-between;align-items:center;
   padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px;
@@ -2920,7 +3242,6 @@ tr:last-child td{border-bottom:none}
     <div class="top-right">
       <div class="nav">
         <button class="tab-btn active" data-page="dashboard">Dashboard</button>
-        <button class="tab-btn" data-page="trading">Trading</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
@@ -3090,116 +3411,88 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
-  <!-- ════════════════════ TRADING ════════════════════ -->
-  <div class="page" id="page-trading">
-    <div class="vstack">
-
-      <!-- HERO -->
-      <div class="hero-banner">
-        <div class="hero-eyebrow">What Matters Right Now</div>
-        <div class="hero-grid">
-          <div>
-            <div class="hero-title" id="tradingHeadline">—</div>
-            <div class="hero-sub" id="tradingSummary">—</div>
-            <div style="margin-top:14px;padding:12px 14px;border-radius:12px;font-size:13px;color:var(--muted);line-height:1.6;background:rgba(255,255,255,.03);border:1px solid var(--line2)" id="tradingFocusReason">—</div>
-          </div>
-          <div class="chip-stack">
-            <div class="chip">
-              <span class="chip-label">Donna Mode</span>
-              <span class="chip-value" id="tradingMode">—</span>
-            </div>
-            <div class="chip">
-              <span class="chip-label">Risk To Conviction</span>
-              <span class="chip-value" id="tradingRtC">—</span>
-            </div>
-          </div>
-        </div>
-        <div style="margin-top:16px">
-          <div class="kicker" style="margin-bottom:10px">Quick Focus</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap" id="watchFirstRow"></div>
-        </div>
-      </div>
-
-      <!-- MID GRID -->
-      <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:16px;align-items:start">
-
-        <!-- FUTURES/MACRO PULSE -->
-        <div class="panel">
-          <div class="kicker">Live Pulse</div>
-          <div class="section-title" style="margin-bottom:14px">Futures + Macro Pulse</div>
-          <table>
-            <thead><tr><th>Asset</th><th>Last</th><th>Chg</th><th>% Chg</th></tr></thead>
-            <tbody id="tradingPulseTable"></tbody>
-          </table>
-        </div>
-
-        <!-- TRADE INTELLIGENCE -->
-        <div class="panel">
-          <div class="kicker">Execution View</div>
-          <div class="section-title" style="margin-bottom:14px">Trade Intelligence</div>
-          <div class="kv-row"><span class="kv-k">Bias</span><span class="kv-v" id="tradeBias">—</span></div>
-          <div class="kv-row"><span class="kv-k">Open Quality</span><span class="kv-v" id="tradeOpenQuality">—</span></div>
-          <div class="kv-row"><span class="kv-k">Main Threat</span><span class="kv-v" id="tradeThreat">—</span></div>
-          <div class="kv-row"><span class="kv-k">Focus</span><span class="kv-v" id="tradeFocus">—</span></div>
-          <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.6" id="tradeNote">—</div>
-        </div>
-
-      </div>
-
-      <!-- RECENT ALERTS -->
-      <div class="panel">
-        <div class="kicker">Alert History</div>
-        <div class="section-title" style="margin-bottom:14px">Recent Alerts &amp; Observations</div>
-        <div id="recentAlerts"></div>
-      </div>
-
-    </div>
-  </div>
-
   <!-- ════════════════════ NEWS ════════════════════ -->
   <div class="page" id="page-news">
     <div class="vstack">
 
-      <div class="hero-banner">
-        <div class="hero-eyebrow">Macro Story</div>
-        <div class="hero-title" id="newsMacroTitle">—</div>
-        <div class="hero-sub" id="newsMacroNote">—</div>
+      <!-- BREAKING NEWS BAR -->
+      <div class="breaking-bar">
+        <div class="breaking-label">Breaking</div>
+        <div class="breaking-ticker-wrap">
+          <div class="breaking-ticker-track" id="breakingTickerTrack">
+            <span class="breaking-item">Loading live headlines...</span>
+          </div>
+        </div>
       </div>
 
-      <div class="panel">
-        <div class="kicker">Market Catalyst</div>
-        <div class="section-title" style="margin-bottom:6px" id="newsMarketTitle">—</div>
-        <div style="font-size:13px;color:var(--muted);line-height:1.6" id="newsMarketNote">—</div>
+      <!-- 5 INDEX TILES -->
+      <div class="index-tiles" id="indexTiles">
+        <div class="index-tile"><div class="index-tile-name">NASDAQ</div><div class="index-tile-val" id="tileNASDAQ">—</div><div class="index-tile-chg" id="tileNASDAQchg">—</div></div>
+        <div class="index-tile"><div class="index-tile-name">S&amp;P 500</div><div class="index-tile-val" id="tileSPX">—</div><div class="index-tile-chg" id="tileSPXchg">—</div></div>
+        <div class="index-tile"><div class="index-tile-name">DJIA</div><div class="index-tile-val" id="tileDJIA">—</div><div class="index-tile-chg" id="tileDJIAchg">—</div></div>
+        <div class="index-tile"><div class="index-tile-name">DXY</div><div class="index-tile-val" id="tileDXY">—</div><div class="index-tile-chg" id="tileDXYchg">—</div></div>
+        <div class="index-tile"><div class="index-tile-name">VIX</div><div class="index-tile-val" id="tileVIX">—</div><div class="index-tile-chg" id="tileVIXchg">—</div></div>
       </div>
 
-      <div class="panel">
-        <div class="kicker">Latest Headlines</div>
-        <div class="section-title" style="margin-bottom:14px">Live Market News</div>
-        <div id="newsList"></div>
-      </div>
+      <!-- MAIN CONTENT + SIDEBAR -->
+      <div class="news-layout">
 
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
-        <div class="panel">
-          <div class="kicker" style="color:var(--green)">Leaders</div>
-          <table>
-            <thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead>
-            <tbody id="leadersTable"></tbody>
-          </table>
+        <!-- LEFT: FEATURE STORY + NEWS FEED -->
+        <div class="vstack" style="gap:14px">
+
+          <!-- FEATURE STORY -->
+          <div class="feature-story">
+            <div id="featureStoryTag" class="story-tag MACRO">MACRO</div>
+            <div class="feature-headline" id="featureHeadline">Loading top story...</div>
+            <div class="feature-note" id="featureNote">—</div>
+          </div>
+
+          <!-- NUMBERED NEWS FEED -->
+          <div class="panel">
+            <div class="kicker">Live Feed</div>
+            <div class="section-title" style="margin-bottom:14px">Market Intelligence</div>
+            <div id="newsList"></div>
+          </div>
+
         </div>
-        <div class="panel">
-          <div class="kicker" style="color:var(--red)">Threat Names</div>
-          <table>
-            <thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead>
-            <tbody id="threatsTable"></tbody>
-          </table>
+
+        <!-- RIGHT SIDEBAR -->
+        <div class="news-sidebar-panel">
+
+          <div class="sidebar-section">
+            <div class="sidebar-kicker">DONNA&#39;s Read</div>
+            <div class="donna-read" id="donnaRead">—</div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-kicker">Risk Levels</div>
+            <div class="risk-level-row">
+              <span class="risk-level-label">Macro</span>
+              <span id="sidebarMacroRisk" class="risk-badge risk-medium">MEDIUM</span>
+            </div>
+            <div class="risk-level-row">
+              <span class="risk-level-label">Headline</span>
+              <span id="sidebarHeadlineRisk" class="risk-badge risk-medium">MEDIUM</span>
+            </div>
+            <div class="risk-level-row">
+              <span class="risk-level-label">Market</span>
+              <span id="sidebarMarketRisk" class="risk-badge risk-medium">MEDIUM</span>
+            </div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-kicker">Event Phase</div>
+            <div id="sidebarEventPhase" style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--yellow)">—</div>
+            <div id="sidebarNextEvent" style="font-size:12px;color:var(--muted);margin-top:4px">—</div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-kicker">Names to Watch</div>
+            <div id="sidebarWatchNames">—</div>
+          </div>
+
         </div>
-        <div class="panel">
-          <div class="kicker" style="color:var(--yellow)">Next To Watch</div>
-          <table>
-            <thead><tr><th>Ticker</th><th>Impact</th><th>Index</th></tr></thead>
-            <tbody id="nextWatchTable"></tbody>
-          </table>
-        </div>
+
       </div>
 
     </div>
@@ -3209,25 +3502,54 @@ tr:last-child td{border-bottom:none}
   <div class="page" id="page-assistant">
     <div class="vstack">
 
-      <!-- CHAT -->
-      <div class="panel">
-        <div class="kicker">Donna AI</div>
-        <div class="section-title" style="margin-bottom:14px">Command Interface</div>
-        <div class="chat-wrap" id="assistantOutput"></div>
-        <div class="chat-input-row">
-          <input class="chat-input" id="assistantInput" type="text" placeholder="Ask Donna anything about the market..." />
-          <button class="send-btn" id="assistantSend">SEND</button>
+      <!-- COMMAND INTERFACE PANEL -->
+      <div class="panel" style="padding:0;overflow:hidden">
+
+        <!-- DONNA HEADER -->
+        <div class="donna-header">
+          <div class="donna-logo">D.O.N.N.A</div>
+          <div class="donna-online-row">
+            <div class="donna-online-dot"></div>
+            <span class="donna-online-text">Online</span>
+          </div>
+          <div class="donna-tagline">Dynamic Operations &amp; Neural Network Assistant · Command Interface v5</div>
         </div>
+
+        <!-- CHAT AREA -->
+        <div style="padding:16px">
+          <div class="chat-terminal" id="assistantOutput">
+            <div class="msg assistant">
+              <span class="role">DONNA</span>
+              Command interface ready. I am monitoring macro conditions, market structure, and risk levels. Ask me anything or use a quick command below.
+              <div><span class="msg-tag ANALYSIS">ANALYSIS</span></div>
+            </div>
+            <div class="msg-clearfix"></div>
+          </div>
+          <div class="typing-indicator" id="typingIndicator">
+            <span class="typing-dots"><span></span><span></span><span></span></span>&nbsp;&nbsp;DONNA is thinking...
+          </div>
+          <div class="quick-cmds">
+            <button class="quick-cmd-btn" data-cmd="What matters now">What matters now</button>
+            <button class="quick-cmd-btn" data-cmd="Current regime">Current regime</button>
+            <button class="quick-cmd-btn" data-cmd="Is this a good tape?">Is this a good tape?</button>
+            <button class="quick-cmd-btn" data-cmd="Key risks today">Key risks today</button>
+          </div>
+          <div class="chat-input-row">
+            <input class="chat-input" id="assistantInput" type="text" placeholder="Enter command or question..." />
+            <button class="send-btn" id="assistantSend">SEND</button>
+          </div>
+        </div>
+
       </div>
 
-      <!-- ASSISTANT STATE -->
+      <!-- TASKS + REMINDERS -->
       <div class="asst-state-grid">
 
         <!-- FOCUS + TASKS -->
         <div class="panel">
           <div class="kicker">Daily Agenda</div>
           <div class="section-title" style="margin-bottom:8px">Focus &amp; Tasks</div>
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(77,143,255,.07);border:1px solid rgba(77,143,255,.15);font-size:13px;color:var(--text);margin-bottom:14px" id="dailyFocus">—</div>
+          <div style="padding:10px 14px;border-radius:10px;background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.15);font-size:13px;color:var(--text);margin-bottom:14px;line-height:1.5" id="dailyFocus">—</div>
           <div id="tasksList"></div>
           <div class="add-row">
             <input class="add-input" id="taskInput" type="text" placeholder="Add a task..." />
@@ -3695,73 +4017,6 @@ function renderDashboard(d) {
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
 }
 
-// ════════ RENDER TRADING ════════
-function renderTrading(d) {
-  const wm = d.what_matters_now || {};
-  const morning = d.morning_edge || {};
-  const pulse = d.futures_macro_pulse || [];
-  const alerts = d.raw_trade_alerts || [];
-  const obs = d.observations || [];
-
-  setText('tradingHeadline', wm.headline || '—');
-  setText('tradingSummary', wm.summary || '—');
-  setText('tradingFocusReason', wm.focus_reason || '—');
-  setText('tradingMode', (wm.mode || '—').replace(/_/g,' ').toUpperCase());
-  setText('tradingRtC', wm.risk_to_conviction || '—');
-
-  // Watch-first buttons
-  const watchFirst = morning.watch_first || wm.watch || [];
-  setHtml('watchFirstRow', watchFirst.map(sym => `
-    <button class="tab-btn" style="font-size:13px;padding:8px 14px;letter-spacing:1px"
-      onclick="this.classList.toggle('active')">${sym}</button>
-  `).join(''));
-
-  // Pulse table
-  setHtml('tradingPulseTable', pulse.map(r => `
-    <tr>
-      <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${r.symbol}</td>
-      <td class="${dirClass(r.pct)}">${r.last}</td>
-      <td class="${dirClass(r.pct)}">${r.chg}</td>
-      <td class="${dirClass(r.pct)}">${r.pct}</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="neutral">No pulse data</td></tr>');
-
-  // Trade intel
-  setText('tradeBias', morning.today_bias || '—');
-  setText('tradeOpenQuality', morning.open_quality || '—');
-  setText('tradeThreat', morning.main_threat || '—');
-  setText('tradeFocus', morning.focus || '—');
-  setText('tradeNote', morning.first_read || '—');
-
-  // Alerts + observations merged
-  const combined = alerts.length ? alerts : obs;
-  setHtml('recentAlerts', combined.slice(0, 8).map(item => {
-    if (item.ticker) {
-      // Trade alert
-      const v = item.verdict || '';
-      return `
-        <div class="alert-item">
-          <div class="alert-header">
-            <span class="alert-ticker">${item.ticker}</span>
-            <span class="alert-signal">${item.signal || ''}</span>
-          </div>
-          <div class="alert-meta">${item.session || ''} | ${item.timeframe || ''} | $${item.price || ''}</div>
-          <div class="alert-body">
-            Verdict: <span class="verdict-${v}">${v}</span> &nbsp;·&nbsp;
-            Confidence: ${item.confidence || '—'} &nbsp;·&nbsp;
-            ${item.summary || ''}
-          </div>
-        </div>`;
-    } else {
-      // Observation
-      return `
-        <div class="obs-item ${item.priority || 'low'}">
-          <div class="obs-title">${item.title || '—'}</div>
-          <div class="obs-body">${item.summary || ''}</div>
-        </div>`;
-    }
-  }).join('') || '<div class="obs-item low"><div class="obs-body">No recent alerts.</div></div>');
-}
-
 // ═══════════════════════════════════════
 // H.A.R.V.E.Y RENDERER
 // ═══════════════════════════════════════
@@ -3903,38 +4158,121 @@ async function refreshHarvey() {
 }
 
 // ════════ RENDER NEWS ════════
+function classifyHeadlineTag(text) {
+  const t = (text || '').toLowerCase();
+  if (/war|conflict|sanction|geopolit|iran|russia|ukraine|missile|military|nato|troops|attack/.test(t)) return 'GEOPOLITICAL';
+  if (/oil|energy|opec|gas|crude|pipeline/.test(t)) return 'ENERGY';
+  if (/fed|rate|yield|inflation|cpi|pce|gdp|macro|recession|fomc|powell/.test(t)) return 'MACRO';
+  if (/earnings|beat|miss|guidance|revenue|eps|ipo|merger|acquisition/.test(t)) return 'MARKET';
+  if (/calendar|event|data|report|release|scheduled/.test(t)) return 'CALENDAR';
+  return 'MARKET';
+}
+
 function renderNews(d) {
   const risk = d.risk || {};
   const movers = d.market_movers_engine || {};
   const news = d.news || [];
+  const snap = (risk.market_snapshot) || {};
 
-  setText('newsMacroTitle', risk.last_headline || '—');
-  setText('newsMacroNote', risk.headline_guidance || '—');
-  setText('newsMarketTitle', risk.last_market_headline || '—');
-  setText('newsMarketNote', risk.last_market_guidance || '—');
+  // Breaking ticker
+  const tickerItems = news.slice(0, 6).map(n => n.headline || '').filter(Boolean);
+  if (tickerItems.length) {
+    const track = document.getElementById('breakingTickerTrack');
+    if (track) {
+      const doubled = [...tickerItems, ...tickerItems];
+      track.innerHTML = doubled.map(h => `<span class="breaking-item">${h}</span>`).join('');
+    }
+  }
 
-  setHtml('newsList', news.map(n => `
-    <div class="news-item">
-      <div class="news-headline">${n.headline || '—'}</div>
-      <div class="news-meta">${n.source || '—'}</div>
-      ${n.summary ? `<div class="news-summary">${n.summary}</div>` : ''}
-      ${n.url ? `<a class="news-link" href="${n.url}" target="_blank" rel="noopener">Read more →</a>` : ''}
-    </div>`).join('') || '<div class="obs-item low"><div class="obs-body">No live news loaded yet.</div></div>');
+  // Index tiles helper
+  function setTile(idVal, idChg, val, chg, pct, dir) {
+    const elV = document.getElementById(idVal);
+    const elC = document.getElementById(idChg);
+    if (elV) {
+      elV.textContent = val !== '-' ? (typeof val === 'number' ? val.toLocaleString(undefined,{maximumFractionDigits:2}) : val) : '—';
+      elV.style.color = dir === 'up' ? 'var(--green)' : dir === 'down' ? 'var(--red)' : 'var(--text)';
+    }
+    if (elC) {
+      elC.textContent = pct || '—';
+      elC.style.color = dir === 'up' ? 'var(--green)' : dir === 'down' ? 'var(--red)' : 'var(--muted)';
+    }
+    const tileEl = elV && elV.closest('.index-tile');
+    if (tileEl) {
+      tileEl.classList.remove('up','dn');
+      if (dir === 'up') tileEl.classList.add('up');
+      else if (dir === 'down') tileEl.classList.add('dn');
+    }
+  }
 
+  // Populate index tiles from market snapshot
+  const nasdaq = snap.NASDAQ || {};
+  const spx = snap.SPX || {};
+  const djia = snap.DJIA || {};
+  const dxy = snap.DXY || {};
+  const vix = snap.VIX || {};
+
+  function snapDir(obj) {
+    const p = parseFloat(obj.pct);
+    if (isNaN(p)) return '';
+    return p >= 0 ? 'up' : 'down';
+  }
+  setTile('tileNASDAQ','tileNASDAQchg', nasdaq.last||'-', nasdaq.chg||'-', nasdaq.pct != null ? (parseFloat(nasdaq.pct)>=0?'+':'')+parseFloat(nasdaq.pct).toFixed(2)+'%':null, snapDir(nasdaq));
+  setTile('tileSPX','tileSPXchg', spx.last||'-', spx.chg||'-', spx.pct != null ? (parseFloat(spx.pct)>=0?'+':'')+parseFloat(spx.pct).toFixed(2)+'%':null, snapDir(spx));
+  setTile('tileDJIA','tileDJIAchg', djia.last||'-', djia.chg||'-', djia.pct != null ? (parseFloat(djia.pct)>=0?'+':'')+parseFloat(djia.pct).toFixed(2)+'%':null, snapDir(djia));
+  setTile('tileDXY','tileDXYchg', dxy.last||'-', dxy.chg||'-', dxy.pct != null ? (parseFloat(dxy.pct)>=0?'+':'')+parseFloat(dxy.pct).toFixed(2)+'%':null, snapDir(dxy));
+  setTile('tileVIX','tileVIXchg', vix.last||'-', vix.chg||'-', vix.pct != null ? (parseFloat(vix.pct)>=0?'+':'')+parseFloat(vix.pct).toFixed(2)+'%':null, snapDir(vix));
+
+  // Feature story — top macro headline
+  const featureText = risk.last_headline || news[0]?.headline || '—';
+  const featureNote = risk.headline_guidance || risk.last_market_guidance || '—';
+  const featureTag = classifyHeadlineTag(featureText);
+  const ftEl = document.getElementById('featureStoryTag');
+  if (ftEl) { ftEl.textContent = featureTag; ftEl.className = 'story-tag ' + featureTag; }
+  setText('featureHeadline', featureText);
+  setText('featureNote', featureNote);
+
+  // Numbered news feed
+  setHtml('newsList', news.length ? news.map((n, i) => {
+    const tag = classifyHeadlineTag(n.headline);
+    return `<div class="news-numbered-item">
+      <div class="news-num">${i+1}.</div>
+      <div class="news-body">
+        <div class="news-headline">${n.headline || '—'} <span class="story-tag ${tag}" style="font-size:8px;padding:2px 6px;margin-left:6px">${tag}</span></div>
+        <div class="news-meta">${n.source || '—'}</div>
+        ${n.summary && n.summary !== n.headline ? `<div class="news-summary">${n.summary}</div>` : ''}
+        ${n.url ? `<a class="news-link" href="${n.url}" target="_blank" rel="noopener">Read more →</a>` : ''}
+      </div>
+    </div>`;
+  }).join('') : '<div class="obs-item low"><div class="obs-body">No live news loaded yet.</div></div>');
+
+  // Sidebar
+  setText('donnaRead', risk.last_market_guidance || risk.headline_guidance || '—');
+
+  function setRiskBadge(id, level) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const l = (level || 'medium').toLowerCase();
+    el.textContent = l.toUpperCase();
+    el.className = 'risk-badge risk-' + l;
+  }
+  setRiskBadge('sidebarMacroRisk', risk.macro_risk);
+  setRiskBadge('sidebarHeadlineRisk', risk.headline_risk);
+  setRiskBadge('sidebarMarketRisk', risk.market_news_risk);
+
+  const phase = risk.event_phase || '—';
+  setText('sidebarEventPhase', phase);
+  setText('sidebarNextEvent', risk.next_event || '—');
+
+  // Names to watch from movers
   const leaders = movers.leaders || [];
   const threats = movers.threats || [];
-  const nextWatch = movers.next_to_watch || [];
-
-  const moverRow = (m) => `
-    <tr>
-      <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${m.ticker}</td>
-      <td><span class="risk-badge" style="background:rgba(77,143,255,.1);border-color:rgba(77,143,255,.2);color:var(--blue)">${m.impact}</span></td>
-      <td style="font-size:11px;color:var(--muted2)">${m.index_exposure || '—'}</td>
-    </tr>`;
-
-  setHtml('leadersTable', leaders.map(moverRow).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
-  setHtml('threatsTable', threats.map(moverRow).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
-  setHtml('nextWatchTable', nextWatch.map(moverRow).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
+  const watchAll = [...leaders, ...threats].slice(0, 8);
+  const watchEl = document.getElementById('sidebarWatchNames');
+  if (watchEl) {
+    watchEl.innerHTML = watchAll.length
+      ? watchAll.map(m => `<span class="watch-name">${m.ticker}</span>`).join('')
+      : '<span style="font-size:12px;color:var(--muted2)">—</span>';
+  }
 }
 
 // ════════ RENDER ASSISTANT STATE ════════
@@ -3945,14 +4283,14 @@ function renderAssistantState(asst) {
   const tasks = asst.tasks || [];
   setHtml('tasksList', tasks.map((t, i) => `
     <div class="state-list-item">
-      <span style="font-size:13px">${t}</span>
+      <span class="state-card-text">${t}</span>
       <button class="del-btn" onclick="deleteTask(${i})" title="Remove">✕</button>
     </div>`).join('') || '<div style="color:var(--muted2);font-size:13px;padding:8px 0">No tasks.</div>');
 
   const reminders = asst.reminders || [];
   setHtml('remindersList', reminders.map((r, i) => `
     <div class="state-list-item">
-      <span style="font-size:13px">${r}</span>
+      <span class="state-card-text">${r}</span>
       <button class="del-btn" onclick="deleteReminder(${i})" title="Remove">✕</button>
     </div>`).join('') || '<div style="color:var(--muted2);font-size:13px;padding:8px 0">No reminders.</div>');
 }
@@ -3965,7 +4303,6 @@ async function refresh() {
     const d = await res.json();
 
     renderDashboard(d);
-    renderTrading(d);
     renderNews(d);
     renderAssistantState(d.assistant);
     renderHarvey(d);
@@ -3981,21 +4318,45 @@ async function refresh() {
 const chatOutput = document.getElementById('assistantOutput');
 const chatInput = document.getElementById('assistantInput');
 const sendBtn = document.getElementById('assistantSend');
+const typingIndicator = document.getElementById('typingIndicator');
 
-function appendMsg(role, text) {
+function inferResponseTag(text) {
+  const t = (text || '').toLowerCase();
+  if (/risk|danger|warning|threat|caution|stop|avoid/.test(t)) return 'RISK';
+  if (/buy|sell|entry|exit|trade|execute|position|size|stop.loss|target/.test(t)) return 'EXECUTION';
+  if (/earnings|fomc|cpi|event|calendar|report|release|tomorrow|today at/.test(t)) return 'CALENDAR';
+  return 'ANALYSIS';
+}
+
+function appendMsg(role, text, tag) {
+  const clearfix = document.createElement('div');
+  clearfix.className = 'msg-clearfix';
+
   const el = document.createElement('div');
   el.className = 'msg ' + role;
-  el.innerHTML = `<span class="role">${role === 'user' ? 'You' : 'Donna'}</span>${text}`;
+  if (role === 'assistant') {
+    const resolvedTag = tag || inferResponseTag(text);
+    el.innerHTML = `<span class="role">DONNA</span>${text}<div><span class="msg-tag ${resolvedTag}">${resolvedTag}</span></div>`;
+  } else {
+    el.innerHTML = `<span class="role">YOU</span>${text}`;
+  }
   chatOutput.appendChild(el);
+  chatOutput.appendChild(clearfix);
   chatOutput.scrollTop = chatOutput.scrollHeight;
 }
 
-async function sendChat() {
-  const msg = chatInput.value.trim();
+function showTyping(show) {
+  if (typingIndicator) typingIndicator.classList.toggle('active', show);
+  if (show) chatOutput.scrollTop = chatOutput.scrollHeight;
+}
+
+async function sendChat(overrideMsg) {
+  const msg = overrideMsg || chatInput.value.trim();
   if (!msg) return;
   chatInput.value = '';
   sendBtn.disabled = true;
   appendMsg('user', msg);
+  showTyping(true);
   try {
     const res = await fetch('/assistant/chat', {
       method: 'POST',
@@ -4003,17 +4364,23 @@ async function sendChat() {
       body: JSON.stringify({message: msg})
     });
     const data = await res.json();
+    showTyping(false);
     appendMsg('assistant', data.reply || 'No response.');
     if (data.assistant) renderAssistantState(data.assistant);
   } catch (err) {
+    showTyping(false);
     appendMsg('assistant', 'Connection error. Please try again.');
   }
   sendBtn.disabled = false;
   chatInput.focus();
 }
 
-sendBtn.addEventListener('click', sendChat);
+sendBtn.addEventListener('click', () => sendChat());
 chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+document.querySelectorAll('.quick-cmd-btn').forEach(btn => {
+  btn.addEventListener('click', () => sendChat(btn.dataset.cmd));
+});
 
 // ════════ TASK / REMINDER ACTIONS ════════
 async function deleteTask(index) {
