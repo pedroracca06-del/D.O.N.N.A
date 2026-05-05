@@ -24,6 +24,25 @@ except Exception:
         return None
 
 try:
+    from donna_risk_engine import (
+        build_risk_engine_payload,
+        reset_stop_trading,
+        update_re_settings,
+        load_re_state,
+    )
+    _RISK_ENGINE_AVAILABLE = True
+except Exception:
+    _RISK_ENGINE_AVAILABLE = False
+    def build_risk_engine_payload(*a, **kw):
+        return {'stop_trading': False, 'stop_reason': '', 'position_size': {}, 'rr': {}, 'drawdown': {}, 'session_losses': {}}
+    def reset_stop_trading():
+        return {'status': 'ok', 'stop_trading': False}
+    def update_re_settings(**kw):
+        return {}
+    def load_re_state():
+        return {'account_size': 25000.0, 'risk_pct': 1.0}
+
+try:
     from donna_headlines import process_headlines_cycle
 except Exception:
     def process_headlines_cycle():
@@ -1032,6 +1051,21 @@ def build_harvey_payload(risk=None):
         'mins_to_event': state.get('minutes_to_event'),
     }
 
+    # ── RISK ENGINE LAYER ────────────────────────────────────────
+    trades      = load_journal() if callable(load_journal) else []
+    re_state    = load_re_state()
+    risk_engine = build_risk_engine_payload(
+        trades       = trades,
+        account_size = float(re_state.get('account_size', 25000)),
+        risk_pct     = float(re_state.get('risk_pct', 1.0)),
+    )
+
+    # STOP_TRADING overrides the execution verdict
+    if risk_engine.get('stop_trading'):
+        verdict        = 'STOP'
+        verdict_reason = f"RISK ENGINE: {risk_engine.get('stop_reason', 'Session trading limit reached.')} — No new positions until flag is cleared."
+        verdict_color  = 'red'
+
     return {
         'status':               'ok',
         'bias_score':           bias_score,
@@ -1057,12 +1091,53 @@ def build_harvey_payload(risk=None):
         'macro_risk':           state.get('macro_risk', 'medium'),
         'headline':             state.get('last_headline', ''),
         'regime':               regime_data,
+        'risk_engine':          risk_engine,
     }
 
 
 @app.get('/harvey-data')
 async def harvey_data():
     return build_harvey_payload()
+
+
+@app.get('/risk-engine-data')
+async def risk_engine_data(
+    entry:   float | None = None,
+    stop:    float | None = None,
+    target:  float | None = None,
+    direction: str        = 'LONG',
+):
+    trades   = load_journal()
+    re_state = load_re_state()
+    payload  = build_risk_engine_payload(
+        trades       = trades,
+        account_size = float(re_state.get('account_size', 25000)),
+        risk_pct     = float(re_state.get('risk_pct', 1.0)),
+        entry        = entry,
+        stop         = stop,
+        target       = target,
+        direction    = direction,
+    )
+    return {'status': 'ok', **payload}
+
+
+@app.post('/risk-engine/reset-stop')
+async def risk_engine_reset_stop():
+    return reset_stop_trading()
+
+
+@app.post('/risk-engine/settings')
+async def risk_engine_settings(request: Request):
+    body         = await request.json()
+    account_size = body.get('account_size')
+    risk_pct     = body.get('risk_pct')
+    try:
+        if account_size is not None: account_size = float(account_size)
+        if risk_pct     is not None: risk_pct     = float(risk_pct)
+    except Exception:
+        raise HTTPException(status_code=400, detail='account_size and risk_pct must be numbers')
+    state = update_re_settings(account_size=account_size, risk_pct=risk_pct)
+    return {'status': 'ok', 'settings': state}
 
 
 def build_market_movers_engine():
@@ -3173,6 +3248,68 @@ tr:last-child td{border-bottom:none}
 .harvey-mid-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
 .harvey-bot-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
 
+/* ── RISK ENGINE PANEL ── */
+.re-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.re-cell {
+  padding: 14px 16px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--panel);
+}
+.re-cell.stop {
+  border-color: rgba(255,77,109,.5);
+  background: rgba(255,77,109,.08);
+  animation: strip-pulse-red 1.8s ease-in-out infinite;
+}
+.re-label {
+  font-family: 'Space Mono', monospace; font-size: 9px;
+  letter-spacing: 2px; color: var(--muted2); text-transform: uppercase; margin-bottom: 8px;
+}
+.re-value {
+  font-family: 'Rajdhani', sans-serif; font-size: 22px; font-weight: 700; line-height: 1;
+}
+.re-note {
+  margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.4;
+}
+.re-valid   { color: var(--green) }
+.re-invalid { color: var(--red) }
+.re-warn    { color: var(--yellow) }
+.re-ok      { color: var(--green) }
+.re-stop-banner {
+  display: none; padding: 14px 20px; border-radius: 14px;
+  background: rgba(255,77,109,.12); border: 2px solid rgba(255,77,109,.5);
+  color: var(--red); font-family: 'Rajdhani', sans-serif;
+  font-size: 20px; font-weight: 700; letter-spacing: 2px;
+  text-align: center; margin-bottom: 0;
+  animation: strip-pulse-red 1.8s ease-in-out infinite;
+}
+.re-stop-banner.active { display: block }
+.re-calc-row {
+  display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;
+}
+.re-input {
+  flex: 1; min-width: 90px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(255,255,255,.04);
+  color: var(--text); font-family: 'Space Mono', monospace; font-size: 11px;
+  outline: none; transition: border-color .2s;
+}
+.re-input:focus { border-color: rgba(0,229,160,.4) }
+.re-calc-btn {
+  padding: 8px 16px; border-radius: 10px; border: 1px solid rgba(0,229,160,.3);
+  background: rgba(0,229,160,.08); color: var(--green);
+  font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: all .2s; white-space: nowrap;
+}
+.re-calc-btn:hover { background: rgba(0,229,160,.15); border-color: rgba(0,229,160,.5) }
+.re-reset-btn {
+  padding: 8px 16px; border-radius: 10px; border: 1px solid rgba(255,77,109,.3);
+  background: rgba(255,77,109,.08); color: var(--red);
+  font-family: 'Rajdhani', sans-serif; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: all .2s;
+}
+.re-reset-btn:hover { background: rgba(255,77,109,.18) }
+@media(max-width:1100px) {
+  .re-grid { grid-template-columns: 1fr 1fr }
+}
+
 @media(max-width:1100px) {
   .harvey-top-grid, .harvey-mid-grid, .harvey-bot-grid, .verdict-grid { grid-template-columns: 1fr }
 }
@@ -3656,6 +3793,65 @@ tr:last-child td{border-bottom:none}
           <div class="kv-row"><span class="kv-k">Focus</span><span class="kv-v" id="harveyFocus">—</span></div>
           <div class="kv-row"><span class="kv-k">Watch First</span><span class="kv-v" id="harveyWatchFirst">—</span></div>
           <div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--line2);font-size:13px;color:var(--muted);line-height:1.6" id="harveyFirstRead">—</div>
+        </div>
+      </div>
+
+      <!-- ── RISK ENGINE PANEL ── -->
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <div class="kicker" style="color:var(--red)">Layer 4 · Risk Management</div>
+            <div class="section-title">Risk Engine</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:Space Mono,monospace;font-size:10px;color:var(--muted2)">Acct $</span>
+            <input class="re-input" id="reAccountSize" style="width:90px;flex:none" placeholder="25000" />
+            <span style="font-family:Space Mono,monospace;font-size:10px;color:var(--muted2)">Risk %</span>
+            <input class="re-input" id="reRiskPct" style="width:60px;flex:none" placeholder="1.0" />
+            <button class="re-calc-btn" id="reSaveSettings">SAVE</button>
+            <button class="re-reset-btn" id="reResetStop" title="Clear STOP flag">RESET STOP</button>
+          </div>
+        </div>
+
+        <!-- STOP TRADING BANNER -->
+        <div class="re-stop-banner" id="reStopBanner">
+          ⛔ STOP TRADING — Session risk limit reached. Clear flag to resume.
+        </div>
+
+        <!-- 4-CELL GRID -->
+        <div class="re-grid" id="reGrid" style="margin-top:14px">
+          <div class="re-cell" id="rePosCell">
+            <div class="re-label">Position Size</div>
+            <div class="re-value" id="rePosValue">—</div>
+            <div class="re-note" id="rePosNote">Enter entry &amp; stop below</div>
+          </div>
+          <div class="re-cell" id="reRRCell">
+            <div class="re-label">R/R Ratio</div>
+            <div class="re-value" id="reRRValue">—</div>
+            <div class="re-note" id="reRRNote">Enter entry, stop &amp; target</div>
+          </div>
+          <div class="re-cell" id="reDDCell">
+            <div class="re-label">Drawdown</div>
+            <div class="re-value" id="reDDValue">—</div>
+            <div class="re-note" id="reDDNote">—</div>
+          </div>
+          <div class="re-cell" id="reLossCell">
+            <div class="re-label">Session Losses</div>
+            <div class="re-value" id="reLossValue">—</div>
+            <div class="re-note" id="reLossNote">—</div>
+          </div>
+        </div>
+
+        <!-- TRADE CALCULATOR INPUTS -->
+        <div class="re-calc-row">
+          <input class="re-input" id="reEntry"  placeholder="Entry price"  type="number" step="any" />
+          <input class="re-input" id="reStop"   placeholder="Stop price"   type="number" step="any" />
+          <input class="re-input" id="reTarget" placeholder="Target price" type="number" step="any" />
+          <select class="re-input" id="reDir" style="flex:none;width:90px">
+            <option value="LONG">LONG</option>
+            <option value="SHORT">SHORT</option>
+          </select>
+          <button class="re-calc-btn" id="reCalcBtn">CALCULATE</button>
         </div>
       </div>
 
@@ -4152,10 +4348,128 @@ async function refreshHarvey() {
     if (!res.ok) return;
     const d = await res.json();
     renderHarvey(d);
+    if (d.risk_engine) renderRiskEngine(d.risk_engine);
   } catch(e) {
     console.error('HARVEY refresh error:', e);
   }
 }
+
+// ════════ RISK ENGINE ════════
+function renderRiskEngine(re) {
+  if (!re) return;
+
+  const stop = !!re.stop_trading;
+  const banner = document.getElementById('reStopBanner');
+  if (banner) banner.classList.toggle('active', stop);
+
+  // Position size
+  const pos = re.position_size || {};
+  const posEl  = document.getElementById('rePosValue');
+  const posNote = document.getElementById('rePosNote');
+  if (posEl) {
+    if (pos.max_units != null) {
+      posEl.textContent = pos.max_units + ' units';
+      posEl.className = 're-value ' + (pos.valid ? 're-ok' : 're-warn');
+    } else {
+      posEl.textContent = '—';
+      posEl.className = 're-value re-warn';
+    }
+  }
+  if (posNote) posNote.textContent = pos.note || '—';
+
+  // R/R
+  const rr = re.rr || {};
+  const rrEl   = document.getElementById('reRRValue');
+  const rrNote = document.getElementById('reRRNote');
+  if (rrEl) {
+    if (rr.rr != null) {
+      rrEl.textContent = rr.rr + ':1';
+      rrEl.className = 're-value ' + (rr.valid ? 're-valid' : 're-invalid');
+    } else {
+      rrEl.textContent = '—';
+      rrEl.className = 're-value re-warn';
+    }
+  }
+  if (rrNote) rrNote.textContent = rr.note || '—';
+
+  // Drawdown
+  const dd = re.drawdown || {};
+  const ddEl   = document.getElementById('reDDValue');
+  const ddNote = document.getElementById('reDDNote');
+  const ddCell = document.getElementById('reDDCell');
+  if (ddEl) {
+    ddEl.textContent = dd.daily_pnl != null ? '$' + dd.daily_pnl.toFixed(0) : '—';
+    const cls = dd.daily_breach || dd.weekly_breach ? 're-invalid' : dd.status === 'WARNING' ? 're-warn' : 're-ok';
+    ddEl.className = 're-value ' + cls;
+  }
+  if (ddNote) ddNote.textContent = dd.status_note || '—';
+  if (ddCell) {
+    ddCell.classList.toggle('stop', !!(dd.daily_breach || dd.weekly_breach));
+  }
+
+  // Session losses
+  const sl = re.session_losses || {};
+  const slEl   = document.getElementById('reLossValue');
+  const slNote = document.getElementById('reLossNote');
+  const slCell = document.getElementById('reLossCell');
+  if (slEl) {
+    slEl.textContent = sl.consecutive_losses != null ? sl.consecutive_losses : '—';
+    slEl.className = 're-value ' + (sl.stop_triggered ? 're-invalid' : sl.consecutive_losses >= 2 ? 're-warn' : 're-ok');
+  }
+  if (slNote) slNote.textContent = sl.note || '—';
+  if (slCell) slCell.classList.toggle('stop', !!sl.stop_triggered);
+
+  // Pre-fill settings if available
+  const accEl = document.getElementById('reAccountSize');
+  const rPctEl = document.getElementById('reRiskPct');
+  if (accEl && !accEl.value && re.account_size) accEl.placeholder = re.account_size;
+  if (rPctEl && !rPctEl.value && re.risk_pct)   rPctEl.placeholder = re.risk_pct;
+}
+
+async function reCalculate() {
+  const entry  = parseFloat(document.getElementById('reEntry')?.value);
+  const stop   = parseFloat(document.getElementById('reStop')?.value);
+  const target = parseFloat(document.getElementById('reTarget')?.value);
+  const dir    = document.getElementById('reDir')?.value || 'LONG';
+  if (isNaN(entry) || isNaN(stop)) return;
+  const params = new URLSearchParams({ entry, stop, direction: dir });
+  if (!isNaN(target)) params.set('target', target);
+  try {
+    const res = await fetch('/risk-engine-data?' + params.toString());
+    const d = await res.json();
+    renderRiskEngine(d);
+  } catch(e) { console.error('Risk engine calc error:', e); }
+}
+
+async function reSaveSettings() {
+  const account_size = parseFloat(document.getElementById('reAccountSize')?.value);
+  const risk_pct     = parseFloat(document.getElementById('reRiskPct')?.value);
+  const body = {};
+  if (!isNaN(account_size)) body.account_size = account_size;
+  if (!isNaN(risk_pct))     body.risk_pct     = risk_pct;
+  if (!Object.keys(body).length) return;
+  try {
+    await fetch('/risk-engine/settings', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    refreshHarvey();
+  } catch(e) { console.error('Risk engine settings error:', e); }
+}
+
+async function reResetStop() {
+  try {
+    await fetch('/risk-engine/reset-stop', { method: 'POST' });
+    refreshHarvey();
+  } catch(e) { console.error('Risk engine reset error:', e); }
+}
+
+document.getElementById('reCalcBtn')?.addEventListener('click', reCalculate);
+document.getElementById('reSaveSettings')?.addEventListener('click', reSaveSettings);
+document.getElementById('reResetStop')?.addEventListener('click', reResetStop);
+['reEntry','reStop','reTarget'].forEach(id => {
+  document.getElementById(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') reCalculate(); });
+});
 
 // ════════ RENDER NEWS ════════
 function classifyHeadlineTag(text) {
