@@ -2458,6 +2458,12 @@ async def journal_add(request: Request):
     pnl = round((exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size, 2)
     nq_pts = safe_float(state.get('market_snapshot', {}).get('NQ_SESSION_POINTS', 0))
 
+    trade_date_raw = str(body.get('trade_date', '')).strip()
+    if trade_date_raw and len(trade_date_raw) == 10:
+        trade_date = trade_date_raw
+    else:
+        trade_date = datetime.now(NY_TZ).strftime('%Y-%m-%d')
+
     trade = {
         'ticker':         str(body.get('ticker', '')).upper(),
         'direction':      direction,
@@ -2468,6 +2474,7 @@ async def journal_add(request: Request):
         'notes':          str(body.get('notes', '')),
         'outcome':        outcome,
         'pnl':            pnl,
+        'trade_date':     trade_date,
         'timestamp':      utc_now_iso(),
         'active_regime':  harvey.get('regime', {}).get('regime', state.get('market_regime', 'UNKNOWN')),
         'session':        session_label(),
@@ -3129,6 +3136,12 @@ tr:last-child td{border-bottom:none}
 .submit-trade-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(240,180,41,.4)}
 .submit-trade-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
 .outcome-WIN{color:var(--green)}.outcome-LOSS{color:var(--red)}.outcome-BREAKEVEN{color:var(--yellow)}
+.j-date-header{background:rgba(240,180,41,.06);border-bottom:1px solid rgba(240,180,41,.12)}
+.j-date-header td{padding:7px 14px;font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;font-weight:700}
+.j-filter-bar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.j-filter-btn{padding:5px 14px;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.j-filter-btn:hover{border-color:rgba(240,180,41,.4);color:var(--gold)}
+.j-filter-btn.active{background:rgba(240,180,41,.12);border-color:rgba(240,180,41,.4);color:var(--gold)}
 .regime-breakdown-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:12px}
 .regime-card{padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.03)}
 .regime-card .rc-name{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px}
@@ -3946,18 +3959,19 @@ tr:last-child td{border-bottom:none}
         <!-- TRADE HISTORY -->
         <div class="panel">
           <div class="kicker">History</div>
-          <div class="section-title" style="margin-bottom:14px">Trade Log</div>
+          <div class="section-title" style="margin-bottom:12px">Trade Log</div>
+          <div class="j-filter-bar" id="jFilterBar"></div>
           <div style="overflow-x:auto">
             <table>
               <thead>
                 <tr>
-                  <th>Time</th><th>Ticker</th><th>Dir</th><th>Entry</th><th>Exit</th>
+                  <th>Date</th><th>Time (ET)</th><th>Ticker</th><th>Dir</th><th>Entry</th><th>Exit</th>
                   <th>Size</th><th>P&amp;L</th><th>Setup</th><th>Regime</th><th>Session</th>
                   <th>Bias</th><th>Verdict</th><th>Outcome</th><th></th>
                 </tr>
               </thead>
               <tbody id="journalTableBody">
-                <tr><td colspan="14" class="neutral" style="text-align:center;padding:20px">No trades logged yet.</td></tr>
+                <tr><td colspan="15" class="neutral" style="text-align:center;padding:20px">No trades logged yet.</td></tr>
               </tbody>
             </table>
           </div>
@@ -3968,6 +3982,10 @@ tr:last-child td{border-bottom:none}
           <div class="kicker">Log Trade</div>
           <div class="section-title" style="margin-bottom:16px">Quick Add</div>
           <div class="vstack" style="gap:12px">
+            <div>
+              <label class="trade-label">Trade Date</label>
+              <input class="trade-input" id="jDate" type="date" />
+            </div>
             <div>
               <label class="trade-label">Ticker</label>
               <input class="trade-input" id="jTicker" type="text" placeholder="e.g. MNQ1!, SPY" />
@@ -4862,7 +4880,31 @@ async function refreshScenarios(force = false) {
 document.getElementById('scenarioGenBtn').addEventListener('click', () => refreshScenarios(true));
 
 // ════════ JOURNAL ════════
+let journalFilter = 'all';
+let _journalData  = null;
+
+function fmtTimeET(isoStr) {
+  if (!isoStr) return '—';
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'America/New_York'}) + ' ET';
+  } catch(e) { return '—'; }
+}
+
+function fmtDateHeader(dateStr) {
+  try {
+    const [y,m,d] = dateStr.split('-').map(Number);
+    return new Date(y, m-1, d).toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
+  } catch(e) { return dateStr; }
+}
+
+function setJournalFilter(f) {
+  journalFilter = f;
+  if (_journalData) renderJournal(_journalData);
+}
+
 function renderJournal(data) {
+  _journalData = data;
   const stats  = data.stats  || {};
   const trades = data.trades || [];
 
@@ -4879,35 +4921,80 @@ function renderJournal(data) {
   setText('jBestRegime', stats.best_regime || '—');
   setText('jWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
 
-  // Trade history — newest first
-  const reversed = trades.slice().reverse();
-  setHtml('journalTableBody', reversed.length ? reversed.map((t, ri) => {
-    const idx = trades.length - 1 - ri;
-    const outcome = (t.outcome || '').toUpperCase();
-    const pnl = t.pnl || 0;
-    const dir = (t.direction || '').toUpperCase();
-    const pnlColor = outcome === 'WIN' ? 'var(--green)' : outcome === 'LOSS' ? 'var(--red)' : 'var(--yellow)';
-    const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
-    const ts = t.timestamp ? t.timestamp.substring(0,16).replace('T',' ') : '—';
-    const vColor = t.harvey_verdict === 'BUY' ? 'var(--green)' : t.harvey_verdict === 'SELL' ? 'var(--red)' : 'var(--yellow)';
-    return `
-      <tr>
-        <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${ts}</td>
-        <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${t.ticker||'—'}</td>
-        <td style="color:${dirColor};font-weight:700;font-size:12px">${dir}</td>
-        <td>${t.entry_price||'—'}</td>
-        <td>${t.exit_price||'—'}</td>
-        <td>${t.size||'—'}</td>
-        <td style="color:${pnlColor};font-weight:700">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
-        <td style="font-size:12px;color:var(--muted)">${t.setup_type||'—'}</td>
-        <td style="font-size:11px">${t.active_regime||'—'}</td>
-        <td style="font-size:11px">${(t.session||'—').replace(/_/g,' ')}</td>
-        <td style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">${t.bias_score||'—'}</td>
-        <td style="font-size:11px;color:${vColor};font-weight:700">${t.harvey_verdict||'—'}</td>
-        <td><span class="risk-badge outcome-${outcome}" style="font-size:10px;padding:3px 7px">${outcome}</span></td>
-        <td><button class="del-btn" onclick="deleteTrade(${idx})" title="Delete">✕</button></td>
-      </tr>`;
-  }).join('') : '<tr><td colspan="14" class="neutral" style="text-align:center;padding:20px">No trades logged yet. Log your first trade using the form.</td></tr>');
+  // Filter bar
+  const filterLabels = {all:'All Time', week:'This Week', month:'This Month'};
+  setHtml('jFilterBar', '<span style="font-size:9px;color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase">Filter:</span>'
+    + Object.entries(filterLabels).map(([f,label]) =>
+        `<button class="j-filter-btn${journalFilter===f?' active':''}" onclick="setJournalFilter('${f}')">${label}</button>`
+      ).join(''));
+
+  // Annotate original indices then filter by selected period
+  const now = new Date();
+  const indexed = trades.map((t, i) => ({t, origIdx: i}));
+  const filtered = indexed.filter(({t}) => {
+    if (journalFilter === 'all') return true;
+    const ds = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : '');
+    if (!ds) return true;
+    const d = new Date(ds + 'T12:00:00');
+    if (journalFilter === 'week') {
+      const mon = new Date(now);
+      mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+      mon.setHours(0,0,0,0);
+      return d >= mon;
+    }
+    if (journalFilter === 'month') {
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }
+    return true;
+  });
+
+  // Group by date, newest date first, newest trade first within each date
+  const grouped = {};
+  filtered.forEach(({t, origIdx}) => {
+    const dk = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : 'Unknown');
+    if (!grouped[dk]) grouped[dk] = [];
+    grouped[dk].push({t, origIdx});
+  });
+  const sortedDates = Object.keys(grouped).sort((a,b) => b.localeCompare(a));
+
+  let rows = '';
+  if (sortedDates.length === 0) {
+    rows = `<tr><td colspan="15" class="neutral" style="text-align:center;padding:20px">${trades.length ? 'No trades in this period.' : 'No trades logged yet. Log your first trade using the form.'}</td></tr>`;
+  } else {
+    sortedDates.forEach(dk => {
+      const dayItems = grouped[dk].slice().reverse();
+      const count = dayItems.length;
+      rows += `<tr class="j-date-header"><td colspan="15">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span></td></tr>`;
+      dayItems.forEach(({t, origIdx}) => {
+        const outcome = (t.outcome || '').toUpperCase();
+        const pnl = t.pnl || 0;
+        const dir = (t.direction || '').toUpperCase();
+        const pnlColor = outcome === 'WIN' ? 'var(--green)' : outcome === 'LOSS' ? 'var(--red)' : 'var(--yellow)';
+        const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
+        const timeStr = fmtTimeET(t.timestamp);
+        const datDisp = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : '—');
+        const vColor = t.harvey_verdict === 'BUY' ? 'var(--green)' : t.harvey_verdict === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+        rows += `<tr>
+          <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${datDisp}</td>
+          <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${timeStr}</td>
+          <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${t.ticker||'—'}</td>
+          <td style="color:${dirColor};font-weight:700;font-size:12px">${dir}</td>
+          <td>${t.entry_price||'—'}</td>
+          <td>${t.exit_price||'—'}</td>
+          <td>${t.size||'—'}</td>
+          <td style="color:${pnlColor};font-weight:700">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+          <td style="font-size:12px;color:var(--muted)">${t.setup_type||'—'}</td>
+          <td style="font-size:11px">${t.active_regime||'—'}</td>
+          <td style="font-size:11px">${(t.session||'—').replace(/_/g,' ')}</td>
+          <td style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">${t.bias_score||'—'}</td>
+          <td style="font-size:11px;color:${vColor};font-weight:700">${t.harvey_verdict||'—'}</td>
+          <td><span class="risk-badge outcome-${outcome}" style="font-size:10px;padding:3px 7px">${outcome}</span></td>
+          <td><button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button></td>
+        </tr>`;
+      });
+    });
+  }
+  setHtml('journalTableBody', rows);
 
   // Regime breakdown
   const byRegime = stats.by_regime || {};
@@ -4970,6 +5057,7 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   const size        = parseFloat(document.getElementById('jSize').value) || 1;
   const setup_type  = (document.getElementById('jSetup').value || '').trim();
   const notes       = (document.getElementById('jNotes').value || '').trim();
+  const trade_date  = document.getElementById('jDate').value || '';
 
   const msgEl = document.getElementById('jFormMsg');
   function showMsg(text, color) {
@@ -4990,11 +5078,12 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   try {
     const res = await fetch('/journal/add', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ticker, direction, outcome, entry_price, exit_price, size, setup_type, notes})
+      body: JSON.stringify({ticker, direction, outcome, entry_price, exit_price, size, setup_type, notes, trade_date})
     });
     const data = await res.json();
     if (data.status === 'ok') {
       ['jTicker','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('jDate').value = todayDateStr();
       showMsg('Trade logged.', 'var(--green)');
       setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
       refreshJournal();
@@ -5014,6 +5103,12 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
 });
 
 // ════════ BOOT ════════
+function todayDateStr() {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+}
+document.getElementById('jDate').value = todayDateStr();
+
 refresh();
 setInterval(refresh, 15000);
 refreshJournal();
