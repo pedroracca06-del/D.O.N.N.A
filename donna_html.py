@@ -704,7 +704,7 @@ tr:last-child td{border-bottom:none}
 
 .bias-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .bias-gauge { width: 100%; height: 14px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }
-.bias-fill { height: 100%; border-radius: 999px; transition: width .6s ease; }
+.bias-fill { height: 100%; border-radius: 999px; transition: width .6s ease, background .6s ease; }
 .bias-score-big { font-family: 'Rajdhani', sans-serif; font-size: 52px; font-weight: 700; line-height: 1; }
 .bias-direction { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 2px; }
 
@@ -861,6 +861,8 @@ tr:last-child td{border-bottom:none}
 }
 
 /* ── verdict banner flash on new signal ── */
+@keyframes donnaFadeIn { from { opacity: 0 } to { opacity: 1 } }
+body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 @keyframes banner-flash {
   0%   { box-shadow: 0 0 0 0 rgba(0,229,160,.6) }
   50%  { box-shadow: 0 0 0 18px rgba(0,229,160,0) }
@@ -1573,11 +1575,15 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
 // ════════ HELPERS ════════
 function setText(id, val) {
   const el = document.getElementById(id);
-  if (el) el.textContent = val || '—';
+  if (!el) return;
+  const v = val || '—';
+  if (el.textContent !== v) el.textContent = v;
 }
 function setHtml(id, val) {
   const el = document.getElementById(id);
-  if (el) el.innerHTML = val || '';
+  if (!el) return;
+  const v = val || '';
+  if (el.innerHTML !== v) el.innerHTML = v;
 }
 function riskClass(level) {
   const l = (level || '').toLowerCase();
@@ -1602,6 +1608,13 @@ function buildStrip(items) {
     return `<span class="ticker-item"><b>${item.label}:</b> ${val}</span>`;
   }).join('');
 }
+function updateStrip(items) {
+  const el = document.getElementById('liveStrip');
+  if (!el) return;
+  const newHtml = buildStrip(items);
+  // Only rebuild (and reset animation) if content actually changed
+  if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
+}
 
 // ════════ RENDER DASHBOARD ════════
 function renderDashboard(d) {
@@ -1618,7 +1631,7 @@ function renderDashboard(d) {
 
   // Live strip + session
   setText('sessionVal', risk.donna_session || '—');
-  setHtml('liveStrip', buildStrip(d.live_strip || []));
+  updateStrip(d.live_strip || []);
 
   // Risk bar pulse
   const stripEl = document.querySelector('.ticker-wrap');
@@ -2287,7 +2300,7 @@ function connectSSE() {
       osc.onended = () => actx.close();
     } catch(_) {}
 
-    // Immediately refresh HARVEY data
+    // Targeted HARVEY update only — never triggers a full page refresh
     refreshHarvey();
 
     // Flash verdict banner
@@ -2598,8 +2611,12 @@ function todayDateStr() {
 }
 document.getElementById('jDate').value = todayDateStr();
 
+// First-load fade-in — applies once, removed after animation completes
+document.body.classList.add('donna-first-load');
+document.body.addEventListener('animationend', () => document.body.classList.remove('donna-first-load'), { once: true });
+
 refresh();
-setInterval(refresh, 15000);
+setInterval(refresh, 20000);
 refreshJournal();
 setInterval(refreshJournal, 30000);
 connectSSE();
