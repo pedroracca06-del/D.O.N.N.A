@@ -886,6 +886,7 @@ def build_harvey_payload(risk=None):
         'headline':             state.get('last_headline', ''),
         'regime':               regime_data,
         'risk_engine':          risk_engine,
+        'cross_asset_intelligence': build_cross_asset_intelligence(),
     }
 
 
@@ -1251,6 +1252,104 @@ def build_performance_memory() -> dict:
     }
 
 
+def build_cross_asset_intelligence() -> dict:
+    """Detect when major asset classes are sending conflicting signals."""
+    pulse     = get_live_futures_macro_pulse()
+    pulse_map = {r['symbol']: r for r in pulse}
+
+    def pf(sym):
+        raw = str(pulse_map.get(sym, {}).get('pct', '')).replace('%', '').replace('+', '').strip()
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    nq_pct    = pf('NQ')
+    es_pct    = pf('ES')
+    gold_pct  = pf('GOLD')
+    oil_pct   = pf('OIL')
+    dxy_pct   = pf('DXY')
+    vix_pct   = pf('VIX')
+
+    divergences = []
+
+    # 1. Equity / Gold both bid — risk-on and safe haven simultaneously
+    if nq_pct is not None and gold_pct is not None:
+        if nq_pct >= 0.5 and gold_pct >= 0.8:
+            sev = 'HIGH' if (nq_pct >= 1.0 and gold_pct >= 1.2) else 'MEDIUM'
+            divergences.append({
+                'name':          'Equity / Gold Both Bid',
+                'severity':      sev,
+                'what_it_means': 'Risk-on and safe haven are simultaneously in demand — the market is sending conflicting signals about risk appetite.',
+                'watch_for':     'Which breaks first: Gold fading confirms pure risk-on; equity selling confirms the defensive bid wins.',
+            })
+
+    # 2. Equity up / VIX also rising — protection bought into strength
+    if nq_pct is not None and vix_pct is not None:
+        if nq_pct >= 0.5 and vix_pct >= 3.0:
+            sev = 'HIGH' if vix_pct >= 5.0 else 'MEDIUM'
+            divergences.append({
+                'name':          'Equity Up / VIX Bid',
+                'severity':      sev,
+                'what_it_means': 'Someone is buying protection into equity strength — the options market does not trust this rally.',
+                'watch_for':     'If VIX holds elevated while equities push higher, treat the move with skepticism. Snap-back risk is elevated.',
+            })
+
+    # 3. DXY surging while equities also rising — dollar headwind being ignored
+    if dxy_pct is not None and nq_pct is not None:
+        if dxy_pct >= 0.4 and nq_pct >= 0.5:
+            sev = 'HIGH' if dxy_pct >= 0.7 else 'MEDIUM'
+            divergences.append({
+                'name':          'Dollar Strength / Equity Bid',
+                'severity':      sev,
+                'what_it_means': 'A rising dollar is typically a headwind for equities — both rising together is unusual and tends to resolve quickly.',
+                'watch_for':     'Whether DXY holds after the catalyst resolves. Fading dollar would confirm the equity move is clean.',
+            })
+
+    # 4. Oil breaking down while equities rally — deflation / demand concern
+    if oil_pct is not None and nq_pct is not None:
+        if oil_pct <= -2.0 and nq_pct >= 0.5:
+            sev = 'HIGH' if oil_pct <= -3.0 else 'MEDIUM'
+            divergences.append({
+                'name':          'Oil Breakdown / Equity Strength',
+                'severity':      sev,
+                'what_it_means': 'Crude crashing while equities rally can signal deflation or demand destruction — equity strength may be narrow.',
+                'watch_for':     'Energy sector stocks (XLE). If they are also down hard, the equity strength is likely concentrated in tech only.',
+            })
+
+    # 5. NQ / ES spread above 1% — tech massively leading or lagging
+    if nq_pct is not None and es_pct is not None:
+        spread = abs(nq_pct - es_pct)
+        if spread >= 1.0:
+            leader = 'NQ' if nq_pct > es_pct else 'ES'
+            lagger = 'ES' if leader == 'NQ' else 'NQ'
+            sev    = 'HIGH' if spread >= 1.5 else 'MEDIUM'
+            divergences.append({
+                'name':          f'{leader} / {lagger} Spread ({spread:.1f}%)',
+                'severity':      sev,
+                'what_it_means': f'{leader} is significantly outperforming {lagger} — breadth is narrow and leadership is concentrated.',
+                'watch_for':     f'Whether {lagger} catches up (confirming the move) or {leader} reverts (signaling exhaustion).',
+            })
+
+    # Overall mode
+    if not divergences:
+        mode = 'ALIGNED'
+    else:
+        high_count = sum(1 for d in divergences if d['severity'] == 'HIGH')
+        if len(divergences) >= 3 or high_count >= 2:
+            mode = 'WARNING'
+        elif high_count == 1 or len(divergences) == 2:
+            mode = 'DIVERGING'
+        else:
+            mode = 'MIXED'
+
+    return {
+        'cross_asset_mode': mode,
+        'divergences':      divergences,
+        'pulse_snapshot':   {s: pf(s) for s in ('NQ', 'ES', 'GOLD', 'OIL', 'DXY', 'US10Y', 'VIX')},
+    }
+
+
 def build_dashboard_payload():
     risk          = load_risk_state()
     driver        = build_market_driver_engine(risk)
@@ -1271,6 +1370,7 @@ def build_dashboard_payload():
     live_movers   = get_live_movers()
     futures_macro_pulse = get_live_futures_macro_pulse()
     scenarios     = build_scenario_engine()
+    cross_asset   = build_cross_asset_intelligence()
     effective_alerts = alerts if alerts else observations
 
     live_strip = [
@@ -1309,6 +1409,7 @@ def build_dashboard_payload():
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
         'regime':               regime,
         'scenarios':            scenarios,
+        'cross_asset_intelligence': cross_asset,
     }
 
 

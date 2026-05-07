@@ -199,6 +199,35 @@ tr:last-child td{border-bottom:none}
 .obs-title{font-size:13px;font-weight:700;margin-bottom:4px}
 .obs-body{font-size:12px;color:var(--muted);line-height:1.5}
 
+/* ── CROSS-ASSET INTELLIGENCE ── */
+.ca-mode-badge{
+  font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:1px;
+  padding:4px 10px;border-radius:6px;text-transform:uppercase;
+}
+.ca-mode-ALIGNED  {background:rgba(0,229,160,.12);color:var(--green);border:1px solid rgba(0,229,160,.25)}
+.ca-mode-MIXED    {background:rgba(255,201,60,.10);color:var(--yellow);border:1px solid rgba(255,201,60,.25)}
+.ca-mode-DIVERGING{background:rgba(255,140,50,.12);color:#ff8c32;border:1px solid rgba(255,140,50,.3)}
+.ca-mode-WARNING  {background:rgba(255,77,109,.12);color:var(--red);border:1px solid rgba(255,77,109,.3)}
+.ca-div-item{
+  padding:10px 12px;border-radius:10px;margin-bottom:8px;
+  border-left:3px solid var(--muted2);background:rgba(255,255,255,.03);
+}
+.ca-div-item:last-child{margin-bottom:0}
+.ca-div-item.HIGH{border-left-color:var(--red);background:rgba(255,77,109,.05)}
+.ca-div-item.MEDIUM{border-left-color:var(--yellow);background:rgba(255,201,60,.05)}
+.ca-div-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px}
+.ca-div-name{font-size:12px;font-weight:700;color:var(--text)}
+.ca-sev-badge{
+  font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.5px;
+  padding:2px 7px;border-radius:4px;flex-shrink:0;
+}
+.ca-sev-HIGH  {background:rgba(255,77,109,.15);color:var(--red);border:1px solid rgba(255,77,109,.3)}
+.ca-sev-MEDIUM{background:rgba(255,201,60,.12);color:var(--yellow);border:1px solid rgba(255,201,60,.25)}
+.ca-div-meaning{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:4px}
+.ca-div-watch{font-size:11px;color:var(--muted2);line-height:1.4}
+.ca-div-watch b{color:var(--text);font-weight:600}
+.ca-clean{font-size:12px;color:var(--green);padding:6px 0;opacity:.85}
+
 /* ── HERO BANNER ── */
 .hero-banner{
   padding:16px 20px;border-radius:16px;
@@ -998,6 +1027,17 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.55" id="driverSummary">—</div>
           </div>
 
+          <!-- CROSS-ASSET INTELLIGENCE -->
+          <div class="panel" id="crossAssetPanel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <div class="kicker" style="margin-bottom:0">Cross-Asset Intelligence</div>
+              <span class="ca-mode-badge" id="caModeBadge">—</span>
+            </div>
+            <div id="caDivergenceList">
+              <div class="ca-clean">Assets are aligned — tape is clean</div>
+            </div>
+          </div>
+
           <!-- MAJOR INDEXES -->
           <div class="panel">
             <div class="kicker" style="margin-bottom:10px">Market Board</div>
@@ -1729,8 +1769,44 @@ function renderDashboard(d) {
   // Scenarios — update playbook page silently in background
   if (d.scenarios) renderScenarios(d.scenarios);
 
+  // Cross-asset intelligence card
+  if (d.cross_asset_intelligence) renderCrossAsset(d.cross_asset_intelligence);
+
   // Footer
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
+}
+
+// ════════ CROSS-ASSET INTELLIGENCE ════════
+function renderCrossAsset(ca) {
+  if (!ca) return;
+  const mode = ca.cross_asset_mode || 'ALIGNED';
+  const divs = ca.divergences || [];
+
+  const badge = document.getElementById('caModeBadge');
+  if (badge) {
+    badge.textContent = mode;
+    badge.className = 'ca-mode-badge ca-mode-' + mode;
+  }
+
+  const list = document.getElementById('caDivergenceList');
+  if (!list) return;
+
+  if (!divs.length) {
+    const clean = '<div class="ca-clean">Assets are aligned — tape is clean</div>';
+    if (list.innerHTML !== clean) list.innerHTML = clean;
+    return;
+  }
+
+  const html = divs.map(d => `
+    <div class="ca-div-item ${d.severity}">
+      <div class="ca-div-header">
+        <span class="ca-div-name">${d.name}</span>
+        <span class="ca-sev-badge ca-sev-${d.severity}">${d.severity}</span>
+      </div>
+      <div class="ca-div-meaning">${d.what_it_means}</div>
+      <div class="ca-div-watch"><b>Watch:</b> ${d.watch_for}</div>
+    </div>`).join('');
+  if (list.innerHTML !== html) list.innerHTML = html;
 }
 
 // ═══════════════════════════════════════
@@ -1860,6 +1936,8 @@ function renderHarvey(d) {
       sigEl.innerHTML = '<div class="obs-item low"><div class="obs-body">No signals yet. Waiting for TradingView webhook.</div></div>';
     }
   }
+
+  if (d.cross_asset_intelligence) renderCrossAsset(d.cross_asset_intelligence);
 }
 
 async function refreshHarvey() {
