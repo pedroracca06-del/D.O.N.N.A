@@ -253,7 +253,7 @@ def _llm_classify(headlines: list[str]) -> dict | None:
     if not ANTHROPIC_API_KEY:
         return None
     try:
-        import anthropic
+        import 
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
