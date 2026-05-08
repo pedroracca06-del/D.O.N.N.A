@@ -495,8 +495,7 @@ async def journal_data():
 @app.post('/journal/add')
 async def journal_add(request: Request):
     body     = await request.json()
-    required = ['ticker', 'direction', 'entry_price', 'exit_price', 'size', 'outcome']
-    for f in required:
+    for f in ['ticker', 'direction', 'outcome']:
         if f not in body:
             raise HTTPException(status_code=400, detail=f'Missing field: {f}')
 
@@ -507,16 +506,35 @@ async def journal_add(request: Request):
     if outcome not in ('WIN', 'LOSS', 'BREAKEVEN'):
         raise HTTPException(status_code=400, detail='outcome must be WIN, LOSS, or BREAKEVEN')
 
-    try:
-        entry = float(body['entry_price'])
-        exit_ = float(body['exit_price'])
-        size  = float(body['size'])
-    except Exception:
-        raise HTTPException(status_code=400, detail='entry_price, exit_price, size must be numbers')
+    # realized_pnl takes priority; entry/exit/size are optional when it's provided
+    realized_pnl = None
+    rp_raw = body.get('realized_pnl')
+    if rp_raw is not None and rp_raw != '':
+        try:
+            realized_pnl = float(rp_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail='realized_pnl must be a number')
+
+    entry, exit_, size = None, None, 1.0
+    e_raw, x_raw, s_raw = body.get('entry_price'), body.get('exit_price'), body.get('size')
+    if e_raw not in (None, '') or x_raw not in (None, ''):
+        try:
+            entry = float(e_raw) if e_raw not in (None, '') else None
+            exit_ = float(x_raw) if x_raw not in (None, '') else None
+            size  = float(s_raw) if s_raw not in (None, '') else 1.0
+        except Exception:
+            raise HTTPException(status_code=400, detail='entry_price, exit_price, size must be numbers')
+
+    if realized_pnl is None and (entry is None or exit_ is None):
+        raise HTTPException(status_code=400, detail='Provide realized_pnl or both entry_price and exit_price')
+
+    if realized_pnl is not None:
+        pnl = round(realized_pnl, 2)
+    else:
+        pnl = round((exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size, 2)  # type: ignore[operator]
 
     state  = load_risk_state()
     harvey = build_harvey_payload()
-    pnl    = round((exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size, 2)
     nq_pts = safe_float(state.get('market_snapshot', {}).get('NQ_SESSION_POINTS', 0))
 
     trade_date_raw = str(body.get('trade_date', '')).strip()
@@ -528,6 +546,7 @@ async def journal_add(request: Request):
         'entry_price':    entry,
         'exit_price':     exit_,
         'size':           size,
+        'realized_pnl':   realized_pnl,
         'setup_type':     str(body.get('setup_type', '')),
         'notes':          str(body.get('notes', '')),
         'outcome':        outcome,

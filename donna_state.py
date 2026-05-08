@@ -128,30 +128,46 @@ def save_journal(trades: list):
 
 
 def compute_journal_stats(trades: list) -> dict:
+    from datetime import date, timedelta
+
+    empty_daily = {'today': 0.0, 'yesterday': 0.0, 'this_week': 0.0}
     if not trades:
         return {
             'total': 0, 'wins': 0, 'losses': 0, 'breakevens': 0,
             'win_rate': 0.0, 'avg_win': 0.0, 'avg_loss': 0.0,
             'profit_factor': 0.0, 'best_regime': '—', 'worst_regime': '—',
-            'by_regime': {}, 'by_session': {},
+            'by_regime': {}, 'by_session': {}, 'daily_pnl': empty_daily,
         }
+
+    today_str     = date.today().isoformat()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+    week_start    = (date.today() - timedelta(days=date.today().weekday())).isoformat()
 
     wins, losses, breakevens = 0, 0, 0
     win_pnl, loss_pnl = [], []
     regime_buckets: dict = {}
     session_buckets: dict = {}
+    daily_today = daily_yesterday = daily_week = 0.0
 
     for t in trades:
         outcome   = str(t.get('outcome', '')).upper()
         direction = str(t.get('direction', 'LONG')).upper()
-        try:
-            entry = float(t.get('entry_price', 0))
-            exit_ = float(t.get('exit_price', 0))
-            size  = float(t.get('size', 1))
-        except Exception:
-            entry, exit_, size = 0.0, 0.0, 1.0
 
-        pnl = (exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size
+        # P&L priority: realized_pnl if present, else calculate from entry/exit/size
+        realized = t.get('realized_pnl')
+        if realized is not None:
+            try:
+                pnl = float(realized)
+            except (TypeError, ValueError):
+                pnl = 0.0
+        else:
+            try:
+                entry = float(t.get('entry_price') or 0)
+                exit_ = float(t.get('exit_price') or 0)
+                size  = float(t.get('size') or 1)
+            except Exception:
+                entry, exit_, size = 0.0, 0.0, 1.0
+            pnl = (exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size
 
         if outcome == 'WIN':
             wins += 1
@@ -161,6 +177,14 @@ def compute_journal_stats(trades: list) -> dict:
             loss_pnl.append(abs(pnl))
         else:
             breakevens += 1
+
+        trade_date = str(t.get('trade_date', ''))
+        if trade_date == today_str:
+            daily_today += pnl
+        elif trade_date == yesterday_str:
+            daily_yesterday += pnl
+        if trade_date >= week_start:
+            daily_week += pnl
 
         regime  = str(t.get('active_regime', 'UNKNOWN'))
         session = str(t.get('session', 'UNKNOWN'))
@@ -198,4 +222,9 @@ def compute_journal_stats(trades: list) -> dict:
         'win_rate': win_rate, 'avg_win': avg_win, 'avg_loss': avg_loss,
         'profit_factor': profit_factor, 'best_regime': best_regime, 'worst_regime': worst_regime,
         'by_regime': by_regime, 'by_session': by_session,
+        'daily_pnl': {
+            'today':     round(daily_today, 2),
+            'yesterday': round(daily_yesterday, 2),
+            'this_week': round(daily_week, 2),
+        },
     }

@@ -1476,6 +1476,25 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div class="hero-sub" style="font-size:13px">Every trade logged builds DONNA\'s understanding of when you perform best. Tag, review, learn.</div>
       </div>
 
+      <!-- DAILY P&L SUMMARY -->
+      <div class="card" style="padding:14px 24px;display:flex;align-items:center;gap:28px;flex-wrap:wrap">
+        <span style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;white-space:nowrap">Daily P&amp;L</span>
+        <div style="display:flex;gap:36px;flex:1;flex-wrap:wrap">
+          <div>
+            <div style="font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">Today</div>
+            <div id="jPnlToday" style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:700;line-height:1">—</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">Yesterday</div>
+            <div id="jPnlYesterday" style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:700;line-height:1">—</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">This Week</div>
+            <div id="jPnlWeek" style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:700;line-height:1">—</div>
+          </div>
+        </div>
+      </div>
+
       <!-- STATS ROW -->
       <div class="journal-stats-grid">
         <div class="card journal-stat">
@@ -1527,17 +1546,19 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <!-- QUICK ADD FORM -->
         <div class="panel">
           <div class="kicker">Log Trade</div>
-          <div class="section-title" style="margin-bottom:16px">Quick Add</div>
-          <div class="vstack" style="gap:12px">
-            <div>
-              <label class="trade-label">Trade Date</label>
-              <input class="trade-input" id="jDate" type="date" />
+          <div class="section-title" style="margin-bottom:14px">Quick Add</div>
+          <div class="vstack" style="gap:10px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div>
+                <label class="trade-label">Ticker</label>
+                <input class="trade-input" id="jTicker" type="text" placeholder="MNQ, SPY…" />
+              </div>
+              <div>
+                <label class="trade-label">Date</label>
+                <input class="trade-input" id="jDate" type="date" />
+              </div>
             </div>
-            <div>
-              <label class="trade-label">Ticker</label>
-              <input class="trade-input" id="jTicker" type="text" placeholder="e.g. MNQ1!, SPY" />
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
               <div>
                 <label class="trade-label">Direction</label>
                 <select class="trade-select" id="jDirection">
@@ -1554,28 +1575,29 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
                 </select>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label class="trade-label">Realized P&amp;L ($) <span style="color:var(--muted2);font-size:9px;font-weight:400">— type actual dollar amount, e.g. 468.85 or -120</span></label>
+              <input class="trade-input" id="jRealizedPnl" type="number" step="any" placeholder="e.g. 468.85 or -120" style="font-size:16px;font-weight:700;letter-spacing:.5px" />
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
               <div>
-                <label class="trade-label">Entry Price</label>
+                <label class="trade-label">Entry <span style="color:var(--muted2);font-size:9px">opt</span></label>
                 <input class="trade-input" id="jEntry" type="number" step="any" placeholder="0.00" />
               </div>
               <div>
-                <label class="trade-label">Exit Price</label>
+                <label class="trade-label">Exit <span style="color:var(--muted2);font-size:9px">opt</span></label>
                 <input class="trade-input" id="jExit" type="number" step="any" placeholder="0.00" />
+              </div>
+              <div>
+                <label class="trade-label">Size</label>
+                <input class="trade-input" id="jSize" type="number" step="any" placeholder="1" />
               </div>
             </div>
             <div>
-              <label class="trade-label">Size (contracts / shares)</label>
-              <input class="trade-input" id="jSize" type="number" step="any" placeholder="1" />
+              <label class="trade-label">Setup</label>
+              <input class="trade-input" id="jSetup" type="text" placeholder="ORB, VWAP, Breakout…" />
             </div>
-            <div>
-              <label class="trade-label">Setup Type</label>
-              <input class="trade-input" id="jSetup" type="text" placeholder="e.g. ORB, VWAP, Breakout" />
-            </div>
-            <div>
-              <label class="trade-label">Notes</label>
-              <input class="trade-input" id="jNotes" type="text" placeholder="Context, mistakes, lessons..." />
-            </div>
+            <input class="trade-input" id="jNotes" type="text" placeholder="Notes (optional)" style="font-size:12px;color:var(--muted)" />
             <button class="submit-trade-btn" id="jSubmitBtn">LOG TRADE</button>
             <div id="jFormMsg" style="text-align:center;font-size:12px;display:none"></div>
           </div>
@@ -2520,6 +2542,19 @@ function renderJournal(data) {
   const stats  = data.stats  || {};
   const trades = data.trades || [];
 
+  // Daily P&L banner
+  const dp = stats.daily_pnl || {};
+  function applyDailyPnl(elId, val) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const n = parseFloat(val) || 0;
+    el.textContent = (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
+    el.style.color  = n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--muted)';
+  }
+  applyDailyPnl('jPnlToday',     dp.today);
+  applyDailyPnl('jPnlYesterday', dp.yesterday);
+  applyDailyPnl('jPnlWeek',      dp.this_week);
+
   // Stats row
   setText('jTotalTrades', stats.total || 0);
   const wr = stats.win_rate || 0;
@@ -2579,22 +2614,26 @@ function renderJournal(data) {
       rows += `<tr class="j-date-header"><td colspan="15">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span></td></tr>`;
       dayItems.forEach(({t, origIdx}) => {
         const outcome = (t.outcome || '').toUpperCase();
-        const pnl = t.pnl || 0;
+        const rawPnl = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl || 0);
+        const pnl = parseFloat(rawPnl) || 0;
         const dir = (t.direction || '').toUpperCase();
-        const pnlColor = outcome === 'WIN' ? 'var(--green)' : outcome === 'LOSS' ? 'var(--red)' : 'var(--yellow)';
+        const pnlColor = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--yellow)';
         const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
         const timeStr = fmtTimeET(t.timestamp);
         const datDisp = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : '—');
         const vColor = t.harvey_verdict === 'BUY' ? 'var(--green)' : t.harvey_verdict === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+        const pnlStr = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        const entryDisp = t.entry_price !== null && t.entry_price !== undefined ? t.entry_price : '—';
+        const exitDisp  = t.exit_price  !== null && t.exit_price  !== undefined ? t.exit_price  : '—';
         rows += `<tr>
           <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${datDisp}</td>
           <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${timeStr}</td>
           <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${t.ticker||'—'}</td>
           <td style="color:${dirColor};font-weight:700;font-size:12px">${dir}</td>
-          <td>${t.entry_price||'—'}</td>
-          <td>${t.exit_price||'—'}</td>
+          <td>${entryDisp}</td>
+          <td>${exitDisp}</td>
           <td>${t.size||'—'}</td>
-          <td style="color:${pnlColor};font-weight:700">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+          <td style="color:${pnlColor};font-weight:700">${pnlStr}</td>
           <td style="font-size:12px;color:var(--muted)">${t.setup_type||'—'}</td>
           <td style="font-size:11px">${t.active_regime||'—'}</td>
           <td style="font-size:11px">${(t.session||'—').replace(/_/g,' ')}</td>
@@ -2661,15 +2700,19 @@ async function deleteTrade(index) {
 }
 
 document.getElementById('jSubmitBtn').addEventListener('click', async () => {
-  const ticker     = (document.getElementById('jTicker').value || '').trim().toUpperCase();
-  const direction  = document.getElementById('jDirection').value;
-  const outcome    = document.getElementById('jOutcome').value;
-  const entry_price = parseFloat(document.getElementById('jEntry').value);
-  const exit_price  = parseFloat(document.getElementById('jExit').value);
-  const size        = parseFloat(document.getElementById('jSize').value) || 1;
-  const setup_type  = (document.getElementById('jSetup').value || '').trim();
-  const notes       = (document.getElementById('jNotes').value || '').trim();
-  const trade_date  = document.getElementById('jDate').value || '';
+  const ticker        = (document.getElementById('jTicker').value || '').trim().toUpperCase();
+  const direction     = document.getElementById('jDirection').value;
+  const outcome       = document.getElementById('jOutcome').value;
+  const realizedRaw   = document.getElementById('jRealizedPnl').value;
+  const realized_pnl  = realizedRaw !== '' ? parseFloat(realizedRaw) : null;
+  const entryRaw      = document.getElementById('jEntry').value;
+  const exitRaw       = document.getElementById('jExit').value;
+  const entry_price   = entryRaw !== '' ? parseFloat(entryRaw) : null;
+  const exit_price    = exitRaw  !== '' ? parseFloat(exitRaw)  : null;
+  const size          = parseFloat(document.getElementById('jSize').value) || 1;
+  const setup_type    = (document.getElementById('jSetup').value || '').trim();
+  const notes         = (document.getElementById('jNotes').value || '').trim();
+  const trade_date    = document.getElementById('jDate').value || '';
 
   const msgEl = document.getElementById('jFormMsg');
   function showMsg(text, color) {
@@ -2678,8 +2721,9 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
     msgEl.textContent = text;
   }
 
-  if (!ticker || isNaN(entry_price) || isNaN(exit_price)) {
-    showMsg('Ticker, entry price, and exit price are required.', 'var(--red)');
+  if (!ticker) { showMsg('Ticker is required.', 'var(--red)'); return; }
+  if (realized_pnl === null && (entry_price === null || exit_price === null)) {
+    showMsg('Enter Realized P&L or both Entry and Exit prices.', 'var(--red)');
     return;
   }
 
@@ -2688,13 +2732,17 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   msgEl.style.display = 'none';
 
   try {
+    const payload = {ticker, direction, outcome, size, setup_type, notes, trade_date};
+    if (realized_pnl !== null) payload.realized_pnl = realized_pnl;
+    if (entry_price  !== null) payload.entry_price   = entry_price;
+    if (exit_price   !== null) payload.exit_price    = exit_price;
     const res = await fetch('/journal/add', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ticker, direction, outcome, entry_price, exit_price, size, setup_type, notes, trade_date})
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (data.status === 'ok') {
-      ['jTicker','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => { document.getElementById(id).value = ''; });
+      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('jDate').value = todayDateStr();
       showMsg('Trade logged.', 'var(--green)');
       setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
@@ -2708,7 +2756,7 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   btn.disabled = false; btn.textContent = 'LOG TRADE';
 });
 
-['jTicker','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => {
+['jTicker','jRealizedPnl','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => {
   document.getElementById(id).addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('jSubmitBtn').click();
   });
