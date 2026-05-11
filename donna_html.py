@@ -769,11 +769,23 @@ tr:last-child td{border-bottom:none}
 .fib-pivot-row .fib-label { color:var(--gold) !important; }
 .fib-pivot-row .fib-price { color:var(--gold) !important; }
 .fib-pivot-row { background:rgba(240,180,41,.05); }
-.fib-cur-row td { padding:2px 0; border-bottom:1px solid var(--line2); }
-.fib-cur-line { display:flex; align-items:center; gap:5px; }
-.fib-cur-line::before,.fib-cur-line::after { content:''; flex:1; height:1px; background:var(--blue); opacity:.5; }
+.fib-cur-row td { padding:3px 0; border-bottom:1px solid rgba(240,180,41,.4); }
+.fib-cur-line { display:flex; align-items:center; gap:7px; }
+.fib-cur-line::before,.fib-cur-line::after { content:''; flex:1; height:1px; background:var(--gold); opacity:.45; }
 .fib-cur-tag { font-family:'Space Mono',monospace; font-size:9px; font-weight:700;
-               color:var(--blue); white-space:nowrap; }
+               color:var(--gold); white-space:nowrap; }
+.fib-zone-tag { font-family:'Space Mono',monospace; font-size:8px; font-weight:700;
+                padding:1px 5px; border-radius:3px; letter-spacing:.5px; white-space:nowrap; }
+.fib-nearest-r td { font-weight:900 !important; }
+.fib-nearest-r .fib-label { color:var(--red) !important; }
+.fib-nearest-r .fib-price { color:var(--red) !important; }
+.fib-nearest-s td { font-weight:900 !important; }
+.fib-nearest-s .fib-label { color:var(--green) !important; }
+.fib-nearest-s .fib-price { color:var(--green) !important; }
+.fib-bar-wrap { margin-bottom:12px; }
+.fib-bar-track { position:relative; height:3px; background:var(--line2); border-radius:2px; margin:5px 0 2px; }
+.fib-bar-dot { position:absolute; top:-5px; width:11px; height:11px; border-radius:50%;
+               transform:translateX(-50%); border:2px solid var(--bg2,#0d0f14); }
 
 .signal-card { padding: 13px 16px; border-radius: 12px; border: 1px solid var(--line2); background: rgba(255,255,255,.03); margin-bottom: 8px; transition: background .15s; }
 .signal-card:last-child { margin-bottom: 0 }
@@ -1336,13 +1348,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div class="panel">
           <div class="kicker" style="color:var(--green)">NQ Futures</div>
           <div class="section-title" style="margin-bottom:4px">Key Levels</div>
-          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:14px" id="harveyNqLast">—</div>
+          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:8px" id="harveyNqLast">—</div>
+          <div id="harveyNqFibBar"></div>
           <table class="fib-table" id="harveyNqFibs"><tr><td colspan="3" class="neutral" style="font-size:12px">Loading...</td></tr></table>
         </div>
         <div class="panel">
           <div class="kicker" style="color:var(--blue)">ES Futures</div>
           <div class="section-title" style="margin-bottom:4px">Key Levels</div>
-          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:14px" id="harveyEsLast">—</div>
+          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:8px" id="harveyEsLast">—</div>
+          <div id="harveyEsFibBar"></div>
           <table class="fib-table" id="harveyEsFibs"><tr><td colspan="3" class="neutral" style="font-size:12px">Loading...</td></tr></table>
         </div>
         <div class="panel">
@@ -1917,9 +1931,38 @@ function renderHarvey(d) {
   setText('harveyNqPts', sig.nq_points ? sig.nq_points + ' pts (' + (sig.nq_pct||0) + '%)' : '—');
   setText('harveyEsPts', sig.es_points ? sig.es_points + ' pts (' + (sig.es_pct||0) + '%)' : '—');
 
+  function fibZone(fibs, cur) {
+    if (!fibs || !fibs.high || !fibs.low || cur <= 0) return null;
+    const f618 = fibs.fib_618, f500 = fibs.fib_500, f382 = fibs.fib_382;
+    if (f618 && Math.abs(cur - f618) / f618 <= 0.003)
+      return {txt:'KEY LEVEL ⚡', color:'var(--gold)',   bg:'rgba(240,180,41,.14)'};
+    if (cur > f618)
+      return {txt:'BULLISH ZONE',  color:'var(--green)',  bg:'rgba(0,229,160,.10)'};
+    if (cur > f500)
+      return {txt:'NEUTRAL HIGH',  color:'var(--blue)',   bg:'rgba(100,149,237,.10)'};
+    if (cur > f382)
+      return {txt:'NEUTRAL LOW',   color:'var(--blue)',   bg:'rgba(100,149,237,.10)'};
+    return   {txt:'BEARISH ZONE',  color:'var(--red)',    bg:'rgba(255,77,109,.10)'};
+  }
+
+  function fibBar(fibs, cur) {
+    if (!fibs || !fibs.high || !fibs.low || cur <= 0) return '';
+    const low = fibs.low, high = fibs.high;
+    const pct = Math.max(0, Math.min(100, (cur - low) / (high - low) * 100));
+    const dotColor = pct > 61.8 ? 'var(--green)' : pct < 38.2 ? 'var(--red)' : 'var(--yellow)';
+    return `<div class="fib-bar-wrap">
+      <div style="display:flex;justify-content:space-between;font-family:Space Mono,monospace;font-size:8px;color:var(--muted2);letter-spacing:.5px">
+        <span>LOW</span><span style="font-size:8px;color:var(--muted2)">${pct.toFixed(1)}% of range</span><span>HIGH</span>
+      </div>
+      <div class="fib-bar-track">
+        <div class="fib-bar-dot" style="left:${pct.toFixed(2)}%;background:${dotColor}"></div>
+      </div>
+    </div>`;
+  }
+
   function fibRows(fibs, highClass, lowClass, currentPrice) {
     if (!fibs || !fibs.high) return '<tr><td colspan="3" class="neutral" style="font-size:12px">No price data</td></tr>';
-    const fmt = p => p ? p.toLocaleString('en-US', {minimumFractionDigits: 2}) : '—';
+    const fmt = p => (p !== undefined && p !== null) ? p.toLocaleString('en-US', {minimumFractionDigits: 2}) : '—';
     const levels = [
       ['HIGH',  fibs.high,    highClass],
       ['78.6%', fibs.fib_786, ''],
@@ -1930,21 +1973,44 @@ function renderHarvey(d) {
       ['LOW',   fibs.low,     lowClass],
     ];
     const cur = parseFloat(currentPrice) || 0;
-    const curRow = cur > 0 ? `<tr class="fib-cur-row"><td colspan="3"><div class="fib-cur-line"><span class="fib-cur-tag">▶ ${fmt(cur)}</span></div></td></tr>` : '';
+
+    // Find nearest R (first level above cur) and nearest S (first level below cur)
+    let nearestR = null, nearestS = null;
+    for (const [, price] of levels) {
+      if (price == null) continue;
+      if (price > cur) { if (nearestR === null || price < nearestR) nearestR = price; }
+      else if (price < cur) { if (nearestS === null || price > nearestS) nearestS = price; }
+    }
+
+    // Zone label for current price row
+    const zone = fibZone(fibs, cur);
+    const zoneTag = zone
+      ? `<span class="fib-zone-tag" style="color:${zone.color};background:${zone.bg};border:1px solid ${zone.color}55">${zone.txt}</span>`
+      : '';
+    const curRow = cur > 0
+      ? `<tr class="fib-cur-row"><td colspan="3"><div class="fib-cur-line"><span class="fib-cur-tag">► ${fmt(cur)}</span>${zoneTag}</div></td></tr>`
+      : '';
+
     let rows = '';
     let inserted = false;
     for (const [label, price, cls] of levels) {
-      const isPivot = label === '50.0%';
-      const trCls = isPivot ? ' class="fib-pivot-row"' : '';
-      const isAbove = cur > 0 && price !== undefined && price <= cur;
+      const isPivot  = label === '50.0%';
+      const isNearR  = cur > 0 && price === nearestR;
+      const isNearS  = cur > 0 && price === nearestS;
+      let classes = [];
+      if (isPivot) classes.push('fib-pivot-row');
+      if (isNearR) classes.push('fib-nearest-r');
+      if (isNearS) classes.push('fib-nearest-s');
+      const trAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
+
       if (!inserted && cur > 0 && price !== undefined && price <= cur) {
         rows += curRow;
         inserted = true;
       }
-      const rsTag = cur <= 0 ? '' : (price > cur
-        ? '<td class="fib-rs"><span class="fib-tag-r">R</span></td>'
-        : '<td class="fib-rs"><span class="fib-tag-s">S</span></td>');
-      rows += `<tr${trCls}><td class="fib-label">${label}</td><td class="fib-price ${cls}">${fmt(price)}</td>${rsTag || '<td class="fib-rs"></td>'}</tr>`;
+      const rsTag = cur <= 0 ? '<td class="fib-rs"></td>' : (price > cur
+        ? `<td class="fib-rs"><span class="fib-tag-r"${isNearR ? ' style="font-size:10px"' : ''}>R</span></td>`
+        : `<td class="fib-rs"><span class="fib-tag-s"${isNearS ? ' style="font-size:10px"' : ''}>S</span></td>`);
+      rows += `<tr${trAttr}><td class="fib-label">${label}</td><td class="fib-price ${cls}">${fmt(price)}</td>${rsTag}</tr>`;
     }
     if (!inserted && cur > 0) rows += curRow;
     return rows;
@@ -1956,6 +2022,8 @@ function renderHarvey(d) {
   if (nqEl) { nqEl.textContent = d.nq_last || '—'; nqEl.className = nqDir; }
   const esEl = document.getElementById('harveyEsLast');
   if (esEl) { esEl.textContent = d.es_last || '—'; esEl.className = esDir; }
+  setHtml('harveyNqFibBar', fibBar(nqFibs, parseFloat(d.nq_last) || 0));
+  setHtml('harveyEsFibBar', fibBar(esFibs, parseFloat(d.es_last) || 0));
   setHtml('harveyNqFibs', fibRows(nqFibs, 'fib-high', 'fib-low', d.nq_last));
   setHtml('harveyEsFibs', fibRows(esFibs, 'fib-high', 'fib-low', d.es_last));
 
