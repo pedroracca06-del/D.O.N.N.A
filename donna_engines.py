@@ -105,6 +105,68 @@ def get_futures_quote(symbol_alias):
     return None
 
 
+def build_price_levels(fmp_symbol, session, market_open_mins):
+    """Today's OHLC, PDH/PDL from daily history, and ORB from 1-min intraday."""
+    cache_key = f'price_levels::{fmp_symbol}'
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
+    result = {
+        'today_open': None, 'today_high': None, 'today_low': None,
+        'prev_high': None,  'prev_low': None,
+        'orb_high': None,   'orb_low': None,
+    }
+
+    if not FMP_API_KEY:
+        cache_set(cache_key, result, 30)
+        return result
+
+    try:
+        d = _requests_get_json(f'https://financialmodelingprep.com/api/v3/quote/{fmp_symbol}', {'apikey': FMP_API_KEY})
+        if d and isinstance(d, list):
+            q = d[0]
+            result['today_open'] = safe_float(q.get('open'))
+            result['today_high'] = safe_float(q.get('dayHigh'))
+            result['today_low']  = safe_float(q.get('dayLow'))
+    except Exception:
+        pass
+
+    try:
+        d = _requests_get_json(
+            f'https://financialmodelingprep.com/api/v3/historical-price-full/{fmp_symbol}',
+            {'timeseries': '2', 'apikey': FMP_API_KEY},
+        )
+        hist = (d or {}).get('historical', [])
+        if len(hist) >= 2:
+            prev = hist[1]
+            result['prev_high'] = safe_float(prev.get('high'))
+            result['prev_low']  = safe_float(prev.get('low'))
+    except Exception:
+        pass
+
+    if session == 'NEW_YORK_CASH' and market_open_mins >= 5:
+        try:
+            today_str = now_ny().strftime('%Y-%m-%d')
+            bars = _requests_get_json(
+                f'https://financialmodelingprep.com/api/v3/historical-chart/1min/{fmp_symbol}',
+                {'from': today_str, 'to': today_str, 'apikey': FMP_API_KEY},
+            )
+            if isinstance(bars, list):
+                orb_times = {'09:30:00', '09:31:00', '09:32:00', '09:33:00', '09:34:00'}
+                orb_bars = [b for b in bars if any(str(b.get('date', '')).endswith(t) for t in orb_times)]
+                if orb_bars:
+                    highs = [safe_float(b.get('high', 0)) for b in orb_bars]
+                    lows  = [safe_float(b.get('low',  0)) for b in orb_bars]
+                    result['orb_high'] = max((h for h in highs if h), default=None)
+                    result['orb_low']  = min((l for l in lows  if l), default=None)
+        except Exception:
+            pass
+
+    cache_set(cache_key, result, 60)
+    return result
+
+
 def fetch_fmp_market_movers(kind):
     if not FMP_API_KEY:
         return []
@@ -824,6 +886,9 @@ def build_harvey_payload(risk=None):
     nq_fibs = fib_levels(nq_price) if nq_price else {}
     es_fibs  = fib_levels(es_price) if es_price else {}
 
+    nq_levels = build_price_levels('NQ=F', session, market_open_mins)
+    es_levels = build_price_levels('ES=F', session, market_open_mins)
+
     # ── Divergence ───────────────────────────────────────────────
     divergence = None
     if nq_pct is not None and es_pct is not None:
@@ -872,6 +937,8 @@ def build_harvey_payload(risk=None):
         'orb_quality':          orb_quality,
         'nq_fibs':              nq_fibs,
         'es_fibs':              es_fibs,
+        'nq_levels':            nq_levels,
+        'es_levels':            es_levels,
         'nq_last':              nq_last,
         'es_last':              es_last,
         'nq_pct':               nq_pct,
