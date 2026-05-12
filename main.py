@@ -64,10 +64,13 @@ except Exception:
         return {'account_size': 25000.0, 'risk_pct': 1.0}
 
 try:
-    from donna_headlines import process_headlines_cycle
+    from donna_headlines import process_headlines_cycle, check_todays_breaking_events
 except Exception:
     def process_headlines_cycle():
         return None
+    def check_todays_breaking_events():
+        return {'events_found': 0, 'high_events': [], 'risk_escalated': False,
+                'red_folder': False, 'error': 'donna_headlines not available'}
 
 try:
     from donna_finnhub import process_finnhub_cycle
@@ -129,6 +132,7 @@ async def finnhub_loop():
 @app.on_event('startup')
 async def startup():
     ensure_files()
+    await asyncio.to_thread(check_todays_breaking_events)
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
@@ -183,6 +187,12 @@ async def system_health():
 @app.get('/test-telegram')
 async def test_telegram():
     return send_telegram_message('DONNA TEST MESSAGE')
+
+
+@app.get('/breaking-check')
+async def breaking_check():
+    result = await asyncio.to_thread(check_todays_breaking_events)
+    return result
 
 
 # ── Dashboard ──────────────────────────────────────────────────

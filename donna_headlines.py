@@ -331,6 +331,79 @@ def is_red_folder_week() -> bool:
     return is_red
 
 
+# ── public: check_todays_breaking_events (on-demand / startup) ──
+_BREAKING_KEYWORDS = {
+    'cpi', 'core cpi', 'inflation', 'nonfarm payroll', 'nfp',
+    'fomc', 'fed rate', 'federal reserve', 'interest rate decision',
+    'ppi', 'retail sales', 'unemployment rate', 'core pce',
+}
+
+def check_todays_breaking_events() -> dict:
+    """
+    Reads donna_macro_events.json and immediately escalates risk state when
+    any HIGH-impact USD event falls today.
+    - Sets macro_risk=high and headline_risk=high in risk state.
+    - Scans all week events for CPI/NFP/FOMC/PPI/Retail Sales keywords
+      and sets red_folder_week=True if found.
+    Returns a summary dict describing every action taken.
+    Safe to call from startup and the /breaking-check endpoint.
+    """
+    macro       = _read_json(MACRO_EVENTS_FILE, {})
+    all_events  = macro.get('events', [])
+    today       = _now_ny().strftime('%Y-%m-%d')
+    mon_str, fri_str = _week_bounds()
+
+    # Today's HIGH events
+    todays_high = [
+        e for e in all_events
+        if e.get('date') == today and e.get('importance') == 'high'
+    ]
+
+    # Week-wide red-folder keyword scan
+    week_events = [e for e in all_events if mon_str <= e.get('date', '') <= fri_str]
+    red_keywords_hit = [
+        e['title'] for e in week_events
+        if any(k in e.get('title', '').lower() for k in _BREAKING_KEYWORDS)
+    ]
+    is_red = bool(red_keywords_hit) or sum(
+        1 for e in week_events if e.get('importance') == 'high'
+    ) >= 3
+
+    risk_escalated = bool(todays_high)
+
+    if risk_escalated or is_red:
+        risk = _read_json(RISK_STATE_FILE, {})
+        if risk_escalated:
+            risk['macro_risk']    = 'high'
+            risk['headline_risk'] = 'high'
+        if is_red:
+            risk['red_folder_week'] = True
+            risk['macro_risk']      = 'high'
+        risk['last_updated'] = _utc_iso()
+        with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(risk, f, indent=2)
+
+    next_event, mins = _compute_next_event(todays_high) if todays_high else ('None today', None)
+
+    result = {
+        'checked_at':       _utc_iso(),
+        'today':            today,
+        'events_found':     len(todays_high),
+        'high_events':      [{'title': e['title'], 'time_et': e['time_et']} for e in todays_high],
+        'risk_escalated':   risk_escalated,
+        'red_folder':       is_red,
+        'red_keywords_hit': red_keywords_hit,
+        'next_high_event':  next_event,
+        'minutes_away':     mins,
+        'macro_risk':       'high' if (risk_escalated or is_red) else 'unchanged',
+        'headline_risk':    'high' if risk_escalated else 'unchanged',
+    }
+
+    print(f'[donna_headlines] breaking-check — {len(todays_high)} HIGH events today, '
+          f'red_folder={is_red}, escalated={risk_escalated}')
+    return result
+
+
 # ── public: check_todays_events (every 5 min) ─────────────────
 def check_todays_events():
     """
