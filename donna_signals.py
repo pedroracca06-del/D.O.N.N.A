@@ -10,20 +10,23 @@ from donna_engines import (
     build_session_significance, build_market_driver_engine, build_morning_edge,
 )
 
+# Known HARVEY V4 setup types (used for routing and labelling)
+_ELITE_SETUPS = {'ICT_ELITE', 'ICT_ELITE_SHORT', 'ICT_ELITE_LONG'}
+_ICT_SETUPS   = {'ICT_BUY', 'ICT_SELL', 'HARVEY_BUY', 'HARVEY_SELL'}
+_ORB_SETUPS   = {'ORB_LONG', 'ORB_SHORT'}
+
 
 def normalize_payload(payload: dict) -> dict:
-    # trap_risk may arrive as bool or string
-    trap_raw  = payload.get('trap_risk', False)
-    trap_risk = trap_raw if isinstance(trap_raw, bool) else str(trap_raw).lower() in ('true', '1', 'yes')
+    setup_type = str(payload.get('setup_type', 'unknown')).upper()
 
     return {
-        # ── original fields ──────────────────────────────────────
+        # ── core fields ──────────────────────────────────────────
         'ticker':           str(payload.get('ticker', 'UNKNOWN')),
         'price':            str(payload.get('price', '0')),
         'signal':           str(payload.get('signal', 'NONE')).upper(),
         'timeframe':        str(payload.get('timeframe', 'unknown')),
         'session':          str(payload.get('session', session_label())),
-        'setup_type':       str(payload.get('setup_type', 'unknown')),
+        'setup_type':       setup_type,
         'signal_priority':  str(payload.get('signal_priority', 'unknown')),
         'context_strength': str(payload.get('context_strength', 'moderate')),
         'market_state':     str(payload.get('market_state', 'neutral')),
@@ -34,29 +37,45 @@ def normalize_payload(payload: dict) -> dict:
         'score':            str(payload.get('score', '0')),
         'quality':          str(payload.get('quality', 'B')).upper(),
         # ── HARVEY V4 fields ─────────────────────────────────────
-        'tier':             str(payload.get('tier', '')).upper(),
+        'instrument':       str(payload.get('instrument', 'unknown')).upper(),
+        'tier':             str(payload.get('tier', '3')).upper(),
+        'trap_risk':        str(payload.get('trap_risk', 'false')).lower(),
         'signal_reason':    str(payload.get('signal_reason', '')),
         'ict_step':         str(payload.get('ict_step', '')),
-        'trap_risk':        trap_risk,
         'kill_zone':        str(payload.get('kill_zone', '')),
         'regime':           str(payload.get('regime', '')),
         'liq_state':        str(payload.get('liq_state', '')),
         'brain_state':      str(payload.get('brain_state', '')),
-        'harvey_confidence': str(payload.get('confidence', '')),  # HARVEY's 100-pt score
+        'harvey_confidence': str(payload.get('confidence', '')),
     }
 
 
+def _is_elite(data: dict) -> bool:
+    return data.get('tier', '') in ('1', 'ELITE') or data.get('setup_type', '') in _ELITE_SETUPS
+
+
+def _is_nq(data: dict) -> bool:
+    instrument = data.get('instrument', '').upper()
+    ticker     = data.get('ticker', '').upper()
+    return 'NQ' in instrument or 'MNQ' in ticker or 'NQ' in ticker
+
+
 def pre_verdict_engine(data: dict, risk=None) -> str:
-    # ── trap risk is an immediate veto ──────────────────────────
-    if data.get('trap_risk'):
-        return 'WAIT'
+    # ── trap risk: immediate SKIP ────────────────────────────
+    if data.get('trap_risk') == 'true':
+        return 'SKIP'
 
-    state = risk or load_risk_state()
-    score = safe_float(data['score'])
-    tier  = data.get('tier', '').upper()
+    state      = risk or load_risk_state()
+    score      = safe_float(data['score'])
+    tier       = data.get('tier', '3').upper()
+    setup_type = data.get('setup_type', '').upper()
 
-    # ── tier-based fast path ────────────────────────────────────
-    if tier in ('1', 'ELITE'):
+    # ── ORB on NQ → always CAUTION ───────────────────────────
+    if setup_type in _ORB_SETUPS and _is_nq(data):
+        return 'CAUTION'
+
+    # ── tier / elite fast-path ───────────────────────────────
+    if _is_elite(data):
         if score >= 55:
             return 'TAKE'
     elif tier == '2':
@@ -66,7 +85,7 @@ def pre_verdict_engine(data: dict, risk=None) -> str:
         if score >= 70:
             return 'TAKE'
 
-    # ── existing point system (no tier, or tier threshold not met) ──
+    # ── point system fallback ────────────────────────────────
     quality        = data['quality']
     context        = data['context_strength'].lower()
     score_provided = score > 0
@@ -117,97 +136,93 @@ def pre_verdict_engine(data: dict, risk=None) -> str:
         elif nas_pct > 0.5:  points -= 2
 
     sig = build_session_significance(state)
-    if sig['label'].startswith('MAJOR'):    points += 2
+    if sig['label'].startswith('MAJOR'):     points += 2
     elif sig['label'].startswith('NOTABLE'): points += 1
 
     return 'TAKE' if points >= 8 else 'CAUTION' if points >= 4 else 'SKIP'
 
 
 def _compute_signal_confidence(data: dict, risk: dict, sig: dict) -> float:
-    # ── HARVEY's own confidence takes full precedence ─────────
+    session     = str(risk.get('donna_session', '')).upper()
+    macro       = str(risk.get('macro_risk', 'medium')).lower()
+    event_phase = str(risk.get('event_phase', '')).upper()
+
+    # ── HARVEY's own score takes full precedence ──────────────
     harvey_raw = str(data.get('harvey_confidence', '')).strip()
     if harvey_raw:
         try:
-            base = float(harvey_raw.replace('%', '').strip())
-            if base > 0:
+            val = float(harvey_raw.replace('%', '').strip())
+            if val > 0:
                 if str(data.get('kill_zone', '')).upper() == 'OFF KZ':
-                    base *= 0.85
-                return round(max(20.0, min(97.0, base)), 1)
+                    val *= 0.85
+                return round(max(20.0, min(97.0, val)), 1)
         except (ValueError, TypeError):
             pass
 
-    # ── Fallback: DONNA's own scoring model ───────────────────
-    score  = safe_float(data['score'])
-    base   = score if score > 0 else 62.0
-    signal = str(data.get('signal', '')).upper()
-    session = str(risk.get('donna_session', '')).upper()
-    macro   = str(risk.get('macro_risk', 'medium')).lower()
-    event_phase = str(risk.get('event_phase', '')).upper()
+    # ── Tier-based base confidence ────────────────────────────
+    tier       = data.get('tier', '3').upper()
+    setup_type = data.get('setup_type', '').upper()
+
+    if _is_elite(data):
+        base = 85.0
+    elif tier == '2':
+        base = 72.0
+    else:
+        base = 58.0
+
+    # ── Percentage reductions ─────────────────────────────────
+    if macro == 'high':
+        base *= 0.80                                 # −20 % macro risk
+    if event_phase in ('LIVE', 'IMMINENT'):
+        base *= 0.85                                 # −15 % event active
+    if session != 'NEW_YORK_CASH':
+        base *= 0.90                                 # −10 % off-session
+
+    # ── Kill zone penalty ─────────────────────────────────────
+    if str(data.get('kill_zone', '')).upper() == 'OFF KZ':
+        base *= 0.85
+
+    # ── NQ/NASDAQ momentum nudge (minor) ─────────────────────
     snap    = risk.get('market_snapshot', {})
     nas_pct = safe_float(snap.get('NASDAQ', {}).get('pct', 0))
-    vix_pct = safe_float(snap.get('VIX', {}).get('pct', 0))
-    ny_mins = now_ny().hour * 60 + now_ny().minute
-    adj     = 0.0
-
-    if session == 'NEW_YORK_CASH':
-        if (9 * 60 + 30 <= ny_mins <= 11 * 60) or (14 * 60 <= ny_mins <= 15 * 60 + 30): adj += 10
-        else: adj += 4
-    elif session == 'LONDON': adj += 3
-    elif session == 'ASIA':   adj -= 6
-
-    if macro == 'high' and event_phase in ('LIVE', 'IMMINENT'):   adj -= 15
-    elif macro == 'high' and event_phase == 'APPROACHING':         adj -= 8
-    elif macro == 'high':                                           adj -= 5
-    elif macro == 'low':                                            adj += 5
-
+    signal  = str(data.get('signal', '')).upper()
     if signal in ('LONG', 'BUY'):
-        if nas_pct > 0.5:    adj += 8
-        elif nas_pct > 0.2:  adj += 4
-        elif nas_pct < -0.5: adj -= 10
-        elif nas_pct < -0.2: adj -= 5
+        if nas_pct > 0.5:    base = min(97.0, base + 5)
+        elif nas_pct < -0.5: base = max(20.0, base - 8)
     elif signal in ('SHORT', 'SELL'):
-        if nas_pct < -0.5:   adj += 8
-        elif nas_pct < -0.2: adj += 4
-        elif nas_pct > 0.5:  adj -= 10
-        elif nas_pct > 0.2:  adj -= 5
+        if nas_pct < -0.5:   base = min(97.0, base + 5)
+        elif nas_pct > 0.5:  base = max(20.0, base - 8)
 
-    if sig['label'].startswith('MAJOR'):    adj += 8
-    elif sig['label'].startswith('NOTABLE'): adj += 4
-
-    if vix_pct >= 5:    adj -= 8
-    elif vix_pct >= 2:  adj -= 4
-    elif vix_pct <= -3: adj += 3
-
-    # Kill zone penalty on DONNA's fallback path too
-    if str(data.get('kill_zone', '')).upper() == 'OFF KZ':
-        adj -= (base + adj) * 0.15
-
-    return round(max(20.0, min(97.0, base + adj)), 1)
+    return round(max(20.0, min(97.0, base)), 1)
 
 
 def _generate_signal_summary(data: dict, risk: dict, sig: dict, driver: dict) -> str:
-    ticker        = data['ticker']
-    signal        = str(data['signal']).upper()
-    price         = data['price']
-    timeframe     = data['timeframe']
-    signal_reason = str(data.get('signal_reason', '')).upper()
-    kill_zone     = str(data.get('kill_zone', ''))
-    regime        = str(data.get('regime', '') or driver.get('market_regime', 'Neutral'))
-    liq_state     = str(data.get('liq_state', ''))
-    brain_state   = str(data.get('brain_state', ''))
-    target        = str(data.get('scenario', '') or data.get('fib_zone', ''))
-    session       = str(risk.get('donna_session', data.get('session', ''))).upper()
-    macro         = str(risk.get('macro_risk', 'medium')).lower()
-    event_phase   = str(risk.get('event_phase', '')).upper()
-    next_event    = risk.get('next_event', 'no major event scheduled')
-    snap          = risk.get('market_snapshot', {})
-    nas_pct       = safe_float(snap.get('NASDAQ', {}).get('pct', 0))
-    ny_mins       = now_ny().hour * 60 + now_ny().minute
-    is_prime      = session == 'NEW_YORK_CASH' and (
+    ticker      = data['ticker']
+    signal      = str(data['signal']).upper()
+    price       = data['price']
+    timeframe   = data['timeframe']
+    setup_type  = data.get('setup_type', '').upper()
+    instrument  = data.get('instrument', ticker).upper()
+    tier        = data.get('tier', '3')
+    regime      = str(data.get('regime', '') or driver.get('market_regime', 'Neutral'))
+    liq_state   = str(data.get('liq_state', ''))
+    brain_state = str(data.get('brain_state', ''))
+    kill_zone   = str(data.get('kill_zone', ''))
+    session_raw = str(risk.get('donna_session', data.get('session', ''))).upper()
+    macro       = str(risk.get('macro_risk', 'medium')).lower()
+    event_phase = str(risk.get('event_phase', '')).upper()
+    next_event  = risk.get('next_event', 'no major event scheduled')
+    snap        = risk.get('market_snapshot', {})
+    nas_pct     = safe_float(snap.get('NASDAQ', {}).get('pct', 0))
+    ny_mins     = now_ny().hour * 60 + now_ny().minute
+    is_prime    = session_raw == 'NEW_YORK_CASH' and (
         (9 * 60 + 30 <= ny_mins <= 11 * 60) or (14 * 60 <= ny_mins <= 15 * 60 + 30)
     )
+    session_name = {'NEW_YORK_CASH': 'NY cash', 'LONDON': 'London', 'ASIA': 'Asia'}.get(
+        session_raw, session_raw.lower().replace('_', ' ')
+    )
 
-    # ── always-present context suffix ────────────────────────
+    # ── context suffix (always appended) ─────────────────────
     ctx_parts = []
     if regime:      ctx_parts.append(f'Regime: {regime}')
     if liq_state:   ctx_parts.append(f'Liq: {liq_state}')
@@ -217,91 +232,89 @@ def _generate_signal_summary(data: dict, risk: dict, sig: dict, driver: dict) ->
     def _with_ctx(s: str) -> str:
         return f'{s} [{ctx}]' if ctx else s
 
-    # ── signal_reason-specific templates ─────────────────────
-    if 'ICT' in signal_reason and 'ELITE' in signal_reason:
-        kz        = kill_zone or 'current kill zone'
-        direction = 'long' if 'LONG' in signal_reason else 'short'
-        return _with_ctx(
-            f'Elite ICT setup in {kz}. Full 6-step model confirmed. Highest conviction {direction}.'
-        )
+    # ── setup_type-specific templates ────────────────────────
+    if setup_type in _ELITE_SETUPS:
+        body = (f'ELITE ICT setup on {instrument}. '
+                f'Tier 1 — highest conviction HARVEY signal. {regime} regime.')
 
-    if 'ORB' in signal_reason:
-        direction     = 'long' if 'LONG' in signal_reason else 'short'
-        breakout_type = 'breakout' if direction == 'long' else 'rejection'
-        tgt_note      = f' Target: {target}.' if target and target not in ('none', '') else ''
-        return _with_ctx(f'ORB {breakout_type} on {ticker}. {regime}.{tgt_note}')
+    elif setup_type in _ICT_SETUPS:
+        direction = 'long' if signal in ('LONG', 'BUY') else 'short'
+        body = (f'HARVEY Tier {tier} {direction} on {instrument}. '
+                f'ICT structure confirmed in {session_name} session.')
 
-    if 'LIQUIDITY' in signal_reason or signal_reason.startswith('LIQ'):
-        liq = liq_state or 'key level'
-        return _with_ctx(f'Liquidity sweep at {liq}. Reversal setup confirmed.')
+    elif setup_type in _ORB_SETUPS:
+        body = (f'ORB signal on {instrument}. Structure: {setup_type}. '
+                f'Respect event timing if macro risk is active.')
 
-    # ── fallback: existing directional + macro logic ──────────
-    if signal in ('LONG', 'BUY'):
-        if nas_pct > 0.5:    dir_note = f'NQ is up {nas_pct:.1f}% — momentum aligned with the long.'
-        elif nas_pct > 0.1:  dir_note = f'NQ is modestly positive (+{nas_pct:.1f}%) — bias leans long.'
-        elif nas_pct < -0.5: dir_note = f'NQ is down {nas_pct:.1f}% — counter-trend long; require clean structure.'
-        else:                 dir_note = 'NQ near flat — long needs structural support.'
-    elif signal in ('SHORT', 'SELL'):
-        if nas_pct < -0.5:   dir_note = f'NQ is down {nas_pct:.1f}% — momentum aligned with the short.'
-        elif nas_pct < -0.1: dir_note = f'NQ is modestly negative ({nas_pct:.1f}%) — bias leans short.'
-        elif nas_pct > 0.5:  dir_note = f'NQ is up +{nas_pct:.1f}% — counter-trend short; use tight management.'
-        else:                 dir_note = 'NQ near flat — short needs clear structural breakdown.'
     else:
-        dir_note = f'NQ at {nas_pct:+.1f}% — no clear directional alignment.'
-
-    if macro == 'high' and event_phase in ('LIVE', 'IMMINENT'):
-        base = (f'{ticker} {signal} at {price} — macro event LIVE ({next_event}). '
-                f'Elevated risk. {dir_note} Wait for clean confirmation.')
-    elif macro == 'high' and event_phase == 'APPROACHING':
-        base = (f'{ticker} {signal} at {price}. {next_event} approaching. '
-                f'{dir_note} Do not add size into the event window.')
-    elif is_prime:
-        session_label_map = {'NEW_YORK_CASH': 'NY cash session', 'LONDON': 'London session', 'ASIA': 'Asia session'}
-        sp = session_label_map.get(session, session.lower().replace('_', ' '))
-        base = f'{ticker} {signal} at {price} during prime {sp}. {dir_note} Macro: {macro}. {sig["summary"]}'
-    elif ticker == 'MNQ1!' and timeframe == '1':
-        nq_pts = sig['nq_points']
-        label  = sig['label']
-        if label.startswith('MAJOR'):
-            base = (f'MNQ1! 1m at {price} inside MAJOR NQ expansion ({int(nq_pts)} pts). '
-                    f'{dir_note} This is a high-significance window.')
+        # ── fallback: directional + macro ─────────────────────
+        if signal in ('LONG', 'BUY'):
+            if nas_pct > 0.5:    dir_note = f'NQ up {nas_pct:.1f}% — momentum aligned.'
+            elif nas_pct > 0.1:  dir_note = f'NQ +{nas_pct:.1f}% — bias leans long.'
+            elif nas_pct < -0.5: dir_note = f'NQ down {nas_pct:.1f}% — counter-trend long.'
+            else:                 dir_note = 'NQ near flat — structural support required.'
+        elif signal in ('SHORT', 'SELL'):
+            if nas_pct < -0.5:   dir_note = f'NQ down {nas_pct:.1f}% — momentum aligned.'
+            elif nas_pct < -0.1: dir_note = f'NQ {nas_pct:.1f}% — bias leans short.'
+            elif nas_pct > 0.5:  dir_note = f'NQ +{nas_pct:.1f}% — counter-trend short.'
+            else:                 dir_note = 'NQ near flat — structural breakdown required.'
         else:
-            base = f'MNQ1! 1m at {price}. NQ session move: {int(nq_pts)} pts. {dir_note}'
-    else:
-        base = (f'{ticker} {signal} at {price}. {dir_note} Macro: {macro}. '
-                f'{driver.get("market_summary", "No strong driver detected.")}')
+            dir_note = f'NQ at {nas_pct:+.1f}%.'
 
-    return _with_ctx(base)
+        if macro == 'high' and event_phase in ('LIVE', 'IMMINENT'):
+            body = (f'{ticker} {signal} at {price} — macro event LIVE ({next_event}). '
+                    f'{dir_note} Wait for clean confirmation.')
+        elif is_prime:
+            body = f'{ticker} {signal} at {price} during prime {session_name}. {dir_note} Macro: {macro}. {sig["summary"]}'
+        else:
+            body = (f'{ticker} {signal} at {price}. {dir_note} Macro: {macro}. '
+                    f'{driver.get("market_summary", "No strong driver detected.")}')
+
+    summary = _with_ctx(body)
+
+    # ── conditional risk warnings (appended to all templates) ─
+    warnings: list[str] = []
+    if macro == 'high':
+        warnings.append('⚠️ Macro risk HIGH — reduce size, respect reaction risk.')
+    if event_phase in ('LIVE', 'IMMINENT'):
+        warnings.append(f'⚠️ Event is {event_phase} — WAIT for clean price action.')
+
+    if warnings:
+        summary = summary + ' ' + ' '.join(warnings)
+
+    return summary
 
 
 def should_send_trade_to_telegram(parsed: dict) -> bool:
     mode = (TELEGRAM_ALERT_MODE or 'critical').lower()
-    if mode == 'off':  return False
-    if mode == 'all':  return True
+    if mode == 'off': return False
+    if mode == 'all': return True
     verdict = str(parsed.get('verdict', '')).upper()
     try:
         confidence = float(str(parsed.get('confidence', '0')).replace('%', '').strip())
     except Exception:
         confidence = 0.0
-    return verdict in ('TAKE', 'WAIT') or confidence >= 80
+    return verdict == 'TAKE' or confidence >= 80
 
 
 def add_alert_to_history(data: dict, parsed: dict):
     alerts = load_alert_history()
     alerts.insert(0, {
-        'ticker':       data['ticker'],
-        'signal':       data['signal'],
-        'session':      data['session'],
-        'timeframe':    data['timeframe'],
-        'price':        data['price'],
-        'verdict':      parsed['verdict'],
-        'confidence':   parsed['confidence'],
-        'summary':      parsed['summary'],
-        'tier':         data.get('tier', ''),
-        'signal_reason':data.get('signal_reason', ''),
-        'brain_state':  data.get('brain_state', ''),
-        'trap_risk':    data.get('trap_risk', False),
-        'timestamp':    utc_now_iso(),
+        'ticker':        data['ticker'],
+        'signal':        data['signal'],
+        'session':       data['session'],
+        'timeframe':     data['timeframe'],
+        'price':         data['price'],
+        'verdict':       parsed['verdict'],
+        'confidence':    parsed['confidence'],
+        'summary':       parsed['summary'],
+        'instrument':    data.get('instrument', ''),
+        'tier':          data.get('tier', ''),
+        'setup_type':    data.get('setup_type', ''),
+        'signal_reason': data.get('signal_reason', ''),
+        'brain_state':   data.get('brain_state', ''),
+        'trap_risk':     data.get('trap_risk', 'false'),
+        'timestamp':     utc_now_iso(),
     })
     save_alert_history(alerts)
 
@@ -327,38 +340,41 @@ def process_signal(payload: dict) -> dict:
     snap        = risk.get('market_snapshot', {})
     nas_pct     = safe_float(snap.get('NASDAQ', {}).get('pct', 0))
     signal      = str(data['signal']).upper()
+    instrument  = data.get('instrument', data['ticker'])
     tier        = data.get('tier', '')
+    setup_type  = data.get('setup_type', '')
     ict_step    = data.get('ict_step', '')
     brain_state = data.get('brain_state', '')
-    trap_risk   = data.get('trap_risk', False)
+    trap_risk   = data.get('trap_risk') == 'true'
 
-    # why
+    # ── why ──────────────────────────────────────────────────
     if trap_risk:
-        why = 'Trap risk flagged by HARVEY — signal vetoed regardless of score.'
+        why = 'Trap risk flagged by HARVEY — signal forced to SKIP.'
     elif data.get('harvey_confidence'):
-        why = f"HARVEY confidence: {data['harvey_confidence']}. {'Kill zone penalty applied (OFF KZ).' if data.get('kill_zone', '').upper() == 'OFF KZ' else 'Kill zone confirmed.'}"
+        kz_note = 'Kill zone penalty applied (OFF KZ).' if data.get('kill_zone', '').upper() == 'OFF KZ' else 'Kill zone active.'
+        why = f"HARVEY confidence: {data['harvey_confidence']}. {kz_note}"
     elif macro == 'high' and event_phase in ('LIVE', 'IMMINENT'):
-        why = f"Macro event is live ({risk.get('next_event', 'unknown')}). Confidence penalized — event-period noise is real."
+        why = f"Macro event LIVE ({risk.get('next_event', 'unknown')}). Confidence penalized — event-period noise is real."
     elif sig['label'].startswith('MAJOR'):
-        why = 'Major NQ session expansion is the primary context. Momentum conditions deserve respect.'
+        why = 'Major NQ session expansion. Momentum conditions deserve respect.'
     elif signal in ('LONG', 'BUY') and nas_pct > 0.5:
-        why = f'Long signal aligned with NQ up {nas_pct:.1f}% — directional context supports the trade.'
+        why = f'Long aligned with NQ +{nas_pct:.1f}% — directional context supports the trade.'
     elif signal in ('SHORT', 'SELL') and nas_pct < -0.5:
-        why = f'Short signal aligned with NQ down {nas_pct:.1f}% — momentum favors the direction.'
+        why = f'Short aligned with NQ {nas_pct:.1f}% — momentum favors the direction.'
     elif session == 'NEW_YORK_CASH':
-        why = 'NY cash session active — signal quality elevated by session timing.'
+        why = 'NY cash session — signal quality elevated by timing.'
     else:
-        why = f"Confidence reflects {macro} macro risk and {session.lower().replace('_', ' ')} session quality."
+        why = f"Confidence reflects {macro} macro risk, Tier {tier}, {session.lower().replace('_', ' ')} session."
 
-    # execution
+    # ── execution ─────────────────────────────────────────────
     if trap_risk:
         execution = 'Stand aside — HARVEY flagged a trap. Do not enter until trap_risk clears.'
     elif event_phase in ('LIVE', 'IMMINENT'):
         execution = 'Reduce size or stand aside until event resolves. Price confirmation required.'
     elif sig['label'].startswith('MAJOR'):
-        execution = 'Respect leadership. Do not fade strength blindly in a major session expansion.'
+        execution = 'Respect leadership. Do not fade strength in a major session expansion.'
     elif macro == 'high':
-        execution = 'Keep size controlled. Event risk can reverse moves quickly without warning.'
+        execution = 'Keep size controlled. Event risk can reverse moves quickly.'
     else:
         execution = morning.get('first_read', 'Use leadership and event timing as the final filter.')
 
@@ -377,16 +393,19 @@ def process_signal(payload: dict) -> dict:
     add_alert_to_history(data, parsed)
 
     if should_send_trade_to_telegram(parsed):
-        tier_line   = f'Tier: {tier}' if tier else ''
-        step_line   = f'ICT Step: {ict_step}' if ict_step else ''
-        brain_line  = f'Brain: {brain_state}' if brain_state else ''
-        trap_line   = 'TRAP RISK: YES — WAIT forced' if trap_risk else ''
-        extra_lines = '\n'.join(l for l in [tier_line, step_line, brain_line, trap_line] if l)
+        header_lines = [
+            f'Instrument: {instrument}' if instrument else '',
+            f'Tier: {tier} | Setup: {setup_type}' if (tier or setup_type) else '',
+            f'ICT Step: {ict_step}' if ict_step else '',
+            f'Brain: {brain_state}'  if brain_state else '',
+            'TRAP RISK: YES — SKIP forced' if trap_risk else '',
+        ]
+        header_block = '\n'.join(l for l in header_lines if l)
 
         send_telegram_message(
             f"DONNA // {data['ticker']} // {data['signal']}\n"
             f"{data['session']} | TF {data['timeframe']} | Price {data['price']}\n"
-            + (f'{extra_lines}\n' if extra_lines else '') +
+            + (f'{header_block}\n' if header_block else '') +
             f'\nVerdict: {parsed["verdict"]}\nConfidence: {parsed["confidence"]}\n'
             f'Why: {parsed["why"]}\nRisk: {parsed["risk"]}\n'
             f'Execution: {parsed["execution"]}\nSummary: {parsed["summary"]}'
