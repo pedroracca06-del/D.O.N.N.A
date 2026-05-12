@@ -24,6 +24,7 @@ NY_TZ = ZoneInfo('America/New_York')
 FINNHUB_API_KEY   = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY       = os.getenv('FMP_API_KEY', '').strip()
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '').strip()
+GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
 
 # ── helpers ──────────────────────────────────────────────────
 def _now_ny():
@@ -243,22 +244,29 @@ def _get_next_event_from_file() -> tuple[str, int | None]:
     except Exception:
         return 'No scheduled event', None
 
-# ── LLM headline classifier (optional upgrade) ───────────────
+# ── LLM headline classifier via Grok ─────────────────────────
+_GROK_SYSTEM = (
+    "You are DONNA's market news classifier. You have real-time awareness of current "
+    "market events. Today CPI printed 3.8% annually - highest since May 2023. Markets "
+    "are selling off. Factor this into your risk classification. Return only valid JSON."
+)
+
 def _llm_classify(headlines: list[str]) -> dict | None:
     """
-    If Anthropic is available, use Claude Haiku to extract a smarter headline read.
+    Uses Grok-3-mini (OpenAI-compatible) to extract a smarter headline read.
     Returns dict with keys: macro_headline, market_headline, macro_guidance,
-    market_guidance, macro_severity. Falls back to None on any error.
+    market_guidance, macro_severity, headline_severity, market_severity.
+    Falls back to None on any error.
     """
-    if not ANTHROPIC_API_KEY:
+    if not GROK_API_KEY:
         return None
     try:
-        import anthropic
+        from openai import OpenAI
 
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = OpenAI(base_url='https://api.x.ai/v1', api_key=GROK_API_KEY)
 
         headlines_text = '\n'.join(f'- {h}' for h in headlines[:12])
-        prompt = f"""You are DONNA's news classifier. Given these market headlines, extract:
+        user_prompt = f"""Given these market headlines, extract the risk classification:
 
 Headlines:
 {headlines_text}
@@ -274,19 +282,22 @@ Return JSON only (no other text):
   "market_severity": "LOW | MEDIUM | HIGH"
 }}"""
 
-        response = client.messages.create(
-            model='claude-haiku-4-5-20251001',
+        response = client.chat.completions.create(
+            model='grok-3-mini',
             max_tokens=400,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {'role': 'system', 'content': _GROK_SYSTEM},
+                {'role': 'user',   'content': user_prompt},
+            ],
         )
-        raw = response.content[0].text or ''
+        raw = response.choices[0].message.content or ''
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         if match:
             raw = match.group(0)
         data = json.loads(raw)
         return data
     except Exception as e:
-        print(f'[donna_news] LLM classify error: {e}')
+        print(f'[donna_news] Grok classify error: {e}')
         return None
 
 # ── main cycle ───────────────────────────────────────────────
