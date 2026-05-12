@@ -12,7 +12,6 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import json
-import os
 import requests
 
 BASE_DIR = Path(__file__).parent
@@ -20,8 +19,15 @@ MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
 RISK_STATE_FILE   = BASE_DIR / 'donna_risk_state.json'
 NY_TZ = ZoneInfo('America/New_York')
 
-FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY', '').strip()
-FMP_API_KEY     = os.getenv('FMP_API_KEY', '').strip()
+_FF_HEADERS = {
+    'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept':          'text/html,application/xhtml+xml,application/xhtml+xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection':      'keep-alive',
+    'Cache-Control':   'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+}
 
 
 def _now_ny():
@@ -29,15 +35,6 @@ def _now_ny():
 
 def _utc_iso():
     return datetime.now(timezone.utc).isoformat()
-
-def _safe_get(url, params=None, timeout=18):
-    try:
-        r = requests.get(url, params=params, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f'[donna_headlines] GET {url} failed: {e}')
-        return None
 
 def _read_json(path, default):
     try:
@@ -54,34 +51,13 @@ def _write_json(path, data):
         json.dump(data, f, indent=2)
 
 
-# ── importance scoring ────────────────────────────────────────
+# ── category classifier ───────────────────────────────────────
 _NON_FINANCIAL = {
     'holiday', 'christmas', 'thanksgiving', 'easter', 'new year', 'independence day',
     'memorial day', 'labor day', 'martin luther king', 'presidents day', 'columbus day',
     'veterans day', 'good friday', 'daylight saving', 'daylight savings', 'clocks change',
     'bank holiday', 'public holiday', 'market closed', 'exchange closed',
 }
-
-_HIGH_WORDS = {
-    'fomc', 'fed rate', 'federal reserve', 'interest rate decision',
-    'cpi', 'nonfarm payroll', 'nfp', 'gdp', 'pce', 'core inflation',
-    'unemployment rate', 'jobs report', 'powell speech',
-    'debt ceiling', 'treasury auction',
-}
-_MEDIUM_WORDS = {
-    'retail sales', 'consumer confidence', 'consumer sentiment',
-    'housing starts', 'building permits', 'jobless claims',
-    'manufacturing pmi', 'services pmi', 'ism', 'ppi',
-    'durable goods', 'trade balance', 'factory orders',
-}
-
-def _importance(title: str) -> str:
-    t = title.lower()
-    if any(w in t for w in _HIGH_WORDS):
-        return 'high'
-    if any(w in t for w in _MEDIUM_WORDS):
-        return 'medium'
-    return 'low'
 
 def _category(title: str) -> str:
     t = title.lower()
@@ -96,103 +72,138 @@ def _category(title: str) -> str:
     return 'macro'
 
 
-# ── Finnhub economic calendar ─────────────────────────────────
-def _fetch_finnhub_calendar() -> list[dict]:
-    if not FINNHUB_API_KEY:
-        return []
-    now = _now_ny()
-    from_date = now.strftime('%Y-%m-%d')
-    to_date   = (now + timedelta(days=7)).strftime('%Y-%m-%d')
-    data = _safe_get(
-        'https://finnhub.io/api/v1/calendar/economic',
-        {'from': from_date, 'to': to_date, 'token': FINNHUB_API_KEY}
-    )
-    if not data:
-        return []
-    raw = data.get('economicCalendar') or data.get('economic') or []
-    if not isinstance(raw, list):
+# ── ForexFactory scraper ──────────────────────────────────────
+def _fetch_forexfactory_calendar() -> list[dict]:
+    from bs4 import BeautifulSoup
+
+    try:
+        resp = requests.get(
+            'https://www.forexfactory.com/calendar',
+            headers=_FF_HEADERS,
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f'[donna_headlines] ForexFactory fetch failed: {e}')
         return []
 
+    soup = BeautifulSoup(resp.text, 'html.parser')
     events = []
-    for item in raw[:40]:
-        title = str(item.get('event', '') or item.get('name', '')).strip()
+    current_date = None
+    current_year = _now_ny().year
+
+    for row in soup.select('tr.calendar__row'):
+        # ── date (carried forward across rows) ───────────────────
+        date_cell = row.select_one('td.calendar__date')
+        if date_cell:
+            date_text = date_cell.get_text(strip=True)
+            if date_text:
+                for fmt in ('%a%b %d', '%a %b %d'):
+                    try:
+                        dt = datetime.strptime(f'{date_text} {current_year}', f'{fmt} %Y')
+                        current_date = dt.strftime('%Y-%m-%d')
+                        break
+                    except ValueError:
+                        pass
+
+        if not current_date:
+            continue
+
+        # ── currency filter ───────────────────────────────────────
+        cur_cell = row.select_one('td.calendar__currency')
+        if not cur_cell or cur_cell.get_text(strip=True).upper() != 'USD':
+            continue
+
+        # ── impact: red=HIGH, orange=MEDIUM, yellow=LOW ───────────
+        impact = 'low'
+        impact_cell = row.select_one('td.calendar__impact')
+        if impact_cell:
+            span = impact_cell.find('span')
+            if span:
+                span_classes = ' '.join(span.get('class', []))
+                span_title   = span.get('title', '').lower()
+                if 'high' in span_classes or 'red' in span_classes or 'high' in span_title:
+                    impact = 'high'
+                elif 'medium' in span_classes or 'orange' in span_classes or 'medium' in span_title:
+                    impact = 'medium'
+
+        # ── title ─────────────────────────────────────────────────
+        event_cell = row.select_one('td.calendar__event')
+        if not event_cell:
+            continue
+        title_el = event_cell.select_one('.calendar__event-title') or event_cell
+        title = title_el.get_text(strip=True)
         if not title:
             continue
-        # Parse time
-        time_str = str(item.get('time', '') or '').strip()
-        if not time_str:
-            date_str = str(item.get('date', '')).strip()
-            time_et = '08:30'  # default pre-market
-        else:
-            try:
-                # Finnhub returns UTC time — convert to ET
-                dt_utc = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
-                dt_ny  = dt_utc.astimezone(NY_TZ)
-                time_et = dt_ny.strftime('%H:%M')
-            except Exception:
-                time_et = time_str[:5]
+
+        # ── time (ForexFactory displays ET) ──────────────────────
+        time_et = '08:30'
+        time_cell = row.select_one('td.calendar__time')
+        if time_cell:
+            time_text = time_cell.get_text(strip=True).lower()
+            if time_text:
+                for fmt in ('%I:%M%p', '%I%p'):
+                    try:
+                        time_et = datetime.strptime(time_text, fmt).strftime('%H:%M')
+                        break
+                    except ValueError:
+                        pass
+
+        # ── forecast / previous ───────────────────────────────────
+        fc_cell   = row.select_one('td.calendar__forecast')
+        prev_cell = row.select_one('td.calendar__previous')
+        forecast  = (fc_cell.get_text(strip=True)   if fc_cell   else '') or '—'
+        previous  = (prev_cell.get_text(strip=True) if prev_cell else '') or '—'
 
         events.append({
             'title':      title,
             'time_et':    time_et,
-            'importance': _importance(title),
+            'importance': impact,
             'category':   _category(title),
-            'note':       f"Est: {item.get('estimate', '—')} | Prev: {item.get('prev', '—')}",
-            'date':       str(item.get('date', now.strftime('%Y-%m-%d'))),
+            'note':       f'Forecast: {forecast} | Prev: {previous}',
+            'date':       current_date,
+            'currency':   'USD',
         })
+
     return events
 
 
-# ── FMP economic calendar fallback ───────────────────────────
-def _fetch_fmp_calendar() -> list[dict]:
-    if not FMP_API_KEY:
-        return []
-    now = _now_ny()
-    from_date = now.strftime('%Y-%m-%d')
-    to_date   = (now + timedelta(days=7)).strftime('%Y-%m-%d')
-    data = _safe_get(
-        'https://financialmodelingprep.com/api/v3/economic_calendar',
-        {'from': from_date, 'to': to_date, 'apikey': FMP_API_KEY}
+# ── red-folder week detector ──────────────────────────────────
+def is_red_folder_week() -> bool:
+    """
+    Returns True when 3+ HIGH-impact USD events fall within Mon–Fri of the
+    current week.  Automatically sets red_folder_week=True and
+    macro_risk='high' in donna_risk_state.json when the threshold is met.
+    """
+    now    = _now_ny()
+    monday = now - timedelta(days=now.weekday())
+    friday = monday + timedelta(days=4)
+    mon_str = monday.strftime('%Y-%m-%d')
+    fri_str = friday.strftime('%Y-%m-%d')
+
+    macro  = _read_json(MACRO_EVENTS_FILE, {})
+    events = macro.get('events', [])
+
+    high_count = sum(
+        1 for e in events
+        if e.get('importance') == 'high'
+        and mon_str <= e.get('date', '') <= fri_str
     )
-    if not isinstance(data, list):
-        return []
 
-    events = []
-    for item in data[:40]:
-        title = str(item.get('event', '')).strip()
-        if not title:
-            continue
-        date_str = str(item.get('date', '')).strip()
-        time_et  = '08:30'
-        if date_str and 'T' in date_str:
-            try:
-                dt_utc = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                dt_ny  = dt_utc.astimezone(NY_TZ)
-                time_et = dt_ny.strftime('%H:%M')
-                date_str = dt_ny.strftime('%Y-%m-%d')
-            except Exception:
-                pass
+    is_red = high_count >= 3
+    if is_red:
+        risk = _read_json(RISK_STATE_FILE, {})
+        risk['red_folder_week'] = True
+        risk['macro_risk']      = 'high'
+        risk['last_updated']    = _utc_iso()
+        with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(risk, f, indent=2)
+        print(f'[donna_headlines] Red-folder week detected ({high_count} HIGH USD events)')
 
-        imp_raw = str(item.get('impact', '') or item.get('importance', '')).lower()
-        if 'high' in imp_raw:
-            importance = 'high'
-        elif 'medium' in imp_raw or 'moderate' in imp_raw:
-            importance = 'medium'
-        else:
-            importance = _importance(title)
-
-        events.append({
-            'title':      title,
-            'time_et':    time_et,
-            'importance': importance,
-            'category':   _category(title),
-            'note':       f"Est: {item.get('estimate', '—')} | Prev: {item.get('previous', '—')}",
-            'date':       date_str,
-        })
-    return events
+    return is_red
 
 
-# ── filter to today's events ──────────────────────────────────
+# ── filter helpers ────────────────────────────────────────────
 def _is_financial(event: dict) -> bool:
     t = event.get('title', '').lower()
     if any(w in t for w in _NON_FINANCIAL):
@@ -204,7 +215,6 @@ def _filter_today(events: list[dict]) -> list[dict]:
     today_events = [e for e in events if e.get('date', '') == today and _is_financial(e)]
     if today_events:
         return sorted(today_events, key=lambda e: e.get('time_et', ''))
-    # If no today events, return upcoming high/medium financial events
     upcoming = [e for e in events if _is_financial(e)]
     return sorted(upcoming, key=lambda e: (e.get('date', ''), e.get('time_et', '')))[:8]
 
@@ -230,30 +240,45 @@ def _compute_next_event(events: list[dict]) -> tuple[str, int | None]:
 def process_headlines_cycle():
     """
     Main entry point — called by headline_loop() in main.py every 15 minutes.
-    Fetches macro calendar, updates donna_macro_events.json,
-    and patches next_event / minutes_to_event / event_phase in risk state.
+    Scrapes ForexFactory for USD events, stores the full Mon–Fri week in
+    donna_macro_events.json, checks for a red-folder week, then patches
+    next_event / minutes_to_event / event_phase in donna_risk_state.json.
     """
     print(f'[donna_headlines] Running cycle at {_now_ny().strftime("%H:%M:%S")} ET')
 
-    # 1. Fetch calendar
-    events = _fetch_finnhub_calendar()
-    if not events:
-        events = _fetch_fmp_calendar()
+    # 1. Scrape ForexFactory
+    all_events = _fetch_forexfactory_calendar()
 
-    today_events = _filter_today(events) if events else []
+    # 2. Narrow to current Mon–Fri
+    now    = _now_ny()
+    monday = now - timedelta(days=now.weekday())
+    friday = monday + timedelta(days=4)
+    mon_str = monday.strftime('%Y-%m-%d')
+    fri_str = friday.strftime('%Y-%m-%d')
 
-    # 2. Write macro events file
-    macro_data = {
-        'source': 'Finnhub/FMP live calendar',
+    week_events = [
+        e for e in all_events
+        if mon_str <= e.get('date', '') <= fri_str
+    ]
+
+    # 3. Persist full week to macro events file
+    _write_json(MACRO_EVENTS_FILE, {
+        'source':     'ForexFactory',
         'fetched_at': _utc_iso(),
-        'events': today_events,
-    }
-    _write_json(MACRO_EVENTS_FILE, macro_data)
+        'week_start': mon_str,
+        'week_end':   fri_str,
+        'events':     week_events,
+    })
 
-    # 3. Compute next event
+    # 4. Auto-flag red-folder week
+    is_red_folder_week()
+
+    # 5. Today's events for risk-state timing
+    today_events = _filter_today(week_events)
+
+    # 6. Compute next event
     next_event, mins_to_event = _compute_next_event(today_events)
 
-    # Phase
     if mins_to_event is None:
         event_phase = 'NONE'
     else:
@@ -269,15 +294,13 @@ def process_headlines_cycle():
         else:
             event_phase = 'SCHEDULED'
 
-    # 4. Patch risk state — only update calendar-related fields
+    # 7. Patch risk state — calendar fields only
     risk = _read_json(RISK_STATE_FILE, {})
     risk['next_event']       = next_event
     risk['minutes_to_event'] = mins_to_event
     risk['event_phase']      = event_phase
 
-    # Recompute event_time_ny
     try:
-        now = _now_ny()
         if today_events:
             first = today_events[0]
             h, m_part = [int(x) for x in first['time_et'].split(':')]
@@ -291,5 +314,6 @@ def process_headlines_cycle():
     with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(risk, f, indent=2)
 
-    print(f'[donna_headlines] Done — {len(today_events)} events loaded. '
+    print(f'[donna_headlines] Done — {len(week_events)} USD events this week, '
+          f'{len(today_events)} today. '
           f'Next: "{next_event}" in {mins_to_event}min, phase: {event_phase}')
