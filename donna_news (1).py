@@ -253,7 +253,7 @@ def _llm_classify(headlines: list[str]) -> dict | None:
     if not ANTHROPIC_API_KEY:
         return None
     try:
-        import 
+        import anthropic
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -397,3 +397,43 @@ def process_news_guard_cycle():
 
     print(f'[donna_news] Cycle complete — macro:{macro_risk} headline:{headline_risk} '
           f'market:{market_risk} phase:{event_phase} headlines:{len(items)}')
+
+
+# ── immediate risk check (on-demand / every 5 min) ────────────
+_IMMEDIATE_TRIGGERS = [
+    'cpi', 'inflation', 'fed ', 'federal reserve', 'fomc',
+    'rate hike', 'rate cut', 'rate decision', 'rate pause',
+    'nonfarm', 'payroll', 'powell', 'recession', 'stagflation',
+    'treasury yield', 'debt ceiling', 'banking crisis',
+]
+
+def immediate_risk_check() -> dict:
+    """
+    Fetches the latest Finnhub headlines right now and immediately sets
+    headline_risk=HIGH in donna_risk_state.json if any macro risk keyword
+    is detected. Returns {'triggered': bool, 'matched_words': list, 'top_headline': str}.
+    Safe to call from a 5-minute loop for rapid headline response.
+    """
+    print(f'[donna_news] immediate_risk_check at {_now_ny().strftime("%H:%M:%S")} ET')
+
+    items = _fetch_finnhub_news()
+    if not items:
+        return {'triggered': False, 'matched_words': [], 'top_headline': ''}
+
+    all_text    = ' '.join(i['headline'] + ' ' + i['summary'] for i in items).lower()
+    matched     = [w.strip() for w in _IMMEDIATE_TRIGGERS if w in all_text]
+    top_headline = items[0]['headline']
+
+    if matched:
+        state = _read_risk()
+        state['headline_risk']       = 'high'
+        state['last_headline']       = top_headline
+        state['_immediate_triggers'] = matched[:6]
+        _write_risk(state)
+        print(f'[donna_news] IMMEDIATE escalation — headline_risk=HIGH, matched: {matched[:6]}')
+
+    return {
+        'triggered':     bool(matched),
+        'matched_words': matched,
+        'top_headline':  top_headline,
+    }
