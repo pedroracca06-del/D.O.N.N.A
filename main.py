@@ -35,6 +35,24 @@ from donna_engines import (
     send_morning_brief,
 )
 from donna_signals import process_signal
+
+try:
+    from donna_execution import (
+        execute_signal,
+        get_account, get_positions,
+        close_position, close_all_positions,
+        get_today_trade_count,
+    )
+    _EXECUTION_AVAILABLE = True
+except Exception:
+    _EXECUTION_AVAILABLE = False
+    def execute_signal(r):           return {'status': 'unavailable'}
+    def get_account():               return {'available': False}
+    def get_positions():             return []
+    def close_position(s):           return {'status': 'unavailable'}
+    def close_all_positions():       return {'status': 'unavailable'}
+    def get_today_trade_count():     return 0
+
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
 )
@@ -302,6 +320,50 @@ async def alerts_data():
     return {'alerts': load_alert_history()}
 
 
+# ── Execution engine ───────────────────────────────────────────
+
+@app.get('/execution-status')
+async def execution_status():
+    if not _EXECUTION_AVAILABLE:
+        return {'available': False, 'error': 'donna_execution not loaded'}
+
+    account, positions, trades_today = await asyncio.gather(
+        asyncio.to_thread(get_account),
+        asyncio.to_thread(get_positions),
+        asyncio.to_thread(get_today_trade_count),
+    )
+
+    stop_trading = False
+    try:
+        from donna_risk_engine import load_re_state
+        stop_trading = bool(load_re_state().get('stop_trading', False))
+    except Exception:
+        pass
+
+    return {
+        'available':     True,
+        'account':       account,
+        'positions':     positions,
+        'pnl_today':     account.get('pnl_today', 0),
+        'trades_today':  trades_today,
+        'stop_trading':  stop_trading,
+    }
+
+
+@app.post('/execution/close')
+async def execution_close(request: Request):
+    body   = await request.json()
+    symbol = str(body.get('symbol', '')).strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail='symbol is required')
+    return await asyncio.to_thread(close_position, symbol)
+
+
+@app.post('/execution/close-all')
+async def execution_close_all():
+    return await asyncio.to_thread(close_all_positions)
+
+
 # ── Morning brief ──────────────────────────────────────────────
 
 @app.get('/send-morning-brief')
@@ -324,6 +386,14 @@ async def webhook(request: Request):
     result = process_signal(payload)
     if result.get('status') != 'ok':
         raise HTTPException(status_code=500, detail=result.get('error', 'Signal processing failed'))
+
+    execution: dict = {}
+    if _EXECUTION_AVAILABLE:
+        try:
+            execution = await asyncio.to_thread(execute_signal, result)
+        except Exception as e:
+            execution = {'status': 'error', 'reason': str(e)}
+
     if _sse_clients:
         evt = json.dumps({
             'type':       'signal',
@@ -338,7 +408,7 @@ async def webhook(request: Request):
                 q.put_nowait(evt)
             except Exception:
                 pass
-    return result
+    return {**result, 'execution': execution}
 
 
 @app.get('/stream')
