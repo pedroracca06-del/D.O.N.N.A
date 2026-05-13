@@ -1,8 +1,9 @@
-"""donna_execution.py — DONNA's autonomous paper trading engine via Alpaca."""
+"""donna_execution.py — DONNA autonomous paper trading via Alpaca futures API."""
 from __future__ import annotations
 
+import calendar
 import os
-from datetime import date
+from datetime import date, timedelta
 
 from donna_config import now_ny, utc_now_iso, safe_float, send_telegram_message
 from donna_state import load_risk_state, load_alert_history, save_alert_history
@@ -11,35 +12,65 @@ from donna_state import load_risk_state, load_alert_history, save_alert_history
 
 ALPACA_API_KEY    = os.getenv('ALPACA_API_KEY', '').strip()
 ALPACA_SECRET_KEY = os.getenv('ALPACA_SECRET_KEY', '').strip()
-ALPACA_BASE_URL   = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets').strip()
+_PAPER = 'paper' in os.getenv('ALPACA_BASE_URL', 'paper-api.alpaca.markets').lower()
 
 try:
-    import alpaca_trade_api as tradeapi
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import (
+        MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest,
+    )
+    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
     _ALPACA_LIB = True
 except ImportError:
-    tradeapi = None  # type: ignore
+    TradingClient = None  # type: ignore
     _ALPACA_LIB = False
 
 # ── Contract specs ─────────────────────────────────────────────
-# MNQ: $2/point  |  MES: $5/point
-# Default stop keeps risk-per-contract at $20 in both cases.
+# MES: $5/point, 4-pt stop → $20 risk/contract
+# MNQ: $2/point, 10-pt stop → $20 risk/contract
 
-_POINT_VALUE   = {'MNQ': 2.0,  'MES': 5.0}
-_DEFAULT_STOP  = {'MNQ': 10.0, 'MES': 4.0}   # points
+_POINT_VALUE   = {'MES': 5.0,  'MNQ': 2.0}
+_DEFAULT_STOP  = {'MES': 4.0,  'MNQ': 10.0}
 _ACCOUNT_SIZE  = 100_000.0
-_RISK_FRACTION = 0.01      # 1% = $1 000 max risk
+_RISK_FRACTION = 0.01       # 1% = $1 000 max risk
 _MAX_CONTRACTS = 3
+
+# CME quarterly expiry months (Globex codes)
+_QUARTERLY = [(3, 'H'), (6, 'M'), (9, 'U'), (12, 'Z')]
+
+
+# ── Front-month contract resolution ───────────────────────────
+
+def _third_friday(year: int, month: int) -> date:
+    weeks   = calendar.monthcalendar(year, month)
+    fridays = [w[4] for w in weeks if w[4] != 0]
+    return date(year, month, fridays[2])
+
+
+def _front_month_symbol(base: str) -> str:
+    """Return active quarterly symbol, e.g. 'MESM26'.
+
+    Rolls 7 days before the third Friday of the expiry month.
+    """
+    today = date.today()
+    for yr_offset in range(2):
+        year = today.year + yr_offset
+        for month, code in _QUARTERLY:
+            if yr_offset == 0 and month < today.month:
+                continue
+            roll_date = _third_friday(year, month) - timedelta(days=7)
+            if today <= roll_date:
+                return f'{base}{code}{str(year)[2:]}'
+    return f'{base}M{str(today.year + 1)[2:]}'
 
 
 # ── Internal helpers ───────────────────────────────────────────
 
-def _client():
+def _client() -> 'TradingClient | None':
     if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         return None
     try:
-        return tradeapi.REST(
-            ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL, api_version='v2'
-        )
+        return TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=_PAPER)
     except Exception:
         return None
 
@@ -52,8 +83,8 @@ def _in_ny_cash() -> bool:
     return 9 * 60 + 30 <= m < 16 * 60
 
 
-def _map_symbol(data: dict) -> str | None:
-    """Resolve signal instrument/ticker to MNQ or MES."""
+def _map_base(data: dict) -> str | None:
+    """Resolve signal instrument/ticker to 'MNQ' or 'MES'."""
     instrument = str(data.get('instrument', '')).upper()
     ticker     = str(data.get('ticker', '')).upper()
     if 'NQ' in instrument or 'NQ' in ticker or 'MNQ' in ticker:
@@ -63,16 +94,14 @@ def _map_symbol(data: dict) -> str | None:
     return None
 
 
-def _calc_qty(symbol: str) -> int:
-    """Max contracts within 1% account risk, capped at _MAX_CONTRACTS."""
-    stop_pts = _DEFAULT_STOP.get(symbol, 10.0)
-    pv       = _POINT_VALUE.get(symbol, 2.0)
-    risk     = _ACCOUNT_SIZE * _RISK_FRACTION         # $1 000
-    qty      = int(risk / (stop_pts * pv))            # $1000 / $20 = 50 → capped
+def _calc_qty(base: str) -> int:
+    stop_pts = _DEFAULT_STOP.get(base, 4.0)
+    pv       = _POINT_VALUE.get(base, 5.0)
+    qty      = int((_ACCOUNT_SIZE * _RISK_FRACTION) / (stop_pts * pv))
     return max(1, min(qty, _MAX_CONTRACTS))
 
 
-# ── Public account / position helpers ─────────────────────────
+# ── Public helpers ─────────────────────────────────────────────
 
 def get_account() -> dict:
     api = _client()
@@ -86,7 +115,7 @@ def get_account() -> dict:
             'cash':         float(a.cash),
             'buying_power': float(a.buying_power),
             'pnl_today':    round(float(a.equity) - float(a.last_equity), 2),
-            'status':       a.status,
+            'status':       str(a.status),
         }
     except Exception as e:
         return {'available': False, 'error': str(e)}
@@ -101,12 +130,12 @@ def get_positions() -> list:
             {
                 'symbol':         p.symbol,
                 'qty':            int(p.qty),
-                'side':           p.side,
+                'side':           str(p.side),
                 'avg_entry':      float(p.avg_entry_price),
                 'market_value':   float(p.market_value),
                 'unrealized_pnl': float(p.unrealized_pl),
             }
-            for p in api.list_positions()
+            for p in api.get_all_positions()
         ]
     except Exception:
         return []
@@ -128,28 +157,28 @@ def close_all_positions() -> dict:
     if not api:
         return {'status': 'error', 'error': 'Alpaca not configured'}
     try:
-        api.close_all_positions()
+        api.close_all_positions(cancel_orders=True)
         return {'status': 'ok'}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
 
 
 def get_today_trade_count() -> int:
-    """Count entry orders submitted today (excludes bracket legs)."""
     api = _client()
     if not api:
         return 0
     try:
-        today  = date.today().isoformat()
-        orders = api.list_orders(
-            status='all',
-            after=f'{today}T00:00:00Z',
+        req    = GetOrdersRequest(
+            status=QueryOrderStatus.ALL,
+            after=f'{date.today().isoformat()}T00:00:00Z',
             limit=500,
         )
+        orders = api.get_orders(filter=req)
+        # Count only bracket parents (entry orders), not the stop/target legs
         return sum(
             1 for o in orders
-            if getattr(o, 'order_class', '') in ('', 'simple', 'bracket')
-            and getattr(o, 'legs', None) is None  # only the parent
+            if str(getattr(o, 'order_class', '')) in ('bracket', '')
+            and getattr(o, 'legs', None) is not None  # bracket parents always have legs
         )
     except Exception:
         return 0
@@ -158,10 +187,7 @@ def get_today_trade_count() -> int:
 # ── Core execution ─────────────────────────────────────────────
 
 def execute_signal(signal_result: dict) -> dict:
-    """
-    Gate-check a process_signal() result and, if all conditions pass,
-    submit a bracket market order on the Alpaca paper account.
-    """
+    """Gate-check and execute a TAKE signal as a bracket order on Alpaca paper."""
     parsed = signal_result.get('parsed', {})
     data   = signal_result.get('data', {})
 
@@ -189,9 +215,11 @@ def execute_signal(signal_result: dict) -> dict:
         pass
 
     # ── symbol resolution ─────────────────────────────────────
-    symbol = _map_symbol(data)
-    if not symbol:
+    base = _map_base(data)
+    if not base:
         return {'status': 'skipped', 'reason': 'cannot resolve instrument to MNQ or MES'}
+
+    symbol = _front_month_symbol(base)   # e.g. 'MESM26'
 
     # ── Alpaca client ─────────────────────────────────────────
     api = _client()
@@ -199,17 +227,18 @@ def execute_signal(signal_result: dict) -> dict:
         return {'status': 'error', 'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY'}
 
     # ── no-double-up gate ─────────────────────────────────────
-    if any(p['symbol'] == symbol for p in get_positions()):
-        return {'status': 'skipped', 'reason': f'already holding an open {symbol} position'}
+    positions = get_positions()
+    if any(p['symbol'].startswith(base) for p in positions):
+        return {'status': 'skipped', 'reason': f'already holding open {base} position'}
 
     # ── sizing ────────────────────────────────────────────────
-    signal    = str(data.get('signal', '')).upper()
-    is_long   = signal in ('LONG', 'BUY')
-    side      = 'buy' if is_long else 'sell'
-    qty       = _calc_qty(symbol)
+    signal   = str(data.get('signal', '')).upper()
+    is_long  = signal in ('LONG', 'BUY')
+    side     = OrderSide.BUY if is_long else OrderSide.SELL
+    qty      = _calc_qty(base)
 
-    stop_pts   = _DEFAULT_STOP[symbol]
-    target_pts = stop_pts * 2                          # 2:1 R:R
+    stop_pts   = _DEFAULT_STOP[base]
+    target_pts = stop_pts * 2            # 2:1 R:R
     entry_ref  = safe_float(data.get('price', 0))
 
     if is_long:
@@ -222,41 +251,43 @@ def execute_signal(signal_result: dict) -> dict:
     # ── bracket order ─────────────────────────────────────────
     try:
         order = api.submit_order(
-            symbol        = symbol,
-            qty           = qty,
-            side          = side,
-            type          = 'market',
-            time_in_force = 'day',
-            order_class   = 'bracket',
-            stop_loss     = {'stop_price': stop_px},
-            take_profit   = {'limit_price': target_px},
+            MarketOrderRequest(
+                symbol        = symbol,
+                qty           = qty,
+                side          = side,
+                time_in_force = TimeInForce.DAY,
+                order_class   = OrderClass.BRACKET,
+                take_profit   = TakeProfitRequest(limit_price=target_px),
+                stop_loss     = StopLossRequest(stop_price=stop_px),
+            )
         )
-        order_id = order.id
+        order_id = str(order.id)
     except Exception as e:
         return {'status': 'error', 'reason': str(e)}
 
     # ── log to alert history ──────────────────────────────────
+    direction = 'BUY' if is_long else 'SELL'
     record = {
-        'type':         'execution',
-        'ticker':       symbol,
-        'signal':       side.upper(),
-        'session':      data.get('session', ''),
-        'timeframe':    data.get('timeframe', ''),
-        'price':        str(entry_ref),
-        'verdict':      'TAKE',
-        'confidence':   parsed.get('confidence', ''),
-        'summary':      (f'EXECUTED {side.upper()} {qty}x {symbol} @ {entry_ref}. '
-                         f'Stop: {stop_px}, Target: {target_px}'),
-        'instrument':   symbol,
-        'tier':         data.get('tier', ''),
-        'setup_type':   data.get('setup_type', ''),
+        'type':          'execution',
+        'ticker':        symbol,
+        'signal':        direction,
+        'session':       data.get('session', ''),
+        'timeframe':     data.get('timeframe', ''),
+        'price':         str(entry_ref),
+        'verdict':       'TAKE',
+        'confidence':    parsed.get('confidence', ''),
+        'summary':       (f'EXECUTED {direction} {qty}x {symbol} @ {entry_ref}. '
+                          f'Stop: {stop_px}, Target: {target_px}'),
+        'instrument':    symbol,
+        'tier':          data.get('tier', ''),
+        'setup_type':    data.get('setup_type', ''),
         'signal_reason': data.get('signal_reason', ''),
-        'entry_price':  entry_ref,
-        'contracts':    qty,
-        'stop_price':   stop_px,
-        'target_price': target_px,
-        'order_id':     order_id,
-        'timestamp':    utc_now_iso(),
+        'entry_price':   entry_ref,
+        'contracts':     qty,
+        'stop_price':    stop_px,
+        'target_price':  target_px,
+        'order_id':      order_id,
+        'timestamp':     utc_now_iso(),
     }
     alerts = load_alert_history()
     alerts.insert(0, record)
@@ -264,7 +295,7 @@ def execute_signal(signal_result: dict) -> dict:
 
     send_telegram_message(
         f'DONNA EXECUTED\n'
-        f'{side.upper()} {qty}x {symbol} @ {entry_ref}\n'
+        f'{direction} {qty}x {symbol} @ {entry_ref}\n'
         f'Stop: {stop_px} | Target: {target_px}\n'
         f'Setup: {data.get("setup_type", "")} | Tier: {data.get("tier", "")}\n'
         f'Order ID: {order_id}'
@@ -273,7 +304,7 @@ def execute_signal(signal_result: dict) -> dict:
     return {
         'status':       'executed',
         'symbol':       symbol,
-        'side':         side,
+        'side':         'buy' if is_long else 'sell',
         'contracts':    qty,
         'entry_ref':    entry_ref,
         'stop_price':   stop_px,

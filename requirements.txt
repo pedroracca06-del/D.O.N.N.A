@@ -5,4 +5,4 @@ openai
 requests
 python-dotenv
 beautifulsoup4
-alpaca-trade-api
+alpaca-py
