@@ -1985,89 +1985,72 @@ function renderHarvey(d) {
     const fmt = p => (p != null && p > 0) ? p.toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
     const c = parseFloat(curRaw) || 0;
 
-    // No price at all — but still show something
     if (c <= 0) {
-      return `<div class="pi-verdict">${ticker} — live price feed connecting. Cards update every 20s.</div>`;
+      return `<div class="pi-verdict">Waiting for market data — price feed connecting.</div>`;
     }
 
-    const open = levels.today_open, high = levels.today_high, low = levels.today_low;
-    const pdh  = levels.prev_high,  pdl  = levels.prev_low;
-    const orbH = levels.orb_high,   orbL = levels.orb_low;
-    const hasRealLevels = !!(open || pdh || high || low);
+    const open = levels?.today_open;
+    const high = levels?.today_high,  low  = levels?.today_low;
+    const pdh  = levels?.prev_high,   pdl  = levels?.prev_low;
+    const orbH = levels?.orb_high,    orbL = levels?.orb_low;
 
-    // ── Plain English verdict ──────────────────────────────────────
+    // ── Verdict ───────────────────────────────────────────────────
     let verdict;
-    if (!open && !hasRealLevels) {
-      verdict = `${ticker} is at ${fmt(c)} — showing approximate reference zones. Historical levels load when market data is available.`;
-    } else if (!open) {
-      verdict = `${ticker} is at ${fmt(c)} — open price unavailable, reference levels shown.`;
+    if (!open) {
+      verdict = `${ticker} at ${fmt(c)} — waiting for open price reference.`;
     } else {
       const diffPct = (c - open) / open;
       if (diffPct > 0.0008) {
         verdict = pdh && c > pdh
-          ? `${ticker} is trading above today's open and above yesterday's high — strongly bullish.`
-          : `${ticker} is trading above today's open — bullish bias, buyers in control.`;
+          ? `Above today's open and above yesterday's high — strongly bullish.`
+          : `Above today's open — bullish bias.`;
       } else if (diffPct < -0.0008) {
         verdict = pdl && c < pdl
-          ? `${ticker} is trading below today's open and below yesterday's low — strongly bearish.`
-          : `${ticker} is trading below today's open — bearish bias, sellers have the edge.`;
+          ? `Below today's open and below yesterday's low — strongly bearish.`
+          : `Below today's open — bearish bias.`;
       } else {
-        verdict = `${ticker} is trading at today's open — balanced conditions, neutral bias.`;
+        verdict = `At today's open — balanced, neutral bias.`;
       }
     }
 
-    // ── Build level list (real or synthetic) ──────────────────────
-    let allLevels = [];
-    if (hasRealLevels) {
-      if (pdh)  allLevels.push({label:'Prev High', price:pdh,  cls:'pi-level-pdh'});
-      if (high) allLevels.push({label:'Today High',price:high, cls:''});
-      if (open) allLevels.push({label:'Today Open',price:open, cls:''});
-      if (orbH) allLevels.push({label:'ORB High',  price:orbH, cls:'pi-level-orb'});
-      if (orbL) allLevels.push({label:'ORB Low',   price:orbL, cls:'pi-level-orb'});
-      if (low)  allLevels.push({label:'Today Low', price:low,  cls:''});
-      if (pdl)  allLevels.push({label:'Prev Low',  price:pdl,  cls:'pi-level-pdl'});
-    } else {
-      // Synthetic ±20 / ±40 reference zones
-      allLevels = [
-        {label:'Resistance 2', price: c + 40, cls:'pi-level-pdh'},
-        {label:'Resistance 1', price: c + 20, cls:''},
-        {label:'Support 1',    price: c - 20, cls:''},
-        {label:'Support 2',    price: c - 40, cls:'pi-level-pdl'},
-      ];
-    }
-    allLevels.sort((a, b) => b.price - a.price);
+    // ── Real levels only — skip anything null/zero ─────────────────
+    const candidates = [
+      { label: 'Prev Day High', price: pdh,  cls: 'pi-level-pdh' },
+      { label: 'Session High',  price: high, cls: '' },
+      { label: 'ORB High',      price: orbH, cls: 'pi-level-orb' },
+      { label: 'ORB Low',       price: orbL, cls: 'pi-level-orb' },
+      { label: 'Session Low',   price: low,  cls: '' },
+      { label: 'Prev Day Low',  price: pdl,  cls: 'pi-level-pdl' },
+    ].filter(lv => lv.price != null && lv.price > 0);
 
-    // Nearest R and S
-    let nearR = null, nearS = null;
-    for (const lv of allLevels) {
-      if (lv.price > c && (!nearR || lv.price < nearR.price)) nearR = lv;
-      if (lv.price < c && (!nearS || lv.price > nearS.price)) nearS = lv;
+    if (!candidates.length) {
+      return `<div class="pi-verdict">${verdict}</div>`
+           + `<div class="pi-verdict" style="margin-top:6px;color:var(--muted2)">Waiting for market data — levels load during market hours.</div>`;
     }
 
-    const curRow = `<tr class="pi-cur-row"><td colspan="3"><div class="pi-cur-line"><span class="pi-cur-tag">► ${fmt(c)}</span></div></td></tr>`;
+    candidates.sort((a, b) => b.price - a.price);
+
+    const curRow = `<tr class="pi-cur-row"><td colspan="3"><div class="pi-cur-line">`
+                 + `<span class="pi-cur-tag" style="color:var(--gold)">► ${fmt(c)}</span></div></td></tr>`;
     let rows = '', inserted = false;
-
-    for (const lv of allLevels) {
-      const isNearR = nearR && lv.price === nearR.price;
-      const isNearS = nearS && lv.price === nearS.price;
-      const cls = [isNearR ? 'pi-nearest-r' : '', isNearS ? 'pi-nearest-s' : ''].filter(Boolean).join(' ');
-      const trAttr = cls ? ` class="${cls}"` : '';
+    for (const lv of candidates) {
       if (!inserted && lv.price < c) { rows += curRow; inserted = true; }
-      const rsTag = lv.price > c
-        ? `<td class="pi-rs"><span class="pi-tag-r"${isNearR ? ' style="font-size:10px"' : ''}>R</span></td>`
-        : `<td class="pi-rs"><span class="pi-tag-s"${isNearS ? ' style="font-size:10px"' : ''}>S</span></td>`;
-      rows += `<tr${trAttr}><td class="pi-label ${lv.cls}">${lv.label}</td><td class="pi-price ${lv.cls}">${fmt(lv.price)}</td>${rsTag}</tr>`;
+      const badge = lv.price > c
+        ? `<td class="pi-rs"><span class="pi-tag-r">R</span></td>`
+        : `<td class="pi-rs"><span class="pi-tag-s">S</span></td>`;
+      rows += `<tr><td class="pi-label ${lv.cls}">${lv.label}</td>`
+            + `<td class="pi-price ${lv.cls}">${fmt(lv.price)}</td>${badge}</tr>`;
     }
     if (!inserted) rows += curRow;
 
-    // Session range bar (real levels only)
+    // ── Session range bar ─────────────────────────────────────────
     let rangeBar = '';
     if (high && low && high > low) {
       const rp = Math.max(0, Math.min(100, (c - low) / (high - low) * 100));
       const dot = rp > 65 ? 'var(--green)' : rp < 35 ? 'var(--red)' : 'var(--yellow)';
       rangeBar = `<div class="pi-range-wrap">
         <div style="display:flex;justify-content:space-between;font-family:Space Mono,monospace;font-size:8px;color:var(--muted2);letter-spacing:.5px;margin-bottom:2px">
-          <span>DAY LOW</span><span>Price is ${rp.toFixed(1)}% through today's range</span><span>DAY HIGH</span>
+          <span>DAY LOW</span><span>${rp.toFixed(1)}% through today's range</span><span>DAY HIGH</span>
         </div>
         <div class="pi-range-track">
           <div class="pi-range-fill" style="width:${rp.toFixed(2)}%"></div>
@@ -2076,14 +2059,15 @@ function renderHarvey(d) {
       </div>`;
     }
 
-    const syntheticNote = !hasRealLevels
-      ? `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);letter-spacing:.5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line2)">APPROXIMATE ZONES — ±20 / ±40 pts from current price</div>`
-      : '';
-    return `<div class="pi-verdict">${verdict}</div><table class="pi-table">${rows}</table>${syntheticNote}${rangeBar}`;
+    return `<div class="pi-verdict">${verdict}</div><table class="pi-table">${rows}</table>${rangeBar}`;
   }
 
-  const nqDir = (d.nq_pct || 0) >= 0 ? 'up' : 'dn';
-  const esDir = (d.es_pct || 0) >= 0 ? 'up' : 'dn';
+  const nqC    = parseFloat(d.nq_last) || 0;
+  const esC    = parseFloat(d.es_last) || 0;
+  const nqOpen = nqLevels?.today_open || 0;
+  const esOpen = esLevels?.today_open || 0;
+  const nqDir  = nqC > 0 && nqOpen > 0 ? (nqC >= nqOpen ? 'up' : 'dn') : ((d.nq_pct || 0) >= 0 ? 'up' : 'dn');
+  const esDir  = esC > 0 && esOpen > 0 ? (esC >= esOpen ? 'up' : 'dn') : ((d.es_pct || 0) >= 0 ? 'up' : 'dn');
   const nqEl = document.getElementById('harveyNqLast');
   if (nqEl) { nqEl.textContent = d.nq_last || '—'; nqEl.className = nqDir; }
   const esEl = document.getElementById('harveyEsLast');
