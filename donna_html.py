@@ -449,6 +449,87 @@ tr:last-child td{border-bottom:none}
   font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--blue);
 }
 
+/* ── GROK INTELLIGENCE ── */
+.grok-card{
+  padding:22px 26px 20px;border-radius:18px;
+  border:1px solid var(--line);background:var(--panel);
+  box-shadow:var(--shadow2);position:relative;overflow:hidden;
+}
+.grok-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,var(--green),var(--gold));
+  border-radius:18px 18px 0 0;
+}
+.grok-card-header{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.grok-pulse-dot{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  animation:pulse 2s ease-in-out infinite;flex-shrink:0;
+}
+.grok-card-title{
+  font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;letter-spacing:.5px;
+  color:var(--text);flex:1;
+}
+.grok-powered-badge{
+  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;
+  padding:3px 9px;border-radius:5px;
+  background:var(--panel2);color:var(--muted2);border:1px solid var(--line);
+}
+.grok-sentiment-badge{
+  display:inline-flex;align-items:center;
+  padding:4px 12px;border-radius:8px;
+  font-family:'Space Mono',monospace;font-size:9px;font-weight:700;
+  letter-spacing:1.5px;text-transform:uppercase;
+}
+.grok-sentiment-badge.sentiment-BULLISH{background:var(--green2);color:var(--green);border:1px solid rgba(30,110,65,.25)}
+.grok-sentiment-badge.sentiment-BEARISH{background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.25)}
+.grok-sentiment-badge.sentiment-NEUTRAL{background:var(--panel2);color:var(--muted2);border:1px solid var(--line)}
+.grok-sentiment-badge.sentiment-MIXED{background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.25)}
+.grok-headline{
+  font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;
+  line-height:1.15;letter-spacing:.3px;margin-bottom:10px;color:var(--text);
+}
+.grok-summary{font-size:13px;color:var(--muted);line-height:1.65;margin-bottom:10px}
+.grok-sentiment-reason{font-size:12px;color:var(--muted2);line-height:1.5;font-style:italic;margin-bottom:14px}
+.grok-trade-read{
+  padding:13px 16px 13px 18px;
+  border-radius:0 10px 10px 0;
+  background:var(--panel2);
+  border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  border-left:3px solid var(--gold);
+  font-size:13px;color:var(--text);line-height:1.7;margin-bottom:16px;font-weight:500;
+}
+.grok-names-row{display:flex;flex-wrap:wrap;gap:7px}
+.grok-name-chip{
+  display:inline-block;padding:5px 14px;border-radius:999px;
+  background:var(--panel2);border:1px solid var(--line);
+  font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;
+  color:var(--text);cursor:pointer;transition:all .15s;letter-spacing:.3px;
+}
+.grok-name-chip:hover{background:var(--bg2);border-color:var(--muted2);color:var(--text)}
+.breaking-events-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.breaking-event-card{
+  padding:14px 16px;border-radius:14px;
+  border:1px solid var(--line);background:var(--panel);
+}
+.breaking-event-badges{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.impact-badge{
+  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;
+  padding:2px 8px;border-radius:5px;font-weight:700;text-transform:uppercase;
+}
+.impact-badge.impact-HIGH{background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.2)}
+.impact-badge.impact-MEDIUM{background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.2)}
+.impact-badge.impact-LOW{background:var(--panel2);color:var(--muted2);border:1px solid var(--line)}
+.dir-badge{
+  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;
+  padding:2px 8px;border-radius:5px;font-weight:700;text-transform:uppercase;
+}
+.dir-badge.dir-BULL{background:var(--green2);color:var(--green);border:1px solid rgba(30,110,65,.2)}
+.dir-badge.dir-BEAR{background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.2)}
+.dir-badge.dir-NEUTRAL{background:var(--panel2);color:var(--muted2);border:1px solid var(--line)}
+.breaking-event-title{font-size:12px;font-weight:600;line-height:1.4;color:var(--text);margin-bottom:4px}
+.breaking-event-source{font-size:10px;color:var(--muted2);font-family:'Space Mono',monospace}
+@media(max-width:900px){.breaking-events-grid{grid-template-columns:1fr}}
+
 /* ── ASSISTANT ── */
 .donna-header{
   text-align:center;padding:24px 20px 16px;
@@ -1159,17 +1240,36 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">VIX</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
       </div>
 
+      <!-- DONNA'S MARKET READ — full width above grid -->
+      <div class="grok-card">
+        <div class="grok-card-header">
+          <div class="grok-pulse-dot"></div>
+          <div class="grok-card-title">DONNA&#39;s Market Read</div>
+          <div class="grok-powered-badge">Powered by Grok</div>
+          <div id="grokSentimentBadge" class="grok-sentiment-badge sentiment-NEUTRAL">NEUTRAL</div>
+        </div>
+        <div class="grok-headline" id="grokTopStory">Loading market intelligence...</div>
+        <div class="grok-summary" id="grokSummary">—</div>
+        <div class="grok-sentiment-reason" id="grokSentimentReason">—</div>
+        <div class="grok-trade-read" id="grokTradeRead">—</div>
+        <div class="grok-names-row" id="grokKeyNames"></div>
+      </div>
+
       <!-- MAIN CONTENT + SIDEBAR -->
       <div class="news-layout">
 
-        <!-- LEFT: FEATURE STORY + NEWS FEED -->
+        <!-- LEFT: BREAKING EVENTS + NEWS FEED -->
         <div class="vstack" style="gap:14px">
 
-          <!-- FEATURE STORY -->
-          <div class="feature-story">
-            <div id="featureStoryTag" class="story-tag MACRO">MACRO</div>
-            <div class="feature-headline" id="featureHeadline">Loading top story...</div>
-            <div class="feature-note" id="featureNote">—</div>
+          <!-- BREAKING EVENTS -->
+          <div class="panel">
+            <div class="kicker">Breaking Events</div>
+            <div class="breaking-events-grid" id="breakingEventsGrid">
+              <div class="breaking-event-card">
+                <div class="breaking-event-badges"><span class="impact-badge impact-LOW">LOW</span><span class="dir-badge dir-NEUTRAL">NEUTRAL</span></div>
+                <div class="breaking-event-title" style="color:var(--muted2)">Loading breaking events...</div>
+              </div>
+            </div>
           </div>
 
           <!-- NUMBERED NEWS FEED -->
@@ -1185,7 +1285,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div class="news-sidebar-panel">
 
           <div class="sidebar-section">
-            <div class="sidebar-kicker">DONNA&#39;s Read</div>
+            <div class="sidebar-kicker">X Sentiment</div>
+            <div style="margin-bottom:8px" id="sidebarGrokSentiment">—</div>
             <div class="donna-read" id="donnaRead">—</div>
           </div>
 
@@ -2239,6 +2340,69 @@ document.getElementById('reResetStop')?.addEventListener('click', reResetStop);
   document.getElementById(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') reCalculate(); });
 });
 
+// ════════ GROK INTELLIGENCE ════════
+async function refreshGrokIntelligence() {
+  try {
+    const res = await fetch('/grok-intelligence');
+    if (!res.ok) return;
+    const g = await res.json();
+
+    const sent = (g.market_sentiment || 'NEUTRAL').toUpperCase();
+    const badgeEl = document.getElementById('grokSentimentBadge');
+    if (badgeEl) {
+      badgeEl.textContent = sent;
+      badgeEl.className = 'grok-sentiment-badge sentiment-' + sent;
+    }
+
+    setText('grokTopStory', g.top_story || '—');
+    setText('grokSummary', g.top_story_summary || '—');
+    setText('grokTradeRead', g.donna_trade_read || '—');
+    setText('grokSentimentReason', g.sentiment_reason || '—');
+
+    const names = Array.isArray(g.key_names_to_watch) ? g.key_names_to_watch : [];
+    const namesEl = document.getElementById('grokKeyNames');
+    if (namesEl) {
+      namesEl.innerHTML = names.length
+        ? names.map(n => `<span class="grok-name-chip">${n}</span>`).join('')
+        : '<span style="font-size:12px;color:var(--muted2)">—</span>';
+    }
+
+    const events = Array.isArray(g.breaking_events) ? g.breaking_events : [];
+    const evGrid = document.getElementById('breakingEventsGrid');
+    if (evGrid) {
+      if (events.length) {
+        evGrid.innerHTML = events.map(ev => {
+          const imp = (ev.impact || 'LOW').toUpperCase();
+          const dir = (ev.direction || 'NEUTRAL').toUpperCase();
+          return `<div class="breaking-event-card">
+            <div class="breaking-event-badges">
+              <span class="impact-badge impact-${imp}">${imp}</span>
+              <span class="dir-badge dir-${dir}">${dir}</span>
+            </div>
+            <div class="breaking-event-title">${ev.title || '—'}</div>
+            <div class="breaking-event-source">${ev.source || '—'}</div>
+          </div>`;
+        }).join('');
+      } else {
+        evGrid.innerHTML = `<div class="breaking-event-card" style="grid-column:1/-1">
+          <div class="breaking-event-title" style="color:var(--muted2)">No breaking events detected</div>
+        </div>`;
+      }
+    }
+
+    const sgEl = document.getElementById('sidebarGrokSentiment');
+    if (sgEl) {
+      const sentColor = sent === 'BULLISH' ? 'var(--green)' : sent === 'BEARISH' ? 'var(--red)' : sent === 'MIXED' ? 'var(--yellow)' : 'var(--muted2)';
+      sgEl.innerHTML = `<span style="font-family:Rajdhani,sans-serif;font-size:18px;font-weight:700;color:${sentColor}">${sent}</span>`;
+    }
+
+    setText('donnaRead', g.sentiment_reason || '—');
+
+  } catch(e) {
+    console.error('refreshGrokIntelligence failed:', e);
+  }
+}
+
 // ════════ RENDER NEWS ════════
 function classifyHeadlineTag(text) {
   const t = (text || '').toLowerCase();
@@ -2983,6 +3147,8 @@ refreshExecMonitor();
 refreshSessionScorecard();
 setInterval(refreshExecMonitor, 20000);
 setInterval(refreshSessionScorecard, 20000);
+refreshGrokIntelligence();
+setInterval(refreshGrokIntelligence, 5 * 60 * 1000);
 connectSSE();
 </script>
 </body>
