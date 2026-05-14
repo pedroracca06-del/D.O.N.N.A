@@ -14,6 +14,7 @@ from donna_state import (
     load_risk_state, save_risk_state,
     load_alert_history, save_alert_history,
     load_macro_events,
+    load_journal, save_journal,
 )
 
 # ── Alpaca setup ───────────────────────────────────────────────
@@ -382,6 +383,151 @@ def get_execution_status() -> dict:
     }
 
 
+# ── Journal helpers ───────────────────────────────────────────
+
+def _journal_log_trade(
+    data: dict, parsed: dict, symbol: str, base: str,
+    is_long: bool, qty: int, entry_ref: float,
+    stop_px: float, tgt_px: float, order_id: str, session: str,
+) -> None:
+    """Write a DONNA_AUTO journal entry immediately after a confirmed bracket order."""
+    risk    = load_risk_state()
+    regime  = str(data.get('regime', '') or risk.get('market_regime', '')).upper() or 'UNKNOWN'
+    macro   = risk.get('macro_risk', 'medium')
+    conf    = str(parsed.get('confidence', ''))
+    setup   = str(data.get('setup_type', ''))
+    tier    = str(data.get('tier', ''))
+    instr   = str(data.get('instrument', symbol))
+    ny      = now_ny()
+
+    entry = {
+        'source':         'DONNA_AUTO',
+        'order_id':       order_id,
+        'ticker':         symbol,
+        'direction':      'LONG' if is_long else 'SHORT',
+        'trade_date':     ny.strftime('%Y-%m-%d'),
+        'time':           ny.strftime('%H:%M:%S ET'),
+        'entry_price':    entry_ref,
+        'stop_price':     stop_px,
+        'target_price':   tgt_px,
+        'exit_price':     None,
+        'exit_time':      None,
+        'size':           qty,
+        'setup_type':     setup,
+        'tier':           tier,
+        'confidence':     conf,
+        'regime':         regime,
+        'active_regime':  regime,
+        'macro_risk':     macro,
+        'session':        session,
+        'harvey_verdict': 'TAKE',
+        'realized_pnl':   None,
+        'pnl':            None,
+        'outcome':        'OPEN',
+        'notes': (
+            f'DONNA autonomous trade. {setup} on {instr}. '
+            f'Regime: {regime}. Confidence: {conf}.'
+        ),
+        'timestamp': utc_now_iso(),
+    }
+    trades = load_journal()
+    trades.append(entry)
+    save_journal(trades)
+
+
+def check_position_outcomes() -> int:
+    """
+    Scan journal entries with outcome=OPEN/source=DONNA_AUTO, query Alpaca for
+    each bracket order's leg fills, and update the journal with realized P&L,
+    exit price/time, and WIN/LOSS/BREAKEVEN outcome.  Returns number updated.
+    """
+    trades    = load_journal()
+    open_auto = [
+        (i, t) for i, t in enumerate(trades)
+        if t.get('source') == 'DONNA_AUTO'
+        and str(t.get('outcome', '')).upper() == 'OPEN'
+        and t.get('order_id')
+    ]
+    if not open_auto:
+        return 0
+
+    api = _client()
+    if not api:
+        return 0
+
+    updated = 0
+    for idx, trade in open_auto:
+        try:
+            order = api.get_order_by_id(trade['order_id'])
+        except Exception:
+            continue
+
+        updates: dict = {}
+
+        # Capture actual entry fill price if Alpaca has it
+        actual_entry = getattr(order, 'filled_avg_price', None)
+        if actual_entry is not None:
+            try:
+                updates['entry_price'] = float(actual_entry)
+            except Exception:
+                pass
+
+        # Find the leg that filled (TP or SL)
+        legs       = getattr(order, 'legs', None) or []
+        filled_leg = next(
+            (lg for lg in legs if str(getattr(lg, 'status', '')).lower() == 'filled'),
+            None,
+        )
+
+        if filled_leg is None:
+            # Position still open — only write entry price update if changed
+            if updates:
+                trades[idx] = {**trade, **updates}
+                updated += 1
+            continue
+
+        # Exit price & time
+        raw_exit   = getattr(filled_leg, 'filled_avg_price', None)
+        exit_price = float(raw_exit) if raw_exit is not None else 0.0
+        exit_time  = now_ny().strftime('%H:%M:%S ET')
+        try:
+            filled_at = getattr(filled_leg, 'filled_at', None)
+            if filled_at:
+                exit_time = filled_at.astimezone(now_ny().tzinfo).strftime('%H:%M:%S ET')
+        except Exception:
+            pass
+
+        # P&L (futures dollar value)
+        entry_px  = float(updates.get('entry_price', trade.get('entry_price') or 0))
+        qty       = int(trade.get('size') or 1)
+        direction = str(trade.get('direction', 'LONG')).upper()
+        ticker    = str(trade.get('ticker', ''))
+        base      = 'MNQ' if ('MNQ' in ticker or 'NQ' in ticker) else 'MES'
+        pv        = _POINT_VALUE.get(base, 5.0)
+
+        raw_pnl = (
+            (exit_price - entry_px) * qty * pv if direction == 'LONG'
+            else (entry_px - exit_price) * qty * pv
+        )
+        realized_pnl = round(raw_pnl, 2)
+        outcome      = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
+
+        trades[idx] = {
+            **trade,
+            **updates,
+            'exit_price':   exit_price,
+            'exit_time':    exit_time,
+            'realized_pnl': realized_pnl,
+            'pnl':          realized_pnl,
+            'outcome':      outcome,
+        }
+        updated += 1
+
+    if updated:
+        save_journal(trades)
+    return updated
+
+
 # ── Core execution ─────────────────────────────────────────────
 
 def execute_signal(signal_result: dict) -> dict:
@@ -499,6 +645,13 @@ def execute_signal(signal_result: dict) -> dict:
     _increment_daily_trades()
     if session == 'ASIA':
         _set_asia_trade_taken()
+
+    # ── AUTO-JOURNAL — create OPEN entry immediately
+    _journal_log_trade(
+        data=data, parsed=parsed, symbol=symbol, base=base,
+        is_long=is_long, qty=qty, entry_ref=entry_ref,
+        stop_px=stop_px, tgt_px=tgt_px, order_id=order_id, session=session,
+    )
 
     # ── LOG EXECUTION
     direction = 'BUY' if is_long else 'SELL'

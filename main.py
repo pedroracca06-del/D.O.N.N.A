@@ -43,6 +43,7 @@ try:
         close_position, close_all_positions,
         get_today_trade_count,
         get_execution_status,
+        check_position_outcomes,
     )
     _EXECUTION_AVAILABLE = True
 except Exception:
@@ -54,6 +55,7 @@ except Exception:
     def close_all_positions():       return {'status': 'unavailable'}
     def get_today_trade_count():     return 0
     def get_execution_status():      return {'available': False}
+    def check_position_outcomes():   return 0
 
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
@@ -103,6 +105,22 @@ _sse_clients: list[asyncio.Queue] = []
 
 
 # ── Background loops ───────────────────────────────────────────
+
+async def position_outcomes_loop():
+    """Every 60 s during NY session (+30 min buffer), check Alpaca for closed
+    bracket legs and update journal entries with P&L / outcome."""
+    while True:
+        try:
+            ny = now_ny()
+            m  = ny.hour * 60 + ny.minute
+            if ny.weekday() < 5 and 9 * 60 + 30 <= m <= 16 * 60 + 30:
+                n = await asyncio.to_thread(check_position_outcomes)
+                if n:
+                    print(f'[position_outcomes] Updated {n} journal entry/entries')
+        except Exception as e:
+            print(f'Position outcomes loop error: {e}')
+        await asyncio.sleep(60)
+
 
 async def morning_brief_loop():
     while True:
@@ -157,6 +175,8 @@ async def startup():
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
     asyncio.create_task(morning_brief_loop())
+    if _EXECUTION_AVAILABLE:
+        asyncio.create_task(position_outcomes_loop())
 
 
 # ── Health / meta ──────────────────────────────────────────────
