@@ -574,7 +574,7 @@ tr:last-child td{border-bottom:none}
 .mover-pct.up{color:var(--green)}.mover-pct.dn{color:var(--red)}
 
 /* ── SECTOR HEAT / TREEMAP ── */
-.treemap-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px}
+.treemap-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px}
 .treemap-toggle{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .treemap-toggle-btn{
   padding:5px 14px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;
@@ -582,74 +582,49 @@ tr:last-child td{border-bottom:none}
   background:var(--panel);color:var(--muted2);transition:all .15s;
 }
 .treemap-toggle-btn.active{background:var(--text);color:var(--panel)}
-.treemap-container{display:flex;gap:3px;width:100%;height:175px;border-radius:8px;overflow:hidden}
-.treemap-sidebar-wrap{display:grid;grid-template-columns:35% 65%;gap:3px;height:190px;margin-top:10px}
-.treemap-sidebar-big{border-radius:4px;cursor:pointer;transition:opacity .15s;display:flex;flex-direction:column;justify-content:flex-end;padding:8px}
-.treemap-sidebar-big:hover{opacity:.82}
-.treemap-sidebar-col{display:flex;flex-direction:column;gap:3px}
-.treemap-sidebar-sm{border-radius:3px;cursor:pointer;transition:opacity .15s;display:flex;align-items:flex-end;justify-content:space-between;padding:4px 6px;min-height:0}
-.treemap-sidebar-sm:hover{opacity:.82}
-.treemap-sidebar-sm .tm-sym{font-size:10px}.treemap-sidebar-sm .tm-pct{font-size:9px}
-.donna-says-box{
-  padding:16px 18px;border-radius:14px;
-  background:var(--bg2);border:1px solid var(--line);
+.tm-wrap{display:flex;flex-wrap:wrap;width:100%;height:220px;gap:2px;background:#2a2a2a;border-radius:6px;overflow:hidden}
+.tm-block{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  overflow:hidden;cursor:pointer;transition:opacity .15s;box-sizing:border-box;
 }
-.donna-says-label{
-  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;
-  color:var(--muted2);margin-bottom:8px;
-}
-.donna-says-text{font-size:12px;color:var(--muted);line-height:1.65}
-.treemap-block{
-  display:flex;flex-direction:column;justify-content:flex-end;padding:7px 8px;
-  cursor:pointer;transition:opacity .15s;min-width:28px;height:100%;
-  border-radius:3px;
-}
-.treemap-block:hover{opacity:.8}
-.treemap-block.selected{outline:2px solid rgba(255,255,255,.7);outline-offset:-2px}
-.tm-sym{font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:#fff;line-height:1;letter-spacing:.3px}
-.tm-name{font-size:9px;color:rgba(255,255,255,.75);line-height:1.2;margin-bottom:3px;font-family:'Space Mono',monospace}
-.tm-pct{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,.9);font-weight:700}
-.treemap-legend{
-  display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap;
-}
-.tm-legend-item{
-  display:flex;align-items:center;gap:4px;
-  font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);letter-spacing:.5px;
-}
-.tm-legend-swatch{width:10px;height:10px;border-radius:2px}
-.treemap-drill{
-  margin-top:10px;padding:12px 14px;border-radius:10px;
-  background:var(--panel2);border:1px solid var(--line);display:none;
-}
+.tm-block:hover{opacity:.82}
+.treemap-drill{margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);display:none}
 .treemap-drill.open{display:block}
-.treemap-drill-title{font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;margin-bottom:8px}
-.treemap-drill-items{display:flex;flex-wrap:wrap;gap:6px}
-.treemap-drill-chip{
-  padding:3px 10px;border-radius:6px;background:var(--panel);border:1px solid var(--line);
-  font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:var(--text);
-}
+.treemap-drill-title{font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;margin-bottom:6px}
+.treemap-drill-items{display:flex;flex-wrap:wrap;gap:5px}
+.treemap-drill-chip{padding:3px 9px;border-radius:5px;background:var(--panel);border:1px solid var(--line);font-family:'Rajdhani',sans-serif;font-size:11px;font-weight:700;color:var(--text)}
+.donna-says-box{padding:16px 18px;border-radius:14px;background:var(--bg2);border:1px solid var(--line)}
+.donna-says-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px}
+.donna-says-text{font-size:12px;color:var(--muted);line-height:1.65}
 
 /* ── ECON CALENDAR ── */
-.econ-event{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid var(--line2)}
+.econ-day-header{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;
+  padding:6px 0 4px;margin-top:6px;border-bottom:1px solid var(--line);margin-bottom:4px;
+}
+.econ-day-header.today{color:var(--text);font-weight:700}
+.econ-day-header.other{color:var(--muted2)}
+.econ-day-header:first-child{margin-top:0}
+.econ-event{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid var(--line2)}
 .econ-event:last-child{border-bottom:none}
-.econ-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
-.econ-dot.high{background:var(--red)}.econ-dot.medium{background:var(--yellow)}.econ-dot.low{background:var(--muted2)}
-.econ-time{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);flex-shrink:0;width:38px;padding-top:1px}
-.econ-body{flex:1}
-.econ-title{font-size:11px;color:var(--text);line-height:1.4;font-weight:600}
-.econ-note{font-size:10px;color:var(--muted2);line-height:1.3;margin-top:2px}
-.econ-countdown{
-  display:inline-block;margin-top:3px;font-family:'Space Mono',monospace;font-size:9px;
-  font-weight:700;color:var(--red);
+.econ-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.econ-dot.high{background:#f87171}.econ-dot.medium{background:#fbbf24}.econ-dot.low{background:#facc15}
+.econ-time{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);flex-shrink:0;width:34px;padding-top:2px}
+.econ-body{flex:1;min-width:0}
+.econ-title-row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.econ-title{font-size:11px;color:var(--text);font-weight:600;line-height:1.35}
+.econ-date-muted{font-size:9px;color:var(--muted2);font-family:'Space Mono',monospace;white-space:nowrap}
+.econ-meta{font-size:9px;color:var(--muted2);margin-top:3px;font-family:'Space Mono',monospace;line-height:1.5}
+.econ-verdict{
+  display:inline-block;margin-left:4px;padding:1px 6px;border-radius:4px;
+  font-family:'Space Mono',monospace;font-size:8px;font-weight:700;letter-spacing:.5px;vertical-align:middle;
 }
+.econ-verdict.hot{background:#7f1d1d;color:#fca5a5}
+.econ-verdict.inline{background:#374151;color:#9ca3af}
+.econ-verdict.miss{background:#14532d;color:#86efac}
 .econ-no-events{font-size:12px;color:var(--muted2);padding:4px 0}
-.econ-next-high{
-  margin-bottom:8px;padding:8px 10px;border-radius:8px;
-  background:var(--red2);border:1px solid rgba(192,57,43,.2);
-}
-.econ-next-high-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--red);text-transform:uppercase;margin-bottom:3px}
-.econ-next-high-title{font-size:11px;font-weight:700;color:var(--text);line-height:1.3}
-.econ-next-high-time{font-family:'Space Mono',monospace;font-size:10px;color:var(--red);font-weight:700;margin-top:2px}
+.econ-sub{display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap}
+.econ-vals{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)}
 
 /* ── ASSISTANT ── */
 .donna-header{
@@ -2599,52 +2574,17 @@ async function refreshTrendingMovers() {
 }
 
 // ════════ SECTOR HEAT TREEMAP ════════
-const SECTOR_HOLDINGS = {
-  XLK:  ['AAPL','MSFT','NVDA','AVGO','AMD'],
-  XLV:  ['LLY','UNH','JNJ','ABBV','MRK'],
-  XLF:  ['JPM','BAC','WFC','GS','MS'],
-  XLY:  ['AMZN','TSLA','HD','MCD','NKE'],
-  XLC:  ['META','GOOGL','NFLX','DIS','CMCSA'],
-  XLI:  ['CAT','RTX','HON','UNP','GE'],
-  XLP:  ['PG','KO','PEP','COST','WMT'],
-  XLE:  ['XOM','CVX','COP','EOG','SLB'],
-  XLU:  ['NEE','SO','DUK','AEP','EXC'],
-  XLB:  ['LIN','APD','SHW','ECL','NEM'],
-  XLRE: ['AMT','PLD','CCI','EQIX','PSA'],
-};
-const NQ_SEGMENTS = {
-  AAPL:  ['iPhone','Mac','Services','iPad','Wearables'],
-  MSFT:  ['Azure','Office 365','Teams','Xbox','LinkedIn'],
-  NVDA:  ['Data Center','Gaming','Auto','Professional','OEM'],
-  AMZN:  ['AWS','Retail','Advertising','Prime','International'],
-  META:  ['Facebook','Instagram','WhatsApp','Oculus','Ads'],
-  GOOG:  ['Search','YouTube','GCP','Android','Other Bets'],
-  AVGO:  ['Semiconductors','VMware','Networking','Storage','Security'],
-  TSLA:  ['Model 3/Y','Model S/X','Energy Storage','Supercharging','FSD'],
-  COST:  ['US Warehouses','Intl Warehouses','E-commerce','Pharmacy','Gas Stations'],
-  ADBE:  ['Creative Cloud','Document Cloud','Experience Cloud','Firefly','Stock'],
-};
-
-function tmColor(pct) {
-  const n = parseFloat(pct);
-  if (isNaN(n)) return '#3a3a3a';
-  if (n >  2)  return '#166534';
-  if (n >  0.5) return '#1e6e41';
-  if (n > -0.5) return '#4a4a4a';
-  if (n > -2)  return '#8b2020';
-  return '#6b0000';
-}
-
 let _tmMode = 'sectors';
 let _tmData = { sectors: [], nq: [] };
 
-function setTreemapMode(mode) {
-  _tmMode = mode;
-  document.getElementById('tmBtnSectors').classList.toggle('active', mode === 'sectors');
-  document.getElementById('tmBtnNQ').classList.toggle('active', mode === 'nq');
-  renderTreemap();
-  const drill = document.getElementById('treemapDrill');
-  if (drill) drill.classList.remove('open');
+function tmColor2(pct) {
+  const n = parseFloat(pct);
+  if (isNaN(n)) return { bg:'#3a3a3a', fg:'#9ca3af' };
+  if (n >  1)   return { bg:'#166534', fg:'#bbf7d0' };
+  if (n >  0.1) return { bg:'#15803d', fg:'#bbf7d0' };
+  if (n > -0.1) return { bg:'#854d0e', fg:'#fef9c3' };
+  if (n > -1)   return { bg:'#7f1d1d', fg:'#fecaca' };
+  return                { bg:'#450a0a', fg:'#fecaca' };
 }
 
 function fmtPct(n) {
@@ -2653,66 +2593,66 @@ function fmtPct(n) {
   return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
 }
 
+function setTreemapMode(mode) {
+  _tmMode = mode;
+  document.getElementById('tmBtnSectors').classList.toggle('active', mode === 'sectors');
+  document.getElementById('tmBtnNQ').classList.toggle('active', mode === 'nq');
+  renderTreemap();
+}
+
 function renderTreemap() {
   const container = document.getElementById('treemapContainer');
   if (!container) return;
-  const items = _tmMode === 'sectors' ? _tmData.sectors : _tmData.nq;
-  if (!items || !items.length) {
-    container.innerHTML = '<div style="height:190px;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12px">Loading...</div>';
+  const isSectors = _tmMode === 'sectors';
+  const rawData   = isSectors ? _tmData.sectors : _tmData.nq;
+
+  if (!rawData || !rawData.length) {
+    container.innerHTML = '<div class="tm-wrap" style="align-items:center;justify-content:center"><span style="color:var(--muted2);font-size:12px">Loading…</span></div>';
     return;
   }
-  // Sort descending by weight so biggest is first
-  const sorted = [...items].sort((a, b) => b.weight - a.weight);
-  const biggest = sorted[0];
-  const rest    = sorted.slice(1);
 
-  const bigBg  = tmColor(biggest.pct);
-  const bigPct = fmtPct(biggest.pct);
-  const bigName = biggest.name.length > 11 ? biggest.name.substring(0,10) + '…' : biggest.name;
+  const bySymbol = {};
+  rawData.forEach(d => { bySymbol[d.symbol] = d; });
 
-  const bigBlock = `<div class="treemap-sidebar-big" style="background:${bigBg}"
-    data-sym="${biggest.symbol}" onclick="treemapDrill('${biggest.symbol}','${biggest.name}')">
-    <span class="tm-name" style="font-size:10px;margin-bottom:4px">${bigName}</span>
-    <span class="tm-sym">${biggest.symbol}</span>
-    <span class="tm-pct">${bigPct}</span>
-  </div>`;
-
-  const totalRestWeight = rest.reduce((s, r) => s + r.weight, 0) || 1;
-  const smallBlocks = rest.map(item => {
-    const bg  = tmColor(item.pct);
-    const pct = fmtPct(item.pct);
-    return `<div class="treemap-sidebar-sm" style="background:${bg};flex:${item.weight}"
-      data-sym="${item.symbol}" onclick="treemapDrill('${item.symbol}','${item.name}')">
-      <span class="tm-sym">${item.symbol}</span>
-      <span class="tm-pct">${pct}</span>
+  function blk(sym, name, w, h) {
+    const d   = bySymbol[sym] || {};
+    const c   = tmColor2(d.pct);
+    const lbl = name.length > 9 ? name.slice(0,8)+'…' : name;
+    const pct = fmtPct(d.pct);
+    return `<div class="tm-block" style="width:calc(${w} - 1px);height:calc(${h} - 1px);background:${c.bg};color:${c.fg}" title="${name} (${sym}): ${pct}">
+      <span style="font-size:9px;opacity:.75;line-height:1.1">${lbl}</span>
+      <span style="font-size:10px;font-weight:700;line-height:1.2">${sym}</span>
+      <span style="font-size:10px;line-height:1.1">${pct}</span>
     </div>`;
-  }).join('');
+  }
 
-  container.innerHTML = `<div class="treemap-sidebar-wrap">
-    ${bigBlock}
-    <div class="treemap-sidebar-col">${smallBlocks}</div>
-  </div>`;
-}
+  let html;
+  if (isSectors) {
+    // XLK spans full height on left; remaining 10 sectors fill right side in 2 rows
+    const rightBlocks = [
+      blk('XLF','Financials','31%','50%'),blk('XLV','Healthcare','31%','50%'),
+      blk('XLY','Cons. Disc.','23%','50%'),blk('XLC','Comm.','15%','50%'),
+      blk('XLI','Industrials','23%','50%'),blk('XLP','Staples','18%','50%'),
+      blk('XLE','Energy','17%','50%'),blk('XLU','Utilities','14%','50%'),
+      blk('XLB','Materials','14%','50%'),blk('XLRE','Real Estate','14%','50%'),
+    ].join('');
+    html = `<div class="tm-wrap">
+      ${blk('XLK','Technology','35%','100%')}
+      <div style="display:flex;flex-wrap:wrap;flex:1;height:100%;gap:2px;align-content:flex-start">${rightBlocks}</div>
+    </div>`;
+  } else {
+    // NQ: all 10 stocks in flat 2-row wrap layout
+    const nqBlocks = [
+      blk('AAPL','Apple','28%','50%'),blk('MSFT','Microsoft','28%','50%'),
+      blk('NVDA','Nvidia','22%','50%'),blk('AMZN','Amazon','22%','50%'),
+      blk('META','Meta','22%','50%'),blk('GOOG','Alphabet','20%','50%'),
+      blk('AVGO','Broadcom','20%','50%'),blk('TSLA','Tesla','18%','50%'),
+      blk('COST','Costco','12%','50%'),blk('ADBE','Adobe','8%','50%'),
+    ].join('');
+    html = `<div class="tm-wrap">${nqBlocks}</div>`;
+  }
 
-function treemapDrill(sym, name) {
-  const drill = document.getElementById('treemapDrill');
-  const titleEl = document.getElementById('treemapDrillTitle');
-  const itemsEl = document.getElementById('treemapDrillItems');
-  if (!drill || !titleEl || !itemsEl) return;
-
-  const holdings = _tmMode === 'sectors'
-    ? (SECTOR_HOLDINGS[sym] || [])
-    : (NQ_SEGMENTS[sym]    || []);
-
-  const prev = document.querySelector('.treemap-block.selected');
-  if (prev) prev.classList.remove('selected');
-  const cur = document.querySelector(`.treemap-block[data-sym="${sym}"]`);
-  if (cur) cur.classList.add('selected');
-
-  if (!holdings.length) { drill.classList.remove('open'); return; }
-  titleEl.textContent = `${name} — Top ${_tmMode === 'sectors' ? 'Holdings' : 'Segments'}`;
-  itemsEl.innerHTML = holdings.map(h => `<span class="treemap-drill-chip">${h}</span>`).join('');
-  drill.classList.add('open');
+  container.innerHTML = html;
 }
 
 async function refreshSectorHeat() {
@@ -2721,7 +2661,7 @@ async function refreshSectorHeat() {
       fetch('/sector-heat').then(r => r.json()),
       fetch('/nq-components').then(r => r.json()),
     ]);
-    _tmData.sectors = secRes.sectors  || [];
+    _tmData.sectors = secRes.sectors   || [];
     _tmData.nq      = nqRes.components || [];
     renderTreemap();
   } catch(e) { console.error('refreshSectorHeat:', e); }
@@ -2731,48 +2671,94 @@ async function refreshSectorHeat() {
 function renderEconCalendar(events) {
   const el = document.getElementById('sidebarEconCalendar');
   if (!el) return;
-  if (!events || !events.length) {
-    el.innerHTML = '<div class="econ-no-events">No events today</div>';
-    return;
-  }
-  const nowNY = new Date(new Date().toLocaleString('en-US', {timeZone:'America/New_York'}));
-  const nowMin = nowNY.getHours() * 60 + nowNY.getMinutes();
 
-  // Find next HIGH event
-  const highEvents = events.filter(e => (e.importance||'').toLowerCase() === 'high');
-  let nextHighHtml = '';
-  for (const e of highEvents) {
-    const [hh, mm] = (e.time_et || '00:00').split(':').map(Number);
-    const evMin = hh * 60 + mm;
-    if (evMin > nowMin) {
-      const diff = evMin - nowMin;
-      const hrs  = Math.floor(diff / 60);
-      const mins = diff % 60;
-      const countdown = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-      nextHighHtml = `<div class="econ-next-high">
-        <div class="econ-next-high-label">Next High Impact</div>
-        <div class="econ-next-high-title">${e.title || '—'}</div>
-        <div class="econ-next-high-time">${e.time_et} ET · in ${countdown}</div>
-      </div>`;
-      break;
+  const nyNow   = new Date(new Date().toLocaleString('en-US', { timeZone:'America/New_York' }));
+  const todayStr = nyNow.toISOString().slice(0,10);
+  const nowMin   = nyNow.getHours() * 60 + nyNow.getMinutes();
+
+  // Build Mon–Fri dates for this week
+  const dow = nyNow.getDay();
+  const monOffset = dow === 0 ? -6 : 1 - dow;
+  const weekDays = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(nyNow);
+    d.setDate(nyNow.getDate() + monOffset + i);
+    weekDays.push(d.toISOString().slice(0,10));
+  }
+
+  const DAY_ABBR = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const MON_ABBR = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+  function dayLabel(ds) {
+    const [y,m,d] = ds.split('-').map(Number);
+    const dt = new Date(y, m-1, d);
+    return `${DAY_ABBR[dt.getDay()]} ${MON_ABBR[dt.getMonth()]} ${d}`;
+  }
+
+  // Group events by date
+  const byDate = {};
+  (events || []).forEach(ev => {
+    const k = (ev.date || todayStr).slice(0,10);
+    if (!byDate[k]) byDate[k] = [];
+    byDate[k].push(ev);
+  });
+
+  function verdict(ev) {
+    const a = parseFloat(ev.actual), f = parseFloat(ev.forecast);
+    if (isNaN(a) || isNaN(f) || f === 0) return '';
+    const diff = (a - f) / Math.abs(f);
+    if (diff >  0.05) return '<span class="econ-verdict hot">HOT</span>';
+    if (diff < -0.05) return '<span class="econ-verdict miss">MISS</span>';
+    return '<span class="econ-verdict inline">INLINE</span>';
+  }
+
+  function evRow(ev, isToday) {
+    const imp    = (ev.importance || 'low').toLowerCase();
+    const dotCls = imp === 'high' ? 'high' : imp === 'medium' ? 'medium' : 'low';
+    const [hh,mm]= (ev.time_et || '00:00').split(':').map(Number);
+    const isPast = isToday && (hh * 60 + mm) <= nowMin;
+    let sub = '';
+    if (isToday && isPast) {
+      const a = ev.actual   != null ? ev.actual   : '—';
+      const f = ev.forecast != null ? ev.forecast : '—';
+      sub = `<div class="econ-sub"><span class="econ-vals">A:${a} · F:${f}</span>${verdict(ev)}</div>`;
+    } else if (ev.forecast != null || ev.previous != null) {
+      const parts = [];
+      if (ev.forecast != null) parts.push(`F:${ev.forecast}`);
+      if (ev.previous != null) parts.push(`P:${ev.previous}`);
+      sub = `<div class="econ-sub"><span class="econ-vals">${parts.join(' · ')}</span></div>`;
+    }
+    return `<div class="econ-event">
+      <div class="econ-dot ${dotCls}"></div>
+      <div class="econ-time">${ev.time_et || '?'}</div>
+      <div class="econ-body"><div class="econ-title">${ev.title || '—'}</div>${sub}</div>
+    </div>`;
+  }
+
+  let html = '';
+  for (const ds of weekDays) {
+    const dayEvts = byDate[ds] || [];
+    const isToday = ds === todayStr;
+    if (!isToday && !dayEvts.length) continue;
+    const label = isToday ? `TODAY — ${dayLabel(ds)}` : dayLabel(ds);
+    html += `<div class="econ-day-header ${isToday ? 'today' : 'other'}">${label}</div>`;
+    if (dayEvts.length) {
+      html += dayEvts.map(ev => evRow(ev, isToday)).join('');
+    } else {
+      html += '<div class="econ-no-events">No scheduled events</div>';
     }
   }
 
-  const rows = events.map(e => {
-    const imp = (e.importance || 'low').toLowerCase();
-    const dotCls = imp === 'high' ? 'high' : imp === 'medium' ? 'medium' : 'low';
-    const note = e.note ? `<div class="econ-note">${e.note}</div>` : '';
-    return `<div class="econ-event">
-      <div class="econ-dot ${dotCls}"></div>
-      <div class="econ-time">${e.time_et || '?'}</div>
-      <div class="econ-body">
-        <div class="econ-title">${e.title || '—'}</div>
-        ${note}
-      </div>
-    </div>`;
-  }).join('');
+  el.innerHTML = html || '<div class="econ-no-events">No events this week</div>';
+}
 
-  el.innerHTML = nextHighHtml + rows;
+async function refreshEconCalendar() {
+  try {
+    const res = await fetch('/calendar');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderEconCalendar(data.events || []);
+  } catch(e) { console.error('refreshEconCalendar:', e); }
 }
 
 // ════════ RENDER NEWS ════════
@@ -3531,6 +3517,8 @@ refreshTrendingMovers();
 setInterval(refreshTrendingMovers, 5 * 60 * 1000);
 refreshSectorHeat();
 setInterval(refreshSectorHeat, 5 * 60 * 1000);
+refreshEconCalendar();
+setInterval(refreshEconCalendar, 5 * 60 * 1000);
 connectSSE();
 </script>
 </body>
