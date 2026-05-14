@@ -388,7 +388,7 @@ tr:last-child td{border-bottom:none}
 }
 .index-tile.up{border-left:3px solid var(--green)}
 .index-tile.dn{border-left:3px solid var(--red)}
-.news-layout{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
+.news-layout{display:grid;grid-template-columns:7fr 3fr;gap:16px;align-items:start}
 .feature-story{
   padding:20px 22px;border-radius:16px;
   border:1px solid var(--line);
@@ -583,6 +583,22 @@ tr:last-child td{border-bottom:none}
 }
 .treemap-toggle-btn.active{background:var(--text);color:var(--panel)}
 .treemap-container{display:flex;gap:3px;width:100%;height:175px;border-radius:8px;overflow:hidden}
+.treemap-sidebar-wrap{display:grid;grid-template-columns:35% 65%;gap:3px;height:190px;margin-top:10px}
+.treemap-sidebar-big{border-radius:4px;cursor:pointer;transition:opacity .15s;display:flex;flex-direction:column;justify-content:flex-end;padding:8px}
+.treemap-sidebar-big:hover{opacity:.82}
+.treemap-sidebar-col{display:flex;flex-direction:column;gap:3px}
+.treemap-sidebar-sm{border-radius:3px;cursor:pointer;transition:opacity .15s;display:flex;align-items:flex-end;justify-content:space-between;padding:4px 6px;min-height:0}
+.treemap-sidebar-sm:hover{opacity:.82}
+.treemap-sidebar-sm .tm-sym{font-size:10px}.treemap-sidebar-sm .tm-pct{font-size:9px}
+.donna-says-box{
+  padding:16px 18px;border-radius:14px;
+  background:var(--bg2);border:1px solid var(--line);
+}
+.donna-says-label{
+  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;
+  color:var(--muted2);margin-bottom:8px;
+}
+.donna-says-text{font-size:12px;color:var(--muted);line-height:1.65}
 .treemap-block{
   display:flex;flex-direction:column;justify-content:flex-end;padding:7px 8px;
   cursor:pointer;transition:opacity .15s;min-width:28px;height:100%;
@@ -1355,30 +1371,30 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">VIX</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
       </div>
 
-      <!-- DONNA'S MARKET READ — full width above grid -->
-      <div class="grok-card">
-        <div class="grok-card-header">
-          <div class="grok-pulse-dot"></div>
-          <div class="grok-card-title">DONNA&#39;s Market Read</div>
-          <div class="grok-powered-badge">Powered by Grok</div>
-          <div id="grokSentimentBadge" class="grok-sentiment-badge sentiment-NEUTRAL">NEUTRAL</div>
-        </div>
-        <div class="grok-headline" id="grokTopStory">Loading market intelligence...</div>
-        <div class="grok-summary" id="grokSummary">—</div>
-        <div class="grok-sentiment-reason" id="grokSentimentReason">—</div>
-        <div class="grok-trade-read" id="grokTradeRead">—</div>
-        <div class="grok-names-row" id="grokKeyNames"></div>
-      </div>
-
-      <!-- MAIN CONTENT + SIDEBAR -->
+      <!-- MAIN 2-COLUMN GRID: 70% left / 30% right -->
       <div class="news-layout">
 
-        <!-- LEFT: MOVERS + TREEMAP + BREAKING EVENTS + NEWS FEED -->
+        <!-- ─── LEFT COLUMN ─── -->
         <div class="vstack" style="gap:14px">
 
-          <!-- TRENDING MOVERS -->
+          <!-- 1. DONNA'S MARKET READ -->
+          <div class="grok-card">
+            <div class="grok-card-header">
+              <div class="grok-pulse-dot"></div>
+              <div class="grok-card-title">DONNA&#39;s Market Read</div>
+              <div class="grok-powered-badge">Powered by Grok</div>
+              <div id="grokSentimentBadge" class="grok-sentiment-badge sentiment-NEUTRAL">NEUTRAL</div>
+            </div>
+            <div class="grok-headline" id="grokTopStory">Fetching latest market intelligence from Grok...</div>
+            <div class="grok-summary" id="grokSummary" style="min-height:18px"></div>
+            <div class="grok-sentiment-reason" id="grokSentimentReason" style="min-height:14px"></div>
+            <div class="grok-trade-read" id="grokTradeRead" style="min-height:18px"></div>
+            <div class="grok-names-row" id="grokKeyNames"></div>
+          </div>
+
+          <!-- 2. TRENDING MOVERS -->
           <div class="panel">
-            <div class="kicker" style="margin-bottom:12px">Trending Movers</div>
+            <div class="kicker" style="margin-bottom:12px">Trending Right Now</div>
             <div class="movers-grid">
               <div>
                 <div class="movers-col-title gainers">▲ Gainers</div>
@@ -1391,60 +1407,28 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             </div>
           </div>
 
-          <!-- SECTOR HEAT TREEMAP -->
+          <!-- 3. LIVE FEED -->
           <div class="panel">
-            <div class="treemap-toggle-row">
-              <div class="kicker" style="margin-bottom:0">Market Heat</div>
-              <div class="treemap-toggle">
-                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sectors')">S&amp;P Sectors</button>
-                <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ Components</button>
-              </div>
-            </div>
-            <div class="treemap-container" id="treemapContainer"></div>
-            <div class="treemap-legend">
-              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#166534"></span>&gt;+2%</span>
-              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#1e6e41"></span>+0.5–2%</span>
-              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#4a4a4a"></span>Flat</span>
-              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#8b2020"></span>-0.5–2%</span>
-              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#6b0000"></span>&lt;-2%</span>
-            </div>
-            <div class="treemap-drill" id="treemapDrill">
-              <div class="treemap-drill-title" id="treemapDrillTitle">Top Holdings</div>
-              <div class="treemap-drill-items" id="treemapDrillItems"></div>
-            </div>
-          </div>
-
-          <!-- BREAKING EVENTS -->
-          <div class="panel">
-            <div class="kicker">Breaking Events</div>
-            <div class="breaking-events-grid" id="breakingEventsGrid">
-              <div class="breaking-event-card">
-                <div class="breaking-event-badges"><span class="impact-badge impact-LOW">LOW</span><span class="dir-badge dir-NEUTRAL">NEUTRAL</span></div>
-                <div class="breaking-event-title" style="color:var(--muted2)">Loading breaking events...</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- NUMBERED NEWS FEED -->
-          <div class="panel">
-            <div class="kicker">Live Feed</div>
-            <div class="section-title" style="margin-bottom:14px">Market Intelligence</div>
-            <div id="newsList"></div>
+            <div class="kicker" style="margin-bottom:12px">Live Feed</div>
+            <div id="newsList"><div class="obs-item low"><div class="obs-body">Loading headlines...</div></div></div>
           </div>
 
         </div>
 
-        <!-- RIGHT SIDEBAR -->
-        <div class="news-sidebar-panel">
+        <!-- ─── RIGHT SIDEBAR 30% ─── -->
+        <div class="vstack" style="gap:14px">
 
-          <div class="sidebar-section">
-            <div class="sidebar-kicker">X Sentiment</div>
-            <div style="margin-bottom:8px" id="sidebarGrokSentiment">—</div>
+          <!-- 1. X SENTIMENT -->
+          <div class="panel">
+            <div class="kicker" style="margin-bottom:10px">X Sentiment</div>
+            <div id="sidebarGrokSentiment" style="margin-bottom:6px">—</div>
             <div class="donna-read" id="donnaRead">—</div>
+            <div class="grok-names-row" style="margin-top:10px" id="sidebarGrokChips"></div>
           </div>
 
-          <div class="sidebar-section">
-            <div class="sidebar-kicker">Risk Levels</div>
+          <!-- 2. RISK LEVELS -->
+          <div class="panel">
+            <div class="kicker" style="margin-bottom:10px">Risk Levels</div>
             <div class="risk-level-row">
               <span class="risk-level-label">Macro</span>
               <span id="sidebarMacroRisk" class="risk-badge risk-medium">MEDIUM</span>
@@ -1457,22 +1441,41 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
               <span class="risk-level-label">Market</span>
               <span id="sidebarMarketRisk" class="risk-badge risk-medium">MEDIUM</span>
             </div>
+            <div class="risk-level-row" style="border-bottom:none">
+              <span class="risk-level-label">Event Phase</span>
+              <span id="sidebarEventPhase" style="font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--yellow)">—</span>
+            </div>
+            <div id="sidebarNextEvent" style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2)">—</div>
           </div>
 
-          <div class="sidebar-section">
-            <div class="sidebar-kicker">Event Phase</div>
-            <div id="sidebarEventPhase" style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--yellow)">—</div>
-            <div id="sidebarNextEvent" style="font-size:12px;color:var(--muted);margin-top:4px">—</div>
-          </div>
-
-          <div class="sidebar-section">
-            <div class="sidebar-kicker">Names to Watch</div>
-            <div id="sidebarWatchNames">—</div>
-          </div>
-
-          <div class="sidebar-section">
-            <div class="sidebar-kicker">Economic Calendar</div>
+          <!-- 3. ECONOMIC CALENDAR -->
+          <div class="panel">
+            <div class="kicker" style="margin-bottom:10px">Economic Calendar</div>
             <div id="sidebarEconCalendar"><div class="econ-no-events">Loading events...</div></div>
+          </div>
+
+          <!-- 4. SECTOR HEAT -->
+          <div class="panel">
+            <div class="treemap-toggle-row" style="margin-bottom:0">
+              <div class="kicker" style="margin-bottom:0">Sector Heat</div>
+              <div class="treemap-toggle">
+                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sectors')">S&amp;P</button>
+                <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ</button>
+              </div>
+            </div>
+            <div id="treemapContainer">
+              <div style="height:190px;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12px">Loading...</div>
+            </div>
+            <div class="treemap-drill" id="treemapDrill">
+              <div class="treemap-drill-title" id="treemapDrillTitle">Top Holdings</div>
+              <div class="treemap-drill-items" id="treemapDrillItems"></div>
+            </div>
+          </div>
+
+          <!-- 5. DONNA SAYS -->
+          <div class="donna-says-box">
+            <div class="donna-says-label">DONNA Says</div>
+            <div class="donna-says-text" id="donnaSaysText">Monitoring market conditions...</div>
           </div>
 
         </div>
@@ -2504,57 +2507,40 @@ async function refreshGrokIntelligence() {
     const res = await fetch('/grok-intelligence');
     if (!res.ok) return;
     const g = await res.json();
+    if (g.error) return; // no cached data yet — keep placeholder text
 
     const sent = (g.market_sentiment || 'NEUTRAL').toUpperCase();
+
+    // Main card badge
     const badgeEl = document.getElementById('grokSentimentBadge');
     if (badgeEl) {
       badgeEl.textContent = sent;
       badgeEl.className = 'grok-sentiment-badge sentiment-' + sent;
     }
 
-    setText('grokTopStory', g.top_story || '—');
-    setText('grokSummary', g.top_story_summary || '—');
-    setText('grokTradeRead', g.donna_trade_read || '—');
-    setText('grokSentimentReason', g.sentiment_reason || '—');
+    // Main card fields — only update when there's real content
+    if (g.top_story)         setText('grokTopStory',        g.top_story);
+    if (g.top_story_summary) setText('grokSummary',         g.top_story_summary);
+    if (g.donna_trade_read)  setText('grokTradeRead',       g.donna_trade_read);
+    if (g.sentiment_reason)  setText('grokSentimentReason', g.sentiment_reason);
 
+    // Ticker chips (main card + sidebar)
     const names = Array.isArray(g.key_names_to_watch) ? g.key_names_to_watch : [];
+    const chipsHtml = names.length
+      ? names.map(n => `<a href="https://finance.yahoo.com/quote/${encodeURIComponent(n)}" target="_blank" rel="noopener" class="grok-name-chip">${n}</a>`).join('')
+      : '';
     const namesEl = document.getElementById('grokKeyNames');
-    if (namesEl) {
-      namesEl.innerHTML = names.length
-        ? names.map(n => `<a href="https://finance.yahoo.com/quote/${encodeURIComponent(n)}" target="_blank" rel="noopener" class="grok-name-chip">${n}</a>`).join('')
-        : '<span style="font-size:12px;color:var(--muted2)">—</span>';
-    }
+    if (namesEl && chipsHtml) namesEl.innerHTML = chipsHtml;
+    const sideChipsEl = document.getElementById('sidebarGrokChips');
+    if (sideChipsEl && chipsHtml) sideChipsEl.innerHTML = chipsHtml;
 
-    const events = Array.isArray(g.breaking_events) ? g.breaking_events : [];
-    const evGrid = document.getElementById('breakingEventsGrid');
-    if (evGrid) {
-      if (events.length) {
-        evGrid.innerHTML = events.map(ev => {
-          const imp = (ev.impact || 'LOW').toUpperCase();
-          const dir = (ev.direction || 'NEUTRAL').toUpperCase();
-          return `<div class="breaking-event-card">
-            <div class="breaking-event-badges">
-              <span class="impact-badge impact-${imp}">${imp}</span>
-              <span class="dir-badge dir-${dir}">${dir}</span>
-            </div>
-            <div class="breaking-event-title">${ev.title || '—'}</div>
-            <div class="breaking-event-source">${ev.source || '—'}</div>
-          </div>`;
-        }).join('');
-      } else {
-        evGrid.innerHTML = `<div class="breaking-event-card" style="grid-column:1/-1">
-          <div class="breaking-event-title" style="color:var(--muted2)">No breaking events detected</div>
-        </div>`;
-      }
-    }
-
+    // Sidebar X Sentiment card
     const sgEl = document.getElementById('sidebarGrokSentiment');
     if (sgEl) {
-      const sentColor = sent === 'BULLISH' ? 'var(--green)' : sent === 'BEARISH' ? 'var(--red)' : sent === 'MIXED' ? 'var(--yellow)' : 'var(--muted2)';
-      sgEl.innerHTML = `<span style="font-family:Rajdhani,sans-serif;font-size:18px;font-weight:700;color:${sentColor}">${sent}</span>`;
+      const sentColor = sent==='BULLISH' ? 'var(--green)' : sent==='BEARISH' ? 'var(--red)' : sent==='MIXED' ? 'var(--yellow)' : 'var(--muted2)';
+      sgEl.innerHTML = `<span style="font-family:Rajdhani,sans-serif;font-size:22px;font-weight:700;color:${sentColor};letter-spacing:.5px">${sent}</span>`;
     }
-
-    setText('donnaRead', g.sentiment_reason || '—');
+    if (g.sentiment_reason) setText('donnaRead', g.sentiment_reason);
 
   } catch(e) {
     console.error('refreshGrokIntelligence failed:', e);
@@ -2661,28 +2647,51 @@ function setTreemapMode(mode) {
   if (drill) drill.classList.remove('open');
 }
 
+function fmtPct(n) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return '—';
+  return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+}
+
 function renderTreemap() {
   const container = document.getElementById('treemapContainer');
   if (!container) return;
   const items = _tmMode === 'sectors' ? _tmData.sectors : _tmData.nq;
   if (!items || !items.length) {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;color:var(--muted2);font-size:12px">Loading market data...</div>';
+    container.innerHTML = '<div style="height:190px;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12px">Loading...</div>';
     return;
   }
-  container.innerHTML = items.map(item => {
-    const bg   = tmColor(item.pct);
-    const pctFmt = (item.pct > 0 ? '+' : '') + item.pct.toFixed(2) + '%';
-    const label = _tmMode === 'sectors' ? item.symbol : item.symbol;
-    const sublabel = _tmMode === 'sectors'
-      ? item.name.substring(0,10)
-      : item.name.substring(0,8);
-    return `<div class="treemap-block" style="flex:${item.weight};background:${bg}"
+  // Sort descending by weight so biggest is first
+  const sorted = [...items].sort((a, b) => b.weight - a.weight);
+  const biggest = sorted[0];
+  const rest    = sorted.slice(1);
+
+  const bigBg  = tmColor(biggest.pct);
+  const bigPct = fmtPct(biggest.pct);
+  const bigName = biggest.name.length > 11 ? biggest.name.substring(0,10) + '…' : biggest.name;
+
+  const bigBlock = `<div class="treemap-sidebar-big" style="background:${bigBg}"
+    data-sym="${biggest.symbol}" onclick="treemapDrill('${biggest.symbol}','${biggest.name}')">
+    <span class="tm-name" style="font-size:10px;margin-bottom:4px">${bigName}</span>
+    <span class="tm-sym">${biggest.symbol}</span>
+    <span class="tm-pct">${bigPct}</span>
+  </div>`;
+
+  const totalRestWeight = rest.reduce((s, r) => s + r.weight, 0) || 1;
+  const smallBlocks = rest.map(item => {
+    const bg  = tmColor(item.pct);
+    const pct = fmtPct(item.pct);
+    return `<div class="treemap-sidebar-sm" style="background:${bg};flex:${item.weight}"
       data-sym="${item.symbol}" onclick="treemapDrill('${item.symbol}','${item.name}')">
-      <span class="tm-name">${sublabel}</span>
-      <span class="tm-sym">${label}</span>
-      <span class="tm-pct">${pctFmt}</span>
+      <span class="tm-sym">${item.symbol}</span>
+      <span class="tm-pct">${pct}</span>
     </div>`;
   }).join('');
+
+  container.innerHTML = `<div class="treemap-sidebar-wrap">
+    ${bigBlock}
+    <div class="treemap-sidebar-col">${smallBlocks}</div>
+  </div>`;
 }
 
 function treemapDrill(sym, name) {
@@ -2810,23 +2819,31 @@ function renderNews(d) {
   setText('featureHeadline', featureText);
   setText('featureNote', featureNote);
 
-  // Numbered news feed
+  // Live feed — tag colors: GEOPOLITICAL red, MARKET blue, MACRO amber, ENERGY gold, CALENDAR gray
+  const tagStyle = {
+    GEOPOLITICAL: 'background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.2)',
+    MARKET:       'background:rgba(37,99,235,.08);color:var(--blue);border:1px solid rgba(37,99,235,.15)',
+    MACRO:        'background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.2)',
+    ENERGY:       'background:rgba(184,134,11,.08);color:var(--gold);border:1px solid rgba(184,134,11,.2)',
+    CALENDAR:     'background:var(--panel2);color:var(--muted2);border:1px solid var(--line)',
+  };
   setHtml('newsList', news.length ? news.map((n, i) => {
-    const tag = classifyHeadlineTag(n.headline);
+    const tag  = classifyHeadlineTag(n.headline);
+    const tSty = tagStyle[tag] || tagStyle.MARKET;
+    const ts   = n.datetime ? new Date(n.datetime * 1000).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
     return `<div class="news-numbered-item">
       <div class="news-num">${i+1}.</div>
       <div class="news-body">
-        <div class="news-headline">${n.headline || '—'} <span class="story-tag ${tag}" style="font-size:8px;padding:2px 6px;margin-left:6px">${tag}</span></div>
-        <div class="news-meta">${n.source || '—'}</div>
+        <div style="margin-bottom:5px"><span style="display:inline-block;padding:2px 8px;border-radius:5px;font-family:Space Mono,monospace;font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;${tSty}">${tag}</span></div>
+        <div class="news-headline">${n.headline || '—'}</div>
+        <div class="news-meta">${n.source || '—'}${ts ? ' · ' + ts : ''}</div>
         ${n.summary && n.summary !== n.headline ? `<div class="news-summary">${n.summary}</div>` : ''}
         ${n.url ? `<a class="news-link" href="${n.url}" target="_blank" rel="noopener">Read more →</a>` : ''}
       </div>
     </div>`;
   }).join('') : '<div class="obs-item low"><div class="obs-body">No live news loaded yet.</div></div>');
 
-  // Sidebar
-  setText('donnaRead', risk.last_market_guidance || risk.headline_guidance || '—');
-
+  // Sidebar risk levels
   function setRiskBadge(id, level) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -2834,24 +2851,16 @@ function renderNews(d) {
     el.textContent = l.toUpperCase();
     el.className = 'risk-badge risk-' + l;
   }
-  setRiskBadge('sidebarMacroRisk', risk.macro_risk);
+  setRiskBadge('sidebarMacroRisk',    risk.macro_risk);
   setRiskBadge('sidebarHeadlineRisk', risk.headline_risk);
-  setRiskBadge('sidebarMarketRisk', risk.market_news_risk);
+  setRiskBadge('sidebarMarketRisk',   risk.market_news_risk);
 
-  const phase = risk.event_phase || '—';
-  setText('sidebarEventPhase', phase);
-  setText('sidebarNextEvent', risk.next_event || '—');
+  setText('sidebarEventPhase', risk.event_phase || '—');
+  setText('sidebarNextEvent',  risk.next_event  || 'No upcoming events');
 
-  // Names to watch from movers
-  const leaders = movers.leaders || [];
-  const threats = movers.threats || [];
-  const watchAll = [...leaders, ...threats].slice(0, 8);
-  const watchEl = document.getElementById('sidebarWatchNames');
-  if (watchEl) {
-    watchEl.innerHTML = watchAll.length
-      ? watchAll.map(m => `<span class="watch-name">${m.ticker}</span>`).join('')
-      : '<span style="font-size:12px;color:var(--muted2)">—</span>';
-  }
+  // DONNA SAYS — market guidance text
+  const donnaSays = risk.last_market_guidance || risk.headline_guidance || risk.last_headline || '';
+  if (donnaSays) setText('donnaSaysText', donnaSays);
 }
 
 // ════════ EXEC MONITOR + SESSION SCORECARD ════════
