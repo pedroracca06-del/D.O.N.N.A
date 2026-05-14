@@ -50,12 +50,12 @@ _ETF_MAP = {
 # stop/target are $/share distances; cap is hard max shares
 _ETF_SIZING: dict[str, dict] = {
     'NY_LON': {
-        'SPY': {'risk': 1000.0, 'stop': 5.00, 'target': 10.00, 'cap': 50},
-        'QQQ': {'risk': 1000.0, 'stop': 7.50, 'target': 15.00, 'cap': 40},
+        'SPY': {'risk': 1000.0, 'stop': 10.00, 'target': 20.00, 'cap': 100},
+        'QQQ': {'risk': 1000.0, 'stop': 15.00, 'target': 30.00, 'cap':  66},
     },
     'ASIA': {
-        'SPY': {'risk':  500.0, 'stop': 5.00, 'target': 10.00, 'cap': 10},
-        'QQQ': {'risk':  500.0, 'stop': 7.50, 'target': 15.00, 'cap':  8},
+        'SPY': {'risk':  500.0, 'stop': 10.00, 'target': 20.00, 'cap': 10},
+        'QQQ': {'risk':  500.0, 'stop': 15.00, 'target': 30.00, 'cap':  8},
     },
 }
 
