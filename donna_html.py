@@ -1982,49 +1982,59 @@ function renderHarvey(d) {
   setText('harveyEsPts', sig.es_points ? sig.es_points + ' pts (' + (sig.es_pct||0) + '%)' : '—');
 
   function renderPriceIntel(ticker, levels, curRaw) {
-    const fmt = p => (p != null && p > 0) ? p.toLocaleString('en-US', {minimumFractionDigits: 2}) : '—';
+    const fmt = p => (p != null && p > 0) ? p.toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
     const c = parseFloat(curRaw) || 0;
 
-    if (c <= 0) return '<div class="pi-verdict">Waiting for price data…</div>';
+    // No price at all — but still show something
+    if (c <= 0) {
+      return `<div class="pi-verdict">${ticker} — live price feed connecting. Cards update every 20s.</div>`;
+    }
 
     const open = levels.today_open, high = levels.today_high, low = levels.today_low;
     const pdh  = levels.prev_high,  pdl  = levels.prev_low;
     const orbH = levels.orb_high,   orbL = levels.orb_low;
+    const hasRealLevels = !!(open || pdh || high || low);
 
-    // ── Plain English verdict (always leads with open relationship) ──
+    // ── Plain English verdict ──────────────────────────────────────
     let verdict;
-    if (!open) {
-      verdict = `${ticker} price data loading — levels will appear shortly.`;
+    if (!open && !hasRealLevels) {
+      verdict = `${ticker} is at ${fmt(c)} — showing approximate reference zones. Historical levels load when market data is available.`;
+    } else if (!open) {
+      verdict = `${ticker} is at ${fmt(c)} — open price unavailable, reference levels shown.`;
     } else {
       const diffPct = (c - open) / open;
-      const aboveOpen = diffPct > 0.0008;
-      const belowOpen = diffPct < -0.0008;
-      if (aboveOpen) {
-        if (pdh && c > pdh) {
-          verdict = `${ticker} is trading above today's open and above yesterday's high — strongly bullish.`;
-        } else {
-          verdict = `${ticker} is trading above today's open — bullish bias, buyers in control.`;
-        }
-      } else if (belowOpen) {
-        if (pdl && c < pdl) {
-          verdict = `${ticker} is trading below today's open and below yesterday's low — strongly bearish.`;
-        } else {
-          verdict = `${ticker} is trading below today's open — bearish bias, sellers have the edge.`;
-        }
+      if (diffPct > 0.0008) {
+        verdict = pdh && c > pdh
+          ? `${ticker} is trading above today's open and above yesterday's high — strongly bullish.`
+          : `${ticker} is trading above today's open — bullish bias, buyers in control.`;
+      } else if (diffPct < -0.0008) {
+        verdict = pdl && c < pdl
+          ? `${ticker} is trading below today's open and below yesterday's low — strongly bearish.`
+          : `${ticker} is trading below today's open — bearish bias, sellers have the edge.`;
       } else {
         verdict = `${ticker} is trading at today's open — balanced conditions, neutral bias.`;
       }
     }
 
-    // ── Build sorted level list ────────────────────────────────────
-    const allLevels = [];
-    if (pdh)  allLevels.push({label:'Prev High', price:pdh,  cls:'pi-level-pdh'});
-    if (high) allLevels.push({label:'Today High',price:high, cls:''});
-    if (open) allLevels.push({label:'Today Open',price:open, cls:''});
-    if (orbH) allLevels.push({label:'ORB High',  price:orbH, cls:'pi-level-orb'});
-    if (orbL) allLevels.push({label:'ORB Low',   price:orbL, cls:'pi-level-orb'});
-    if (low)  allLevels.push({label:'Today Low', price:low,  cls:''});
-    if (pdl)  allLevels.push({label:'Prev Low',  price:pdl,  cls:'pi-level-pdl'});
+    // ── Build level list (real or synthetic) ──────────────────────
+    let allLevels = [];
+    if (hasRealLevels) {
+      if (pdh)  allLevels.push({label:'Prev High', price:pdh,  cls:'pi-level-pdh'});
+      if (high) allLevels.push({label:'Today High',price:high, cls:''});
+      if (open) allLevels.push({label:'Today Open',price:open, cls:''});
+      if (orbH) allLevels.push({label:'ORB High',  price:orbH, cls:'pi-level-orb'});
+      if (orbL) allLevels.push({label:'ORB Low',   price:orbL, cls:'pi-level-orb'});
+      if (low)  allLevels.push({label:'Today Low', price:low,  cls:''});
+      if (pdl)  allLevels.push({label:'Prev Low',  price:pdl,  cls:'pi-level-pdl'});
+    } else {
+      // Synthetic ±20 / ±40 reference zones
+      allLevels = [
+        {label:'Resistance 2', price: c + 40, cls:'pi-level-pdh'},
+        {label:'Resistance 1', price: c + 20, cls:''},
+        {label:'Support 1',    price: c - 20, cls:''},
+        {label:'Support 2',    price: c - 40, cls:'pi-level-pdl'},
+      ];
+    }
     allLevels.sort((a, b) => b.price - a.price);
 
     // Nearest R and S
@@ -2042,18 +2052,15 @@ function renderHarvey(d) {
       const isNearS = nearS && lv.price === nearS.price;
       const cls = [isNearR ? 'pi-nearest-r' : '', isNearS ? 'pi-nearest-s' : ''].filter(Boolean).join(' ');
       const trAttr = cls ? ` class="${cls}"` : '';
-
       if (!inserted && lv.price < c) { rows += curRow; inserted = true; }
-
       const rsTag = lv.price > c
         ? `<td class="pi-rs"><span class="pi-tag-r"${isNearR ? ' style="font-size:10px"' : ''}>R</span></td>`
         : `<td class="pi-rs"><span class="pi-tag-s"${isNearS ? ' style="font-size:10px"' : ''}>S</span></td>`;
-
       rows += `<tr${trAttr}><td class="pi-label ${lv.cls}">${lv.label}</td><td class="pi-price ${lv.cls}">${fmt(lv.price)}</td>${rsTag}</tr>`;
     }
     if (!inserted) rows += curRow;
 
-    // ── Session range bar ──────────────────────────────────────────
+    // Session range bar (real levels only)
     let rangeBar = '';
     if (high && low && high > low) {
       const rp = Math.max(0, Math.min(100, (c - low) / (high - low) * 100));
@@ -2069,10 +2076,10 @@ function renderHarvey(d) {
       </div>`;
     }
 
-    if (!allLevels.length) {
-      return `<div class="pi-verdict">${verdict}</div>${rangeBar}`;
-    }
-    return `<div class="pi-verdict">${verdict}</div><table class="pi-table">${rows}</table>${rangeBar}`;
+    const syntheticNote = !hasRealLevels
+      ? `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);letter-spacing:.5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line2)">APPROXIMATE ZONES — ±20 / ±40 pts from current price</div>`
+      : '';
+    return `<div class="pi-verdict">${verdict}</div><table class="pi-table">${rows}</table>${syntheticNote}${rangeBar}`;
   }
 
   const nqDir = (d.nq_pct || 0) >= 0 ? 'up' : 'dn';
@@ -2351,13 +2358,30 @@ function _donnaGrade(winRate, todayPnl) {
 }
 
 async function refreshExecMonitor() {
+  const _setExecPlaceholder = (msg) => {
+    const pillEl = document.getElementById('execStatusPill');
+    const dotEl  = document.getElementById('execStatusDot');
+    const txtEl  = document.getElementById('execStatusText');
+    if (pillEl) pillEl.className = 'exec-status-pill exec-status-paused';
+    if (dotEl)  dotEl.style.background = 'var(--muted2)';
+    if (txtEl)  txtEl.textContent = 'CONNECTING';
+    const pnlEl = document.getElementById('execPnlBig');
+    if (pnlEl) { pnlEl.textContent = '$0.00'; pnlEl.style.color = 'var(--muted)'; }
+    ['execEquity','execTrades'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.textContent = '—'; el.style.color = 'var(--muted2)'; }
+    });
+    const rfEl = document.getElementById('execRedFolder');
+    if (rfEl) { rfEl.textContent = 'Checking schedule...'; rfEl.style.color = 'var(--muted2)'; }
+    const sigEl = document.getElementById('execLastSignal');
+    if (sigEl) { sigEl.textContent = msg; sigEl.style.color = 'var(--muted2)'; }
+  };
   try {
     const res = await fetch('/execution-status');
-    if (!res.ok) return;
+    if (!res.ok) { _setExecPlaceholder('Execution monitor — connect Alpaca to activate'); return; }
     const s = await res.json();
     if (!s.available) {
-      const txtEl = document.getElementById('execStatusText');
-      if (txtEl) txtEl.textContent = 'OFFLINE';
+      _setExecPlaceholder('Execution monitor offline — Alpaca credentials not configured');
       return;
     }
 
@@ -2382,14 +2406,15 @@ async function refreshExecMonitor() {
     const pnlEl = document.getElementById('execPnlBig');
     if (pnlEl) {
       pnlEl.textContent = _fmtPnl(pnl);
-      pnlEl.style.color = parseFloat(pnl) >= 0 ? 'var(--green)' : 'var(--red)';
+      const n = parseFloat(pnl);
+      pnlEl.style.color = isNaN(n) ? 'var(--muted)' : n >= 0 ? 'var(--green)' : 'var(--red)';
     }
 
     const eqEl = document.getElementById('execEquity');
-    if (eqEl) eqEl.textContent = _fmtUsd(s.account?.equity);
+    if (eqEl) { eqEl.textContent = _fmtUsd(s.account?.equity); eqEl.style.color = 'var(--text)'; }
 
     const trEl = document.getElementById('execTrades');
-    if (trEl) trEl.textContent = s.daily_trades_taken != null ? `${s.daily_trades_taken} today` : '—';
+    if (trEl) { trEl.textContent = s.daily_trades_taken != null ? `${s.daily_trades_taken} today` : '0 today'; trEl.style.color = 'var(--text)'; }
 
     const rfEl = document.getElementById('execRedFolder');
     if (rfEl) {
@@ -2398,29 +2423,51 @@ async function refreshExecMonitor() {
         rfEl.style.color = 'var(--red)';
       } else if (s.minutes_to_next_event != null) {
         const mins = Math.round(parseFloat(s.minutes_to_next_event));
-        rfEl.textContent = mins > 0
-          ? `${mins} min — ${s.next_red_folder_event || ''}`
-          : 'Imminent';
+        rfEl.textContent = mins > 0 ? `${mins} min — ${s.next_red_folder_event || ''}` : 'Imminent';
         rfEl.style.color = mins <= 15 ? 'var(--yellow)' : 'var(--text)';
       } else {
         rfEl.textContent = 'No event scheduled';
         rfEl.style.color = 'var(--muted)';
       }
     }
-  } catch(e) { console.error('refreshExecMonitor failed:', e); }
+  } catch(e) {
+    _setExecPlaceholder('Execution monitor — connecting...');
+    console.error('refreshExecMonitor failed:', e);
+  }
 }
 
 async function refreshSessionScorecard() {
+  const _setScorecardPlaceholder = (msg) => {
+    const pnlEl = document.getElementById('scorecardPnlBig');
+    if (pnlEl) { pnlEl.textContent = '$0.00'; pnlEl.style.color = 'var(--muted2)'; }
+    const gradeEl = document.getElementById('donnaGrade');
+    if (gradeEl) { gradeEl.textContent = '—'; gradeEl.style.color = 'var(--muted2)'; }
+    const wEl = document.getElementById('scWins');   if (wEl) wEl.textContent = '0';
+    const lEl = document.getElementById('scLosses'); if (lEl) lEl.textContent = '0';
+    const bEl = document.getElementById('scBe');     if (bEl) bEl.textContent = '0';
+    const wrEl = document.getElementById('scWinRate'); if (wrEl) wrEl.textContent = '—';
+    const bestEl  = document.getElementById('scBest');  if (bestEl)  bestEl.textContent  = '—';
+    const worstEl = document.getElementById('scWorst'); if (worstEl) worstEl.textContent = '—';
+    const wmEl = document.getElementById('scWhatMatters');
+    if (wmEl) { wmEl.textContent = msg; wmEl.style.color = 'var(--muted2)'; }
+  };
   try {
     const [jRes, sRes] = await Promise.all([fetch('/journal/data'), fetch('/execution-status')]);
     const j = jRes.ok ? await jRes.json() : null;
     const s = sRes.ok ? await sRes.json() : null;
+
+    if (!j) { _setScorecardPlaceholder('Session scorecard — connecting...'); return; }
 
     const trades = j?.trades || [];
     const stats  = j?.stats  || {};
     const todayStr = new Date().toISOString().slice(0, 10);
     const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'OPEN');
     const todayPnl    = parseFloat(stats.daily_pnl?.today ?? 0);
+
+    if (todayTrades.length === 0) {
+      _setScorecardPlaceholder('No trades today — scorecard updates after first trade');
+      return;
+    }
 
     const pnlEl = document.getElementById('scorecardPnlBig');
     if (pnlEl) {
@@ -2486,7 +2533,10 @@ async function refreshSessionScorecard() {
       wmEl.textContent = wm?.headline || wm?.summary || '—';
     }
 
-  } catch(e) { console.error('refreshSessionScorecard failed:', e); }
+  } catch(e) {
+    _setScorecardPlaceholder('Session scorecard — connecting...');
+    console.error('refreshSessionScorecard failed:', e);
+  }
 }
 
 // ════════ MAIN REFRESH ════════
