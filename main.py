@@ -126,9 +126,20 @@ _GROK_INTEL_PROMPT = (
 )
 
 
+def _load_cached_grok() -> dict:
+    """Return the last saved Grok intelligence file, or an empty dict."""
+    if _GROK_INTEL_FILE.exists():
+        try:
+            return json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
 def fetch_grok_intelligence() -> dict:
     if not _GROK_API_KEY:
-        return {'error': 'GROK_API_KEY not configured'}
+        print('[grok_intelligence] GROK_API_KEY not set — skipping fetch')
+        return _load_cached_grok()
     try:
         resp = requests.post(
             'https://api.x.ai/v1/chat/completions',
@@ -152,10 +163,11 @@ def fetch_grok_intelligence() -> dict:
         result  = json.loads(content)
         result['fetched_at'] = utc_now_iso()
         _GROK_INTEL_FILE.write_text(json.dumps(result, indent=2), encoding='utf-8')
+        print(f'[grok_intelligence] Updated — sentiment:{result.get("market_sentiment")}')
         return result
     except Exception as e:
-        print(f'[grok_intelligence] Error: {e}')
-        return {'error': str(e)}
+        print(f'[grok_intelligence] Fetch error: {e} — keeping previous cached data')
+        return _load_cached_grok()
 
 
 # ── Background loops ───────────────────────────────────────────
@@ -241,13 +253,14 @@ async def finnhub_loop():
 async def grok_loop():
     while True:
         try:
-            ny = now_ny()
-            m  = ny.hour * 60 + ny.minute
-            if ny.weekday() < 5 and 9 * 60 + 30 <= m <= 16 * 60:
-                await asyncio.to_thread(fetch_grok_intelligence)
+            await asyncio.to_thread(fetch_grok_intelligence)
         except Exception as e:
             print('Grok intelligence loop error:', str(e))
-        await asyncio.sleep(300)
+        # Adaptive sleep: 5 min during market hours (9:00–16:30 ET Mon–Fri), 30 min outside
+        ny = now_ny()
+        m  = ny.hour * 60 + ny.minute
+        in_market = ny.weekday() < 5 and 9 * 60 <= m <= 16 * 60 + 30
+        await asyncio.sleep(300 if in_market else 1800)
 
 
 # ── Startup ────────────────────────────────────────────────────
@@ -522,12 +535,19 @@ async def alerts_data():
 
 @app.get('/grok-intelligence')
 async def grok_intelligence():
-    if _GROK_INTEL_FILE.exists():
-        try:
-            return json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            pass
-    return {'error': 'No Grok intelligence available yet'}
+    cached = _load_cached_grok()
+    if cached:
+        return cached
+    # No file yet — return a safe skeleton so the frontend never breaks
+    return {
+        'top_story':          '',
+        'top_story_summary':  '',
+        'market_sentiment':   'NEUTRAL',
+        'sentiment_reason':   'Intelligence is being fetched — check back shortly.',
+        'donna_trade_read':   '',
+        'key_names_to_watch': [],
+        'fetched_at':         None,
+    }
 
 
 # ── Execution engine ───────────────────────────────────────────
