@@ -265,20 +265,6 @@ tr:last-child td{border-bottom:none}
 .hero-warn-list{margin-top:10px;border-top:1px solid var(--line2);padding-top:8px}
 .hw-item{display:flex;align-items:baseline;gap:7px;padding:3px 0;font-size:11px;color:var(--muted)}
 .hw-dot{width:5px;height:5px;border-radius:50%;background:var(--yellow);flex-shrink:0;margin-top:2px}
-/* ── PLAYBOOK BAR (slim single-row) ── */
-.playbook-bar{
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:10px 16px;border-radius:10px;
-  background:var(--panel);border:1px solid var(--line2);
-  font-size:12px;
-}
-.pb-bar-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--muted2);text-transform:uppercase;margin-right:4px}
-.pb-bar-val{font-weight:600;color:var(--text)}
-.pb-bar-sep{color:var(--line);font-size:14px}
-.pb-bar-note{color:var(--muted);flex:1;font-size:11px}
-/* ── PLAYBOOK NAV BTN ── */
-.playbook-btn{background:linear-gradient(135deg,rgba(139,92,246,.12),rgba(139,92,246,.05))!important;border-color:rgba(139,92,246,.25)!important;color:#a78bfa!important}
-.playbook-btn.active{background:linear-gradient(135deg,#5b21b6,#4c1d95)!important;border-color:transparent!important;color:#fff!important;box-shadow:0 4px 20px rgba(139,92,246,.35)!important}
 
 /* ── STAT GRID ── */
 .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
@@ -510,38 +496,11 @@ tr:last-child td{border-bottom:none}
 }
 .send-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,229,160,.35)}
 .send-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
-.asst-state-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.state-card{
-  padding:10px 14px;border-radius:12px;
-  background:rgba(255,255,255,.03);border:1px solid var(--line2);
-  margin-bottom:8px;transition:border-color .2s;
-}
-.state-card:last-child{margin-bottom:0}
-.state-card:hover{border-color:rgba(77,143,255,.2)}
-.state-card-text{font-size:13px;color:var(--text);line-height:1.4;flex:1}
-.state-list-item{
-  display:flex;justify-content:space-between;align-items:center;
-  padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px;
-}
-.state-list-item:last-child{border-bottom:none}
 .del-btn{
   background:none;border:none;color:var(--muted2);cursor:pointer;
   font-size:15px;padding:2px 6px;border-radius:6px;transition:all .15s;
 }
 .del-btn:hover{background:var(--red2);color:var(--red)}
-.add-row{display:flex;gap:8px;margin-top:10px}
-.add-input{
-  flex:1;padding:9px 12px;border-radius:10px;
-  border:1px solid var(--line);background:rgba(255,255,255,.04);
-  color:var(--text);font-size:13px;outline:none;
-}
-.add-input:focus{border-color:rgba(77,143,255,.35)}
-.add-btn{
-  padding:9px 14px;border-radius:10px;border:1px solid rgba(77,143,255,.3);
-  background:rgba(77,143,255,.1);color:var(--blue);
-  cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;
-}
-.add-btn:hover{background:rgba(77,143,255,.18)}
 
 /* ── ALERT ITEMS ── */
 .alert-item{
@@ -683,7 +642,7 @@ tr:last-child td{border-bottom:none}
   body{padding:12px}
   .brand h1{font-size:32px}
   .hero-title{font-size:26px}
-  .hero-grid,.main-grid,.stat-grid,.asst-state-grid,.live-strip-row{grid-template-columns:1fr}
+  .hero-grid,.main-grid,.stat-grid,.live-strip-row{grid-template-columns:1fr}
 }
 
 /* ═══════════════════════════════════════
@@ -691,6 +650,7 @@ tr:last-child td{border-bottom:none}
    ═══════════════════════════════════════ */
 
 .harvey-btn {
+  position: relative;
   background: linear-gradient(135deg, rgba(0,229,160,.15), rgba(0,229,160,.05)) !important;
   border-color: rgba(0,229,160,.3) !important;
   color: var(--green) !important;
@@ -885,23 +845,7 @@ tr:last-child td{border-bottom:none}
 .ticker-wrap.risk-high   { animation:strip-pulse-red    2s ease-in-out infinite }
 .ticker-wrap.risk-medium { animation:strip-pulse-yellow 2.5s ease-in-out infinite }
 
-/* ── SESSION PLAYBOOK CARD ── */
-.playbook-grid {
-  display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-items:start;
-}
-.playbook-cell { }
-.playbook-cell .pb-val {
-  font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;letter-spacing:.3px;
-  line-height:1.2;margin-top:4px;
-}
-.playbook-cell .pb-note {
-  font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px;
-}
-@media(max-width:900px){ .playbook-grid{grid-template-columns:1fr 1fr} }
-@media(max-width:540px){ .playbook-grid{grid-template-columns:1fr} }
-
 /* ── SSE signal dot on nav button ── */
-.harvey-btn { position: relative }
 .signal-dot {
   position: absolute;
   top: 6px; right: 6px;
@@ -1639,7 +1583,6 @@ function renderDashboard(d) {
   const morning = d.morning_edge || {};
   const sig = d.session_significance || {};
   const wm = d.what_matters_now || {};
-  const obs = d.observations || [];
   const alerts = d.raw_trade_alerts || [];
   const movers = d.market_movers_engine || {};
   const liveMovers = d.live_movers || {};
