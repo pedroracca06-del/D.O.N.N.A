@@ -1810,11 +1810,11 @@ function renderDashboard(d) {
   setText('topStory', risk.last_headline || wm.headline || '—');
   setText('topStoryNote', risk.headline_guidance || wm.summary || '—');
 
-  // Scenarios — update silently in background
-  if (d.scenarios) renderScenarios(d.scenarios);
+  // Scenarios — only render if container element exists
+  if (d.scenarios && document.getElementById('scenarioGrid')) renderScenarios(d.scenarios);
 
   // Cross-asset intelligence card
-  if (d.cross_asset_intelligence) renderCrossAsset(d.cross_asset_intelligence);
+  if (d.cross_asset_intelligence && document.getElementById('caDivergenceList')) renderCrossAsset(d.cross_asset_intelligence);
 
   // Footer
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
@@ -2058,7 +2058,7 @@ function renderHarvey(d) {
     }
   }
 
-  if (d.cross_asset_intelligence) renderCrossAsset(d.cross_asset_intelligence);
+  if (d.cross_asset_intelligence && document.getElementById('caDivergenceList')) renderCrossAsset(d.cross_asset_intelligence);
 }
 
 async function refreshHarvey() {
@@ -2281,13 +2281,11 @@ async function refresh() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     _lastDashData = d;
-
-    renderDashboard(d);
-    renderNews(d);
-    renderHarvey(d);
-    refreshHarvey();
-
-  } catch (err) {
+    try { renderDashboard(d); } catch(e) { console.error('renderDashboard failed:', e); }
+    try { renderNews(d); } catch(e) { console.error('renderNews failed:', e); }
+    try { renderHarvey(d); } catch(e) { console.error('renderHarvey failed:', e); }
+    try { refreshHarvey(); } catch(e) { console.error('refreshHarvey failed:', e); }
+  } catch(err) {
     console.error('Donna refresh error:', err);
     setText('lastUpdated', 'Sync error — retrying...');
   }
