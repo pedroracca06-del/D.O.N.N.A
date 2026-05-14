@@ -582,7 +582,8 @@ tr:last-child td{border-bottom:none}
   background:var(--panel);color:var(--muted2);transition:all .15s;
 }
 .treemap-toggle-btn.active{background:var(--text);color:var(--panel)}
-.tm-wrap{display:flex;flex-wrap:wrap;width:100%;height:220px;gap:2px;background:#2a2a2a;border-radius:6px;overflow:hidden}
+.tm-wrap{display:flex;flex-wrap:wrap;width:100%;height:200px;gap:2px;background:#2a2a2a;border-radius:6px;overflow:hidden}
+.tm-closed-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.07);color:var(--muted2)}
 .tm-block{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   overflow:hidden;cursor:pointer;transition:opacity .15s;box-sizing:border-box;
@@ -595,7 +596,7 @@ tr:last-child td{border-bottom:none}
 .treemap-drill-chip{padding:3px 9px;border-radius:5px;background:var(--panel);border:1px solid var(--line);font-family:'Rajdhani',sans-serif;font-size:11px;font-weight:700;color:var(--text)}
 .donna-says-box{padding:16px 18px;border-radius:14px;background:var(--bg2);border:1px solid var(--line)}
 .donna-says-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px}
-.donna-says-text{font-size:12px;color:var(--muted);line-height:1.65}
+.donna-says-text{font-size:12px;color:#888;line-height:1.65}
 
 /* ── ECON CALENDAR ── */
 .econ-day-header{
@@ -1367,18 +1368,20 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div class="grok-names-row" id="grokKeyNames"></div>
           </div>
 
-          <!-- 2. TRENDING MOVERS -->
+          <!-- 2. SECTOR HEAT (full width main column) -->
           <div class="panel">
-            <div class="kicker" style="margin-bottom:12px">Trending Right Now</div>
-            <div class="movers-grid">
-              <div>
-                <div class="movers-col-title gainers">▲ Gainers</div>
-                <div id="moversGainers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
+            <div class="treemap-toggle-row" style="margin-bottom:10px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div class="kicker" style="margin-bottom:0">Sector Heat</div>
+                <span class="tm-closed-badge" id="tmClosedBadge" style="display:none">Market Closed</span>
               </div>
-              <div>
-                <div class="movers-col-title losers">▼ Losers</div>
-                <div id="moversLosers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
+              <div class="treemap-toggle">
+                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sectors')">S&amp;P</button>
+                <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ</button>
               </div>
+            </div>
+            <div id="treemapContainer">
+              <div style="height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12px">Loading...</div>
             </div>
           </div>
 
@@ -1429,22 +1432,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div id="sidebarEconCalendar"><div class="econ-no-events">Loading events...</div></div>
           </div>
 
-          <!-- 4. SECTOR HEAT -->
+          <!-- 4. TRENDING MOVERS (compact vertical list) -->
           <div class="panel">
-            <div class="treemap-toggle-row" style="margin-bottom:0">
-              <div class="kicker" style="margin-bottom:0">Sector Heat</div>
-              <div class="treemap-toggle">
-                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sectors')">S&amp;P</button>
-                <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ</button>
-              </div>
-            </div>
-            <div id="treemapContainer">
-              <div style="height:190px;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12px">Loading...</div>
-            </div>
-            <div class="treemap-drill" id="treemapDrill">
-              <div class="treemap-drill-title" id="treemapDrillTitle">Top Holdings</div>
-              <div class="treemap-drill-items" id="treemapDrillItems"></div>
-            </div>
+            <div class="kicker" style="margin-bottom:10px">Trending Movers</div>
+            <div class="movers-col-title gainers" style="margin-bottom:6px">▲ Gainers</div>
+            <div id="moversGainers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
+            <div style="border-top:1px solid var(--line);margin:10px 0"></div>
+            <div class="movers-col-title losers" style="margin-bottom:6px">▼ Losers</div>
+            <div id="moversLosers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
           </div>
 
           <!-- 5. DONNA SAYS -->
@@ -2579,12 +2574,12 @@ let _tmData = { sectors: [], nq: [] };
 
 function tmColor2(pct) {
   const n = parseFloat(pct);
-  if (isNaN(n)) return { bg:'#3a3a3a', fg:'#9ca3af' };
-  if (n >  1)   return { bg:'#166534', fg:'#bbf7d0' };
-  if (n >  0.1) return { bg:'#15803d', fg:'#bbf7d0' };
-  if (n > -0.1) return { bg:'#854d0e', fg:'#fef9c3' };
-  if (n > -1)   return { bg:'#7f1d1d', fg:'#fecaca' };
-  return                { bg:'#450a0a', fg:'#fecaca' };
+  if (isNaN(n)) return { bg:'#3a3a3a', fg:'#ffffff' };
+  if (n >  1)   return { bg:'#166534', fg:'#ffffff' };
+  if (n >  0.1) return { bg:'#15803d', fg:'#ffffff' };
+  if (n > -0.1) return { bg:'#374151', fg:'#ffffff' };
+  if (n > -1)   return { bg:'#7f1d1d', fg:'#ffffff' };
+  return                { bg:'#450a0a', fg:'#ffffff' };
 }
 
 function fmtPct(n) {
@@ -2607,7 +2602,7 @@ function renderTreemap() {
   const rawData   = isSectors ? _tmData.sectors : _tmData.nq;
 
   if (!rawData || !rawData.length) {
-    container.innerHTML = '<div class="tm-wrap" style="align-items:center;justify-content:center"><span style="color:var(--muted2);font-size:12px">Loading…</span></div>';
+    container.innerHTML = '<div class="tm-wrap" style="align-items:center;justify-content:center"><span style="color:rgba(255,255,255,.4);font-size:12px">Loading…</span></div>';
     return;
   }
 
@@ -2664,6 +2659,14 @@ async function refreshSectorHeat() {
     _tmData.sectors = secRes.sectors   || [];
     _tmData.nq      = nqRes.components || [];
     renderTreemap();
+    // Market-closed badge
+    const badge = document.getElementById('tmClosedBadge');
+    if (badge) {
+      const ny  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const m   = ny.getHours() * 60 + ny.getMinutes();
+      const open = ny.getDay() >= 1 && ny.getDay() <= 5 && m >= 570 && m <= 990;
+      badge.style.display = open ? 'none' : 'inline-block';
+    }
   } catch(e) { console.error('refreshSectorHeat:', e); }
 }
 
