@@ -44,8 +44,20 @@ _ETF_MAP = {
     'ES': 'SPY', 'MES': 'SPY',
     'NQ': 'QQQ', 'MNQ': 'QQQ',
 }
-_ETF_STOP       = {'SPY': 2.00, 'QQQ': 3.00}   # $/share stop distance
-_RISK_PER_TRADE = 500.0                          # $500 = 0.5% of $100 000
+
+# Session-aware sizing table — DONNA official risk rules
+# NY/London: 1% = $1 000/trade   Asia: 0.5% = $500/trade
+# stop/target are $/share distances; cap is hard max shares
+_ETF_SIZING: dict[str, dict] = {
+    'NY_LON': {
+        'SPY': {'risk': 1000.0, 'stop': 5.00, 'target': 10.00, 'cap': 50},
+        'QQQ': {'risk': 1000.0, 'stop': 7.50, 'target': 15.00, 'cap': 40},
+    },
+    'ASIA': {
+        'SPY': {'risk':  500.0, 'stop': 5.00, 'target': 10.00, 'cap': 10},
+        'QQQ': {'risk':  500.0, 'stop': 7.50, 'target': 15.00, 'cap':  8},
+    },
+}
 
 # ── Risk rule constants ────────────────────────────────────────
 
@@ -110,10 +122,12 @@ def _map_etf(data: dict) -> str | None:
     return None
 
 
-def _calc_etf_qty(etf: str) -> int:
-    """floor($500 / stop_per_share), minimum 1."""
-    stop = _ETF_STOP.get(etf, 2.00)
-    return max(1, math.floor(_RISK_PER_TRADE / stop))
+def _get_etf_sizing(etf: str, session: str) -> dict:
+    """Return qty, stop_dist, tgt_dist for DONNA's official sizing rules."""
+    key    = 'ASIA' if session == 'ASIA' else 'NY_LON'
+    p      = _ETF_SIZING[key].get(etf, _ETF_SIZING['NY_LON']['SPY'])
+    qty    = max(1, min(math.floor(p['risk'] / p['stop']), p['cap']))
+    return {'qty': qty, 'stop': p['stop'], 'target': p['target']}
 
 
 def _log_skip(data: dict, parsed: dict, reason: str, code: str = '') -> dict:
@@ -348,6 +362,100 @@ def close_all_positions() -> dict:
         return {'status': 'error', 'error': str(e)}
 
 
+def close_all_positions_eod() -> int:
+    """
+    Force-close all open positions at 3:45 PM ET.
+    Updates existing DONNA_AUTO journal entries (outcome → EOD_CLOSE) or creates
+    a new entry for manually placed positions.  Sends a Telegram message per close.
+    Returns number of positions closed.
+    """
+    positions = get_positions()
+    if not positions:
+        return 0
+
+    api = _client()
+    if not api:
+        return 0
+
+    ny      = now_ny()
+    closed  = 0
+
+    for pos in positions:
+        symbol    = pos['symbol']
+        qty       = abs(int(pos['qty']))
+        is_long   = int(pos['qty']) > 0 or 'long' in str(pos.get('side', '')).lower()
+        avg_entry = float(pos['avg_entry'])
+        unreal    = float(pos['unrealized_pnl'])
+        mkt_val   = float(pos['market_value'])
+
+        # Approximate exit price from market value
+        exit_price = round(mkt_val / qty, 2) if qty > 0 else avg_entry
+
+        try:
+            api.close_position(symbol)
+        except Exception as e:
+            print(f'EOD close failed for {symbol}: {e}')
+            continue
+
+        realized_pnl = round(unreal, 2)
+        outcome_str  = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
+        exit_time    = ny.strftime('%H:%M:%S ET')
+
+        # Update existing OPEN DONNA_AUTO journal entry if one matches
+        trades  = load_journal()
+        matched = False
+        for i, t in enumerate(trades):
+            if (t.get('ticker') == symbol
+                    and str(t.get('outcome', '')).upper() == 'OPEN'
+                    and t.get('source') == 'DONNA_AUTO'):
+                trades[i] = {
+                    **t,
+                    'exit_price':   exit_price,
+                    'exit_time':    exit_time,
+                    'realized_pnl': realized_pnl,
+                    'pnl':          realized_pnl,
+                    'outcome':      'EOD_CLOSE',
+                    'notes':        (
+                        (t.get('notes') or '').rstrip(' |')
+                        + f' | EOD forced close @ {exit_price}'
+                    ),
+                }
+                matched = True
+                break
+
+        if not matched:
+            trades.append({
+                'source':       'DONNA_EOD',
+                'ticker':       symbol,
+                'direction':    'LONG' if is_long else 'SHORT',
+                'trade_date':   ny.strftime('%Y-%m-%d'),
+                'time':         exit_time,
+                'entry_price':  avg_entry,
+                'exit_price':   exit_price,
+                'exit_time':    exit_time,
+                'size':         qty,
+                'realized_pnl': realized_pnl,
+                'pnl':          realized_pnl,
+                'outcome':      'EOD_CLOSE',
+                'session':      'NEW_YORK_CLOSE',
+                'broker_mode':  BROKER_MODE,
+                'notes':        f'EOD forced close @ {exit_price}',
+                'timestamp':    utc_now_iso(),
+            })
+
+        save_journal(trades)
+
+        pnl_str = f'+${realized_pnl:.2f}' if realized_pnl >= 0 else f'-${abs(realized_pnl):.2f}'
+        send_telegram_message(
+            f'DONNA EOD CLOSE\n'
+            f'{symbol} {qty} shares ({"LONG" if is_long else "SHORT"}) closed @ {exit_price}\n'
+            f'P&L: {pnl_str}'
+        )
+        closed += 1
+
+    return closed
+
+
 def get_today_trade_count() -> int:
     return _get_daily_trades_taken()
 
@@ -527,7 +635,7 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     """
     Rule 5 + order submission for ALPACA_ETF mode.
     ES/MES → SPY shares, NQ/MNQ → QQQ shares.
-    Sizing: floor($500 / stop_per_share). SPY stop $2, QQQ stop $3.
+    Sizing follows DONNA official rules (session-aware, hard caps applied).
     """
     etf = _map_etf(data)
     if not etf:
@@ -541,9 +649,10 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
             'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY',
         }
 
-    qty       = _calc_etf_qty(etf)
-    stop_dist = _ETF_STOP[etf]
-    tgt_dist  = stop_dist * 2   # 2:1 R:R
+    sizing    = _get_etf_sizing(etf, session)
+    qty       = sizing['qty']
+    stop_dist = sizing['stop']
+    tgt_dist  = sizing['target']
     side      = OrderSide.BUY if is_long else OrderSide.SELL
 
     # Use live ETF price for stop/target — signal price is a futures price and
@@ -612,10 +721,12 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     alerts.insert(0, record)
     save_alert_history(alerts)
 
+    risk_usd = qty * stop_dist
     send_telegram_message(
         f'DONNA EXECUTED\n'
         f'{direction} {qty} shares {etf} @ {entry_ref}\n'
-        f'Stop: {stop_px} | Target: {tgt_px}\n'
+        f'Stop: {stop_px} ({stop_dist:.2f}/share) | Target: {tgt_px}\n'
+        f'Risk: ${risk_usd:.0f} | Session: {session}\n'
         f'Setup: {data.get("setup_type", "")} | Tier: {data.get("tier", "")}\n'
         f'Order ID: {order_id}'
     )

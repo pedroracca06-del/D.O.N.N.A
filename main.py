@@ -40,7 +40,7 @@ try:
     from donna_execution import (
         execute_signal,
         get_account, get_positions,
-        close_position, close_all_positions,
+        close_position, close_all_positions, close_all_positions_eod,
         get_today_trade_count,
         get_execution_status,
         check_position_outcomes,
@@ -48,14 +48,15 @@ try:
     _EXECUTION_AVAILABLE = True
 except Exception:
     _EXECUTION_AVAILABLE = False
-    def execute_signal(r):           return {'status': 'unavailable'}
-    def get_account():               return {'available': False}
-    def get_positions():             return []
-    def close_position(s):           return {'status': 'unavailable'}
-    def close_all_positions():       return {'status': 'unavailable'}
-    def get_today_trade_count():     return 0
-    def get_execution_status():      return {'available': False}
-    def check_position_outcomes():   return 0
+    def execute_signal(r):              return {'status': 'unavailable'}
+    def get_account():                  return {'available': False}
+    def get_positions():                return []
+    def close_position(s):              return {'status': 'unavailable'}
+    def close_all_positions():          return {'status': 'unavailable'}
+    def close_all_positions_eod():      return 0
+    def get_today_trade_count():        return 0
+    def get_execution_status():         return {'available': False}
+    def check_position_outcomes():      return 0
 
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
@@ -122,6 +123,25 @@ async def position_outcomes_loop():
         await asyncio.sleep(60)
 
 
+async def eod_close_loop():
+    """At 3:45 PM ET on weekdays, force-close all open positions."""
+    _done_today = ''
+    while True:
+        try:
+            ny        = now_ny()
+            today_str = ny.strftime('%Y-%m-%d')
+            if (ny.weekday() < 5
+                    and ny.hour == 15 and ny.minute == 45
+                    and today_str != _done_today):
+                print(f'DONNA EOD close: running for {today_str}')
+                n = await asyncio.to_thread(close_all_positions_eod)
+                _done_today = today_str
+                print(f'DONNA EOD close: {n} position(s) closed')
+        except Exception as e:
+            print(f'EOD close loop error: {e}')
+        await asyncio.sleep(60)
+
+
 async def morning_brief_loop():
     while True:
         try:
@@ -177,6 +197,7 @@ async def startup():
     asyncio.create_task(morning_brief_loop())
     if _EXECUTION_AVAILABLE:
         asyncio.create_task(position_outcomes_loop())
+        asyncio.create_task(eod_close_loop())
 
 
 # ── Health / meta ──────────────────────────────────────────────
