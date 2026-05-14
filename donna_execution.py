@@ -32,12 +32,9 @@ try:
         MarketOrderRequest, TakeProfitRequest, StopLossRequest,
     )
     from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockLatestQuoteRequest
     _ALPACA_LIB = True
 except ImportError:
-    TradingClient = None              # type: ignore
-    StockHistoricalDataClient = None  # type: ignore
+    TradingClient = None  # type: ignore
     _ALPACA_LIB = False
 
 # ── ALPACA_ETF mode: instrument → ETF ticker ───────────────────
@@ -72,18 +69,28 @@ def _client() -> 'TradingClient | None':
 
 
 def _get_etf_price(symbol: str) -> float:
-    """Fetch live mid-price for an ETF symbol via Alpaca market data."""
-    if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+    """
+    Fetch live mid-price for an ETF via Alpaca market data REST API.
+    Uses direct HTTP rather than the SDK data client for reliability.
+    """
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         return 0.0
     try:
-        dc    = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-        quote = dc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
-        q     = quote[symbol]
-        ask   = float(q.ask_price or 0)
-        bid   = float(q.bid_price or 0)
+        import requests as _req
+        r = _req.get(
+            f'https://data.alpaca.markets/v2/stocks/{symbol}/quotes/latest',
+            headers={
+                'APCA-API-KEY-ID':     ALPACA_API_KEY,
+                'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY,
+            },
+            timeout=5,
+        )
+        q   = r.json().get('quote', {})
+        ask = float(q.get('ap') or 0)
+        bid = float(q.get('bp') or 0)
         if ask > 0 and bid > 0:
             return round((ask + bid) / 2, 2)
-        return ask or bid
+        return float(ask or bid or 0)
     except Exception:
         return 0.0
 
