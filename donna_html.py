@@ -296,6 +296,27 @@ tr:last-child td{border-bottom:none}
 .main-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start}
 .left-stack,.right-stack{display:grid;gap:16px}
 
+/* ── EXEC MONITOR + SESSION SCORECARD ── */
+.exec-cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.exec-status-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;
+  border-radius:999px;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:1px}
+.exec-status-active {background:var(--green2);color:var(--green);border:1px solid rgba(30,110,65,.2)}
+.exec-status-paused {background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.2)}
+.exec-status-blocked{background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.2)}
+.exec-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.exec-pnl-big{font-family:'Rajdhani',sans-serif;font-size:40px;font-weight:700;line-height:1;letter-spacing:1px}
+.exec-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  padding:8px 0;border-bottom:1px solid var(--line2)}
+.exec-row:last-child{border-bottom:none}
+.exec-row-label{font-size:12px;color:var(--muted)}
+.exec-row-val{font-size:13px;font-weight:700;color:var(--text);text-align:right;max-width:65%}
+.sc-cells{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0}
+.sc-cell{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center}
+.sc-cell-num{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;line-height:1}
+.sc-cell-lab{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-top:3px}
+.donna-grade-big{font-family:'Rajdhani',sans-serif;font-size:52px;font-weight:700;line-height:1;letter-spacing:2px}
+@media(max-width:900px){.exec-cards-grid{grid-template-columns:1fr}}
+
 /* ── NEWS ── */
 .breaking-bar{
   display:flex;align-items:center;gap:0;overflow:hidden;
@@ -1042,6 +1063,76 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         </div>
 
       </div>
+
+      <!-- EXEC MONITOR + SESSION SCORECARD -->
+      <div class="exec-cards-grid">
+
+        <!-- LEFT: EXECUTION MONITOR -->
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <div class="kicker" style="margin-bottom:0">Execution Monitor</div>
+            <span id="execStatusPill" class="exec-status-pill exec-status-active">
+              <span id="execStatusDot" class="exec-status-dot" style="background:var(--green)"></span>
+              <span id="execStatusText">ACTIVE</span>
+            </span>
+          </div>
+          <div id="execPnlBig" class="exec-pnl-big" style="margin-bottom:14px;color:var(--text)">—</div>
+          <div class="exec-row">
+            <span class="exec-row-label">Account Equity</span>
+            <span class="exec-row-val" id="execEquity">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Trades Today</span>
+            <span class="exec-row-val" id="execTrades">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Red Folder In</span>
+            <span class="exec-row-val" id="execRedFolder">—</span>
+          </div>
+          <div class="exec-row" style="align-items:flex-start;padding-top:10px">
+            <span class="exec-row-label">Last Signal</span>
+            <div id="execLastSignal" class="exec-row-val">—</div>
+          </div>
+        </div>
+
+        <!-- RIGHT: SESSION SCORECARD -->
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div class="kicker" style="margin-bottom:0">Session Scorecard</div>
+            <span id="donnaGrade" class="donna-grade-big" style="color:var(--muted2)">—</span>
+          </div>
+          <div id="scorecardPnlBig" class="exec-pnl-big" style="margin-bottom:10px;color:var(--text)">—</div>
+          <div class="sc-cells">
+            <div class="sc-cell">
+              <div class="sc-cell-num up" id="scWins">0</div>
+              <div class="sc-cell-lab">Wins</div>
+            </div>
+            <div class="sc-cell">
+              <div class="sc-cell-num dn" id="scLosses">0</div>
+              <div class="sc-cell-lab">Losses</div>
+            </div>
+            <div class="sc-cell">
+              <div class="sc-cell-num" id="scBe" style="color:var(--muted)">0</div>
+              <div class="sc-cell-lab">B/E</div>
+            </div>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Win Rate</span>
+            <span class="exec-row-val" id="scWinRate">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Best Trade</span>
+            <span class="exec-row-val up" id="scBest">—</span>
+          </div>
+          <div class="exec-row" style="border-bottom:none">
+            <span class="exec-row-label">Worst Trade</span>
+            <span class="exec-row-val dn" id="scWorst">—</span>
+          </div>
+          <div id="scWhatMatters" style="margin-top:10px;font-size:11px;color:var(--muted2);line-height:1.5;font-style:italic">—</div>
+        </div>
+
+      </div>
+
     </div>
   </div>
 
@@ -2241,6 +2332,163 @@ function renderNews(d) {
   }
 }
 
+// ════════ EXEC MONITOR + SESSION SCORECARD ════════
+function _fmtPnl(v) {
+  const n = parseFloat(v);
+  if (v == null || isNaN(n)) return '—';
+  return (n >= 0 ? '+$' : '-$') + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function _fmtUsd(v) {
+  const n = parseFloat(v);
+  if (v == null || isNaN(n)) return '—';
+  return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function _donnaGrade(winRate, todayPnl) {
+  if (winRate >= 65 && todayPnl > 0) return 'A';
+  if (winRate >= 50 && todayPnl >= 0) return 'B';
+  if (winRate >= 40) return 'C';
+  return 'D';
+}
+
+async function refreshExecMonitor() {
+  try {
+    const res = await fetch('/execution-status');
+    if (!res.ok) return;
+    const s = await res.json();
+    if (!s.available) {
+      const txtEl = document.getElementById('execStatusText');
+      if (txtEl) txtEl.textContent = 'OFFLINE';
+      return;
+    }
+
+    const pillEl = document.getElementById('execStatusPill');
+    const dotEl  = document.getElementById('execStatusDot');
+    const txtEl  = document.getElementById('execStatusText');
+    if (s.daily_loss_limit_hit) {
+      if (pillEl) pillEl.className = 'exec-status-pill exec-status-blocked';
+      if (dotEl)  dotEl.style.background = 'var(--red)';
+      if (txtEl)  txtEl.textContent = 'BLOCKED';
+    } else if (s.red_folder_window_active) {
+      if (pillEl) pillEl.className = 'exec-status-pill exec-status-paused';
+      if (dotEl)  dotEl.style.background = 'var(--yellow)';
+      if (txtEl)  txtEl.textContent = 'PAUSED';
+    } else {
+      if (pillEl) pillEl.className = 'exec-status-pill exec-status-active';
+      if (dotEl)  dotEl.style.background = 'var(--green)';
+      if (txtEl)  txtEl.textContent = 'ACTIVE';
+    }
+
+    const pnl   = s.current_pnl_today ?? s.account?.pnl_today;
+    const pnlEl = document.getElementById('execPnlBig');
+    if (pnlEl) {
+      pnlEl.textContent = _fmtPnl(pnl);
+      pnlEl.style.color = parseFloat(pnl) >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    const eqEl = document.getElementById('execEquity');
+    if (eqEl) eqEl.textContent = _fmtUsd(s.account?.equity);
+
+    const trEl = document.getElementById('execTrades');
+    if (trEl) trEl.textContent = s.daily_trades_taken != null ? `${s.daily_trades_taken} today` : '—';
+
+    const rfEl = document.getElementById('execRedFolder');
+    if (rfEl) {
+      if (s.red_folder_window_active) {
+        rfEl.textContent = 'ACTIVE NOW';
+        rfEl.style.color = 'var(--red)';
+      } else if (s.minutes_to_next_event != null) {
+        const mins = Math.round(parseFloat(s.minutes_to_next_event));
+        rfEl.textContent = mins > 0
+          ? `${mins} min — ${s.next_red_folder_event || ''}`
+          : 'Imminent';
+        rfEl.style.color = mins <= 15 ? 'var(--yellow)' : 'var(--text)';
+      } else {
+        rfEl.textContent = 'No event scheduled';
+        rfEl.style.color = 'var(--muted)';
+      }
+    }
+  } catch(e) { console.error('refreshExecMonitor failed:', e); }
+}
+
+async function refreshSessionScorecard() {
+  try {
+    const [jRes, sRes] = await Promise.all([fetch('/journal/data'), fetch('/execution-status')]);
+    const j = jRes.ok ? await jRes.json() : null;
+    const s = sRes.ok ? await sRes.json() : null;
+
+    const trades = j?.trades || [];
+    const stats  = j?.stats  || {};
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'OPEN');
+    const todayPnl    = parseFloat(stats.daily_pnl?.today ?? 0);
+
+    const pnlEl = document.getElementById('scorecardPnlBig');
+    if (pnlEl) {
+      pnlEl.textContent = _fmtPnl(todayPnl);
+      pnlEl.style.color = todayPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    const tw = todayTrades.filter(t => t.outcome === 'WIN').length;
+    const tl = todayTrades.filter(t => t.outcome === 'LOSS').length;
+    const tb = todayTrades.filter(t => t.outcome === 'BREAKEVEN').length;
+    const tt = todayTrades.length;
+    const twr = tt > 0 ? Math.round(tw / tt * 100) : 0;
+
+    const wEl = document.getElementById('scWins');   if (wEl) wEl.textContent = tw;
+    const lEl = document.getElementById('scLosses'); if (lEl) lEl.textContent = tl;
+    const bEl = document.getElementById('scBe');     if (bEl) bEl.textContent = tb;
+    const wrEl = document.getElementById('scWinRate');
+    if (wrEl) wrEl.textContent = tt > 0 ? `${twr}%  (${tw}W / ${tl}L)` : '—';
+
+    const todayPnls = todayTrades
+      .map(t => parseFloat(t.realized_pnl ?? t.pnl ?? 'x'))
+      .filter(n => !isNaN(n));
+    const bestEl  = document.getElementById('scBest');
+    const worstEl = document.getElementById('scWorst');
+    if (todayPnls.length) {
+      if (bestEl)  bestEl.textContent  = _fmtPnl(Math.max(...todayPnls));
+      if (worstEl) worstEl.textContent = _fmtPnl(Math.min(...todayPnls));
+    } else {
+      if (bestEl)  bestEl.textContent  = '—';
+      if (worstEl) worstEl.textContent = '—';
+    }
+
+    const grade   = _donnaGrade(twr, todayPnl);
+    const gradeEl = document.getElementById('donnaGrade');
+    if (gradeEl) {
+      gradeEl.textContent = grade;
+      gradeEl.style.color = {A:'var(--green)',B:'var(--blue)',C:'var(--yellow)',D:'var(--red)'}[grade] || 'var(--muted2)';
+    }
+
+    // Last DONNA_AUTO signal → Execution Monitor last signal cell
+    const auto = [...trades].reverse().find(t => t.source === 'DONNA_AUTO');
+    const sigEl = document.getElementById('execLastSignal');
+    if (sigEl) {
+      if (auto) {
+        const verdict = auto.harvey_verdict || auto.outcome || '—';
+        const vclr = verdict === 'TAKE' || verdict === 'WIN' ? 'var(--green)'
+                   : verdict === 'LOSS' ? 'var(--red)' : 'var(--yellow)';
+        const conf = auto.confidence ? `<span style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted2);margin-left:4px">${auto.confidence}</span>` : '';
+        const ts   = auto.time || (auto.timestamp || '').slice(11,16);
+        sigEl.innerHTML = `<span style="font-weight:700">${auto.ticker || '—'}</span>
+          <span style="font-family:Space Mono,monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(128,128,128,.1);color:${vclr};margin-left:4px">${verdict}</span>${conf}
+          <div style="font-size:11px;color:var(--muted2);margin-top:2px">${ts}</div>`;
+      } else {
+        sigEl.textContent = 'No auto trades yet';
+        sigEl.style.color = 'var(--muted2)';
+      }
+    }
+
+    // What matters now — pull from cached dashboard data
+    const wmEl = document.getElementById('scWhatMatters');
+    if (wmEl) {
+      const wm = _lastDashData?.what_matters_now;
+      wmEl.textContent = wm?.headline || wm?.summary || '—';
+    }
+
+  } catch(e) { console.error('refreshSessionScorecard failed:', e); }
+}
+
 // ════════ MAIN REFRESH ════════
 async function refresh() {
   try {
@@ -2697,6 +2945,10 @@ refresh();
 setInterval(refresh, 20000);
 refreshJournal();
 setInterval(refreshJournal, 30000);
+refreshExecMonitor();
+refreshSessionScorecard();
+setInterval(refreshExecMonitor, 20000);
+setInterval(refreshSessionScorecard, 20000);
 connectSSE();
 </script>
 </body>
