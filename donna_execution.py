@@ -1,11 +1,9 @@
-"""donna_execution.py — DONNA autonomous paper trading, official 5-rule risk framework."""
+"""donna_execution.py — DONNA autonomous trading, two-mode broker architecture."""
 from __future__ import annotations
 
-import calendar
 import math
 import os
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
+from datetime import timedelta
 
 from donna_config import (
     now_ny, utc_now_iso, safe_float, send_telegram_message, session_label,
@@ -16,6 +14,11 @@ from donna_state import (
     load_macro_events,
     load_journal, save_journal,
 )
+
+# ── Broker mode ────────────────────────────────────────────────
+# Change this one variable to switch execution backends.
+# Options: ALPACA_ETF | TRADOVATE | RITHMIC
+BROKER_MODE = "ALPACA_ETF"
 
 # ── Alpaca setup ───────────────────────────────────────────────
 
@@ -34,18 +37,15 @@ except ImportError:
     TradingClient = None  # type: ignore
     _ALPACA_LIB = False
 
-# ── Contract specs (Rule 5) ────────────────────────────────────
-# Risk $500/trade = 0.5% of $100 000.
-# MES: 4-pt stop × $5/pt = $20 risk → floor(500/20) = 25 → cap 3
-# MNQ: 10-pt stop × $2/pt = $20 risk → floor(500/20) = 25 → cap 3
-
-_POINT_VALUE    = {'MES': 5.0,  'MNQ': 2.0}
-_DEFAULT_STOP   = {'MES': 4.0,  'MNQ': 10.0}   # points per trade
-_MAX_CONTRACTS  = 3
-_RISK_PER_TRADE = 500.0   # $500 = 0.5 % of $100 000
-
-# CME quarterly expiry (Globex codes)
-_QUARTERLY = [(3, 'H'), (6, 'M'), (9, 'U'), (12, 'Z')]
+# ── ALPACA_ETF mode: instrument → ETF ticker ───────────────────
+# ES / MES signals trade SPY shares (S&P 500 proxy)
+# NQ / MNQ signals trade QQQ shares (NASDAQ-100 proxy)
+_ETF_MAP = {
+    'ES': 'SPY', 'MES': 'SPY',
+    'NQ': 'QQQ', 'MNQ': 'QQQ',
+}
+_ETF_STOP       = {'SPY': 2.00, 'QQQ': 3.00}   # $/share stop distance
+_RISK_PER_TRADE = 500.0                          # $500 = 0.5% of $100 000
 
 # ── Risk rule constants ────────────────────────────────────────
 
@@ -68,51 +68,29 @@ def _client() -> 'TradingClient | None':
         return None
 
 
-# ── Front-month contract resolution ───────────────────────────
+# ── ETF signal helpers ─────────────────────────────────────────
 
-def _third_friday(year: int, month: int) -> date:
-    weeks   = calendar.monthcalendar(year, month)
-    fridays = [w[4] for w in weeks if w[4] != 0]
-    return date(year, month, fridays[2])
-
-
-def _front_month_symbol(base: str) -> str:
-    """Return active quarterly symbol, e.g. 'MESM26'. Rolls 7 days before third Friday."""
-    today = date.today()
-    for yr_offset in range(2):
-        year = today.year + yr_offset
-        for month, code in _QUARTERLY:
-            if yr_offset == 0 and month < today.month:
-                continue
-            roll_date = _third_friday(year, month) - timedelta(days=7)
-            if today <= roll_date:
-                return f'{base}{code}{str(year)[2:]}'
-    return f'{base}M{str(today.year + 1)[2:]}'
-
-
-# ── Signal helpers ─────────────────────────────────────────────
-
-def _map_base(data: dict) -> str | None:
-    """Resolve signal instrument/ticker to 'MNQ' or 'MES'."""
-    instrument = str(data.get('instrument', '')).upper()
-    ticker     = str(data.get('ticker', '')).upper()
-    if 'NQ' in instrument or 'NQ' in ticker or 'MNQ' in ticker:
-        return 'MNQ'
-    if 'ES' in instrument or 'ES' in ticker or 'MES' in ticker:
-        return 'MES'
+def _map_etf(data: dict) -> str | None:
+    """Resolve instrument/ticker to 'SPY' or 'QQQ'."""
+    combined = (
+        str(data.get('instrument', '')).upper() + ' ' +
+        str(data.get('ticker', '')).upper()
+    )
+    if any(k in combined for k in ('NQ', 'MNQ')):
+        return 'QQQ'
+    if any(k in combined for k in ('ES', 'MES')):
+        return 'SPY'
     return None
 
 
-def _calc_qty(base: str) -> int:
-    """floor(500 / (stop_pts × point_val)), capped at _MAX_CONTRACTS, minimum 1."""
-    stop_pts = _DEFAULT_STOP.get(base, 4.0)
-    pv       = _POINT_VALUE.get(base, 5.0)
-    qty      = math.floor(_RISK_PER_TRADE / (stop_pts * pv))
-    return max(1, min(qty, _MAX_CONTRACTS))
+def _calc_etf_qty(etf: str) -> int:
+    """floor($500 / stop_per_share), minimum 1."""
+    stop = _ETF_STOP.get(etf, 2.00)
+    return max(1, math.floor(_RISK_PER_TRADE / stop))
 
 
 def _log_skip(data: dict, parsed: dict, reason: str, code: str = '') -> dict:
-    """Persist skip record (with reason_code) to donna_risk_state.json."""
+    """Persist skip record to donna_risk_state.json."""
     risk    = load_risk_state()
     skipped = risk.get('skipped_executions', [])
     skipped.insert(0, {
@@ -151,13 +129,6 @@ def _red_folder_status() -> dict:
     """
     Read donna_macro_events.json, find HIGH-importance events, check ±30-min
     blackout window around each.  Also locate the next upcoming HIGH event.
-
-    Returns:
-        active            bool  — True if now is inside a blackout window
-        reason            str   — human-readable block reason
-        next_event_name   str   — name/title of next HIGH event today
-        next_event_time_et str  — HH:MM ET of that event
-        minutes_to_next   int|None
     """
     result: dict = {
         'active':             False,
@@ -174,7 +145,7 @@ def _red_folder_status() -> dict:
 
     now_et      = now_ny()
     now_et_mins = now_et.hour * 60 + now_et.minute
-    upcoming: list[tuple[int, str]] = []   # (event_mins, title)
+    upcoming: list[tuple[int, str]] = []
 
     for event in events:
         if str(event.get('importance', '')).lower() != 'high':
@@ -232,11 +203,7 @@ def _increment_daily_trades() -> None:
 # ── RULE 3: Daily loss limit ───────────────────────────────────
 
 def _check_daily_loss_limit(session: str, pnl_today: float) -> tuple[bool, str]:
-    """
-    Return (blocked, reason_code).
-    If limit breached, sets daily_loss_limit_hit=True in risk state.
-    If already hit (from earlier in the day), blocks immediately.
-    """
+    """Return (blocked, reason_code). Sets daily_loss_limit_hit if limit breached."""
     risk = _get_daily_state()
 
     if risk.get('daily_loss_limit_hit'):
@@ -259,11 +226,7 @@ def _check_daily_loss_limit(session: str, pnl_today: float) -> tuple[bool, str]:
 # ── RULE 4: Asia session ───────────────────────────────────────
 
 def _asia_session_anchor() -> str | None:
-    """
-    Return 'YYYY-MM-DD' of the calendar day when the current Asia session started,
-    or None if we are not currently in the Asia session.
-    Asia = 19:00–03:00 ET.  The session is anchored to its start day.
-    """
+    """Return start-day anchor for current Asia session (19:00–03:00 ET), or None."""
     ny = now_ny()
     h  = ny.hour
     if h >= 19:
@@ -359,16 +322,16 @@ def close_all_positions() -> dict:
 
 
 def get_today_trade_count() -> int:
-    """Trades executed today ET, from donna_risk_state daily counter."""
     return _get_daily_trades_taken()
 
 
 def get_execution_status() -> dict:
     """Full risk-rule snapshot for the /execution-status endpoint."""
-    rf        = _red_folder_status()
-    risk      = _get_daily_state()
-    acct      = get_account()
+    rf   = _red_folder_status()
+    risk = _get_daily_state()
+    acct = get_account()
     return {
+        'broker_mode':              BROKER_MODE,
         'daily_trades_taken':       int(risk.get('daily_trades_taken', 0)),
         'daily_loss_limit_hit':     bool(risk.get('daily_loss_limit_hit', False)),
         'asia_trade_taken':         _get_asia_trade_taken(),
@@ -383,22 +346,20 @@ def get_execution_status() -> dict:
     }
 
 
-# ── Journal helpers ───────────────────────────────────────────
+# ── Journal helpers ────────────────────────────────────────────
 
 def _journal_log_trade(
-    data: dict, parsed: dict, symbol: str, base: str,
+    data: dict, parsed: dict, symbol: str,
     is_long: bool, qty: int, entry_ref: float,
     stop_px: float, tgt_px: float, order_id: str, session: str,
 ) -> None:
-    """Write a DONNA_AUTO journal entry immediately after a confirmed bracket order."""
-    risk    = load_risk_state()
-    regime  = str(data.get('regime', '') or risk.get('market_regime', '')).upper() or 'UNKNOWN'
-    macro   = risk.get('macro_risk', 'medium')
-    conf    = str(parsed.get('confidence', ''))
-    setup   = str(data.get('setup_type', ''))
-    tier    = str(data.get('tier', ''))
-    instr   = str(data.get('instrument', symbol))
-    ny      = now_ny()
+    """Write a DONNA_AUTO journal entry immediately after a confirmed order."""
+    risk   = load_risk_state()
+    regime = str(data.get('regime', '') or risk.get('market_regime', '')).upper() or 'UNKNOWN'
+    conf   = str(parsed.get('confidence', ''))
+    setup  = str(data.get('setup_type', ''))
+    tier   = str(data.get('tier', ''))
+    ny     = now_ny()
 
     entry = {
         'source':         'DONNA_AUTO',
@@ -418,15 +379,15 @@ def _journal_log_trade(
         'confidence':     conf,
         'regime':         regime,
         'active_regime':  regime,
-        'macro_risk':     macro,
         'session':        session,
         'harvey_verdict': 'TAKE',
+        'broker_mode':    BROKER_MODE,
         'realized_pnl':   None,
         'pnl':            None,
         'outcome':        'OPEN',
         'notes': (
-            f'DONNA autonomous trade. {setup} on {instr}. '
-            f'Regime: {regime}. Confidence: {conf}.'
+            f'DONNA autonomous trade. {setup} on {symbol}. '
+            f'Regime: {regime}. Confidence: {conf}. Broker: {BROKER_MODE}.'
         ),
         'timestamp': utc_now_iso(),
     }
@@ -437,9 +398,9 @@ def _journal_log_trade(
 
 def check_position_outcomes() -> int:
     """
-    Scan journal entries with outcome=OPEN/source=DONNA_AUTO, query Alpaca for
-    each bracket order's leg fills, and update the journal with realized P&L,
-    exit price/time, and WIN/LOSS/BREAKEVEN outcome.  Returns number updated.
+    Scan OPEN DONNA_AUTO journal entries, query Alpaca for bracket order fills,
+    and update journal with realized P&L, exit price/time, and WIN/LOSS/BREAKEVEN.
+    Returns number of entries updated.
     """
     trades    = load_journal()
     open_auto = [
@@ -464,7 +425,6 @@ def check_position_outcomes() -> int:
 
         updates: dict = {}
 
-        # Capture actual entry fill price if Alpaca has it
         actual_entry = getattr(order, 'filled_avg_price', None)
         if actual_entry is not None:
             try:
@@ -472,7 +432,6 @@ def check_position_outcomes() -> int:
             except Exception:
                 pass
 
-        # Find the leg that filled (TP or SL)
         legs       = getattr(order, 'legs', None) or []
         filled_leg = next(
             (lg for lg in legs if str(getattr(lg, 'status', '')).lower() == 'filled'),
@@ -480,13 +439,11 @@ def check_position_outcomes() -> int:
         )
 
         if filled_leg is None:
-            # Position still open — only write entry price update if changed
             if updates:
                 trades[idx] = {**trade, **updates}
                 updated += 1
             continue
 
-        # Exit price & time
         raw_exit   = getattr(filled_leg, 'filled_avg_price', None)
         exit_price = float(raw_exit) if raw_exit is not None else 0.0
         exit_time  = now_ny().strftime('%H:%M:%S ET')
@@ -497,17 +454,14 @@ def check_position_outcomes() -> int:
         except Exception:
             pass
 
-        # P&L (futures dollar value)
         entry_px  = float(updates.get('entry_price', trade.get('entry_price') or 0))
         qty       = int(trade.get('size') or 1)
         direction = str(trade.get('direction', 'LONG')).upper()
-        ticker    = str(trade.get('ticker', ''))
-        base      = 'MNQ' if ('MNQ' in ticker or 'NQ' in ticker) else 'MES'
-        pv        = _POINT_VALUE.get(base, 5.0)
 
+        # ETF shares: P&L = price_diff × shares (no futures point multiplier)
         raw_pnl = (
-            (exit_price - entry_px) * qty * pv if direction == 'LONG'
-            else (entry_px - exit_price) * qty * pv
+            (exit_price - entry_px) * qty if direction == 'LONG'
+            else (entry_px - exit_price) * qty
         )
         realized_pnl = round(raw_pnl, 2)
         outcome      = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
@@ -528,19 +482,136 @@ def check_position_outcomes() -> int:
     return updated
 
 
-# ── Core execution ─────────────────────────────────────────────
+# ── Placeholder broker functions ───────────────────────────────
+
+def execute_tradovate(signal_data: dict) -> dict:
+    """Stub — plug in Tradovate API when ready, then set BROKER_MODE = 'TRADOVATE'."""
+    return {'status': 'skipped', 'reason': 'Tradovate not connected yet'}
+
+
+def execute_rithmic(signal_data: dict) -> dict:
+    """Stub — plug in Rithmic API when ready, then set BROKER_MODE = 'RITHMIC'."""
+    return {'status': 'skipped', 'reason': 'Rithmic not connected yet'}
+
+
+# ── ALPACA_ETF execution ───────────────────────────────────────
+
+def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -> dict:
+    """
+    Rule 5 + order submission for ALPACA_ETF mode.
+    ES/MES → SPY shares, NQ/MNQ → QQQ shares.
+    Sizing: floor($500 / stop_per_share). SPY stop $2, QQQ stop $3.
+    """
+    etf = _map_etf(data)
+    if not etf:
+        return _log_skip(data, parsed,
+            'cannot resolve instrument to SPY or QQQ — check ticker/instrument field')
+
+    api = _client()
+    if not api:
+        return {
+            'status': 'error',
+            'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY',
+        }
+
+    qty       = _calc_etf_qty(etf)
+    stop_dist = _ETF_STOP[etf]
+    tgt_dist  = stop_dist * 2   # 2:1 R:R
+    entry_ref = safe_float(data.get('price', 0))
+    side      = OrderSide.BUY if is_long else OrderSide.SELL
+
+    if is_long:
+        stop_px = round(entry_ref - stop_dist, 2)
+        tgt_px  = round(entry_ref + tgt_dist,  2)
+    else:
+        stop_px = round(entry_ref + stop_dist, 2)
+        tgt_px  = round(entry_ref - tgt_dist,  2)
+
+    try:
+        order = api.submit_order(
+            MarketOrderRequest(
+                symbol        = etf,
+                qty           = qty,
+                side          = side,
+                time_in_force = TimeInForce.DAY,
+                order_class   = OrderClass.BRACKET,
+                take_profit   = TakeProfitRequest(limit_price=tgt_px),
+                stop_loss     = StopLossRequest(stop_price=stop_px),
+            )
+        )
+        order_id = str(order.id)
+    except Exception as e:
+        return {'status': 'error', 'reason': str(e)}
+
+    # Record counters only after confirmed order submission
+    _increment_daily_trades()
+    if session == 'ASIA':
+        _set_asia_trade_taken()
+
+    _journal_log_trade(
+        data=data, parsed=parsed, symbol=etf,
+        is_long=is_long, qty=qty, entry_ref=entry_ref,
+        stop_px=stop_px, tgt_px=tgt_px, order_id=order_id, session=session,
+    )
+
+    direction = 'BUY' if is_long else 'SELL'
+    record = {
+        'type':         'execution',
+        'ticker':       etf,
+        'signal':       direction,
+        'session':      session,
+        'timeframe':    data.get('timeframe', ''),
+        'price':        str(entry_ref),
+        'verdict':      'TAKE',
+        'confidence':   parsed.get('confidence', ''),
+        'summary':      (f'EXECUTED {direction} {qty} shares {etf} @ {entry_ref}. '
+                         f'Stop: {stop_px}, Target: {tgt_px}'),
+        'instrument':   etf,
+        'tier':         data.get('tier', ''),
+        'setup_type':   data.get('setup_type', ''),
+        'entry_price':  entry_ref,
+        'shares':       qty,
+        'stop_price':   stop_px,
+        'target_price': tgt_px,
+        'order_id':     order_id,
+        'timestamp':    utc_now_iso(),
+    }
+    alerts = load_alert_history()
+    alerts.insert(0, record)
+    save_alert_history(alerts)
+
+    send_telegram_message(
+        f'DONNA EXECUTED\n'
+        f'{direction} {qty} shares {etf} @ {entry_ref}\n'
+        f'Stop: {stop_px} | Target: {tgt_px}\n'
+        f'Setup: {data.get("setup_type", "")} | Tier: {data.get("tier", "")}\n'
+        f'Order ID: {order_id}'
+    )
+
+    return {
+        'status':       'executed',
+        'symbol':       etf,
+        'side':         'buy' if is_long else 'sell',
+        'shares':       qty,
+        'entry_ref':    entry_ref,
+        'stop_price':   stop_px,
+        'target_price': tgt_px,
+        'order_id':     order_id,
+    }
+
+
+# ── Core execution — routes by BROKER_MODE ─────────────────────
 
 def execute_signal(signal_result: dict) -> dict:
     """
-    Apply DONNA's 5 official risk rules then, if all pass, submit a bracket
-    market order via Alpaca paper.  Every blocked TAKE signal is logged with
-    an exact reason_code to donna_risk_state.json.
+    Apply DONNA's 5 official risk rules, then route to the active broker.
+    To switch brokers: change BROKER_MODE at the top of this file.
 
-    Rule 1 — RED FOLDER       ±30 min around any HIGH macro event → block.
+    Rule 1 — RED FOLDER        ±30 min around any HIGH macro event → block.
     Rule 2 — DAILY TRADE LIMIT  max 2 trades per calendar day ET.
     Rule 3 — DAILY LOSS LIMIT   NY/London < -$1 000 | Asia < -$500 → block.
     Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
-    Rule 5 — POSITION SIZING    floor(500 / (stop_pts × point_val)), cap 3.
+    Rule 5 — POSITION SIZING    broker-specific (ALPACA_ETF: floor($500/stop)).
     """
     parsed = signal_result.get('parsed', {})
     data   = signal_result.get('data', {})
@@ -594,108 +665,14 @@ def execute_signal(signal_result: dict) -> dict:
                 'Asia session trade already taken — max 1 trade per Asia session',
                 'ASIA_TRADE_ALREADY_TAKEN')
 
-    # ── SYMBOL RESOLUTION
-    base = _map_base(data)
-    if not base:
-        return _log_skip(data, parsed, 'cannot resolve instrument to MNQ or MES')
-    symbol = _front_month_symbol(base)
+    # ── RULE 5 + ORDER — routed by BROKER_MODE
+    signal  = str(data.get('signal', '')).upper()
+    is_long = signal in ('LONG', 'BUY')
 
-    # ── ALPACA CLIENT
-    api = _client()
-    if not api:
-        return {
-            'status': 'error',
-            'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY',
-        }
-
-    # ── RULE 5: POSITION SIZING — floor(500 / (stop_pts × point_val)), cap 3
-    signal    = str(data.get('signal', '')).upper()
-    is_long   = signal in ('LONG', 'BUY')
-    side      = OrderSide.BUY if is_long else OrderSide.SELL
-    qty       = _calc_qty(base)
-    stop_pts  = _DEFAULT_STOP[base]
-    tgt_pts   = stop_pts * 2   # 2:1 R:R
-    entry_ref = safe_float(data.get('price', 0))
-
-    if is_long:
-        stop_px = round(entry_ref - stop_pts, 2)
-        tgt_px  = round(entry_ref + tgt_pts,  2)
-    else:
-        stop_px = round(entry_ref + stop_pts, 2)
-        tgt_px  = round(entry_ref - tgt_pts,  2)
-
-    # ── BRACKET ORDER
-    try:
-        order = api.submit_order(
-            MarketOrderRequest(
-                symbol        = symbol,
-                qty           = qty,
-                side          = side,
-                time_in_force = TimeInForce.DAY,
-                order_class   = OrderClass.BRACKET,
-                take_profit   = TakeProfitRequest(limit_price=tgt_px),
-                stop_loss     = StopLossRequest(stop_price=stop_px),
-            )
-        )
-        order_id = str(order.id)
-    except Exception as e:
-        return {'status': 'error', 'reason': str(e)}
-
-    # ── RECORD COUNTERS — only after confirmed order submission
-    _increment_daily_trades()
-    if session == 'ASIA':
-        _set_asia_trade_taken()
-
-    # ── AUTO-JOURNAL — create OPEN entry immediately
-    _journal_log_trade(
-        data=data, parsed=parsed, symbol=symbol, base=base,
-        is_long=is_long, qty=qty, entry_ref=entry_ref,
-        stop_px=stop_px, tgt_px=tgt_px, order_id=order_id, session=session,
-    )
-
-    # ── LOG EXECUTION
-    direction = 'BUY' if is_long else 'SELL'
-    record = {
-        'type':          'execution',
-        'ticker':        symbol,
-        'signal':        direction,
-        'session':       session,
-        'timeframe':     data.get('timeframe', ''),
-        'price':         str(entry_ref),
-        'verdict':       'TAKE',
-        'confidence':    parsed.get('confidence', ''),
-        'summary':       (f'EXECUTED {direction} {qty}x {symbol} @ {entry_ref}. '
-                          f'Stop: {stop_px}, Target: {tgt_px}'),
-        'instrument':    symbol,
-        'tier':          data.get('tier', ''),
-        'setup_type':    data.get('setup_type', ''),
-        'signal_reason': data.get('signal_reason', ''),
-        'entry_price':   entry_ref,
-        'contracts':     qty,
-        'stop_price':    stop_px,
-        'target_price':  tgt_px,
-        'order_id':      order_id,
-        'timestamp':     utc_now_iso(),
-    }
-    alerts = load_alert_history()
-    alerts.insert(0, record)
-    save_alert_history(alerts)
-
-    send_telegram_message(
-        f'DONNA EXECUTED\n'
-        f'{direction} {qty}x {symbol} @ {entry_ref}\n'
-        f'Stop: {stop_px} | Target: {tgt_px}\n'
-        f'Setup: {data.get("setup_type", "")} | Tier: {data.get("tier", "")}\n'
-        f'Order ID: {order_id}'
-    )
-
-    return {
-        'status':       'executed',
-        'symbol':       symbol,
-        'side':         'buy' if is_long else 'sell',
-        'contracts':    qty,
-        'entry_ref':    entry_ref,
-        'stop_price':   stop_px,
-        'target_price': tgt_px,
-        'order_id':     order_id,
-    }
+    if BROKER_MODE == 'ALPACA_ETF':
+        return _execute_alpaca_etf(data, parsed, session, is_long)
+    if BROKER_MODE == 'TRADOVATE':
+        return execute_tradovate(signal_result)
+    if BROKER_MODE == 'RITHMIC':
+        return execute_rithmic(signal_result)
+    return {'status': 'error', 'reason': f'Unknown BROKER_MODE: {BROKER_MODE}'}
