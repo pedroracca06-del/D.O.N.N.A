@@ -42,6 +42,7 @@ try:
         get_account, get_positions,
         close_position, close_all_positions,
         get_today_trade_count,
+        get_execution_status,
     )
     _EXECUTION_AVAILABLE = True
 except Exception:
@@ -52,6 +53,7 @@ except Exception:
     def close_position(s):           return {'status': 'unavailable'}
     def close_all_positions():       return {'status': 'unavailable'}
     def get_today_trade_count():     return 0
+    def get_execution_status():      return {'available': False}
 
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
@@ -326,28 +328,8 @@ async def alerts_data():
 async def execution_status():
     if not _EXECUTION_AVAILABLE:
         return {'available': False, 'error': 'donna_execution not loaded'}
-
-    account, positions, trades_today = await asyncio.gather(
-        asyncio.to_thread(get_account),
-        asyncio.to_thread(get_positions),
-        asyncio.to_thread(get_today_trade_count),
-    )
-
-    stop_trading = False
-    try:
-        from donna_risk_engine import load_re_state
-        stop_trading = bool(load_re_state().get('stop_trading', False))
-    except Exception:
-        pass
-
-    return {
-        'available':     True,
-        'account':       account,
-        'positions':     positions,
-        'pnl_today':     account.get('pnl_today', 0),
-        'trades_today':  trades_today,
-        'stop_trading':  stop_trading,
-    }
+    status = await asyncio.to_thread(get_execution_status)
+    return {'available': True, **status}
 
 
 @app.post('/execution/close')

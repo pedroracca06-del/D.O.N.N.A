@@ -1,13 +1,19 @@
-"""donna_execution.py — DONNA paper trading via Alpaca ETF proxies (SPY / QQQ)."""
+"""donna_execution.py — DONNA autonomous paper trading, official 5-rule risk framework."""
 from __future__ import annotations
 
+import calendar
 import math
 import os
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
-from donna_config import now_ny, utc_now_iso, send_telegram_message
+from donna_config import (
+    now_ny, utc_now_iso, safe_float, send_telegram_message, session_label,
+)
 from donna_state import (
     load_risk_state, save_risk_state,
     load_alert_history, save_alert_history,
+    load_macro_events,
 )
 
 # ── Alpaca setup ───────────────────────────────────────────────
@@ -19,27 +25,38 @@ _PAPER = 'paper' in os.getenv('ALPACA_BASE_URL', 'paper-api.alpaca.markets').low
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import (
-        MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest,
+        MarketOrderRequest, TakeProfitRequest, StopLossRequest,
     )
-    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockLatestTradeRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
     _ALPACA_LIB = True
 except ImportError:
     TradingClient = None  # type: ignore
     _ALPACA_LIB = False
 
-# ── ETF proxy config ───────────────────────────────────────────
-# ES / MES signals → SPY  |  NQ / MNQ signals → QQQ
+# ── Contract specs (Rule 5) ────────────────────────────────────
+# Risk $500/trade = 0.5% of $100 000.
+# MES: 4-pt stop × $5/pt = $20 risk → floor(500/20) = 25 → cap 3
+# MNQ: 10-pt stop × $2/pt = $20 risk → floor(500/20) = 25 → cap 3
 
-_ETF_MAP      = {'MES': 'SPY', 'MNQ': 'QQQ'}
-_ETF_STOP_PTS = {'SPY': 4.0,   'QQQ': 10.0}   # price points per trade
-_MAX_POSITIONS    = 2
-_DAILY_LOSS_LIMIT = -2_000.0      # stop execution if P&L today < −$2 000
-_BLOCKED_REGIMES  = {'EVENT_DRIVEN', 'RISK_OFF'}
+_POINT_VALUE    = {'MES': 5.0,  'MNQ': 2.0}
+_DEFAULT_STOP   = {'MES': 4.0,  'MNQ': 10.0}   # points per trade
+_MAX_CONTRACTS  = 3
+_RISK_PER_TRADE = 500.0   # $500 = 0.5 % of $100 000
+
+# CME quarterly expiry (Globex codes)
+_QUARTERLY = [(3, 'H'), (6, 'M'), (9, 'U'), (12, 'Z')]
+
+# ── Risk rule constants ────────────────────────────────────────
+
+_RED_FOLDER_MINS     = 30       # Rule 1: blackout on each side of a HIGH event
+_DAILY_TRADE_LIMIT   = 2        # Rule 2: max trades per calendar day ET
+_LOSS_LIMIT_NY_LON   = -1000.0  # Rule 3: NY + London P&L floor
+_LOSS_LIMIT_ASIA     = -500.0   # Rule 3: Asia P&L floor
+_ASIA_MIN_CONFIDENCE = 90.0     # Rule 4: min confidence for Asia execution
+_ASIA_MAX_TRADES     = 1        # Rule 4: max trades per Asia session
 
 
-# ── Internal helpers ───────────────────────────────────────────
+# ── Alpaca client ──────────────────────────────────────────────
 
 def _client() -> 'TradingClient | None':
     if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
@@ -50,35 +67,29 @@ def _client() -> 'TradingClient | None':
         return None
 
 
-def _data_client() -> 'StockHistoricalDataClient | None':
-    if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-        return None
-    try:
-        return StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-    except Exception:
-        return None
+# ── Front-month contract resolution ───────────────────────────
+
+def _third_friday(year: int, month: int) -> date:
+    weeks   = calendar.monthcalendar(year, month)
+    fridays = [w[4] for w in weeks if w[4] != 0]
+    return date(year, month, fridays[2])
 
 
-def _get_etf_price(etf: str) -> float | None:
-    dc = _data_client()
-    if not dc:
-        return None
-    try:
-        req   = StockLatestTradeRequest(symbol_or_symbols=etf)
-        trade = dc.get_stock_latest_trade(req)
-        return float(trade[etf].price)
-    except Exception:
-        return None
+def _front_month_symbol(base: str) -> str:
+    """Return active quarterly symbol, e.g. 'MESM26'. Rolls 7 days before third Friday."""
+    today = date.today()
+    for yr_offset in range(2):
+        year = today.year + yr_offset
+        for month, code in _QUARTERLY:
+            if yr_offset == 0 and month < today.month:
+                continue
+            roll_date = _third_friday(year, month) - timedelta(days=7)
+            if today <= roll_date:
+                return f'{base}{code}{str(year)[2:]}'
+    return f'{base}M{str(today.year + 1)[2:]}'
 
 
-def _in_trading_window() -> bool:
-    """9:30 AM – 3:30 PM ET, weekdays only. Excludes last 30 min of NY cash session."""
-    ny = now_ny()
-    if ny.weekday() >= 5:
-        return False
-    m = ny.hour * 60 + ny.minute
-    return 9 * 60 + 30 <= m < 15 * 60 + 30
-
+# ── Signal helpers ─────────────────────────────────────────────
 
 def _map_base(data: dict) -> str | None:
     """Resolve signal instrument/ticker to 'MNQ' or 'MES'."""
@@ -91,65 +102,197 @@ def _map_base(data: dict) -> str | None:
     return None
 
 
-def _calc_etf_qty(etf: str, etf_price: float) -> int:
-    """floor(500 / (stop_points * etf_price * 0.01)), minimum 1 share."""
-    stop_pts = _ETF_STOP_PTS.get(etf, 4.0)
-    return max(1, math.floor(500.0 / (stop_pts * etf_price * 0.01)))
+def _calc_qty(base: str) -> int:
+    """floor(500 / (stop_pts × point_val)), capped at _MAX_CONTRACTS, minimum 1."""
+    stop_pts = _DEFAULT_STOP.get(base, 4.0)
+    pv       = _POINT_VALUE.get(base, 5.0)
+    qty      = math.floor(_RISK_PER_TRADE / (stop_pts * pv))
+    return max(1, min(qty, _MAX_CONTRACTS))
 
 
-def _log_skip(data: dict, parsed: dict, reason: str) -> dict:
-    """Persist skip record to donna_risk_state.json and return the skip dict."""
+def _log_skip(data: dict, parsed: dict, reason: str, code: str = '') -> dict:
+    """Persist skip record (with reason_code) to donna_risk_state.json."""
     risk    = load_risk_state()
     skipped = risk.get('skipped_executions', [])
     skipped.insert(0, {
-        'ticker':     data.get('ticker', ''),
-        'signal':     data.get('signal', ''),
-        'instrument': data.get('instrument', ''),
-        'tier':       data.get('tier', ''),
-        'setup_type': data.get('setup_type', ''),
-        'confidence': parsed.get('confidence', ''),
-        'reason':     reason,
-        'timestamp':  utc_now_iso(),
+        'ticker':      data.get('ticker', ''),
+        'signal':      data.get('signal', ''),
+        'instrument':  data.get('instrument', ''),
+        'tier':        data.get('tier', ''),
+        'setup_type':  data.get('setup_type', ''),
+        'confidence':  parsed.get('confidence', ''),
+        'reason':      reason,
+        'reason_code': code,
+        'timestamp':   utc_now_iso(),
     })
     risk['skipped_executions'] = skipped[:50]
     save_risk_state(risk)
-    return {'status': 'skipped', 'reason': reason}
+    return {'status': 'skipped', 'reason': reason, 'reason_code': code}
 
 
-def _check_instrument_alignment(base: str, is_long: bool) -> str | None:
-    """Return a skip reason if the other instrument's recent signals don't confirm direction.
+# ── Daily state helpers ────────────────────────────────────────
 
-    Looks at the last 3 TAKE signals from the counterpart instrument (ES↔NQ).
-    If none confirm direction, blocks execution. Returns None if no data or alignment passes.
+def _get_daily_state() -> dict:
+    """Load risk state, resetting daily counters if ET calendar date has changed."""
+    risk      = load_risk_state()
+    today_str = now_ny().strftime('%Y-%m-%d')
+    if risk.get('daily_trades_date') != today_str:
+        risk['daily_trades_date']    = today_str
+        risk['daily_trades_taken']   = 0
+        risk['daily_loss_limit_hit'] = False
+        save_risk_state(risk)
+    return risk
+
+
+# ── RULE 1: RED FOLDER ─────────────────────────────────────────
+
+def _red_folder_status() -> dict:
     """
-    other_key = 'ES' if base == 'MNQ' else 'NQ'
-    direction = 'LONG' if is_long else 'SHORT'
+    Read donna_macro_events.json, find HIGH-importance events, check ±30-min
+    blackout window around each.  Also locate the next upcoming HIGH event.
 
-    alerts        = load_alert_history()
-    other_signals = []
-    for a in alerts:
-        if a.get('type') in ('execution',):
+    Returns:
+        active            bool  — True if now is inside a blackout window
+        reason            str   — human-readable block reason
+        next_event_name   str   — name/title of next HIGH event today
+        next_event_time_et str  — HH:MM ET of that event
+        minutes_to_next   int|None
+    """
+    result: dict = {
+        'active':             False,
+        'reason':             '',
+        'next_event_name':    '',
+        'next_event_time_et': '',
+        'minutes_to_next':    None,
+    }
+
+    try:
+        events = load_macro_events().get('events', [])
+    except Exception:
+        return result  # fail open — don't block on unreadable calendar
+
+    now_et      = now_ny()
+    now_et_mins = now_et.hour * 60 + now_et.minute
+    upcoming: list[tuple[int, str]] = []   # (event_mins, title)
+
+    for event in events:
+        if str(event.get('importance', '')).lower() != 'high':
             continue
-        inst = str(a.get('instrument', '') or a.get('ticker', '')).upper()
-        if other_key in inst:
-            other_signals.append(a)
-        if len(other_signals) >= 3:
-            break
+        time_str = str(event.get('time_et', '')).strip()
+        if not time_str:
+            continue
+        try:
+            h, m    = map(int, time_str.split(':'))
+            ev_mins = h * 60 + m
+        except Exception:
+            continue
 
-    if not other_signals:
-        return None  # no recent data from other instrument — allow
+        window_start = ev_mins - _RED_FOLDER_MINS
+        window_end   = ev_mins + _RED_FOLDER_MINS
+        title        = event.get('title', f'HIGH event at {time_str} ET')
 
-    confirmed = any(
-        (str(a.get('signal', '')).upper() in ('LONG', 'BUY')) == is_long
-        for a in other_signals
-    )
-    if not confirmed:
-        latest = str(other_signals[0].get('signal', 'unknown')).upper()
-        return (
-            f'instrument alignment failed — {base} wants {direction} but '
-            f'{other_key} last {len(other_signals)} signal(s) show {latest}'
-        )
+        if window_start <= now_et_mins <= window_end:
+            result['active'] = True
+            result['reason'] = (
+                f'RED_FOLDER_WINDOW — {title} at {time_str} ET, '
+                f'within ±{_RED_FOLDER_MINS}min blackout'
+            )
+
+        if ev_mins > now_et_mins:
+            upcoming.append((ev_mins, title))
+
+    if upcoming:
+        upcoming.sort()
+        next_mins, next_title = upcoming[0]
+        result['next_event_name']    = next_title
+        result['next_event_time_et'] = f'{next_mins // 60:02d}:{next_mins % 60:02d} ET'
+        result['minutes_to_next']    = next_mins - now_et_mins
+
+    return result
+
+
+# ── RULE 2: Daily trade limit ──────────────────────────────────
+
+def _get_daily_trades_taken() -> int:
+    return int(_get_daily_state().get('daily_trades_taken', 0))
+
+
+def _increment_daily_trades() -> None:
+    risk      = load_risk_state()
+    today_str = now_ny().strftime('%Y-%m-%d')
+    if risk.get('daily_trades_date') != today_str:
+        risk['daily_trades_date']    = today_str
+        risk['daily_trades_taken']   = 0
+        risk['daily_loss_limit_hit'] = False
+    risk['daily_trades_taken'] = int(risk.get('daily_trades_taken', 0)) + 1
+    save_risk_state(risk)
+
+
+# ── RULE 3: Daily loss limit ───────────────────────────────────
+
+def _check_daily_loss_limit(session: str, pnl_today: float) -> tuple[bool, str]:
+    """
+    Return (blocked, reason_code).
+    If limit breached, sets daily_loss_limit_hit=True in risk state.
+    If already hit (from earlier in the day), blocks immediately.
+    """
+    risk = _get_daily_state()
+
+    if risk.get('daily_loss_limit_hit'):
+        code = 'DAILY_LOSS_LIMIT_ASIA' if session == 'ASIA' else 'DAILY_LOSS_LIMIT_NY'
+        return True, code
+
+    if session == 'ASIA' and pnl_today < _LOSS_LIMIT_ASIA:
+        risk['daily_loss_limit_hit'] = True
+        save_risk_state(risk)
+        return True, 'DAILY_LOSS_LIMIT_ASIA'
+
+    if session in ('LONDON', 'NEW_YORK_CASH') and pnl_today < _LOSS_LIMIT_NY_LON:
+        risk['daily_loss_limit_hit'] = True
+        save_risk_state(risk)
+        return True, 'DAILY_LOSS_LIMIT_NY'
+
+    return False, ''
+
+
+# ── RULE 4: Asia session ───────────────────────────────────────
+
+def _asia_session_anchor() -> str | None:
+    """
+    Return 'YYYY-MM-DD' of the calendar day when the current Asia session started,
+    or None if we are not currently in the Asia session.
+    Asia = 19:00–03:00 ET.  The session is anchored to its start day.
+    """
+    ny = now_ny()
+    h  = ny.hour
+    if h >= 19:
+        return ny.strftime('%Y-%m-%d')
+    if h < 3:
+        return (ny - timedelta(days=1)).strftime('%Y-%m-%d')
     return None
+
+
+def _get_asia_trade_taken() -> bool:
+    anchor = _asia_session_anchor()
+    if anchor is None:
+        return False
+    risk = load_risk_state()
+    if risk.get('asia_session_anchor') != anchor:
+        risk['asia_session_anchor'] = anchor
+        risk['asia_trade_taken']    = False
+        save_risk_state(risk)
+        return False
+    return bool(risk.get('asia_trade_taken', False))
+
+
+def _set_asia_trade_taken() -> None:
+    anchor = _asia_session_anchor()
+    if anchor is None:
+        return
+    risk = load_risk_state()
+    risk['asia_session_anchor'] = anchor
+    risk['asia_trade_taken']    = True
+    save_risk_state(risk)
 
 
 # ── Public helpers ─────────────────────────────────────────────
@@ -215,156 +358,136 @@ def close_all_positions() -> dict:
 
 
 def get_today_trade_count() -> int:
-    api = _client()
-    if not api:
-        return 0
-    try:
-        from datetime import date
-        req    = GetOrdersRequest(
-            status=QueryOrderStatus.ALL,
-            after=f'{date.today().isoformat()}T00:00:00Z',
-            limit=500,
-        )
-        orders = api.get_orders(filter=req)
-        return sum(
-            1 for o in orders
-            if str(getattr(o, 'order_class', '')) in ('bracket', '')
-            and getattr(o, 'legs', None) is not None
-        )
-    except Exception:
-        return 0
+    """Trades executed today ET, from donna_risk_state daily counter."""
+    return _get_daily_trades_taken()
+
+
+def get_execution_status() -> dict:
+    """Full risk-rule snapshot for the /execution-status endpoint."""
+    rf        = _red_folder_status()
+    risk      = _get_daily_state()
+    acct      = get_account()
+    return {
+        'daily_trades_taken':       int(risk.get('daily_trades_taken', 0)),
+        'daily_loss_limit_hit':     bool(risk.get('daily_loss_limit_hit', False)),
+        'asia_trade_taken':         _get_asia_trade_taken(),
+        'red_folder_window_active': rf['active'],
+        'next_red_folder_event':    rf['next_event_name'],
+        'next_event_time_et':       rf['next_event_time_et'],
+        'minutes_to_next_event':    rf['minutes_to_next'],
+        'current_pnl_today':        acct.get('pnl_today'),
+        'session':                  session_label(),
+        'account':                  acct,
+        'positions':                get_positions(),
+    }
 
 
 # ── Core execution ─────────────────────────────────────────────
 
 def execute_signal(signal_result: dict) -> dict:
     """
-    Gate-check a process_signal() result through 8 execution filters and,
-    if all pass, submit a bracket market order on SPY or QQQ via Alpaca paper.
-    All skipped TAKE signals are logged to donna_risk_state.json.
+    Apply DONNA's 5 official risk rules then, if all pass, submit a bracket
+    market order via Alpaca paper.  Every blocked TAKE signal is logged with
+    an exact reason_code to donna_risk_state.json.
+
+    Rule 1 — RED FOLDER       ±30 min around any HIGH macro event → block.
+    Rule 2 — DAILY TRADE LIMIT  max 2 trades per calendar day ET.
+    Rule 3 — DAILY LOSS LIMIT   NY/London < -$1 000 | Asia < -$500 → block.
+    Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
+    Rule 5 — POSITION SIZING    floor(500 / (stop_pts × point_val)), cap 3.
     """
     parsed = signal_result.get('parsed', {})
     data   = signal_result.get('data', {})
 
-    # ── VERDICT — not a logged skip; non-TAKE signals are not execution candidates
+    # ── VERDICT — non-TAKE signals not logged as skips
     if str(parsed.get('verdict', '')).upper() != 'TAKE':
         return {'status': 'skipped', 'reason': 'verdict not TAKE'}
 
-    # ── SESSION FILTER — 9:30–15:30 ET only (no trades in last 30 min of session)
-    if not _in_trading_window():
-        return _log_skip(data, parsed,
-            'outside trading window (09:30–15:30 ET) — last 30 min of session excluded')
+    # ── RULE 1: RED FOLDER
+    rf = _red_folder_status()
+    if rf['active']:
+        return _log_skip(data, parsed, rf['reason'], 'RED_FOLDER_WINDOW')
 
-    # ── MACRO / EVENT gate
-    risk        = load_risk_state()
-    macro       = str(risk.get('macro_risk', 'medium')).lower()
-    event_phase = str(risk.get('event_phase', '')).upper()
-    if macro == 'high' and event_phase in ('LIVE', 'IMMINENT'):
-        return _log_skip(data, parsed,
-            f'macro_risk HIGH with event {event_phase} — no execution during active events')
+    # ── Session + account P&L (shared by Rules 2–4)
+    session   = session_label()
+    acct      = get_account()
+    pnl_today = acct.get('pnl_today', 0.0) if acct.get('available') else 0.0
 
-    # ── STOP_TRADING flag
-    try:
-        from donna_risk_engine import load_re_state
-        if load_re_state().get('stop_trading'):
-            return _log_skip(data, parsed, 'STOP_TRADING flag is active')
-    except Exception:
-        pass
-
-    # ── REGIME FILTER — allow TRENDING/CONSOLIDATING, block EVENT_DRIVEN/RISK_OFF
-    regime = str(data.get('regime', '') or risk.get('market_regime', '')).upper().strip()
-    if regime in _BLOCKED_REGIMES:
+    # ── RULE 2: DAILY TRADE LIMIT
+    trades_today = _get_daily_trades_taken()
+    if trades_today >= _DAILY_TRADE_LIMIT:
         return _log_skip(data, parsed,
-            f'regime {regime} blocked — execution only allowed in TRENDING or CONSOLIDATING')
+            f'daily trade limit reached — {trades_today}/{_DAILY_TRADE_LIMIT} trades taken today',
+            'DAILY_TRADE_LIMIT')
 
-    # ── CONFIDENCE FILTER — minimum 70%
-    try:
-        confidence_val = float(str(parsed.get('confidence', '0')).replace('%', '').strip())
-    except Exception:
-        confidence_val = 0.0
-    if confidence_val < 70.0:
+    # ── RULE 3: DAILY LOSS LIMIT
+    loss_hit, loss_code = _check_daily_loss_limit(session, pnl_today)
+    if loss_hit:
+        limit = _LOSS_LIMIT_ASIA if session == 'ASIA' else _LOSS_LIMIT_NY_LON
         return _log_skip(data, parsed,
-            f'confidence {confidence_val:.1f}% below 70% minimum — signal logged, no trade')
+            f'daily loss limit hit — P&L ${pnl_today:,.2f} (limit ${limit:,.0f}) [{session}]',
+            loss_code)
 
-    # ── TIER FILTER
-    tier = str(data.get('tier', '3')).strip()
-    if tier == '3':
-        return _log_skip(data, parsed,
-            'Tier 3 signal — never auto-executes, logged only')
-    if tier == '2' and regime != 'TRENDING':
-        regime_desc = regime if regime else 'unknown'
-        return _log_skip(data, parsed,
-            f'Tier 2 requires TRENDING regime — current regime: {regime_desc}')
-    # Tier 1 / ELITE passes automatically
+    # ── RULE 4: ASIA SESSION RULES
+    if session == 'ASIA':
+        try:
+            confidence_val = float(
+                str(parsed.get('confidence', '0')).replace('%', '').strip()
+            )
+        except Exception:
+            confidence_val = 0.0
 
-    # ── SYMBOL RESOLUTION — map futures base to ETF proxy
+        if confidence_val < _ASIA_MIN_CONFIDENCE:
+            return _log_skip(data, parsed,
+                f'Asia session requires confidence ≥ {_ASIA_MIN_CONFIDENCE:.0f}% '
+                f'— signal is {confidence_val:.1f}%',
+                'ASIA_CONFIDENCE_TOO_LOW')
+
+        if _get_asia_trade_taken():
+            return _log_skip(data, parsed,
+                'Asia session trade already taken — max 1 trade per Asia session',
+                'ASIA_TRADE_ALREADY_TAKEN')
+
+    # ── SYMBOL RESOLUTION
     base = _map_base(data)
     if not base:
         return _log_skip(data, parsed, 'cannot resolve instrument to MNQ or MES')
-    etf = _ETF_MAP[base]   # 'MES' → 'SPY', 'MNQ' → 'QQQ'
+    symbol = _front_month_symbol(base)
 
     # ── ALPACA CLIENT
     api = _client()
     if not api:
-        return {'status': 'error', 'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY'}
+        return {
+            'status': 'error',
+            'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY',
+        }
 
-    positions = get_positions()
-
-    # ── POSITION LIMIT — maximum 2 open positions
-    if len(positions) >= _MAX_POSITIONS:
-        return _log_skip(data, parsed,
-            f'position limit reached — {len(positions)}/{_MAX_POSITIONS} positions already open')
-
-    # ── DIRECTION FILTER — no same-direction duplicate on same ETF
-    signal  = str(data.get('signal', '')).upper()
-    is_long = signal in ('LONG', 'BUY')
-    dir_str = 'long' if is_long else 'short'
-    for p in positions:
-        if p['symbol'] == etf:
-            pos_is_long = str(p['side']).lower() in ('long', 'buy')
-            if pos_is_long == is_long:
-                return _log_skip(data, parsed,
-                    f'direction blocked — already {dir_str} {etf}, no duplicate {dir_str} {etf}')
-
-    # ── DAILY LOSS LIMIT — halt if P&L today < −$2 000
-    account   = get_account()
-    pnl_today = account.get('pnl_today', 0.0) if account.get('available') else 0.0
-    if account.get('available') and pnl_today < _DAILY_LOSS_LIMIT:
-        return _log_skip(data, parsed,
-            f'daily loss limit hit — P&L today ${pnl_today:,.2f} (limit ${_DAILY_LOSS_LIMIT:,.0f})')
-
-    # ── INSTRUMENT ALIGNMENT — counterpart instrument must confirm direction
-    align_fail = _check_instrument_alignment(base, is_long)
-    if align_fail:
-        return _log_skip(data, parsed, align_fail)
-
-    # ── ETF PRICE & SIZING
-    etf_price = _get_etf_price(etf)
-    if etf_price is None:
-        return {'status': 'error', 'reason': f'cannot fetch live price for {etf}'}
-
-    side       = OrderSide.BUY if is_long else OrderSide.SELL
-    qty        = _calc_etf_qty(etf, etf_price)
-    stop_pts   = _ETF_STOP_PTS[etf]
-    target_pts = stop_pts * 2            # 2:1 R:R
+    # ── RULE 5: POSITION SIZING — floor(500 / (stop_pts × point_val)), cap 3
+    signal    = str(data.get('signal', '')).upper()
+    is_long   = signal in ('LONG', 'BUY')
+    side      = OrderSide.BUY if is_long else OrderSide.SELL
+    qty       = _calc_qty(base)
+    stop_pts  = _DEFAULT_STOP[base]
+    tgt_pts   = stop_pts * 2   # 2:1 R:R
+    entry_ref = safe_float(data.get('price', 0))
 
     if is_long:
-        stop_px   = round(etf_price - stop_pts,   2)
-        target_px = round(etf_price + target_pts, 2)
+        stop_px = round(entry_ref - stop_pts, 2)
+        tgt_px  = round(entry_ref + tgt_pts,  2)
     else:
-        stop_px   = round(etf_price + stop_pts,   2)
-        target_px = round(etf_price - target_pts, 2)
+        stop_px = round(entry_ref + stop_pts, 2)
+        tgt_px  = round(entry_ref - tgt_pts,  2)
 
     # ── BRACKET ORDER
     try:
         order = api.submit_order(
             MarketOrderRequest(
-                symbol        = etf,
+                symbol        = symbol,
                 qty           = qty,
                 side          = side,
                 time_in_force = TimeInForce.DAY,
                 order_class   = OrderClass.BRACKET,
-                take_profit   = TakeProfitRequest(limit_price=target_px),
+                take_profit   = TakeProfitRequest(limit_price=tgt_px),
                 stop_loss     = StopLossRequest(stop_price=stop_px),
             )
         )
@@ -372,27 +495,32 @@ def execute_signal(signal_result: dict) -> dict:
     except Exception as e:
         return {'status': 'error', 'reason': str(e)}
 
-    # ── LOG EXECUTION TO ALERT HISTORY
+    # ── RECORD COUNTERS — only after confirmed order submission
+    _increment_daily_trades()
+    if session == 'ASIA':
+        _set_asia_trade_taken()
+
+    # ── LOG EXECUTION
     direction = 'BUY' if is_long else 'SELL'
     record = {
         'type':          'execution',
-        'ticker':        etf,
+        'ticker':        symbol,
         'signal':        direction,
-        'session':       data.get('session', ''),
+        'session':       session,
         'timeframe':     data.get('timeframe', ''),
-        'price':         str(etf_price),
+        'price':         str(entry_ref),
         'verdict':       'TAKE',
         'confidence':    parsed.get('confidence', ''),
-        'summary':       (f'EXECUTED {direction} {qty}sh {etf} @ {etf_price}. '
-                          f'Stop: {stop_px}, Target: {target_px}'),
-        'instrument':    etf,
+        'summary':       (f'EXECUTED {direction} {qty}x {symbol} @ {entry_ref}. '
+                          f'Stop: {stop_px}, Target: {tgt_px}'),
+        'instrument':    symbol,
         'tier':          data.get('tier', ''),
         'setup_type':    data.get('setup_type', ''),
         'signal_reason': data.get('signal_reason', ''),
-        'entry_price':   etf_price,
-        'shares':        qty,
+        'entry_price':   entry_ref,
+        'contracts':     qty,
         'stop_price':    stop_px,
-        'target_price':  target_px,
+        'target_price':  tgt_px,
         'order_id':      order_id,
         'timestamp':     utc_now_iso(),
     }
@@ -402,19 +530,19 @@ def execute_signal(signal_result: dict) -> dict:
 
     send_telegram_message(
         f'DONNA EXECUTED\n'
-        f'{direction} {qty}sh {etf} @ {etf_price}\n'
-        f'Stop: {stop_px} | Target: {target_px}\n'
+        f'{direction} {qty}x {symbol} @ {entry_ref}\n'
+        f'Stop: {stop_px} | Target: {tgt_px}\n'
         f'Setup: {data.get("setup_type", "")} | Tier: {data.get("tier", "")}\n'
         f'Order ID: {order_id}'
     )
 
     return {
         'status':       'executed',
-        'symbol':       etf,
+        'symbol':       symbol,
         'side':         'buy' if is_long else 'sell',
-        'shares':       qty,
-        'entry_ref':    etf_price,
+        'contracts':    qty,
+        'entry_ref':    entry_ref,
         'stop_price':   stop_px,
-        'target_price': target_px,
+        'target_price': tgt_px,
         'order_id':     order_id,
     }
