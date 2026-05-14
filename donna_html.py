@@ -1261,18 +1261,20 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         </div>
       </div>
 
-      <!-- FIB LEVELS + PULSE -->
+      <!-- PRICE INTELLIGENCE -->
       <div class="harvey-mid-grid">
         <div class="panel">
-          <div class="kicker" style="color:var(--green)">NQ Futures</div>
-          <div class="section-title" style="margin-bottom:4px">Key Levels</div>
-          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:10px" id="harveyNqLast">—</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div class="kicker" style="margin-bottom:0;color:var(--green)">NQ Futures</div>
+            <div style="font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700" id="harveyNqLast">—</div>
+          </div>
           <div id="harveyNqPriceIntel"><div class="pi-verdict">Loading price intelligence…</div></div>
         </div>
         <div class="panel">
-          <div class="kicker" style="color:var(--blue)">ES Futures</div>
-          <div class="section-title" style="margin-bottom:4px">Key Levels</div>
-          <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700;margin-bottom:10px" id="harveyEsLast">—</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div class="kicker" style="margin-bottom:0;color:var(--blue)">ES Futures</div>
+            <div style="font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700" id="harveyEsLast">—</div>
+          </div>
           <div id="harveyEsPriceIntel"><div class="pi-verdict">Loading price intelligence…</div></div>
         </div>
         <div class="panel">
@@ -1931,35 +1933,29 @@ function renderHarvey(d) {
     const pdh  = levels.prev_high,  pdl  = levels.prev_low;
     const orbH = levels.orb_high,   orbL = levels.orb_low;
 
-    // ── Plain English verdict ──────────────────────────────────────
+    // ── Plain English verdict (always leads with open relationship) ──
     let verdict;
-    if (pdh && c > pdh) {
-      verdict = `${ticker} is trading above yesterday's high — bullish territory, watch for extension or fade.`;
-    } else if (pdl && c < pdl) {
-      verdict = `${ticker} broke below yesterday's low — bearish pressure, respect the breakdown.`;
-    } else if (orbH && orbL) {
-      if (c > orbH) {
-        verdict = `${ticker} broke above the opening range — continuation bias to the upside.`;
-      } else if (c < orbL) {
-        verdict = `${ticker} broke below the opening range — continuation to the downside.`;
-      } else if (open && Math.abs(c - open) / open <= 0.001) {
-        verdict = `${ticker} rejected at today's open — price is balanced here, watch for a push.`;
-      } else {
-        verdict = `${ticker} is inside the opening range — wait for a clean directional break.`;
-      }
-    } else if (open && high && low && high > low) {
-      const rp = (c - low) / (high - low) * 100;
-      if (Math.abs(c - open) / open <= 0.001) {
-        verdict = `${ticker} is pinned to today's open — balanced conditions, no edge yet.`;
-      } else if (rp > 68) {
-        verdict = `${ticker} is in the upper portion of today's range — bulls in control so far.`;
-      } else if (rp < 32) {
-        verdict = `${ticker} is near today's lows — sellers have had the edge this session.`;
-      } else {
-        verdict = `${ticker} is in the middle of today's range — no clear directional edge yet.`;
-      }
-    } else {
+    if (!open) {
       verdict = `${ticker} price data loading — levels will appear shortly.`;
+    } else {
+      const diffPct = (c - open) / open;
+      const aboveOpen = diffPct > 0.0008;
+      const belowOpen = diffPct < -0.0008;
+      if (aboveOpen) {
+        if (pdh && c > pdh) {
+          verdict = `${ticker} is trading above today's open and above yesterday's high — strongly bullish.`;
+        } else {
+          verdict = `${ticker} is trading above today's open — bullish bias, buyers in control.`;
+        }
+      } else if (belowOpen) {
+        if (pdl && c < pdl) {
+          verdict = `${ticker} is trading below today's open and below yesterday's low — strongly bearish.`;
+        } else {
+          verdict = `${ticker} is trading below today's open — bearish bias, sellers have the edge.`;
+        }
+      } else {
+        verdict = `${ticker} is trading at today's open — balanced conditions, neutral bias.`;
+      }
     }
 
     // ── Build sorted level list ────────────────────────────────────
@@ -2469,7 +2465,7 @@ async function refreshScenarios(force = false) {
   if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = 'GENERATE'; }
 }
 
-document.getElementById('scenarioGenBtn').addEventListener('click', () => refreshScenarios(true));
+document.getElementById('scenarioGenBtn')?.addEventListener('click', () => refreshScenarios(true));
 
 // ════════ JOURNAL ════════
 let journalFilter = 'all';
