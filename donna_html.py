@@ -943,7 +943,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
-        <button class="tab-btn playbook-btn" data-page="playbook">Playbook</button>
         <button class="tab-btn journal-btn" data-page="journal">Journal</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
@@ -998,17 +997,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5" id="morningRead">—</div>
           </div>
         </div>
-      </div>
-
-      <!-- SESSION PLAYBOOK BAR -->
-      <div class="playbook-bar">
-        <span class="pb-bar-label">Session</span><span class="pb-bar-val" id="playbookSession">—</span>
-        <span class="pb-bar-sep">·</span>
-        <span class="pb-bar-label">Driver</span><span class="pb-bar-val" id="playbookDriver">—</span>
-        <span class="pb-bar-sep">·</span>
-        <span class="pb-bar-label">Events</span><span class="pb-bar-val" id="playbookEvents">—</span>
-        <span class="pb-bar-sep">·</span>
-        <span class="pb-bar-note" id="playbookTactical">—</span>
       </div>
 
       <!-- RISK STRIP -->
@@ -1100,12 +1088,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
         <!-- RIGHT -->
         <div class="right-stack">
-
-          <!-- DONNA OBSERVATIONS -->
-          <div class="panel">
-            <div class="kicker" style="margin-bottom:10px">Live Observations</div>
-            <div id="observationsList"></div>
-          </div>
 
           <!-- TOP STORY -->
           <div class="panel">
@@ -1246,34 +1228,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <div class="chat-input-row">
             <input class="chat-input" id="assistantInput" type="text" placeholder="Enter command or question..." />
             <button class="send-btn" id="assistantSend">SEND</button>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- TASKS + REMINDERS -->
-      <div class="asst-state-grid">
-
-        <!-- FOCUS + TASKS -->
-        <div class="panel">
-          <div class="kicker">Daily Agenda</div>
-          <div class="section-title" style="margin-bottom:8px">Focus &amp; Tasks</div>
-          <div style="padding:10px 14px;border-radius:10px;background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.15);font-size:13px;color:var(--text);margin-bottom:14px;line-height:1.5" id="dailyFocus">—</div>
-          <div id="tasksList"></div>
-          <div class="add-row">
-            <input class="add-input" id="taskInput" type="text" placeholder="Add a task..." />
-            <button class="add-btn" id="addTaskBtn">+ Add</button>
-          </div>
-        </div>
-
-        <!-- REMINDERS -->
-        <div class="panel">
-          <div class="kicker">Reminders</div>
-          <div class="section-title" style="margin-bottom:14px">Active Reminders</div>
-          <div id="remindersList"></div>
-          <div class="add-row">
-            <input class="add-input" id="reminderInput" type="text" placeholder="Add a reminder..." />
-            <button class="add-btn" id="addReminderBtn">+ Add</button>
           </div>
         </div>
 
@@ -1444,33 +1398,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <div class="kv-row"><span class="kv-k">Mode</span><span class="kv-v" id="harveyWmMode">—</span></div>
           <div class="kv-row"><span class="kv-k">Risk to Conviction</span><span class="kv-v" id="harveyWmRtc">—</span></div>
           <div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.12);font-size:13px;color:var(--muted);line-height:1.6" id="harveyWmFocus">—</div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ════════════════════ PLAYBOOK ════════════════════ -->
-  <div class="page" id="page-playbook">
-    <div class="vstack">
-
-      <div class="hero-banner">
-        <div class="hero-eyebrow">AI Scenario Engine</div>
-        <div class="scenario-header">
-          <div>
-            <div class="hero-title" style="color:#a78bfa">Today\'s Playbook</div>
-            <div class="hero-sub">If/then scenarios generated from live market conditions, active regime, and today\'s macro calendar.</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
-            <div class="scenario-meta" id="scenarioMeta">—</div>
-            <button class="gen-btn" id="scenarioGenBtn">GENERATE</button>
-          </div>
-        </div>
-      </div>
-
-      <div id="scenarioGrid" class="scenario-grid">
-        <div class="scenario-card">
-          <div class="sc-reaction" style="color:var(--muted2)">Click GENERATE to build today\'s if/then playbook from live market conditions and macro calendar.</div>
         </div>
       </div>
 
@@ -1658,7 +1585,6 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
-    if (btn.dataset.page === 'playbook') refreshScenarios();
   });
 });
 
@@ -1797,26 +1723,11 @@ function renderDashboard(d) {
       <td class="dn">${r.symbol}</td><td>${r.last}</td><td class="dn">${r.pct}</td>
     </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
 
-  // Observations
-  setHtml('observationsList', obs.map(o => `
-    <div class="obs-item ${o.priority || 'low'}">
-      <div class="obs-title">${o.title || '—'}</div>
-      <div class="obs-body">${o.summary || ''}</div>
-    </div>`).join('') || '<div class="obs-item low"><div class="obs-body">No observations yet.</div></div>');
-
   // Top story
   setText('topStory', risk.last_headline || wm.headline || '—');
   setText('topStoryNote', risk.headline_guidance || wm.summary || '—');
 
-  // Session playbook bar (slim)
-  const pb = d.session_playbook || {};
-  setText('playbookSession', pb.session_type || '—');
-  setText('playbookDriver', pb.dominant_driver || '—');
-  const evts = pb.key_events || [];
-  setText('playbookEvents', evts.length ? evts.map(e => e.split('—').pop().trim()).join(' · ') : 'None');
-  setText('playbookTactical', pb.tactical_note || '—');
-
-  // Scenarios — update playbook page silently in background
+  // Scenarios — update silently in background
   if (d.scenarios) renderScenarios(d.scenarios);
 
   // Cross-asset intelligence card
@@ -2320,26 +2231,6 @@ function renderNews(d) {
   }
 }
 
-// ════════ RENDER ASSISTANT STATE ════════
-function renderAssistantState(asst) {
-  if (!asst) return;
-  setText('dailyFocus', asst.daily_focus || '—');
-
-  const tasks = asst.tasks || [];
-  setHtml('tasksList', tasks.map((t, i) => `
-    <div class="state-list-item">
-      <span class="state-card-text">${t}</span>
-      <button class="del-btn" onclick="deleteTask(${i})" title="Remove">✕</button>
-    </div>`).join('') || '<div style="color:var(--muted2);font-size:13px;padding:8px 0">No tasks.</div>');
-
-  const reminders = asst.reminders || [];
-  setHtml('remindersList', reminders.map((r, i) => `
-    <div class="state-list-item">
-      <span class="state-card-text">${r}</span>
-      <button class="del-btn" onclick="deleteReminder(${i})" title="Remove">✕</button>
-    </div>`).join('') || '<div style="color:var(--muted2);font-size:13px;padding:8px 0">No reminders.</div>');
-}
-
 // ════════ MAIN REFRESH ════════
 async function refresh() {
   try {
@@ -2349,7 +2240,6 @@ async function refresh() {
 
     renderDashboard(d);
     renderNews(d);
-    renderAssistantState(d.assistant);
     renderHarvey(d);
     refreshHarvey();
 
@@ -2411,7 +2301,6 @@ async function sendChat(overrideMsg) {
     const data = await res.json();
     showTyping(false);
     appendMsg('assistant', data.reply || 'No response.');
-    if (data.assistant) renderAssistantState(data.assistant);
   } catch (err) {
     showTyping(false);
     appendMsg('assistant', 'Connection error. Please try again.');
@@ -2425,64 +2314,6 @@ chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); 
 
 document.querySelectorAll('.quick-cmd-btn').forEach(btn => {
   btn.addEventListener('click', () => sendChat(btn.dataset.cmd));
-});
-
-// ════════ TASK / REMINDER ACTIONS ════════
-async function deleteTask(index) {
-  try {
-    const res = await fetch('/assistant/delete-task', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({index})
-    });
-    const data = await res.json();
-    if (data.assistant) renderAssistantState(data.assistant);
-  } catch(e) { console.error(e); }
-}
-
-async function deleteReminder(index) {
-  try {
-    const res = await fetch('/assistant/delete-reminder', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({index})
-    });
-    const data = await res.json();
-    if (data.assistant) renderAssistantState(data.assistant);
-  } catch(e) { console.error(e); }
-}
-
-document.getElementById('addTaskBtn').addEventListener('click', async () => {
-  const val = document.getElementById('taskInput').value.trim();
-  if (!val) return;
-  document.getElementById('taskInput').value = '';
-  try {
-    const res = await fetch('/assistant/add-task', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({task: val})
-    });
-    const data = await res.json();
-    if (data.assistant) renderAssistantState(data.assistant);
-  } catch(e) { console.error(e); }
-});
-
-document.getElementById('addReminderBtn').addEventListener('click', async () => {
-  const val = document.getElementById('reminderInput').value.trim();
-  if (!val) return;
-  document.getElementById('reminderInput').value = '';
-  try {
-    const res = await fetch('/assistant/add-reminder', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({reminder: val})
-    });
-    const data = await res.json();
-    if (data.assistant) renderAssistantState(data.assistant);
-  } catch(e) { console.error(e); }
-});
-
-document.getElementById('taskInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('addTaskBtn').click();
-});
-document.getElementById('reminderInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('addReminderBtn').click();
 });
 
 // ════════ SSE — REAL-TIME SIGNAL STREAM ════════
