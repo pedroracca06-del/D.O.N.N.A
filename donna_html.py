@@ -1027,27 +1027,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             </table>
           </div>
 
-          <!-- MARKET MOVERS (Live) -->
-          <div class="panel">
-            <div class="kicker" style="margin-bottom:10px">Live Movers</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div>
-                <div class="kicker" style="margin-bottom:6px;color:var(--green)">Gainers</div>
-                <table>
-                  <thead><tr><th>Sym</th><th>Last</th><th>%Chg</th></tr></thead>
-                  <tbody id="gainersTable"></tbody>
-                </table>
-              </div>
-              <div>
-                <div class="kicker" style="margin-bottom:6px;color:var(--red)">Losers</div>
-                <table>
-                  <thead><tr><th>Sym</th><th>Last</th><th>%Chg</th></tr></thead>
-                  <tbody id="losersTable"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
         </div>
 
         <!-- RIGHT -->
@@ -1732,7 +1711,7 @@ function renderDashboard(d) {
   const wm = d.what_matters_now || {};
   const alerts = d.raw_trade_alerts || [];
   const movers = d.market_movers_engine || {};
-  const liveMovers = d.live_movers || {};
+
   const news = d.news || [];
 
   // Live strip + session
@@ -1793,18 +1772,6 @@ function renderDashboard(d) {
 
   // Major indexes
   renderDashMajorIndexes(d);
-
-  // Gainers / Losers
-  const gainers = (liveMovers.gainers || []).slice(0, 5);
-  const losers  = (liveMovers.losers  || []).slice(0, 5);
-  setHtml('gainersTable', gainers.map(r => `
-    <tr>
-      <td class="up">${r.symbol}</td><td>${r.last}</td><td class="up">${r.pct}</td>
-    </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
-  setHtml('losersTable', losers.map(r => `
-    <tr>
-      <td class="dn">${r.symbol}</td><td>${r.last}</td><td class="dn">${r.pct}</td>
-    </tr>`).join('') || '<tr><td colspan="3" class="neutral">—</td></tr>');
 
   // Top story
   setText('topStory', risk.last_headline || wm.headline || '—');
