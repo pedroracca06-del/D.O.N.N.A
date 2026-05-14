@@ -36,7 +36,7 @@ from donna_engines import (
     build_market_driver_engine, build_morning_edge, build_session_significance,
     get_live_major_indexes, get_live_market_data, get_live_movers,
     get_live_calendar, get_live_earnings, get_live_news, get_live_futures_macro_pulse,
-    send_morning_brief,
+    send_morning_brief, get_quote_with_fallback,
 )
 from donna_signals import process_signal
 
@@ -349,6 +349,97 @@ async def major_indexes():
 @app.get('/movers')
 async def movers():
     return get_live_movers()
+
+
+@app.get('/trending-movers')
+async def trending_movers():
+    symbols = [
+        ('NVDA', 'NVIDIA'), ('MSFT', 'Microsoft'), ('AAPL', 'Apple'),
+        ('AMZN', 'Amazon'), ('META', 'Meta'), ('TSLA', 'Tesla'),
+        ('GOOG', 'Alphabet'), ('AVGO', 'Broadcom'), ('CSCO', 'Cisco'),
+        ('AMD', 'AMD'), ('JPM', 'JPMorgan'), ('BAC', 'Bank of America'),
+        ('GS', 'Goldman Sachs'), ('XOM', 'ExxonMobil'), ('CVX', 'Chevron'),
+    ]
+    rows = []
+    for sym, name in symbols:
+        q = await asyncio.to_thread(get_quote_with_fallback, sym)
+        if not q:
+            continue
+        pct = q.get('pct', 0)
+        try:
+            pct_num = float(str(pct).replace('%', ''))
+        except Exception:
+            pct_num = 0.0
+        rows.append({'symbol': sym, 'name': name, 'last': q.get('last', '-'),
+                     'chg': q.get('chg', '-'), 'pct': pct_num})
+    rows.sort(key=lambda r: r['pct'], reverse=True)
+    gainers = [dict(r, pct=f"{r['pct']:+.2f}%") for r in rows[:5]]
+    losers  = [dict(r, pct=f"{r['pct']:+.2f}%") for r in rows[-5:][::-1]]
+    return {'gainers': gainers, 'losers': losers}
+
+
+@app.get('/sector-heat')
+async def sector_heat():
+    sectors = [
+        ('XLK',  'Technology',        31.0),
+        ('XLV',  'Healthcare',        12.5),
+        ('XLF',  'Financials',        13.0),
+        ('XLY',  'Consumer Disc.',    11.0),
+        ('XLC',  'Comm. Services',     9.0),
+        ('XLI',  'Industrials',        9.0),
+        ('XLP',  'Consumer Staples',   6.0),
+        ('XLE',  'Energy',             4.0),
+        ('XLU',  'Utilities',          2.5),
+        ('XLB',  'Materials',          2.5),
+        ('XLRE', 'Real Estate',        2.0),
+    ]
+    results = []
+    for sym, name, weight in sectors:
+        q = await asyncio.to_thread(get_quote_with_fallback, sym)
+        pct_num = 0.0
+        if q:
+            try:
+                pct_num = float(str(q.get('pct', 0)).replace('%', ''))
+            except Exception:
+                pass
+        results.append({'symbol': sym, 'name': name, 'weight': weight,
+                        'last': (q or {}).get('last', '-'),
+                        'pct': round(pct_num, 2)})
+    return {'sectors': results}
+
+
+@app.get('/nq-components')
+async def nq_components():
+    components = [
+        ('AAPL',  'Apple',     9.0),
+        ('MSFT',  'Microsoft', 9.0),
+        ('NVDA',  'NVIDIA',    8.5),
+        ('AMZN',  'Amazon',    5.5),
+        ('META',  'Meta',      5.0),
+        ('GOOG',  'Alphabet',  5.0),
+        ('AVGO',  'Broadcom',  4.0),
+        ('TSLA',  'Tesla',     3.5),
+        ('COST',  'Costco',    2.5),
+        ('ADBE',  'Adobe',     1.5),
+    ]
+    results = []
+    for sym, name, weight in components:
+        q = await asyncio.to_thread(get_quote_with_fallback, sym)
+        pct_num = 0.0
+        if q:
+            try:
+                pct_num = float(str(q.get('pct', 0)).replace('%', ''))
+            except Exception:
+                pass
+        results.append({'symbol': sym, 'name': name, 'weight': weight,
+                        'last': (q or {}).get('last', '-'),
+                        'pct': round(pct_num, 2)})
+    return {'components': results}
+
+
+@app.get('/futures-macro-pulse')
+async def futures_macro_pulse():
+    return {'rows': get_live_futures_macro_pulse()}
 
 
 @app.get('/calendar')

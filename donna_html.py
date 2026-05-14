@@ -531,6 +531,110 @@ tr:last-child td{border-bottom:none}
 .breaking-event-source{font-size:10px;color:var(--muted2);font-family:'Space Mono',monospace}
 @media(max-width:900px){.breaking-events-grid{grid-template-columns:1fr}}
 
+/* ── NEWS FUTURES STRIP ── */
+.news-futures-strip{
+  display:flex;align-items:center;gap:0;overflow:hidden;
+  border-radius:10px;background:var(--panel);border:1px solid var(--line);height:36px;
+}
+.news-futures-label{
+  flex-shrink:0;padding:0 12px;font-family:'Space Mono',monospace;
+  font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;
+  border-right:1px solid var(--line);height:100%;
+  display:flex;align-items:center;background:var(--panel2);white-space:nowrap;
+}
+.news-futures-track-wrap{flex:1;overflow:hidden;position:relative;height:100%;display:flex;align-items:center}
+.news-futures-track{
+  display:inline-flex;white-space:nowrap;padding-left:100%;
+  animation:tickerMove 45s linear infinite;
+}
+.nf-item{
+  margin-right:28px;font-family:'Space Mono',monospace;font-size:10px;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.nf-sym{color:var(--muted2);letter-spacing:1px;font-size:9px;text-transform:uppercase}
+.nf-val{color:var(--text);font-weight:700}
+.nf-pct{font-size:9px}.nf-pct.up{color:var(--green)}.nf-pct.dn{color:var(--red)}
+
+/* ── TRENDING MOVERS ── */
+.movers-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.movers-col-title{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;
+  margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line2);
+}
+.movers-col-title.gainers{color:var(--green)}.movers-col-title.losers{color:var(--red)}
+.mover-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:7px 0;border-bottom:1px solid var(--line2);
+}
+.mover-row:last-child{border-bottom:none}
+.mover-left{display:flex;flex-direction:column}
+.mover-sym{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--text)}
+.mover-name{font-size:10px;color:var(--muted2)}
+.mover-pct{font-family:'Space Mono',monospace;font-size:11px;font-weight:700}
+.mover-pct.up{color:var(--green)}.mover-pct.dn{color:var(--red)}
+
+/* ── SECTOR HEAT / TREEMAP ── */
+.treemap-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px}
+.treemap-toggle{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.treemap-toggle-btn{
+  padding:5px 14px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;
+  text-transform:uppercase;cursor:pointer;border:none;outline:none;
+  background:var(--panel);color:var(--muted2);transition:all .15s;
+}
+.treemap-toggle-btn.active{background:var(--text);color:var(--panel)}
+.treemap-container{display:flex;gap:3px;width:100%;height:175px;border-radius:8px;overflow:hidden}
+.treemap-block{
+  display:flex;flex-direction:column;justify-content:flex-end;padding:7px 8px;
+  cursor:pointer;transition:opacity .15s;min-width:28px;height:100%;
+  border-radius:3px;
+}
+.treemap-block:hover{opacity:.8}
+.treemap-block.selected{outline:2px solid rgba(255,255,255,.7);outline-offset:-2px}
+.tm-sym{font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:#fff;line-height:1;letter-spacing:.3px}
+.tm-name{font-size:9px;color:rgba(255,255,255,.75);line-height:1.2;margin-bottom:3px;font-family:'Space Mono',monospace}
+.tm-pct{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,.9);font-weight:700}
+.treemap-legend{
+  display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap;
+}
+.tm-legend-item{
+  display:flex;align-items:center;gap:4px;
+  font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);letter-spacing:.5px;
+}
+.tm-legend-swatch{width:10px;height:10px;border-radius:2px}
+.treemap-drill{
+  margin-top:10px;padding:12px 14px;border-radius:10px;
+  background:var(--panel2);border:1px solid var(--line);display:none;
+}
+.treemap-drill.open{display:block}
+.treemap-drill-title{font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;margin-bottom:8px}
+.treemap-drill-items{display:flex;flex-wrap:wrap;gap:6px}
+.treemap-drill-chip{
+  padding:3px 10px;border-radius:6px;background:var(--panel);border:1px solid var(--line);
+  font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:var(--text);
+}
+
+/* ── ECON CALENDAR ── */
+.econ-event{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid var(--line2)}
+.econ-event:last-child{border-bottom:none}
+.econ-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.econ-dot.high{background:var(--red)}.econ-dot.medium{background:var(--yellow)}.econ-dot.low{background:var(--muted2)}
+.econ-time{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);flex-shrink:0;width:38px;padding-top:1px}
+.econ-body{flex:1}
+.econ-title{font-size:11px;color:var(--text);line-height:1.4;font-weight:600}
+.econ-note{font-size:10px;color:var(--muted2);line-height:1.3;margin-top:2px}
+.econ-countdown{
+  display:inline-block;margin-top:3px;font-family:'Space Mono',monospace;font-size:9px;
+  font-weight:700;color:var(--red);
+}
+.econ-no-events{font-size:12px;color:var(--muted2);padding:4px 0}
+.econ-next-high{
+  margin-bottom:8px;padding:8px 10px;border-radius:8px;
+  background:var(--red2);border:1px solid rgba(192,57,43,.2);
+}
+.econ-next-high-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--red);text-transform:uppercase;margin-bottom:3px}
+.econ-next-high-title{font-size:11px;font-weight:700;color:var(--text);line-height:1.3}
+.econ-next-high-time{font-family:'Space Mono',monospace;font-size:10px;color:var(--red);font-weight:700;margin-top:2px}
+
 /* ── ASSISTANT ── */
 .donna-header{
   text-align:center;padding:24px 20px 16px;
@@ -1222,6 +1326,16 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   <div class="page" id="page-news">
     <div class="vstack">
 
+      <!-- LIVE FUTURES TICKER STRIP -->
+      <div class="news-futures-strip">
+        <div class="news-futures-label">Live</div>
+        <div class="news-futures-track-wrap">
+          <div class="news-futures-track" id="newsFuturesTrack">
+            <span class="nf-item"><span class="nf-sym">NQ</span><span class="nf-val">—</span><span class="nf-pct">—</span></span>
+          </div>
+        </div>
+      </div>
+
       <!-- BREAKING NEWS BAR -->
       <div class="breaking-bar">
         <div class="breaking-label">Breaking</div>
@@ -1259,8 +1373,46 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
       <!-- MAIN CONTENT + SIDEBAR -->
       <div class="news-layout">
 
-        <!-- LEFT: BREAKING EVENTS + NEWS FEED -->
+        <!-- LEFT: MOVERS + TREEMAP + BREAKING EVENTS + NEWS FEED -->
         <div class="vstack" style="gap:14px">
+
+          <!-- TRENDING MOVERS -->
+          <div class="panel">
+            <div class="kicker" style="margin-bottom:12px">Trending Movers</div>
+            <div class="movers-grid">
+              <div>
+                <div class="movers-col-title gainers">▲ Gainers</div>
+                <div id="moversGainers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
+              </div>
+              <div>
+                <div class="movers-col-title losers">▼ Losers</div>
+                <div id="moversLosers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SECTOR HEAT TREEMAP -->
+          <div class="panel">
+            <div class="treemap-toggle-row">
+              <div class="kicker" style="margin-bottom:0">Market Heat</div>
+              <div class="treemap-toggle">
+                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sectors')">S&amp;P Sectors</button>
+                <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ Components</button>
+              </div>
+            </div>
+            <div class="treemap-container" id="treemapContainer"></div>
+            <div class="treemap-legend">
+              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#166534"></span>&gt;+2%</span>
+              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#1e6e41"></span>+0.5–2%</span>
+              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#4a4a4a"></span>Flat</span>
+              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#8b2020"></span>-0.5–2%</span>
+              <span class="tm-legend-item"><span class="tm-legend-swatch" style="background:#6b0000"></span>&lt;-2%</span>
+            </div>
+            <div class="treemap-drill" id="treemapDrill">
+              <div class="treemap-drill-title" id="treemapDrillTitle">Top Holdings</div>
+              <div class="treemap-drill-items" id="treemapDrillItems"></div>
+            </div>
+          </div>
 
           <!-- BREAKING EVENTS -->
           <div class="panel">
@@ -1316,6 +1468,11 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <div class="sidebar-section">
             <div class="sidebar-kicker">Names to Watch</div>
             <div id="sidebarWatchNames">—</div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-kicker">Economic Calendar</div>
+            <div id="sidebarEconCalendar"><div class="econ-no-events">Loading events...</div></div>
           </div>
 
         </div>
@@ -2404,6 +2561,211 @@ async function refreshGrokIntelligence() {
   }
 }
 
+// ════════ NEWS FUTURES STRIP ════════
+async function refreshNewsFuturesStrip() {
+  try {
+    const [idxRes, pulseRes] = await Promise.all([
+      fetch('/major-indexes').then(r => r.json()),
+      fetch('/futures-macro-pulse').then(r => r.json()),
+    ]);
+    const map = {};
+    (pulseRes.rows || []).forEach(r => { map[r.symbol] = r; });
+    (idxRes.rows || []).forEach(r => {
+      const sym = r.symbol === 'US 10Y' ? 'US10Y' : r.symbol === 'S&P 500' ? 'SPX' : r.symbol;
+      if (!map[sym]) map[sym] = r;
+    });
+    const wanted = ['NQ','ES','DXY','GOLD','OIL','VIX','US10Y'];
+    let html = '';
+    wanted.forEach(sym => {
+      const d = map[sym] || {};
+      const last = d.last || '—';
+      const pct  = d.pct  || '—';
+      const dir  = d.dir  || (String(pct).startsWith('+') ? 'up' : String(pct).startsWith('-') ? 'dn' : '');
+      html += `<span class="nf-item"><span class="nf-sym">${sym}</span><span class="nf-val">${last}</span><span class="nf-pct ${dir}">${pct}</span></span>`;
+    });
+    const track = document.getElementById('newsFuturesTrack');
+    if (track && html) track.innerHTML = html + html;
+  } catch(e) { console.error('refreshNewsFuturesStrip:', e); }
+}
+
+// ════════ TRENDING MOVERS ════════
+async function refreshTrendingMovers() {
+  try {
+    const res = await fetch('/trending-movers');
+    if (!res.ok) return;
+    const d = await res.json();
+    function moverRow(m) {
+      const isUp = String(m.pct).startsWith('+');
+      const cls  = isUp ? 'up' : 'dn';
+      return `<div class="mover-row">
+        <div class="mover-left">
+          <div class="mover-sym">${m.symbol}</div>
+          <div class="mover-name">${m.name}</div>
+        </div>
+        <div class="mover-pct ${cls}">${m.pct}</div>
+      </div>`;
+    }
+    const gEl = document.getElementById('moversGainers');
+    const lEl = document.getElementById('moversLosers');
+    if (gEl) gEl.innerHTML = (d.gainers||[]).map(moverRow).join('') || '<div class="econ-no-events">No data</div>';
+    if (lEl) lEl.innerHTML = (d.losers||[]).map(moverRow).join('')  || '<div class="econ-no-events">No data</div>';
+  } catch(e) { console.error('refreshTrendingMovers:', e); }
+}
+
+// ════════ SECTOR HEAT TREEMAP ════════
+const SECTOR_HOLDINGS = {
+  XLK:  ['AAPL','MSFT','NVDA','AVGO','AMD'],
+  XLV:  ['LLY','UNH','JNJ','ABBV','MRK'],
+  XLF:  ['JPM','BAC','WFC','GS','MS'],
+  XLY:  ['AMZN','TSLA','HD','MCD','NKE'],
+  XLC:  ['META','GOOGL','NFLX','DIS','CMCSA'],
+  XLI:  ['CAT','RTX','HON','UNP','GE'],
+  XLP:  ['PG','KO','PEP','COST','WMT'],
+  XLE:  ['XOM','CVX','COP','EOG','SLB'],
+  XLU:  ['NEE','SO','DUK','AEP','EXC'],
+  XLB:  ['LIN','APD','SHW','ECL','NEM'],
+  XLRE: ['AMT','PLD','CCI','EQIX','PSA'],
+};
+const NQ_SEGMENTS = {
+  AAPL:  ['iPhone','Mac','Services','iPad','Wearables'],
+  MSFT:  ['Azure','Office 365','Teams','Xbox','LinkedIn'],
+  NVDA:  ['Data Center','Gaming','Auto','Professional','OEM'],
+  AMZN:  ['AWS','Retail','Advertising','Prime','International'],
+  META:  ['Facebook','Instagram','WhatsApp','Oculus','Ads'],
+  GOOG:  ['Search','YouTube','GCP','Android','Other Bets'],
+  AVGO:  ['Semiconductors','VMware','Networking','Storage','Security'],
+  TSLA:  ['Model 3/Y','Model S/X','Energy Storage','Supercharging','FSD'],
+  COST:  ['US Warehouses','Intl Warehouses','E-commerce','Pharmacy','Gas Stations'],
+  ADBE:  ['Creative Cloud','Document Cloud','Experience Cloud','Firefly','Stock'],
+};
+
+function tmColor(pct) {
+  const n = parseFloat(pct);
+  if (isNaN(n)) return '#3a3a3a';
+  if (n >  2)  return '#166534';
+  if (n >  0.5) return '#1e6e41';
+  if (n > -0.5) return '#4a4a4a';
+  if (n > -2)  return '#8b2020';
+  return '#6b0000';
+}
+
+let _tmMode = 'sectors';
+let _tmData = { sectors: [], nq: [] };
+
+function setTreemapMode(mode) {
+  _tmMode = mode;
+  document.getElementById('tmBtnSectors').classList.toggle('active', mode === 'sectors');
+  document.getElementById('tmBtnNQ').classList.toggle('active', mode === 'nq');
+  renderTreemap();
+  const drill = document.getElementById('treemapDrill');
+  if (drill) drill.classList.remove('open');
+}
+
+function renderTreemap() {
+  const container = document.getElementById('treemapContainer');
+  if (!container) return;
+  const items = _tmMode === 'sectors' ? _tmData.sectors : _tmData.nq;
+  if (!items || !items.length) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;color:var(--muted2);font-size:12px">Loading market data...</div>';
+    return;
+  }
+  container.innerHTML = items.map(item => {
+    const bg   = tmColor(item.pct);
+    const pctFmt = (item.pct > 0 ? '+' : '') + item.pct.toFixed(2) + '%';
+    const label = _tmMode === 'sectors' ? item.symbol : item.symbol;
+    const sublabel = _tmMode === 'sectors'
+      ? item.name.substring(0,10)
+      : item.name.substring(0,8);
+    return `<div class="treemap-block" style="flex:${item.weight};background:${bg}"
+      data-sym="${item.symbol}" onclick="treemapDrill('${item.symbol}','${item.name}')">
+      <span class="tm-name">${sublabel}</span>
+      <span class="tm-sym">${label}</span>
+      <span class="tm-pct">${pctFmt}</span>
+    </div>`;
+  }).join('');
+}
+
+function treemapDrill(sym, name) {
+  const drill = document.getElementById('treemapDrill');
+  const titleEl = document.getElementById('treemapDrillTitle');
+  const itemsEl = document.getElementById('treemapDrillItems');
+  if (!drill || !titleEl || !itemsEl) return;
+
+  const holdings = _tmMode === 'sectors'
+    ? (SECTOR_HOLDINGS[sym] || [])
+    : (NQ_SEGMENTS[sym]    || []);
+
+  const prev = document.querySelector('.treemap-block.selected');
+  if (prev) prev.classList.remove('selected');
+  const cur = document.querySelector(`.treemap-block[data-sym="${sym}"]`);
+  if (cur) cur.classList.add('selected');
+
+  if (!holdings.length) { drill.classList.remove('open'); return; }
+  titleEl.textContent = `${name} — Top ${_tmMode === 'sectors' ? 'Holdings' : 'Segments'}`;
+  itemsEl.innerHTML = holdings.map(h => `<span class="treemap-drill-chip">${h}</span>`).join('');
+  drill.classList.add('open');
+}
+
+async function refreshSectorHeat() {
+  try {
+    const [secRes, nqRes] = await Promise.all([
+      fetch('/sector-heat').then(r => r.json()),
+      fetch('/nq-components').then(r => r.json()),
+    ]);
+    _tmData.sectors = secRes.sectors  || [];
+    _tmData.nq      = nqRes.components || [];
+    renderTreemap();
+  } catch(e) { console.error('refreshSectorHeat:', e); }
+}
+
+// ════════ ECON CALENDAR ════════
+function renderEconCalendar(events) {
+  const el = document.getElementById('sidebarEconCalendar');
+  if (!el) return;
+  if (!events || !events.length) {
+    el.innerHTML = '<div class="econ-no-events">No events today</div>';
+    return;
+  }
+  const nowNY = new Date(new Date().toLocaleString('en-US', {timeZone:'America/New_York'}));
+  const nowMin = nowNY.getHours() * 60 + nowNY.getMinutes();
+
+  // Find next HIGH event
+  const highEvents = events.filter(e => (e.importance||'').toLowerCase() === 'high');
+  let nextHighHtml = '';
+  for (const e of highEvents) {
+    const [hh, mm] = (e.time_et || '00:00').split(':').map(Number);
+    const evMin = hh * 60 + mm;
+    if (evMin > nowMin) {
+      const diff = evMin - nowMin;
+      const hrs  = Math.floor(diff / 60);
+      const mins = diff % 60;
+      const countdown = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+      nextHighHtml = `<div class="econ-next-high">
+        <div class="econ-next-high-label">Next High Impact</div>
+        <div class="econ-next-high-title">${e.title || '—'}</div>
+        <div class="econ-next-high-time">${e.time_et} ET · in ${countdown}</div>
+      </div>`;
+      break;
+    }
+  }
+
+  const rows = events.map(e => {
+    const imp = (e.importance || 'low').toLowerCase();
+    const dotCls = imp === 'high' ? 'high' : imp === 'medium' ? 'medium' : 'low';
+    const note = e.note ? `<div class="econ-note">${e.note}</div>` : '';
+    return `<div class="econ-event">
+      <div class="econ-dot ${dotCls}"></div>
+      <div class="econ-time">${e.time_et || '?'}</div>
+      <div class="econ-body">
+        <div class="econ-title">${e.title || '—'}</div>
+        ${note}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = nextHighHtml + rows;
+}
+
 // ════════ RENDER NEWS ════════
 function classifyHeadlineTag(text) {
   const t = (text || '').toLowerCase();
@@ -2420,6 +2782,10 @@ function renderNews(d) {
   const movers = d.market_movers_engine || {};
   const news = d.news || [];
   const snap = (risk.market_snapshot) || {};
+
+  // Economic calendar from macro events in dashboard payload
+  const calEvents = (d.calendar && d.calendar.events) ? d.calendar.events : [];
+  renderEconCalendar(calEvents);
 
   // Breaking ticker
   const tickerItems = news.slice(0, 6).map(n => n.headline || '').filter(Boolean);
@@ -3150,6 +3516,12 @@ setInterval(refreshExecMonitor, 20000);
 setInterval(refreshSessionScorecard, 20000);
 refreshGrokIntelligence();
 setInterval(refreshGrokIntelligence, 5 * 60 * 1000);
+refreshNewsFuturesStrip();
+setInterval(refreshNewsFuturesStrip, 30000);
+refreshTrendingMovers();
+setInterval(refreshTrendingMovers, 5 * 60 * 1000);
+refreshSectorHeat();
+setInterval(refreshSectorHeat, 5 * 60 * 1000);
 connectSSE();
 </script>
 </body>
