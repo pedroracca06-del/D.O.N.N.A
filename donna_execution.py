@@ -32,9 +32,12 @@ try:
         MarketOrderRequest, TakeProfitRequest, StopLossRequest,
     )
     from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockLatestQuoteRequest
     _ALPACA_LIB = True
 except ImportError:
-    TradingClient = None  # type: ignore
+    TradingClient = None              # type: ignore
+    StockHistoricalDataClient = None  # type: ignore
     _ALPACA_LIB = False
 
 # ── ALPACA_ETF mode: instrument → ETF ticker ───────────────────
@@ -66,6 +69,23 @@ def _client() -> 'TradingClient | None':
         return TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=_PAPER)
     except Exception:
         return None
+
+
+def _get_etf_price(symbol: str) -> float:
+    """Fetch live mid-price for an ETF symbol via Alpaca market data."""
+    if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        return 0.0
+    try:
+        dc    = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+        quote = dc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
+        q     = quote[symbol]
+        ask   = float(q.ask_price or 0)
+        bid   = float(q.bid_price or 0)
+        if ask > 0 and bid > 0:
+            return round((ask + bid) / 2, 2)
+        return ask or bid
+    except Exception:
+        return 0.0
 
 
 # ── ETF signal helpers ─────────────────────────────────────────
@@ -517,8 +537,13 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     qty       = _calc_etf_qty(etf)
     stop_dist = _ETF_STOP[etf]
     tgt_dist  = stop_dist * 2   # 2:1 R:R
-    entry_ref = safe_float(data.get('price', 0))
     side      = OrderSide.BUY if is_long else OrderSide.SELL
+
+    # Use live ETF price for stop/target — signal price is a futures price and
+    # cannot be used as a reference for SPY/QQQ bracket order validation.
+    entry_ref = _get_etf_price(etf)
+    if entry_ref <= 0:
+        return {'status': 'error', 'reason': f'Could not fetch live price for {etf}'}
 
     if is_long:
         stop_px = round(entry_ref - stop_dist, 2)
