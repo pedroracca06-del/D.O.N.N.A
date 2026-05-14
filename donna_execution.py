@@ -1,11 +1,10 @@
-"""donna_execution.py — DONNA autonomous paper trading via Alpaca futures API."""
+"""donna_execution.py — DONNA paper trading via Alpaca ETF proxies (SPY / QQQ)."""
 from __future__ import annotations
 
-import calendar
+import math
 import os
-from datetime import date, timedelta
 
-from donna_config import now_ny, utc_now_iso, safe_float, send_telegram_message
+from donna_config import now_ny, utc_now_iso, send_telegram_message
 from donna_state import (
     load_risk_state, save_risk_state,
     load_alert_history, save_alert_history,
@@ -23,51 +22,21 @@ try:
         MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest,
     )
     from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockLatestTradeRequest
     _ALPACA_LIB = True
 except ImportError:
     TradingClient = None  # type: ignore
     _ALPACA_LIB = False
 
-# ── Contract specs ─────────────────────────────────────────────
-# MES: $5/point, 4-pt stop → $20 risk/contract
-# MNQ: $2/point, 10-pt stop → $20 risk/contract
+# ── ETF proxy config ───────────────────────────────────────────
+# ES / MES signals → SPY  |  NQ / MNQ signals → QQQ
 
-_POINT_VALUE     = {'MES': 5.0,  'MNQ': 2.0}
-_DEFAULT_STOP    = {'MES': 4.0,  'MNQ': 10.0}
-_ACCOUNT_SIZE    = 100_000.0
-_RISK_FRACTION   = 0.01           # 1% = $1 000 max risk
-_MAX_CONTRACTS   = 3
-_MAX_POSITIONS   = 2
+_ETF_MAP      = {'MES': 'SPY', 'MNQ': 'QQQ'}
+_ETF_STOP_PTS = {'SPY': 4.0,   'QQQ': 10.0}   # price points per trade
+_MAX_POSITIONS    = 2
 _DAILY_LOSS_LIMIT = -2_000.0      # stop execution if P&L today < −$2 000
-
-# CME quarterly expiry months (Globex codes)
-_QUARTERLY       = [(3, 'H'), (6, 'M'), (9, 'U'), (12, 'Z')]
-_BLOCKED_REGIMES = {'EVENT_DRIVEN', 'RISK_OFF'}
-
-
-# ── Front-month contract resolution ───────────────────────────
-
-def _third_friday(year: int, month: int) -> date:
-    weeks   = calendar.monthcalendar(year, month)
-    fridays = [w[4] for w in weeks if w[4] != 0]
-    return date(year, month, fridays[2])
-
-
-def _front_month_symbol(base: str) -> str:
-    """Return active quarterly symbol, e.g. 'MESM26'.
-
-    Rolls 7 days before the third Friday of the expiry month.
-    """
-    today = date.today()
-    for yr_offset in range(2):
-        year = today.year + yr_offset
-        for month, code in _QUARTERLY:
-            if yr_offset == 0 and month < today.month:
-                continue
-            roll_date = _third_friday(year, month) - timedelta(days=7)
-            if today <= roll_date:
-                return f'{base}{code}{str(year)[2:]}'
-    return f'{base}M{str(today.year + 1)[2:]}'
+_BLOCKED_REGIMES  = {'EVENT_DRIVEN', 'RISK_OFF'}
 
 
 # ── Internal helpers ───────────────────────────────────────────
@@ -77,6 +46,27 @@ def _client() -> 'TradingClient | None':
         return None
     try:
         return TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=_PAPER)
+    except Exception:
+        return None
+
+
+def _data_client() -> 'StockHistoricalDataClient | None':
+    if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        return None
+    try:
+        return StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+    except Exception:
+        return None
+
+
+def _get_etf_price(etf: str) -> float | None:
+    dc = _data_client()
+    if not dc:
+        return None
+    try:
+        req   = StockLatestTradeRequest(symbol_or_symbols=etf)
+        trade = dc.get_stock_latest_trade(req)
+        return float(trade[etf].price)
     except Exception:
         return None
 
@@ -101,11 +91,10 @@ def _map_base(data: dict) -> str | None:
     return None
 
 
-def _calc_qty(base: str) -> int:
-    stop_pts = _DEFAULT_STOP.get(base, 4.0)
-    pv       = _POINT_VALUE.get(base, 5.0)
-    qty      = int((_ACCOUNT_SIZE * _RISK_FRACTION) / (stop_pts * pv))
-    return max(1, min(qty, _MAX_CONTRACTS))
+def _calc_etf_qty(etf: str, etf_price: float) -> int:
+    """floor(500 / (stop_points * etf_price * 0.01)), minimum 1 share."""
+    stop_pts = _ETF_STOP_PTS.get(etf, 4.0)
+    return max(1, math.floor(500.0 / (stop_pts * etf_price * 0.01)))
 
 
 def _log_skip(data: dict, parsed: dict, reason: str) -> dict:
@@ -230,6 +219,7 @@ def get_today_trade_count() -> int:
     if not api:
         return 0
     try:
+        from datetime import date
         req    = GetOrdersRequest(
             status=QueryOrderStatus.ALL,
             after=f'{date.today().isoformat()}T00:00:00Z',
@@ -250,7 +240,7 @@ def get_today_trade_count() -> int:
 def execute_signal(signal_result: dict) -> dict:
     """
     Gate-check a process_signal() result through 8 execution filters and,
-    if all pass, submit a bracket market order on the Alpaca paper account.
+    if all pass, submit a bracket market order on SPY or QQQ via Alpaca paper.
     All skipped TAKE signals are logged to donna_risk_state.json.
     """
     parsed = signal_result.get('parsed', {})
@@ -307,12 +297,11 @@ def execute_signal(signal_result: dict) -> dict:
             f'Tier 2 requires TRENDING regime — current regime: {regime_desc}')
     # Tier 1 / ELITE passes automatically
 
-    # ── SYMBOL RESOLUTION
+    # ── SYMBOL RESOLUTION — map futures base to ETF proxy
     base = _map_base(data)
     if not base:
         return _log_skip(data, parsed, 'cannot resolve instrument to MNQ or MES')
-
-    symbol = _front_month_symbol(base)   # e.g. 'MESM26'
+    etf = _ETF_MAP[base]   # 'MES' → 'SPY', 'MNQ' → 'QQQ'
 
     # ── ALPACA CLIENT
     api = _client()
@@ -326,16 +315,16 @@ def execute_signal(signal_result: dict) -> dict:
         return _log_skip(data, parsed,
             f'position limit reached — {len(positions)}/{_MAX_POSITIONS} positions already open')
 
-    # ── DIRECTION FILTER — no same-direction duplicate on same base instrument
+    # ── DIRECTION FILTER — no same-direction duplicate on same ETF
     signal  = str(data.get('signal', '')).upper()
     is_long = signal in ('LONG', 'BUY')
     dir_str = 'long' if is_long else 'short'
     for p in positions:
-        if p['symbol'].startswith(base):
+        if p['symbol'] == etf:
             pos_is_long = str(p['side']).lower() in ('long', 'buy')
             if pos_is_long == is_long:
                 return _log_skip(data, parsed,
-                    f'direction blocked — already {dir_str} {p["symbol"]}, no duplicate {dir_str} {base}')
+                    f'direction blocked — already {dir_str} {etf}, no duplicate {dir_str} {etf}')
 
     # ── DAILY LOSS LIMIT — halt if P&L today < −$2 000
     account   = get_account()
@@ -349,25 +338,28 @@ def execute_signal(signal_result: dict) -> dict:
     if align_fail:
         return _log_skip(data, parsed, align_fail)
 
-    # ── SIZING
+    # ── ETF PRICE & SIZING
+    etf_price = _get_etf_price(etf)
+    if etf_price is None:
+        return {'status': 'error', 'reason': f'cannot fetch live price for {etf}'}
+
     side       = OrderSide.BUY if is_long else OrderSide.SELL
-    qty        = _calc_qty(base)
-    stop_pts   = _DEFAULT_STOP[base]
+    qty        = _calc_etf_qty(etf, etf_price)
+    stop_pts   = _ETF_STOP_PTS[etf]
     target_pts = stop_pts * 2            # 2:1 R:R
-    entry_ref  = safe_float(data.get('price', 0))
 
     if is_long:
-        stop_px   = round(entry_ref - stop_pts,   2)
-        target_px = round(entry_ref + target_pts, 2)
+        stop_px   = round(etf_price - stop_pts,   2)
+        target_px = round(etf_price + target_pts, 2)
     else:
-        stop_px   = round(entry_ref + stop_pts,   2)
-        target_px = round(entry_ref - target_pts, 2)
+        stop_px   = round(etf_price + stop_pts,   2)
+        target_px = round(etf_price - target_pts, 2)
 
     # ── BRACKET ORDER
     try:
         order = api.submit_order(
             MarketOrderRequest(
-                symbol        = symbol,
+                symbol        = etf,
                 qty           = qty,
                 side          = side,
                 time_in_force = TimeInForce.DAY,
@@ -384,21 +376,21 @@ def execute_signal(signal_result: dict) -> dict:
     direction = 'BUY' if is_long else 'SELL'
     record = {
         'type':          'execution',
-        'ticker':        symbol,
+        'ticker':        etf,
         'signal':        direction,
         'session':       data.get('session', ''),
         'timeframe':     data.get('timeframe', ''),
-        'price':         str(entry_ref),
+        'price':         str(etf_price),
         'verdict':       'TAKE',
         'confidence':    parsed.get('confidence', ''),
-        'summary':       (f'EXECUTED {direction} {qty}x {symbol} @ {entry_ref}. '
+        'summary':       (f'EXECUTED {direction} {qty}sh {etf} @ {etf_price}. '
                           f'Stop: {stop_px}, Target: {target_px}'),
-        'instrument':    symbol,
+        'instrument':    etf,
         'tier':          data.get('tier', ''),
         'setup_type':    data.get('setup_type', ''),
         'signal_reason': data.get('signal_reason', ''),
-        'entry_price':   entry_ref,
-        'contracts':     qty,
+        'entry_price':   etf_price,
+        'shares':        qty,
         'stop_price':    stop_px,
         'target_price':  target_px,
         'order_id':      order_id,
@@ -410,7 +402,7 @@ def execute_signal(signal_result: dict) -> dict:
 
     send_telegram_message(
         f'DONNA EXECUTED\n'
-        f'{direction} {qty}x {symbol} @ {entry_ref}\n'
+        f'{direction} {qty}sh {etf} @ {etf_price}\n'
         f'Stop: {stop_px} | Target: {target_px}\n'
         f'Setup: {data.get("setup_type", "")} | Tier: {data.get("tier", "")}\n'
         f'Order ID: {order_id}'
@@ -418,10 +410,10 @@ def execute_signal(signal_result: dict) -> dict:
 
     return {
         'status':       'executed',
-        'symbol':       symbol,
+        'symbol':       etf,
         'side':         'buy' if is_long else 'sell',
-        'contracts':    qty,
-        'entry_ref':    entry_ref,
+        'shares':       qty,
+        'entry_ref':    etf_price,
         'stop_price':   stop_px,
         'target_price': target_px,
         'order_id':     order_id,
