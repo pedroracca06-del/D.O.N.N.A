@@ -576,24 +576,21 @@ async def journal_data():
 
 @app.post('/journal/add')
 async def journal_add(request: Request):
-    body     = await request.json()
-    for f in ['ticker', 'direction', 'outcome']:
+    body      = await request.json()
+    for f in ['ticker', 'direction']:
         if f not in body:
             raise HTTPException(status_code=400, detail=f'Missing field: {f}')
 
     direction = str(body.get('direction', 'LONG')).upper()
-    outcome   = str(body.get('outcome', 'WIN')).upper()
     if direction not in ('LONG', 'SHORT'):
         raise HTTPException(status_code=400, detail='direction must be LONG or SHORT')
-    if outcome not in ('WIN', 'LOSS', 'BREAKEVEN'):
-        raise HTTPException(status_code=400, detail='outcome must be WIN, LOSS, or BREAKEVEN')
 
     # realized_pnl takes priority; entry/exit/size are optional when it's provided
-    realized_pnl = None
+    realized_pnl_raw = None
     rp_raw = body.get('realized_pnl')
     if rp_raw is not None and rp_raw != '':
         try:
-            realized_pnl = float(rp_raw)
+            realized_pnl_raw = float(rp_raw)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail='realized_pnl must be a number')
 
@@ -607,13 +604,17 @@ async def journal_add(request: Request):
         except Exception:
             raise HTTPException(status_code=400, detail='entry_price, exit_price, size must be numbers')
 
-    if realized_pnl is None and (entry is None or exit_ is None):
+    if realized_pnl_raw is None and (entry is None or exit_ is None):
         raise HTTPException(status_code=400, detail='Provide realized_pnl or both entry_price and exit_price')
 
-    if realized_pnl is not None:
-        pnl = round(realized_pnl, 2)
+    # Compute signed P&L — LONG profits when exit > entry, SHORT when exit < entry
+    if realized_pnl_raw is not None:
+        pnl = round(realized_pnl_raw, 2)
     else:
         pnl = round((exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size, 2)  # type: ignore[operator]
+
+    # Outcome is always derived from the signed P&L — never trust the form value
+    outcome = 'WIN' if pnl > 0 else ('LOSS' if pnl < 0 else 'BREAKEVEN')
 
     state  = load_risk_state()
     harvey = build_harvey_payload()
@@ -628,7 +629,7 @@ async def journal_add(request: Request):
         'entry_price':    entry,
         'exit_price':     exit_,
         'size':           size,
-        'realized_pnl':   realized_pnl,
+        'realized_pnl':   pnl,   # always store computed signed value so stats reads it correctly
         'setup_type':     str(body.get('setup_type', '')),
         'notes':          str(body.get('notes', '')),
         'outcome':        outcome,
