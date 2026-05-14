@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime
+from pathlib import Path
+
+import requests
 
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -64,10 +68,12 @@ from donna_assistant import (
 from donna_html import DASHBOARD_HTML
 
 try:
-    from donna_news import process_news_guard_cycle
+    from donna_news import process_news_guard_cycle, get_grok_intelligence
 except Exception:
     def process_news_guard_cycle():
         return None
+    def get_grok_intelligence():
+        return {}
 
 try:
     from donna_risk_engine import (
@@ -103,6 +109,53 @@ except Exception:
 
 app = FastAPI(title='DONNA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
+
+_GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
+_GROK_INTEL_FILE   = Path(__file__).parent / 'donna_grok_intelligence.json'
+_GROK_INTEL_PROMPT = (
+    'You are a financial markets AI. Return ONLY valid JSON with these fields:\n'
+    '{\n'
+    '  "top_story": "<headline of the single most market-moving story right now>",\n'
+    '  "top_story_summary": "<2-3 sentence summary of that story and its market impact>",\n'
+    '  "market_sentiment": "<one of: BULLISH | BEARISH | NEUTRAL | MIXED>",\n'
+    '  "sentiment_reason": "<1-2 sentences explaining the sentiment>",\n'
+    '  "donna_trade_read": "<actionable trading implication for today — what to watch, avoid, or lean into>",\n'
+    '  "key_names_to_watch": ["TICKER1", "TICKER2", "TICKER3"]\n'
+    '}\n'
+    'No markdown fences, no extra keys, no commentary. Output raw JSON only.'
+)
+
+
+def fetch_grok_intelligence() -> dict:
+    if not _GROK_API_KEY:
+        return {'error': 'GROK_API_KEY not configured'}
+    try:
+        resp = requests.post(
+            'https://api.x.ai/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {_GROK_API_KEY}',
+                'Content-Type':  'application/json',
+            },
+            json={
+                'model': 'grok-3-mini',
+                'messages': [
+                    {'role': 'system', 'content': 'You are a concise financial markets intelligence assistant.'},
+                    {'role': 'user',   'content': _GROK_INTEL_PROMPT},
+                ],
+                'temperature':   0.3,
+                'response_format': {'type': 'json_object'},
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        content = resp.json()['choices'][0]['message']['content']
+        result  = json.loads(content)
+        result['fetched_at'] = utc_now_iso()
+        _GROK_INTEL_FILE.write_text(json.dumps(result, indent=2), encoding='utf-8')
+        return result
+    except Exception as e:
+        print(f'[grok_intelligence] Error: {e}')
+        return {'error': str(e)}
 
 
 # ── Background loops ───────────────────────────────────────────
@@ -185,6 +238,18 @@ async def finnhub_loop():
         await asyncio.sleep(300)
 
 
+async def grok_loop():
+    while True:
+        try:
+            ny = now_ny()
+            m  = ny.hour * 60 + ny.minute
+            if ny.weekday() < 5 and 9 * 60 + 30 <= m <= 16 * 60:
+                await asyncio.to_thread(fetch_grok_intelligence)
+        except Exception as e:
+            print('Grok intelligence loop error:', str(e))
+        await asyncio.sleep(300)
+
+
 # ── Startup ────────────────────────────────────────────────────
 
 @app.on_event('startup')
@@ -194,6 +259,7 @@ async def startup():
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
+    asyncio.create_task(grok_loop())
     asyncio.create_task(morning_brief_loop())
     if _EXECUTION_AVAILABLE:
         asyncio.create_task(position_outcomes_loop())
@@ -361,6 +427,16 @@ async def risk_engine_settings(request: Request):
 @app.get('/alerts-data')
 async def alerts_data():
     return {'alerts': load_alert_history()}
+
+
+@app.get('/grok-intelligence')
+async def grok_intelligence():
+    if _GROK_INTEL_FILE.exists():
+        try:
+            return json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {'error': 'No Grok intelligence available yet'}
 
 
 # ── Execution engine ───────────────────────────────────────────
