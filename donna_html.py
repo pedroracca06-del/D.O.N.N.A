@@ -504,8 +504,9 @@ tr:last-child td{border-bottom:none}
   background:var(--panel2);border:1px solid var(--line);
   font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;
   color:var(--text);cursor:pointer;transition:all .15s;letter-spacing:.3px;
+  text-decoration:none;
 }
-.grok-name-chip:hover{background:var(--bg2);border-color:var(--muted2);color:var(--text)}
+.grok-name-chip:hover{background:var(--bg2);border-color:var(--muted);color:var(--text);text-decoration:none}
 .breaking-events-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .breaking-event-card{
   padding:14px 16px;border-radius:14px;
@@ -2363,7 +2364,7 @@ async function refreshGrokIntelligence() {
     const namesEl = document.getElementById('grokKeyNames');
     if (namesEl) {
       namesEl.innerHTML = names.length
-        ? names.map(n => `<span class="grok-name-chip">${n}</span>`).join('')
+        ? names.map(n => `<a href="https://finance.yahoo.com/quote/${encodeURIComponent(n)}" target="_blank" rel="noopener" class="grok-name-chip">${n}</a>`).join('')
         : '<span style="font-size:12px;color:var(--muted2)">—</span>';
     }
 
