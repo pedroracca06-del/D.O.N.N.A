@@ -745,6 +745,32 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
 
 # ── Core execution — routes by BROKER_MODE ─────────────────────
 
+def close_qqq_positions() -> dict:
+    """Close all open QQQ positions on Alpaca immediately."""
+    api = _client()
+    if not api:
+        return {'status': 'error', 'reason': 'Alpaca not configured'}
+    try:
+        positions = api.get_all_positions()
+        qqq_pos   = [p for p in positions if str(p.symbol).upper() == 'QQQ']
+        if not qqq_pos:
+            print('[close_qqq] No open QQQ positions found')
+            return {'status': 'ok', 'closed': 0}
+        api.close_position('QQQ')
+        count   = len(qqq_pos)
+        ts_et   = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
+        print(f'[close_qqq] {ts_et} — closed QQQ ({count} lot(s))')
+        send_telegram_message(
+            f'DONNA EMERGENCY CLOSE\n'
+            f'Closed {count} QQQ position(s) — Asia-session rule violation cleanup\n'
+            f'Time: {ts_et}'
+        )
+        return {'status': 'ok', 'closed': count}
+    except Exception as e:
+        print(f'[close_qqq] Error: {e}')
+        return {'status': 'error', 'reason': str(e)}
+
+
 def execute_signal(signal_result: dict) -> dict:
     """
     Apply DONNA's 5 official risk rules, then route to the active broker.
@@ -756,34 +782,48 @@ def execute_signal(signal_result: dict) -> dict:
     Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
     Rule 5 — POSITION SIZING    broker-specific (ALPACA_ETF: floor($500/stop)).
     """
+    # ── Snapshot time + session at moment of execution — ALWAYS server-time, never from webhook
+    ts_et        = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
+    session      = session_label()   # derived from server clock, ignores webhook payload
+
+    # ── Read + (if needed) reset daily counter immediately — persisted in donna_risk_state.json
+    risk_snap    = _get_daily_state()
+    trades_today = int(risk_snap.get('daily_trades_taken', 0))
+
+    print(f'[execute_signal] {ts_et} | session={session} | daily_trades_taken={trades_today}')
+
     parsed = signal_result.get('parsed', {})
     data   = signal_result.get('data', {})
 
     # ── VERDICT — non-TAKE signals not logged as skips
     if str(parsed.get('verdict', '')).upper() != 'TAKE':
+        print(f'[execute_signal] {ts_et} | BLOCKED: verdict not TAKE')
         return {'status': 'skipped', 'reason': 'verdict not TAKE'}
+
+    # ── RULE 2: DAILY TRADE LIMIT — checked first, cheapest guard, counter persists in JSON
+    if trades_today >= _DAILY_TRADE_LIMIT:
+        print(f'[execute_signal] {ts_et} | BLOCKED RULE2: '
+              f'{trades_today}/{_DAILY_TRADE_LIMIT} trades taken today (session={session})')
+        return _log_skip(data, parsed,
+            f'daily trade limit reached — {trades_today}/{_DAILY_TRADE_LIMIT} trades taken today',
+            'DAILY_TRADE_LIMIT')
 
     # ── RULE 1: RED FOLDER
     rf = _red_folder_status()
     if rf['active']:
+        print(f'[execute_signal] {ts_et} | BLOCKED RULE1: {rf["reason"]}')
         return _log_skip(data, parsed, rf['reason'], 'RED_FOLDER_WINDOW')
 
-    # ── Session + account P&L (shared by Rules 2–4)
-    session   = session_label()
+    # ── Account P&L (fetched after cheap guards pass)
     acct      = get_account()
     pnl_today = acct.get('pnl_today', 0.0) if acct.get('available') else 0.0
-
-    # ── RULE 2: DAILY TRADE LIMIT
-    trades_today = _get_daily_trades_taken()
-    if trades_today >= _DAILY_TRADE_LIMIT:
-        return _log_skip(data, parsed,
-            f'daily trade limit reached — {trades_today}/{_DAILY_TRADE_LIMIT} trades taken today',
-            'DAILY_TRADE_LIMIT')
 
     # ── RULE 3: DAILY LOSS LIMIT
     loss_hit, loss_code = _check_daily_loss_limit(session, pnl_today)
     if loss_hit:
         limit = _LOSS_LIMIT_ASIA if session == 'ASIA' else _LOSS_LIMIT_NY_LON
+        print(f'[execute_signal] {ts_et} | BLOCKED RULE3: '
+              f'P&L=${pnl_today:,.2f} limit=${limit:,.0f} session={session}')
         return _log_skip(data, parsed,
             f'daily loss limit hit — P&L ${pnl_today:,.2f} (limit ${limit:,.0f}) [{session}]',
             loss_code)
@@ -798,19 +838,24 @@ def execute_signal(signal_result: dict) -> dict:
             confidence_val = 0.0
 
         if confidence_val < _ASIA_MIN_CONFIDENCE:
+            print(f'[execute_signal] {ts_et} | BLOCKED RULE4a: '
+                  f'confidence={confidence_val:.1f}% < {_ASIA_MIN_CONFIDENCE:.0f}% (Asia minimum)')
             return _log_skip(data, parsed,
                 f'Asia session requires confidence ≥ {_ASIA_MIN_CONFIDENCE:.0f}% '
                 f'— signal is {confidence_val:.1f}%',
                 'ASIA_CONFIDENCE_TOO_LOW')
 
         if _get_asia_trade_taken():
+            print(f'[execute_signal] {ts_et} | BLOCKED RULE4b: Asia trade already taken this session')
             return _log_skip(data, parsed,
                 'Asia session trade already taken — max 1 trade per Asia session',
                 'ASIA_TRADE_ALREADY_TAKEN')
 
-    # ── RULE 5 + ORDER — routed by BROKER_MODE
+    # ── RULE 5 + ORDER — all rules passed, route to active broker
     signal  = str(data.get('signal', '')).upper()
     is_long = signal in ('LONG', 'BUY')
+    print(f'[execute_signal] {ts_et} | ALL RULES PASSED — '
+          f'broker={BROKER_MODE} signal={signal} session={session} trades_today={trades_today}')
 
     if BROKER_MODE == 'ALPACA_ETF':
         return _execute_alpaca_etf(data, parsed, session, is_long)
@@ -819,3 +864,11 @@ def execute_signal(signal_result: dict) -> dict:
     if BROKER_MODE == 'RITHMIC':
         return execute_rithmic(signal_result)
     return {'status': 'error', 'reason': f'Unknown BROKER_MODE: {BROKER_MODE}'}
+
+
+# ── One-time QQQ cleanup — closes Asia-session violation positions on module load ──
+try:
+    _qqq_result = close_qqq_positions()
+    print(f'[donna_execution] QQQ cleanup on load: {_qqq_result}')
+except Exception as _e:
+    print(f'[donna_execution] QQQ cleanup error: {_e}')
