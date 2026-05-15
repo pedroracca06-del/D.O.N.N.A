@@ -582,18 +582,9 @@ tr:last-child td{border-bottom:none}
   background:var(--panel);color:var(--muted2);transition:all .15s;
 }
 .treemap-toggle-btn.active{background:var(--text);color:var(--panel)}
-.tm-wrap{display:flex;flex-wrap:wrap;width:100%;height:200px;gap:2px;background:#2a2a2a;border-radius:6px;overflow:hidden}
+#stockTreemap{width:100%;height:280px;border-radius:8px;overflow:hidden;background:#111;display:block}
+#stockTreemap svg{display:block}
 .tm-closed-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.07);color:var(--muted2)}
-.tm-block{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  overflow:hidden;cursor:pointer;transition:opacity .15s;box-sizing:border-box;
-}
-.tm-block:hover{opacity:.82}
-.treemap-drill{margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);display:none}
-.treemap-drill.open{display:block}
-.treemap-drill-title{font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;margin-bottom:6px}
-.treemap-drill-items{display:flex;flex-wrap:wrap;gap:5px}
-.treemap-drill-chip{padding:3px 9px;border-radius:5px;background:var(--panel);border:1px solid var(--line);font-family:'Rajdhani',sans-serif;font-size:11px;font-weight:700;color:var(--text)}
 .donna-says-box{padding:16px 18px;border-radius:14px;background:var(--bg2);border:1px solid var(--line)}
 .donna-says-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px}
 .donna-says-text{font-size:12px;color:#888;line-height:1.65}
@@ -1090,6 +1081,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 }
 .verdict-banner.flash { animation: banner-flash .7s ease-out }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
 <div class="wrap">
@@ -1376,12 +1368,12 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
                 <span class="tm-closed-badge" id="tmClosedBadge" style="display:none">Market Closed</span>
               </div>
               <div class="treemap-toggle">
-                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sectors')">S&amp;P</button>
+                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sp')">S&amp;P</button>
                 <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ</button>
               </div>
             </div>
-            <div id="treemapContainer">
-              <div style="height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12px">Loading...</div>
+            <div id="stockTreemap">
+              <svg width="100%" height="280"><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="rgba(255,255,255,.25)" font-size="12" font-family="Space Mono,monospace">Loading…</text></svg>
             </div>
           </div>
 
@@ -2568,102 +2560,139 @@ async function refreshTrendingMovers() {
   } catch(e) { console.error('refreshTrendingMovers:', e); }
 }
 
-// ════════ SECTOR HEAT TREEMAP ════════
-let _tmMode = 'sectors';
-let _tmData = { sectors: [], nq: [] };
+// ════════ STOCK TREEMAP (D3) ════════
+let _tmMode = 'sp';
 
-function tmColor2(pct) {
+function _tmColor(pct) {
   const n = parseFloat(pct);
-  if (isNaN(n)) return { bg:'#3a3a3a', fg:'#ffffff' };
-  if (n >  1)   return { bg:'#166534', fg:'#ffffff' };
-  if (n >  0.1) return { bg:'#15803d', fg:'#ffffff' };
-  if (n > -0.1) return { bg:'#374151', fg:'#ffffff' };
-  if (n > -1)   return { bg:'#7f1d1d', fg:'#ffffff' };
-  return                { bg:'#450a0a', fg:'#ffffff' };
-}
-
-function fmtPct(n) {
-  const v = parseFloat(n);
-  if (isNaN(v)) return '—';
-  return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+  if (isNaN(n) || n === 0) return '#1a3a1a';
+  if (n >  2)   return '#14532d';
+  if (n >  0.5) return '#166534';
+  if (n >  0)   return '#1a3a1a';
+  if (n > -0.5) return '#3a1a1a';
+  if (n > -1)   return '#7f1d1d';
+  return '#450a0a';
 }
 
 function setTreemapMode(mode) {
   _tmMode = mode;
-  document.getElementById('tmBtnSectors').classList.toggle('active', mode === 'sectors');
+  document.getElementById('tmBtnSectors').classList.toggle('active', mode === 'sp');
   document.getElementById('tmBtnNQ').classList.toggle('active', mode === 'nq');
-  renderTreemap();
+  refreshSectorHeat();
 }
 
-function renderTreemap() {
-  const container = document.getElementById('treemapContainer');
-  if (!container) return;
-  const isSectors = _tmMode === 'sectors';
-  const rawData   = isSectors ? _tmData.sectors : _tmData.nq;
+function renderD3Treemap(stocks) {
+  const container = document.getElementById('stockTreemap');
+  if (!container || typeof d3 === 'undefined') return;
 
-  if (!rawData || !rawData.length) {
-    container.innerHTML = '<div class="tm-wrap" style="align-items:center;justify-content:center"><span style="color:rgba(255,255,255,.4);font-size:12px">Loading…</span></div>';
+  const width  = container.clientWidth || container.offsetWidth || 640;
+  const height = 280;
+  container.innerHTML = '';
+
+  if (!stocks || !stocks.length) {
+    container.innerHTML = '<div style="height:280px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.3);font-size:12px;font-family:Space Mono,monospace">No data</div>';
     return;
   }
 
-  const bySymbol = {};
-  rawData.forEach(d => { bySymbol[d.symbol] = d; });
+  const root = d3.hierarchy({ name: 'root', children: stocks })
+    .sum(d => d.market_weight || 0)
+    .sort((a, b) => b.value - a.value);
 
-  function blk(sym, name, w, h) {
-    const d   = bySymbol[sym] || {};
-    const c   = tmColor2(d.pct);
-    const lbl = name.length > 9 ? name.slice(0,8)+'…' : name;
-    const pct = fmtPct(d.pct);
-    return `<div class="tm-block" style="width:calc(${w} - 1px);height:calc(${h} - 1px);background:${c.bg};color:${c.fg}" title="${name} (${sym}): ${pct}">
-      <span style="font-size:9px;opacity:.75;line-height:1.1">${lbl}</span>
-      <span style="font-size:10px;font-weight:700;line-height:1.2">${sym}</span>
-      <span style="font-size:10px;line-height:1.1">${pct}</span>
-    </div>`;
+  d3.treemap().size([width, height]).paddingInner(2).paddingOuter(0)(root);
+
+  let tip = document.getElementById('d3StockTip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'd3StockTip';
+    Object.assign(tip.style, {
+      position: 'fixed', background: '#1a1a1a', border: '1px solid #2e2e2e',
+      borderRadius: '8px', padding: '10px 14px',
+      fontFamily: "'Rajdhani',sans-serif", fontSize: '13px', color: '#fff',
+      pointerEvents: 'none', display: 'none', zIndex: '9999',
+      minWidth: '155px', lineHeight: '1.65', boxShadow: '0 4px 24px rgba(0,0,0,.7)'
+    });
+    document.body.appendChild(tip);
   }
 
-  let html;
-  if (isSectors) {
-    // XLK spans full height on left; remaining 10 sectors fill right side in 2 rows
-    const rightBlocks = [
-      blk('XLF','Financials','31%','50%'),blk('XLV','Healthcare','31%','50%'),
-      blk('XLY','Cons. Disc.','23%','50%'),blk('XLC','Comm.','15%','50%'),
-      blk('XLI','Industrials','23%','50%'),blk('XLP','Staples','18%','50%'),
-      blk('XLE','Energy','17%','50%'),blk('XLU','Utilities','14%','50%'),
-      blk('XLB','Materials','14%','50%'),blk('XLRE','Real Estate','14%','50%'),
-    ].join('');
-    html = `<div class="tm-wrap">
-      ${blk('XLK','Technology','35%','100%')}
-      <div style="display:flex;flex-wrap:wrap;flex:1;height:100%;gap:2px;align-content:flex-start">${rightBlocks}</div>
-    </div>`;
-  } else {
-    // NQ: all 10 stocks in flat 2-row wrap layout
-    const nqBlocks = [
-      blk('AAPL','Apple','28%','50%'),blk('MSFT','Microsoft','28%','50%'),
-      blk('NVDA','Nvidia','22%','50%'),blk('AMZN','Amazon','22%','50%'),
-      blk('META','Meta','22%','50%'),blk('GOOG','Alphabet','20%','50%'),
-      blk('AVGO','Broadcom','20%','50%'),blk('TSLA','Tesla','18%','50%'),
-      blk('COST','Costco','12%','50%'),blk('ADBE','Adobe','8%','50%'),
-    ].join('');
-    html = `<div class="tm-wrap">${nqBlocks}</div>`;
-  }
+  const svg = d3.select(container).append('svg')
+    .attr('width', width).attr('height', height)
+    .style('border-radius', '8px').style('display', 'block');
 
-  container.innerHTML = html;
+  const cell = svg.selectAll('g')
+    .data(root.leaves())
+    .enter().append('g')
+    .attr('transform', d => `translate(${d.x0},${d.y0})`);
+
+  cell.append('rect')
+    .attr('width',  d => Math.max(0, d.x1 - d.x0))
+    .attr('height', d => Math.max(0, d.y1 - d.y0))
+    .attr('fill', d => _tmColor(d.data.percent_change))
+    .attr('rx', 3)
+    .style('cursor', 'pointer')
+    .on('mousemove', function(event, d) {
+      const pct   = d.data.percent_change || 0;
+      const sign  = pct >= 0 ? '+' : '';
+      const col   = pct >= 0 ? '#4ade80' : '#f87171';
+      const price = (d.data.price || 0).toFixed(2);
+      const wt    = (d.data.market_weight || 0).toFixed(1);
+      tip.style.display = 'block';
+      tip.style.left    = (event.clientX + 14) + 'px';
+      tip.style.top     = (event.clientY - 10) + 'px';
+      tip.innerHTML =
+        `<div style="font-weight:700;font-size:15px;margin-bottom:2px">${d.data.name}</div>` +
+        `<div style="color:#555;font-size:10px;font-family:'Space Mono',monospace;margin-bottom:6px">${d.data.symbol}</div>` +
+        `<div>Price: <b style="color:#ddd">$${price}</b></div>` +
+        `<div>Change: <b style="color:${col}">${sign}${pct.toFixed(2)}%</b></div>` +
+        `<div>Weight: <b style="color:#ddd">${wt}%</b></div>`;
+    })
+    .on('mouseleave', () => { tip.style.display = 'none'; });
+
+  cell.each(function(d) {
+    const w = d.x1 - d.x0;
+    const h = d.y1 - d.y0;
+    if (w < 24 || h < 16) return;
+
+    const g        = d3.select(this);
+    const pct      = d.data.percent_change || 0;
+    const pctStr   = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    const isLarge  = d.data.market_weight > 2;
+    const cx       = w / 2;
+    const lineH    = 14;
+
+    const lines = [];
+    if (isLarge && h >= 56 && w >= 60)
+      lines.push({ text: d.data.name,  size: 10, opacity: 0.72, weight: '500' });
+    lines.push(    { text: d.data.symbol, size: Math.min(13, Math.max(9, Math.floor(w / 5))), opacity: 1, weight: '700' });
+    if (h >= 32)
+      lines.push({ text: pctStr, size: 10, opacity: 0.9, weight: '400' });
+
+    let y = (h - lines.length * lineH) / 2 + lineH;
+    lines.forEach(ln => {
+      const maxCh = Math.max(2, Math.floor(w / (ln.size * 0.62)));
+      const txt   = ln.text.length > maxCh ? ln.text.slice(0, maxCh - 1) + '…' : ln.text;
+      g.append('text')
+        .attr('x', cx).attr('y', y)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#fff').attr('fill-opacity', ln.opacity)
+        .attr('font-family', "'Rajdhani',sans-serif")
+        .attr('font-size', ln.size).attr('font-weight', ln.weight)
+        .attr('pointer-events', 'none')
+        .text(txt);
+      y += lineH;
+    });
+  });
 }
 
 async function refreshSectorHeat() {
   try {
-    const [secRes, nqRes] = await Promise.all([
-      fetch('/sector-heat').then(r => r.json()),
-      fetch('/nq-components').then(r => r.json()),
-    ]);
-    _tmData.sectors = secRes.sectors   || [];
-    _tmData.nq      = nqRes.components || [];
-    renderTreemap();
-    // Market-closed badge
+    const endpoint = _tmMode === 'nq' ? '/nq-heatmap' : '/sp500-heatmap';
+    const res  = await fetch(endpoint);
+    const data = await res.json();
+    renderD3Treemap(data.stocks || []);
     const badge = document.getElementById('tmClosedBadge');
     if (badge) {
-      const ny  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const m   = ny.getHours() * 60 + ny.getMinutes();
+      const ny   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const m    = ny.getHours() * 60 + ny.getMinutes();
       const open = ny.getDay() >= 1 && ny.getDay() <= 5 && m >= 570 && m <= 990;
       badge.style.display = open ? 'none' : 'inline-block';
     }

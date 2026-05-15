@@ -450,6 +450,102 @@ async def nq_components():
     return {'components': results}
 
 
+# ── Stock Heatmaps ─────────────────────────────────────────────
+
+_SP500_HEATMAP_FILE = Path(__file__).parent / 'donna_sp500_heatmap.json'
+_NQ_HEATMAP_FILE    = Path(__file__).parent / 'donna_nq_heatmap.json'
+
+_SP500_SYMBOLS: dict[str, tuple[str, float]] = {
+    'AAPL': ('Apple',          7.2), 'MSFT': ('Microsoft',     6.5),
+    'NVDA': ('NVIDIA',         5.8), 'AMZN': ('Amazon',        3.8),
+    'META': ('Meta',           2.6), 'TSLA': ('Tesla',         1.8),
+    'GOOGL':('Alphabet',       2.1), 'AVGO': ('Broadcom',      1.7),
+    'JPM':  ('JPMorgan',       1.4), 'LLY':  ('Eli Lilly',     1.3),
+    'V':    ('Visa',           1.2), 'UNH':  ('UnitedHealth',  1.1),
+    'XOM':  ('ExxonMobil',     1.0), 'MA':   ('Mastercard',    0.9),
+    'JNJ':  ('Johnson & J',    0.9), 'PG':   ('P&G',           0.8),
+    'HD':   ('Home Depot',     0.8), 'BAC':  ('BofA',          0.6),
+    'COST': ('Costco',         0.7), 'AMD':  ('AMD',           0.5),
+    'NFLX': ('Netflix',        0.5), 'KO':   ('Coca-Cola',     0.4),
+    'PEP':  ('PepsiCo',        0.4), 'GS':   ('Goldman Sachs', 0.2),
+    'CSCO': ('Cisco',          0.4), 'WFC':  ('Wells Fargo',   0.4),
+    'IBM':  ('IBM',            0.3), 'GE':   ('GE',            0.3),
+    'CAT':  ('Caterpillar',    0.3), 'ORCL': ('Oracle',        0.5),
+}
+
+_NQ_SYMBOLS: dict[str, tuple[str, float]] = {
+    'AAPL':  ('Apple',       9.0), 'MSFT':  ('Microsoft',   8.5),
+    'NVDA':  ('NVIDIA',      7.8), 'AMZN':  ('Amazon',      5.2),
+    'META':  ('Meta',        4.8), 'TSLA':  ('Tesla',       3.5),
+    'GOOGL': ('Alphabet',    3.2), 'AVGO':  ('Broadcom',    2.9),
+    'COST':  ('Costco',      2.4), 'ADBE':  ('Adobe',       1.8),
+    'AMD':   ('AMD',         1.6), 'NFLX':  ('Netflix',     1.5),
+    'CSCO':  ('Cisco',       1.2), 'INTC':  ('Intel',       0.9),
+    'QCOM':  ('Qualcomm',    0.8), 'TXN':   ('Texas Instr', 0.8),
+    'ORCL':  ('Oracle',      0.7), 'INTU':  ('Intuit',      0.7),
+    'MU':    ('Micron',      0.6), 'KLAC':  ('KLA Corp',    0.5),
+}
+
+
+def _heatmap_is_market_hours() -> bool:
+    ny = now_ny()
+    m  = ny.hour * 60 + ny.minute
+    return ny.weekday() < 5 and 9 * 60 + 30 <= m <= 16 * 60
+
+
+def _fetch_heatmap(symbols_dict: dict, cache_file: Path) -> dict:
+    from datetime import timezone as _tz
+    ttl = 300 if _heatmap_is_market_hours() else 1800
+    if cache_file.exists():
+        try:
+            cached = json.loads(cache_file.read_text(encoding='utf-8'))
+            age = (datetime.now(_tz.utc) - datetime.fromisoformat(
+                cached.get('fetched_at', '1970-01-01T00:00:00+00:00').replace('Z', '+00:00')
+            )).total_seconds()
+            if age < ttl:
+                return cached
+        except Exception:
+            pass
+
+    stocks = []
+    for sym, (name, weight) in symbols_dict.items():
+        try:
+            r   = requests.get(
+                f'https://finnhub.io/api/v1/quote?symbol={sym}&token={FINNHUB_API_KEY}',
+                timeout=8,
+            )
+            r.raise_for_status()
+            q     = r.json()
+            pct   = round(float(q.get('dp', 0) or 0), 2)
+            price = round(float(q.get('c',  0) or 0), 2)
+        except Exception:
+            pct, price = 0.0, 0.0
+        stocks.append({
+            'symbol':         sym,
+            'name':           name,
+            'percent_change': pct,
+            'price':          price,
+            'market_weight':  weight,
+        })
+
+    result = {'stocks': stocks, 'fetched_at': utc_now_iso()}
+    try:
+        cache_file.write_text(json.dumps(result, indent=2), encoding='utf-8')
+    except Exception:
+        pass
+    return result
+
+
+@app.get('/sp500-heatmap')
+async def sp500_heatmap():
+    return await asyncio.to_thread(_fetch_heatmap, _SP500_SYMBOLS, _SP500_HEATMAP_FILE)
+
+
+@app.get('/nq-heatmap')
+async def nq_heatmap():
+    return await asyncio.to_thread(_fetch_heatmap, _NQ_SYMBOLS, _NQ_HEATMAP_FILE)
+
+
 @app.get('/futures-macro-pulse')
 async def futures_macro_pulse():
     return {'rows': get_live_futures_macro_pulse()}
