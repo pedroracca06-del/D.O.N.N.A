@@ -1893,28 +1893,50 @@ function getSymbolData(sym, d) {
       dir: p >= 0 ? 'up' : 'down'
     };
   }
-  const snap = ((d.risk || {}).market_snapshot) || {};
-  const idxLabelMap = {NASDAQ:'NASDAQ', SPX:'S&P 500', DJIA:'DJIA', DXY:'DXY'};
-  const s = snap[sym];
-  if (s && s.last && s.last !== '-') {
-    const p = parseFloat(s.pct);
-    return {
-      val: s.last, chg: s.chg || '—',
-      pct: isNaN(p) ? null : (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
-      dir: isNaN(p) ? '' : (p >= 0 ? 'up' : 'down')
-    };
+
+  // Helper: format a numeric price with comma separators
+  function fmtPrice(raw) {
+    const n = parseFloat(raw);
+    if (isNaN(n) || n === 0) return null;
+    return n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
   }
+
+  // 1. Futures macro pulse: NQ, ES, OIL, GOLD, SILVER — authoritative full prices
+  const pulseRow = (d.futures_macro_pulse || []).find(r => r.symbol === sym);
+  if (pulseRow && pulseRow.last && pulseRow.last !== '-' && pulseRow.last !== '—') {
+    const disp = fmtPrice(pulseRow.last);
+    if (disp) return {val: disp, chg: pulseRow.chg || '—', pct: pulseRow.pct || null, dir: pulseRow.dir || ''};
+  }
+
+  // 2. Major indexes: NASDAQ → 'NASDAQ', DJIA → 'DJIA', SPX → 'S&P 500', DXY, US10Y
+  const idxLabelMap = {NASDAQ: 'NASDAQ', SPX: 'S&P 500', DJIA: 'DJIA', DXY: 'DXY', US10Y: 'US 10Y'};
   const label = idxLabelMap[sym] || sym;
   const row = (d.major_indexes || []).find(r => r.symbol === label);
-  if (row && row.last && row.last !== '-') {
-    return {val: row.last, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || ''};
+  if (row && row.last && row.last !== '-' && row.last !== '—') {
+    const disp = fmtPrice(row.last);
+    if (disp) return {val: disp, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || ''};
   }
+
+  // 3. Last resort: market_snapshot (may be stale or from older calc)
+  const snap = ((d.risk || {}).market_snapshot) || {};
+  const s = snap[sym];
+  if (s && s.last && s.last !== '-') {
+    const disp = fmtPrice(s.last);
+    if (disp) {
+      const p = parseFloat(s.pct);
+      return {
+        val: disp, chg: s.chg || '—',
+        pct: isNaN(p) ? null : (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+        dir: isNaN(p) ? '' : (p >= 0 ? 'up' : 'down')
+      };
+    }
+  }
+
   return {val: '—', chg: '—', pct: null, dir: ''};
 }
 
 function applyTileData(tileEl, sym, data) {
-  const noData = !data.val || data.val === '—' || data.val === '-'
-              || parseFloat(data.val) === 0;
+  const noData = !data.val || data.val === '—' || data.val === '-';
   tileEl.style.display = noData ? 'none' : '';
   if (noData) return;
   const nameEl = tileEl.querySelector('.index-tile-name');
@@ -1922,8 +1944,8 @@ function applyTileData(tileEl, sym, data) {
   const chgEl  = tileEl.querySelector('.index-tile-chg');
   if (nameEl) nameEl.textContent = sym;
   if (valEl) {
-    const v = data.val;
-    valEl.textContent = v && v !== '-' ? (typeof v === 'number' ? v.toLocaleString(undefined,{maximumFractionDigits:2}) : v) : '—';
+    // data.val is pre-formatted by getSymbolData (e.g. "20,708.93")
+    valEl.textContent = data.val;
     valEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--text)';
   }
   if (chgEl) {
@@ -2890,7 +2912,14 @@ async function refreshSessionScorecard() {
     const stats  = j?.stats  || {};
     const todayStr = new Date().toISOString().slice(0, 10);
     const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'OPEN');
-    const todayPnl    = parseFloat(stats.daily_pnl?.today ?? 0);
+
+    // Bug 6: today P&L — only sum realized_pnl from WIN and LOSS trades, never OPEN or null
+    const todayPnl = todayTrades
+      .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS')
+      .reduce((sum, t) => {
+        const v = parseFloat(t.realized_pnl ?? t.pnl ?? 'x');
+        return sum + (isNaN(v) ? 0 : v);
+      }, 0);
 
     if (todayTrades.length === 0) {
       _setScorecardPlaceholder('No trades today — scorecard updates after first trade');
@@ -2906,7 +2935,8 @@ async function refreshSessionScorecard() {
     const tw = todayTrades.filter(t => t.outcome === 'WIN').length;
     const tl = todayTrades.filter(t => t.outcome === 'LOSS').length;
     const tb = todayTrades.filter(t => t.outcome === 'BREAKEVEN').length;
-    const tt = todayTrades.length;
+    // Bug 7: win rate denominator = only WIN + LOSS (exclude BREAKEVEN from rate)
+    const tt = tw + tl;
     const twr = tt > 0 ? Math.round(tw / tt * 100) : 0;
 
     const wEl = document.getElementById('scWins');   if (wEl) wEl.textContent = tw;
@@ -3194,13 +3224,25 @@ function renderJournal(data) {
     el.textContent = (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
     el.style.color  = n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--muted)';
   }
-  applyDailyPnl('jPnlToday',     dp.today);
+
+  // Bug 6: today P&L — recalculate from raw trades; only WIN + LOSS, skip OPEN and null
+  const todayStrJ = new Date().toISOString().slice(0, 10);
+  const todayPnlJ = trades
+    .filter(t => t.trade_date === todayStrJ && (t.outcome === 'WIN' || t.outcome === 'LOSS'))
+    .reduce((sum, t) => {
+      const v = parseFloat(t.realized_pnl ?? t.pnl ?? 'x');
+      return sum + (isNaN(v) ? 0 : v);
+    }, 0);
+  applyDailyPnl('jPnlToday',     todayPnlJ);
   applyDailyPnl('jPnlYesterday', dp.yesterday);
   applyDailyPnl('jPnlWeek',      dp.this_week);
 
   // Stats row
   setText('jTotalTrades', stats.total || 0);
-  const wr = stats.win_rate || 0;
+  // Bug 7: win rate — only WIN + LOSS in denominator (exclude OPEN, BREAKEVEN)
+  const jClosedCount = trades.filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS').length;
+  const jWinCount    = trades.filter(t => t.outcome === 'WIN').length;
+  const wr = jClosedCount > 0 ? Math.round(jWinCount / jClosedCount * 1000) / 10 : 0;
   const wrEl = document.getElementById('jWinRate');
   if (wrEl) { wrEl.textContent = wr + '%'; wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : 'var(--red)'; }
   setText('jWinRateSub', `${stats.wins||0}W / ${stats.losses||0}L / ${stats.breakevens||0}BE`);

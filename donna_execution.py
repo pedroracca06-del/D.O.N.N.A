@@ -157,9 +157,13 @@ def _get_daily_state() -> dict:
     risk      = load_risk_state()
     today_str = now_ny().strftime('%Y-%m-%d')
     if risk.get('daily_trades_date') != today_str:
-        risk['daily_trades_date']    = today_str
-        risk['daily_trades_taken']   = 0
-        risk['daily_loss_limit_hit'] = False
+        risk['daily_trades_date']      = today_str
+        risk['daily_trades_taken']     = 0
+        risk['daily_loss_limit_hit']   = False
+        risk['cumulative_risk_today']  = 0.0
+        risk['first_trade_outcome']    = ''
+        risk['size_reduction_active']  = False
+        risk['daily_loss_trade_hit']   = False
         save_risk_state(risk)
     return risk
 
@@ -469,6 +473,10 @@ def get_execution_status() -> dict:
         'broker_mode':              BROKER_MODE,
         'daily_trades_taken':       int(risk.get('daily_trades_taken', 0)),
         'daily_loss_limit_hit':     bool(risk.get('daily_loss_limit_hit', False)),
+        'daily_loss_trade_hit':     bool(risk.get('daily_loss_trade_hit', False)),
+        'first_trade_outcome':      risk.get('first_trade_outcome', ''),
+        'size_reduction_active':    bool(risk.get('size_reduction_active', False)),
+        'cumulative_risk_today':    float(risk.get('cumulative_risk_today', 0.0)),
         'asia_trade_taken':         _get_asia_trade_taken(),
         'red_folder_window_active': rf['active'],
         'next_red_folder_event':    rf['next_event_name'],
@@ -533,67 +541,109 @@ def _journal_log_trade(
 
 def check_position_outcomes() -> int:
     """
-    Scan OPEN DONNA_AUTO journal entries, query Alpaca for bracket order fills,
-    and update journal with realized P&L, exit price/time, and WIN/LOSS/BREAKEVEN.
-    Returns number of entries updated.
+    Query Alpaca for all closed orders today, match to OPEN DONNA_AUTO journal
+    entries by order_id (bracket legs) or symbol+direction fallback.
+    Updates exit_price, realized_pnl, outcome, exit_time.  Returns count updated.
     """
     trades    = load_journal()
     open_auto = [
         (i, t) for i, t in enumerate(trades)
         if t.get('source') == 'DONNA_AUTO'
         and str(t.get('outcome', '')).upper() == 'OPEN'
-        and t.get('order_id')
     ]
     if not open_auto:
         return 0
 
-    api = _client()
-    if not api:
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         return 0
+
+    # Fetch all of today's orders from Alpaca REST (nested=true returns bracket legs)
+    import requests as _req
+    from datetime import timezone as _tz
+    _base     = 'https://paper-api.alpaca.markets' if _PAPER else 'https://api.alpaca.markets'
+    today_ny  = now_ny().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_utc = today_ny.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    try:
+        r = _req.get(
+            f'{_base}/v2/orders',
+            headers={
+                'APCA-API-KEY-ID':     ALPACA_API_KEY,
+                'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY,
+            },
+            params={'status': 'all', 'after': today_utc, 'limit': 100, 'nested': 'true'},
+            timeout=10,
+        )
+        today_orders = r.json() if (r.ok and isinstance(r.json(), list)) else []
+    except Exception:
+        today_orders = []
+
+    # Lookups: by parent order id; by symbol+side for filled exits
+    orders_by_id: dict = {str(o.get('id', '')): o for o in today_orders}
+    exit_fills:   dict = {}
+    for o in today_orders:
+        if str(o.get('status', '')).lower() != 'filled':
+            continue
+        key = f"{str(o.get('symbol', '')).upper()}:{str(o.get('side', '')).lower()}"
+        exit_fills.setdefault(key, []).append(o)
+
+    def _parse_time(iso: str) -> str:
+        try:
+            from datetime import datetime as _dt
+            ft = _dt.fromisoformat(iso.replace('Z', '+00:00'))
+            return ft.astimezone(now_ny().tzinfo).strftime('%H:%M:%S ET')
+        except Exception:
+            return now_ny().strftime('%H:%M:%S ET')
 
     updated = 0
     for idx, trade in open_auto:
-        try:
-            order = api.get_order_by_id(trade['order_id'])
-        except Exception:
-            continue
-
-        updates: dict = {}
-
-        actual_entry = getattr(order, 'filled_avg_price', None)
-        if actual_entry is not None:
-            try:
-                updates['entry_price'] = float(actual_entry)
-            except Exception:
-                pass
-
-        legs       = getattr(order, 'legs', None) or []
-        filled_leg = next(
-            (lg for lg in legs if str(getattr(lg, 'status', '')).lower() == 'filled'),
-            None,
-        )
-
-        if filled_leg is None:
-            if updates:
-                trades[idx] = {**trade, **updates}
-                updated += 1
-            continue
-
-        raw_exit   = getattr(filled_leg, 'filled_avg_price', None)
-        exit_price = float(raw_exit) if raw_exit is not None else 0.0
-        exit_time  = now_ny().strftime('%H:%M:%S ET')
-        try:
-            filled_at = getattr(filled_leg, 'filled_at', None)
-            if filled_at:
-                exit_time = filled_at.astimezone(now_ny().tzinfo).strftime('%H:%M:%S ET')
-        except Exception:
-            pass
-
-        entry_px  = float(updates.get('entry_price', trade.get('entry_price') or 0))
-        qty       = int(trade.get('size') or 1)
+        order_id  = str(trade.get('order_id', ''))
+        symbol    = str(trade.get('ticker', '')).upper()
         direction = str(trade.get('direction', 'LONG')).upper()
+        exit_side = 'sell' if direction == 'LONG' else 'buy'
+        entry_px  = float(trade.get('entry_price') or 0)
 
-        # ETF shares: P&L = price_diff × shares (no futures point multiplier)
+        exit_price: float | None = None
+        exit_time_str = now_ny().strftime('%H:%M:%S ET')
+
+        # Try 1: match bracket parent by order_id → find filled exit leg
+        parent = orders_by_id.get(order_id)
+        if parent:
+            # Prefer actual fill price over estimate
+            fp = parent.get('filled_avg_price')
+            if fp:
+                try:
+                    entry_px = float(fp)
+                except Exception:
+                    pass
+            for leg in (parent.get('legs') or []):
+                if (str(leg.get('status', '')).lower() == 'filled'
+                        and str(leg.get('side', '')).lower() == exit_side):
+                    raw = leg.get('filled_avg_price')
+                    if raw:
+                        exit_price = float(raw)
+                    fa = leg.get('filled_at', '')
+                    if fa:
+                        exit_time_str = _parse_time(fa)
+                    break
+
+        # Try 2: match by symbol + exit_side from today's filled orders
+        if exit_price is None:
+            key = f'{symbol}:{exit_side}'
+            for o in exit_fills.get(key, []):
+                if str(o.get('id', '')) == order_id:
+                    continue  # skip the entry order itself
+                raw = o.get('filled_avg_price')
+                if raw:
+                    exit_price = float(raw)
+                fa = o.get('filled_at', '')
+                if fa:
+                    exit_time_str = _parse_time(fa)
+                break
+
+        if exit_price is None:
+            continue
+
+        qty     = int(trade.get('size') or 1)
         raw_pnl = (
             (exit_price - entry_px) * qty if direction == 'LONG'
             else (entry_px - exit_price) * qty
@@ -603,9 +653,9 @@ def check_position_outcomes() -> int:
 
         trades[idx] = {
             **trade,
-            **updates,
+            'entry_price':  entry_px,
             'exit_price':   exit_price,
-            'exit_time':    exit_time,
+            'exit_time':    exit_time_str,
             'realized_pnl': realized_pnl,
             'pnl':          realized_pnl,
             'outcome':      outcome,
@@ -614,6 +664,26 @@ def check_position_outcomes() -> int:
 
     if updated:
         save_journal(trades)
+        # Propagate first-trade outcome into daily risk state for trade-2 logic
+        today_str = now_ny().strftime('%Y-%m-%d')
+        risk = load_risk_state()
+        if risk.get('daily_trades_date') == today_str and not risk.get('first_trade_outcome'):
+            closed_today = sorted(
+                [t for t in trades
+                 if t.get('source') == 'DONNA_AUTO'
+                 and t.get('trade_date') == today_str
+                 and str(t.get('outcome', '')).upper() in ('WIN', 'LOSS', 'BREAKEVEN')],
+                key=lambda t_: t_.get('time', ''),
+            )
+            if closed_today:
+                first_oc = closed_today[0].get('outcome', '')
+                risk['first_trade_outcome'] = first_oc
+                if first_oc == 'LOSS':
+                    risk['daily_loss_trade_hit'] = True
+                elif first_oc == 'WIN':
+                    risk['size_reduction_active'] = True
+                save_risk_state(risk)
+
     return updated
 
 
@@ -649,10 +719,26 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
             'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY',
         }
 
+    # Load daily risk state for cumulative checks
+    risk_state       = _get_daily_state()
+    cumulative_risk  = float(risk_state.get('cumulative_risk_today', 0.0))
+
     sizing    = _get_etf_sizing(etf, session)
     qty       = sizing['qty']
     stop_dist = sizing['stop']
     tgt_dist  = sizing['target']
+
+    # Trade 2 uses 50% size when first trade was WIN
+    if risk_state.get('size_reduction_active'):
+        qty = max(1, qty // 2)
+
+    # Block if cumulative risk would hit $1,000 daily cap
+    new_trade_risk = qty * stop_dist
+    if cumulative_risk + new_trade_risk >= 1000.0:
+        return _log_skip(data, parsed,
+            f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new >= $1,000 limit',
+            'DAILY_RISK_LIMIT')
+
     side      = OrderSide.BUY if is_long else OrderSide.SELL
 
     # Use live ETF price for stop/target — signal price is a futures price and
@@ -684,8 +770,16 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     except Exception as e:
         return {'status': 'error', 'reason': str(e)}
 
-    # Record counters only after confirmed order submission
-    _increment_daily_trades()
+    # Record counters only after confirmed order submission (atomic write)
+    risk_after = load_risk_state()
+    today_str  = now_ny().strftime('%Y-%m-%d')
+    if risk_after.get('daily_trades_date') != today_str:
+        risk_after['daily_trades_date']     = today_str
+        risk_after['daily_trades_taken']    = 0
+        risk_after['cumulative_risk_today'] = 0.0
+    risk_after['daily_trades_taken']    = int(risk_after.get('daily_trades_taken', 0)) + 1
+    risk_after['cumulative_risk_today'] = float(risk_after.get('cumulative_risk_today', 0.0)) + (qty * stop_dist)
+    save_risk_state(risk_after)
     if session == 'ASIA':
         _set_asia_trade_taken()
 
@@ -807,6 +901,23 @@ def execute_signal(signal_result: dict) -> dict:
         return _log_skip(data, parsed,
             f'daily trade limit reached — {trades_today}/{_DAILY_TRADE_LIMIT} trades taken today',
             'DAILY_TRADE_LIMIT')
+
+    # ── RULE 3b: DAILY LOSS TRADE — first trade of day was a LOSS → stop all trading
+    if risk_snap.get('daily_loss_trade_hit'):
+        print(f'[execute_signal] {ts_et} | BLOCKED: first trade was LOSS — halted for today')
+        return _log_skip(data, parsed,
+            'first trade of day was a LOSS — no more trades today',
+            'DAILY_LOSS_TRADE_HIT')
+
+    # ── TRADE 2 LOGIC — second trade only allowed if first trade closed as WIN
+    if trades_today >= 1:
+        first_oc = risk_snap.get('first_trade_outcome', '')
+        if first_oc != 'WIN':
+            label = first_oc if first_oc else 'still open'
+            print(f'[execute_signal] {ts_et} | BLOCKED: trade 2 requires trade 1 WIN (current: {label})')
+            return _log_skip(data, parsed,
+                f'trade 2 blocked — first trade outcome is "{label}" (requires WIN)',
+                'TRADE2_BLOCKED_NO_WIN')
 
     # ── RULE 1: RED FOLDER
     rf = _red_folder_status()

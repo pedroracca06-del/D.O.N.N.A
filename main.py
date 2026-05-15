@@ -189,14 +189,16 @@ async def position_outcomes_loop():
 
 
 async def eod_close_loop():
-    """At 3:45 PM ET on weekdays, force-close all open positions."""
+    """At or after 3:45 PM ET on weekdays, force-close all open positions."""
     _done_today = ''
     while True:
         try:
             ny        = now_ny()
             today_str = ny.strftime('%Y-%m-%d')
+            m         = ny.hour * 60 + ny.minute
             if (ny.weekday() < 5
-                    and ny.hour == 15 and ny.minute == 45
+                    and m >= 15 * 60 + 45
+                    and m < 16 * 60 + 30
                     and today_str != _done_today):
                 print(f'DONNA EOD close: running for {today_str}')
                 n = await asyncio.to_thread(close_all_positions_eod)
@@ -726,6 +728,86 @@ async def execution_close(request: Request):
 @app.post('/execution/close-all')
 async def execution_close_all():
     return await asyncio.to_thread(close_all_positions)
+
+
+@app.get('/close-all')
+async def close_all_eod_manual():
+    """Manually trigger EOD close of all open positions immediately."""
+    if not _EXECUTION_AVAILABLE:
+        return {'status': 'unavailable', 'error': 'execution not loaded'}
+    n = await asyncio.to_thread(close_all_positions_eod)
+    return {'status': 'ok', 'positions_closed': n}
+
+
+@app.get('/system-check')
+async def system_check():
+    """Return connection and daily-state status for all DONNA subsystems."""
+    from donna_config import TELEGRAM_BOT_TOKEN, FINNHUB_API_KEY
+    from donna_state import load_macro_events
+
+    # Alpaca
+    alpaca_connected = False
+    if _EXECUTION_AVAILABLE:
+        try:
+            acct = await asyncio.to_thread(get_account)
+            alpaca_connected = bool(acct.get('available'))
+        except Exception:
+            pass
+
+    # Open positions count
+    open_pos = 0
+    if _EXECUTION_AVAILABLE:
+        try:
+            open_pos = len(await asyncio.to_thread(get_positions))
+        except Exception:
+            pass
+
+    # Execution state
+    exec_state: dict = {}
+    if _EXECUTION_AVAILABLE:
+        try:
+            exec_state = await asyncio.to_thread(get_execution_status)
+        except Exception:
+            pass
+
+    # Grok: last fetch time from cached file
+    grok_connected = bool(os.getenv('GROK_API_KEY', '').strip())
+    last_grok_fetch: str | None = None
+    try:
+        if _GROK_INTEL_FILE.exists():
+            cached = json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
+            last_grok_fetch = cached.get('fetched_at')
+    except Exception:
+        pass
+
+    # Calendar: last fetch time from macro events file
+    last_calendar_fetch: str | None = None
+    try:
+        macro = load_macro_events()
+        last_calendar_fetch = macro.get('fetched_at') or macro.get('last_updated')
+    except Exception:
+        pass
+
+    ny = now_ny()
+    m  = ny.hour * 60 + ny.minute
+    eod_close_window = ny.weekday() < 5 and m >= 15 * 60 + 45 and m < 16 * 60 + 30
+
+    from donna_execution import BROKER_MODE as _BROKER_MODE
+    return {
+        'alpaca_connected':      alpaca_connected,
+        'grok_connected':        grok_connected,
+        'finnhub_connected':     bool(FINNHUB_API_KEY),
+        'telegram_connected':    bool(TELEGRAM_BOT_TOKEN),
+        'daily_trades_taken':    exec_state.get('daily_trades_taken', 0),
+        'first_trade_outcome':   exec_state.get('first_trade_outcome', ''),
+        'cumulative_risk_today': exec_state.get('cumulative_risk_today', 0.0),
+        'open_positions':        open_pos,
+        'eod_close_scheduled':   _EXECUTION_AVAILABLE,
+        'eod_close_window_now':  eod_close_window,
+        'last_grok_fetch':       last_grok_fetch,
+        'last_calendar_fetch':   last_calendar_fetch,
+        'broker_mode':           _BROKER_MODE if _EXECUTION_AVAILABLE else 'unavailable',
+    }
 
 
 # ── Morning brief ──────────────────────────────────────────────
