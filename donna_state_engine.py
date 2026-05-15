@@ -1,0 +1,291 @@
+"""
+DONNA State Engine — centralized live execution state authority.
+Single source of truth for all execution state. No business logic; pure state ownership.
+
+Future migration: replace JSON persistence with Redis or Postgres by swapping
+_save() and _load() methods only. All other code stays identical.
+"""
+from __future__ import annotations
+
+import json
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+# ── Timezone helpers ───────────────────────────────────────────
+
+try:
+    from zoneinfo import ZoneInfo as _ZI
+    _NY_TZ = _ZI('America/New_York')
+except ImportError:
+    try:
+        import pytz as _pytz  # type: ignore[import]
+        _NY_TZ = _pytz.timezone('America/New_York')
+    except ImportError:
+        _NY_TZ = timezone.utc  # type: ignore[assignment]
+
+
+def _now_ny() -> datetime:
+    return datetime.now(tz=_NY_TZ)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+# ── Schema ─────────────────────────────────────────────────────
+
+_STATE_FILE = Path(__file__).parent / 'donna_state_engine.json'
+
+_DEFAULT_STATE: dict = {
+    'market_regime':         'UNKNOWN',
+    'macro_risk':            'low',
+    'session_state':         'OFF_HOURS',
+    'daily_trade_count':     0,
+    'first_trade_outcome':   None,
+    'size_reduction_active': False,
+    'daily_loss_trade_hit':  False,
+    'cumulative_risk_today': 0.0,
+    'daily_pnl':             0.0,
+    'open_positions':        [],
+    'execution_lock':        False,
+    'trade_permission':      True,
+    'eod_lock':              False,
+    'macro_lock':            False,
+    'red_folder_lock':       False,
+    'asia_trade_taken':      False,
+    'last_signal_id':        None,
+    'last_execution_time':   None,
+    'risk_lockouts':         [],
+    'state_date':            None,
+    'last_updated':          None,
+}
+
+# Fields reset to their defaults each new ET calendar day
+_DAILY_RESET_FIELDS: dict = {
+    'daily_trade_count':     0,
+    'first_trade_outcome':   None,
+    'size_reduction_active': False,
+    'daily_loss_trade_hit':  False,
+    'cumulative_risk_today': 0.0,
+    'daily_pnl':             0.0,
+    'eod_lock':              False,
+    'asia_trade_taken':      False,
+    'risk_lockouts':         [],
+}
+
+
+class DonnaStateEngine:
+    """
+    Thread-safe, file-backed state store for DONNA's live execution layer.
+    Instantiate once (use the module-level `state` singleton below).
+    All public methods are safe to call from any thread — they never raise.
+    """
+
+    def __init__(self) -> None:
+        self._lock  = threading.Lock()
+        self._state: dict = {}
+        self._load()
+
+    # ── Persistence ────────────────────────────────────────────
+
+    def _load(self) -> None:
+        """Load state from disk, falling back to defaults on any failure."""
+        try:
+            if _STATE_FILE.exists():
+                raw = json.loads(_STATE_FILE.read_text(encoding='utf-8'))
+                if isinstance(raw, dict):
+                    merged = dict(_DEFAULT_STATE)
+                    merged.update(raw)
+                    self._state = merged
+                    self._maybe_reset_daily_unlocked()
+                    return
+        except Exception as exc:
+            print(f'[state_engine] _load error: {exc}')
+        self._state = dict(_DEFAULT_STATE)
+        self._state['state_date'] = _now_ny().strftime('%Y-%m-%d')
+        self._save_unlocked()
+
+    def _save_unlocked(self) -> None:
+        """Write current state to disk. Caller must hold self._lock."""
+        try:
+            self._state['last_updated'] = _utc_now_iso()
+            _STATE_FILE.write_text(
+                json.dumps(self._state, indent=2, default=str),
+                encoding='utf-8',
+            )
+        except Exception as exc:
+            print(f'[state_engine] _save error: {exc}')
+
+    # ── Daily reset ────────────────────────────────────────────
+
+    def _maybe_reset_daily_unlocked(self) -> None:
+        """Reset daily fields if state_date is not today ET. Caller must hold lock."""
+        today_str = _now_ny().strftime('%Y-%m-%d')
+        if self._state.get('state_date') != today_str:
+            self._do_reset_unlocked(today_str)
+
+    def _do_reset_unlocked(self, today_str: str | None = None) -> None:
+        """Apply the daily field reset. Caller must hold lock."""
+        if today_str is None:
+            today_str = _now_ny().strftime('%Y-%m-%d')
+        self._state.update(_DAILY_RESET_FIELDS)
+        self._state['state_date'] = today_str
+        self._save_unlocked()
+        print(f'[state_engine] Daily reset — state_date={today_str}')
+
+    # ── Getters ────────────────────────────────────────────────
+
+    def get_state(self) -> dict:
+        """Return a shallow copy of the full state dict."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            return dict(self._state)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Return the value of a single state field."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            return self._state.get(key, default)
+
+    def can_execute(self) -> bool:
+        """True only when all execution gates are open."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            s = self._state
+            return (
+                not s.get('execution_lock', False)
+                and bool(s.get('trade_permission', True))
+                and not s.get('eod_lock', False)
+                and not s.get('macro_lock', False)
+                and not s.get('red_folder_lock', False)
+            )
+
+    def get_trade_count(self) -> int:
+        """Return today's trade count."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            return int(self._state.get('daily_trade_count', 0))
+
+    def get_session(self) -> str:
+        """Return the current session_state label."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            return str(self._state.get('session_state', 'OFF_HOURS'))
+
+    def get_open_positions(self) -> list:
+        """Return a copy of the open_positions list."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            return list(self._state.get('open_positions', []))
+
+    # ── Setters ────────────────────────────────────────────────
+
+    def set(self, key: str, value: Any) -> None:
+        """Update a single field and persist immediately."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                self._state[key] = value
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] set({key}) error: {exc}')
+
+    def set_many(self, updates: dict) -> None:
+        """Update multiple fields in a single atomic write."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                self._state.update(updates)
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] set_many error: {exc}')
+
+    def add_lockout(self, reason: str) -> None:
+        """Append a timestamped lockout reason to risk_lockouts."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                lockouts = list(self._state.get('risk_lockouts', []))
+                lockouts.append({'reason': reason, 'timestamp': _utc_now_iso()})
+                self._state['risk_lockouts'] = lockouts
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] add_lockout error: {exc}')
+
+    def clear_lockouts(self) -> None:
+        """Empty the risk_lockouts list."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                self._state['risk_lockouts'] = []
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] clear_lockouts error: {exc}')
+
+    def add_position(self, position: dict) -> None:
+        """Append a position dict to open_positions."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                positions = list(self._state.get('open_positions', []))
+                positions.append(position)
+                self._state['open_positions'] = positions
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] add_position error: {exc}')
+
+    def remove_position(self, symbol: str) -> None:
+        """Remove all positions matching symbol from open_positions."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                sym_upper = str(symbol).upper()
+                self._state['open_positions'] = [
+                    p for p in self._state.get('open_positions', [])
+                    if str(p.get('symbol', '')).upper() != sym_upper
+                ]
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] remove_position error: {exc}')
+
+    def increment_trade_count(self) -> int:
+        """Increment daily_trade_count by 1 and return the new value."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                new_val = int(self._state.get('daily_trade_count', 0)) + 1
+                self._state['daily_trade_count'] = new_val
+                self._save_unlocked()
+                return new_val
+            except Exception as exc:
+                print(f'[state_engine] increment_trade_count error: {exc}')
+                return 0
+
+    def record_execution(self, signal_id: str | None, risk_amount: float) -> None:
+        """Record a completed trade: updates signal ID, timestamp, and cumulative risk."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                self._state['last_signal_id']       = signal_id
+                self._state['last_execution_time']  = _utc_now_iso()
+                self._state['cumulative_risk_today'] = (
+                    float(self._state.get('cumulative_risk_today', 0.0))
+                    + float(risk_amount)
+                )
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] record_execution error: {exc}')
+
+    def reset_daily(self) -> None:
+        """Force an immediate daily reset of all daily-scoped fields."""
+        with self._lock:
+            try:
+                self._do_reset_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] reset_daily error: {exc}')
+
+
+# ── Singleton ──────────────────────────────────────────────────
+state = DonnaStateEngine()

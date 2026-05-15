@@ -107,6 +107,18 @@ except Exception:
     def process_finnhub_cycle():
         return None
 
+try:
+    from donna_state_engine import state as _donna_state
+    _STATE_ENGINE_AVAILABLE = True
+except Exception as _se_err:
+    print(f'[main] donna_state_engine unavailable: {_se_err}')
+    _STATE_ENGINE_AVAILABLE = False
+    class _FallbackState:
+        def get_state(self):   return {}
+        def get(self, k, d=None): return d
+        def get_trade_count(self): return 0
+    _donna_state = _FallbackState()  # type: ignore[assignment]
+
 app = FastAPI(title='DONNA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
 
@@ -270,6 +282,12 @@ async def grok_loop():
 @app.on_event('startup')
 async def startup():
     ensure_files()
+    if _STATE_ENGINE_AVAILABLE:
+        print(
+            f'State engine loaded — '
+            f'date: {_donna_state.get("state_date")}, '
+            f'trades today: {_donna_state.get_trade_count()}'
+        )
     await asyncio.to_thread(check_todays_breaking_events)
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
@@ -311,6 +329,12 @@ async def check_env():
         'chat_model':                  ANTHROPIC_ASSISTANT_MODEL,
         'fast_model':                  ANTHROPIC_MODEL,
     }
+
+
+@app.get('/state-engine')
+async def state_engine_endpoint():
+    """Return the full DONNA state engine snapshot."""
+    return _donna_state.get_state()
 
 
 @app.get('/system-health')
