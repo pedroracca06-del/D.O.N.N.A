@@ -2630,42 +2630,62 @@ function renderD3Treemap(stocks) {
     .attr('rx', 3)
     .style('cursor', 'pointer')
     .on('mousemove', function(event, d) {
-      const pct   = d.data.percent_change || 0;
-      const sign  = pct >= 0 ? '+' : '';
-      const col   = pct >= 0 ? '#4ade80' : '#f87171';
-      const price = (d.data.price || 0).toFixed(2);
-      const wt    = (d.data.market_weight || 0).toFixed(1);
+      const pct    = d.data.percent_change || 0;
+      const sign   = pct >= 0 ? '+' : '';
+      const col    = pct >= 0 ? '#4ade80' : '#f87171';
+      const isSec  = !d.data.symbol;
       tip.style.display = 'block';
       tip.style.left    = (event.clientX + 14) + 'px';
       tip.style.top     = (event.clientY - 10) + 'px';
-      tip.innerHTML =
-        `<div style="font-weight:700;font-size:15px;margin-bottom:2px">${d.data.name}</div>` +
-        `<div style="color:#555;font-size:10px;font-family:'Space Mono',monospace;margin-bottom:6px">${d.data.symbol}</div>` +
-        `<div>Price: <b style="color:#ddd">$${price}</b></div>` +
-        `<div>Change: <b style="color:${col}">${sign}${pct.toFixed(2)}%</b></div>` +
-        `<div>Weight: <b style="color:#ddd">${wt}%</b></div>`;
+      if (isSec) {
+        tip.innerHTML =
+          `<div style="font-weight:700;font-size:15px;margin-bottom:4px">${d.data.name}</div>` +
+          `<div>Change: <b style="color:${col}">${sign}${pct.toFixed(2)}%</b></div>`;
+      } else {
+        const price = (d.data.price || 0).toFixed(2);
+        const wt    = (d.data.market_weight || 0).toFixed(1);
+        tip.innerHTML =
+          `<div style="font-weight:700;font-size:15px;margin-bottom:2px">${d.data.name}</div>` +
+          `<div style="color:#555;font-size:10px;font-family:'Space Mono',monospace;margin-bottom:6px">${d.data.symbol}</div>` +
+          `<div>Price: <b style="color:#ddd">$${price}</b></div>` +
+          `<div>Change: <b style="color:${col}">${sign}${pct.toFixed(2)}%</b></div>` +
+          `<div>Weight: <b style="color:#ddd">${wt}%</b></div>`;
+      }
     })
     .on('mouseleave', () => { tip.style.display = 'none'; });
 
   cell.each(function(d) {
-    const w = d.x1 - d.x0;
-    const h = d.y1 - d.y0;
+    const w     = d.x1 - d.x0;
+    const h     = d.y1 - d.y0;
     if (w < 24 || h < 16) return;
 
-    const g        = d3.select(this);
-    const pct      = d.data.percent_change || 0;
-    const pctStr   = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-    const isLarge  = d.data.market_weight > 2;
-    const cx       = w / 2;
-    const lineH    = 14;
+    const g      = d3.select(this);
+    const pct    = d.data.percent_change || 0;
+    const pctStr = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    const isSec  = !d.data.symbol;
+    const cx     = w / 2;
 
-    const lines = [];
-    if (isLarge && h >= 56 && w >= 60)
-      lines.push({ text: d.data.name,  size: 10, opacity: 0.72, weight: '500' });
-    lines.push(    { text: d.data.symbol, size: Math.min(13, Math.max(9, Math.floor(w / 5))), opacity: 1, weight: '700' });
-    if (h >= 32)
-      lines.push({ text: pctStr, size: 10, opacity: 0.9, weight: '400' });
+    let lines;
+    if (isSec) {
+      // Sector mode — name uppercase dominant, % below
+      const nameUp  = (d.data.name || '').toUpperCase();
+      const nameSz  = Math.min(14, Math.max(8, Math.floor(w / 9)));
+      lines = [];
+      if (h >= 36) lines.push({ text: nameUp,  size: nameSz, opacity: 1,    weight: '700' });
+      if (h >= 28) lines.push({ text: pctStr,  size: 11,     opacity: 0.85, weight: '400' });
+      if (!lines.length) lines.push({ text: nameUp, size: Math.max(7, Math.floor(w / 9)), opacity: 1, weight: '700' });
+    } else {
+      // Stock mode — optional name, ticker bold, % below
+      const isLarge = d.data.market_weight > 2;
+      lines = [];
+      if (isLarge && h >= 56 && w >= 60)
+        lines.push({ text: d.data.name,   size: 10, opacity: 0.72, weight: '500' });
+      lines.push(   { text: d.data.symbol, size: Math.min(13, Math.max(9, Math.floor(w / 5))), opacity: 1, weight: '700' });
+      if (h >= 32)
+        lines.push({ text: pctStr, size: 10, opacity: 0.9, weight: '400' });
+    }
 
+    const lineH = isSec ? 16 : 14;
     let y = (h - lines.length * lineH) / 2 + lineH;
     lines.forEach(ln => {
       const maxCh = Math.max(2, Math.floor(w / (ln.size * 0.62)));
