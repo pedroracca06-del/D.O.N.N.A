@@ -574,9 +574,6 @@ tr:last-child td{border-bottom:none}
 .mover-pct.up{color:var(--green)}.mover-pct.dn{color:var(--red)}
 
 /* ── SECTOR HEAT / TREEMAP ── */
-#stockTreemap{width:100%;height:280px;border-radius:8px;overflow:hidden;background:#111;display:block}
-#stockTreemap svg{display:block}
-.tm-closed-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.07);color:var(--muted2)}
 .donna-says-box{padding:16px 18px;border-radius:14px;background:var(--bg2);border:1px solid var(--line)}
 .donna-says-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px}
 .donna-says-text{font-size:12px;color:#888;line-height:1.65}
@@ -1113,7 +1110,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 }
 .verdict-banner.flash { animation: banner-flash .7s ease-out }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
 <div class="wrap">
@@ -1365,10 +1361,10 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
       <!-- 5 INDEX TILES (customizable) -->
       <div class="index-tiles" id="indexTiles">
         <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">NASDAQ</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
-        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">SPX</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
+        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">ES</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
         <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">DJIA</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
-        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">DXY</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
-        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">VIX</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
+        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">GOLD</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
+        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">OIL</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
       </div>
 
       <!-- MAIN 2-COLUMN GRID: 70% left / 30% right -->
@@ -1392,18 +1388,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div class="grok-names-row" id="grokKeyNames"></div>
           </div>
 
-          <!-- 2. SECTOR HEAT (full width main column) -->
-          <div class="panel">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-              <div class="kicker" style="margin-bottom:0">Sector Heat</div>
-              <span class="tm-closed-badge" id="tmClosedBadge" style="display:none">Market Closed</span>
-            </div>
-            <div id="stockTreemap">
-              <svg width="100%" height="280"><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="rgba(255,255,255,.25)" font-size="12" font-family="Space Mono,monospace">Loading…</text></svg>
-            </div>
-          </div>
-
-          <!-- 3. LIVE FEED -->
+          <!-- 2. LIVE FEED -->
           <div class="panel">
             <div class="kicker" style="margin-bottom:12px">Live Feed</div>
             <div id="newsList"><div class="obs-item low"><div class="obs-body">Loading headlines...</div></div></div>
@@ -1874,7 +1859,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 <script>
 // ════════ CUSTOMIZABLE INDEX TILES ════════
 const SYMBOL_LIST = ['NQ','ES','MNQ','MES','SPX','NASDAQ','DJIA','DXY','VIX','US10Y','GOLD','SILVER','OIL','BTC','ETH'];
-const DEFAULT_PREFS = ['NASDAQ','SPX','DJIA','DXY','VIX'];
+const DEFAULT_PREFS = ['NASDAQ','ES','DJIA','GOLD','OIL'];
 const LS_KEY = 'user_index_prefs';
 let _lastDashData = null;
 let _activePicker = null;
@@ -2599,155 +2584,6 @@ async function refreshTrendingMovers() {
   } catch(e) { console.error('refreshTrendingMovers:', e); }
 }
 
-// ════════ STOCK TREEMAP (D3) ════════
-
-function _tmColor(pct) {
-  const n = parseFloat(pct);
-  if (isNaN(n) || n === 0) return '#1a3a1a';
-  if (n >  2)   return '#14532d';
-  if (n >  0.5) return '#166534';
-  if (n >  0)   return '#1a3a1a';
-  if (n > -0.5) return '#3a1a1a';
-  if (n > -1)   return '#7f1d1d';
-  return '#450a0a';
-}
-
-function renderD3Treemap(stocks) {
-  const container = document.getElementById('stockTreemap');
-  if (!container || typeof d3 === 'undefined') return;
-
-  const width  = container.clientWidth || container.offsetWidth || 640;
-  const height = 280;
-  container.innerHTML = '';
-
-  if (!stocks || !stocks.length) {
-    container.innerHTML = '<div style="height:280px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.3);font-size:12px;font-family:Space Mono,monospace">No data</div>';
-    return;
-  }
-
-  const root = d3.hierarchy({ name: 'root', children: stocks })
-    .sum(d => d.market_weight || 0)
-    .sort((a, b) => b.value - a.value);
-
-  d3.treemap().size([width, height]).paddingInner(2).paddingOuter(0)(root);
-
-  let tip = document.getElementById('d3StockTip');
-  if (!tip) {
-    tip = document.createElement('div');
-    tip.id = 'd3StockTip';
-    Object.assign(tip.style, {
-      position: 'fixed', background: '#1a1a1a', border: '1px solid #2e2e2e',
-      borderRadius: '8px', padding: '10px 14px',
-      fontFamily: "'Rajdhani',sans-serif", fontSize: '13px', color: '#fff',
-      pointerEvents: 'none', display: 'none', zIndex: '9999',
-      minWidth: '155px', lineHeight: '1.65', boxShadow: '0 4px 24px rgba(0,0,0,.7)'
-    });
-    document.body.appendChild(tip);
-  }
-
-  const svg = d3.select(container).append('svg')
-    .attr('width', width).attr('height', height)
-    .style('border-radius', '8px').style('display', 'block');
-
-  const cell = svg.selectAll('g')
-    .data(root.leaves())
-    .enter().append('g')
-    .attr('transform', d => `translate(${d.x0},${d.y0})`);
-
-  cell.append('rect')
-    .attr('width',  d => Math.max(0, d.x1 - d.x0))
-    .attr('height', d => Math.max(0, d.y1 - d.y0))
-    .attr('fill', d => _tmColor(d.data.percent_change))
-    .attr('rx', 3)
-    .style('cursor', 'pointer')
-    .on('mousemove', function(event, d) {
-      const pct    = d.data.percent_change || 0;
-      const sign   = pct >= 0 ? '+' : '';
-      const col    = pct >= 0 ? '#4ade80' : '#f87171';
-      const isSec  = !d.data.symbol;
-      tip.style.display = 'block';
-      tip.style.left    = (event.clientX + 14) + 'px';
-      tip.style.top     = (event.clientY - 10) + 'px';
-      if (isSec) {
-        tip.innerHTML =
-          `<div style="font-weight:700;font-size:15px;margin-bottom:4px">${d.data.name}</div>` +
-          `<div>Change: <b style="color:${col}">${sign}${pct.toFixed(2)}%</b></div>`;
-      } else {
-        const price = (d.data.price || 0).toFixed(2);
-        const wt    = (d.data.market_weight || 0).toFixed(1);
-        tip.innerHTML =
-          `<div style="font-weight:700;font-size:15px;margin-bottom:2px">${d.data.name}</div>` +
-          `<div style="color:#555;font-size:10px;font-family:'Space Mono',monospace;margin-bottom:6px">${d.data.symbol}</div>` +
-          `<div>Price: <b style="color:#ddd">$${price}</b></div>` +
-          `<div>Change: <b style="color:${col}">${sign}${pct.toFixed(2)}%</b></div>` +
-          `<div>Weight: <b style="color:#ddd">${wt}%</b></div>`;
-      }
-    })
-    .on('mouseleave', () => { tip.style.display = 'none'; });
-
-  cell.each(function(d) {
-    const w     = d.x1 - d.x0;
-    const h     = d.y1 - d.y0;
-    if (w < 24 || h < 16) return;
-
-    const g      = d3.select(this);
-    const pct    = d.data.percent_change || 0;
-    const pctStr = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-    const isSec  = !d.data.symbol;
-    const cx     = w / 2;
-
-    let lines;
-    if (isSec) {
-      // Sector mode — name uppercase dominant, % below
-      const nameUp  = (d.data.name || '').toUpperCase();
-      const nameSz  = Math.min(14, Math.max(8, Math.floor(w / 9)));
-      lines = [];
-      if (h >= 36) lines.push({ text: nameUp,  size: nameSz, opacity: 1,    weight: '700' });
-      if (h >= 28) lines.push({ text: pctStr,  size: 11,     opacity: 0.85, weight: '400' });
-      if (!lines.length) lines.push({ text: nameUp, size: Math.max(7, Math.floor(w / 9)), opacity: 1, weight: '700' });
-    } else {
-      // Stock mode — optional name, ticker bold, % below
-      const isLarge = d.data.market_weight > 2;
-      lines = [];
-      if (isLarge && h >= 56 && w >= 60)
-        lines.push({ text: d.data.name,   size: 10, opacity: 0.72, weight: '500' });
-      lines.push(   { text: d.data.symbol, size: Math.min(13, Math.max(9, Math.floor(w / 5))), opacity: 1, weight: '700' });
-      if (h >= 32)
-        lines.push({ text: pctStr, size: 10, opacity: 0.9, weight: '400' });
-    }
-
-    const lineH = isSec ? 16 : 14;
-    let y = (h - lines.length * lineH) / 2 + lineH;
-    lines.forEach(ln => {
-      const maxCh = Math.max(2, Math.floor(w / (ln.size * 0.62)));
-      const txt   = ln.text.length > maxCh ? ln.text.slice(0, maxCh - 1) + '…' : ln.text;
-      g.append('text')
-        .attr('x', cx).attr('y', y)
-        .attr('text-anchor', 'middle')
-        .attr('fill', '#fff').attr('fill-opacity', ln.opacity)
-        .attr('font-family', "'Rajdhani',sans-serif")
-        .attr('font-size', ln.size).attr('font-weight', ln.weight)
-        .attr('pointer-events', 'none')
-        .text(txt);
-      y += lineH;
-    });
-  });
-}
-
-async function refreshSectorHeat() {
-  try {
-    const res  = await fetch('/sp500-heatmap');
-    const data = await res.json();
-    renderD3Treemap(data.stocks || []);
-    const badge = document.getElementById('tmClosedBadge');
-    if (badge) {
-      const ny   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-      const m    = ny.getHours() * 60 + ny.getMinutes();
-      const open = ny.getDay() >= 1 && ny.getDay() <= 5 && m >= 570 && m <= 990;
-      badge.style.display = open ? 'none' : 'inline-block';
-    }
-  } catch(e) { console.error('refreshSectorHeat:', e); }
-}
 
 // ════════ ECON CALENDAR ════════
 function renderEconCalendar(events) {
@@ -3595,8 +3431,6 @@ refreshNewsFuturesStrip();
 setInterval(refreshNewsFuturesStrip, 30000);
 refreshTrendingMovers();
 setInterval(refreshTrendingMovers, 5 * 60 * 1000);
-refreshSectorHeat();
-setInterval(refreshSectorHeat, 5 * 60 * 1000);
 refreshEconCalendar();
 setInterval(refreshEconCalendar, 5 * 60 * 1000);
 refreshHarvey();
