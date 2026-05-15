@@ -1036,6 +1036,46 @@ tr:last-child td{border-bottom:none}
   .harvey-top-grid, .harvey-mid-grid, .harvey-bot-grid, .verdict-grid { grid-template-columns: 1fr }
 }
 
+/* ── NEW HARVEY LAYOUT ── */
+.hv-layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
+.hv-left, .hv-right { display: flex; flex-direction: column; gap: 14px; }
+
+.hv-verdict-card { border-radius: var(--radius); padding: 24px 26px; border: 1px solid var(--line); background: var(--panel); position: relative; overflow: hidden; }
+.hv-verdict-card.green  { border-color: rgba(30,110,65,.3);   background: var(--green2); }
+.hv-verdict-card.red    { border-color: rgba(192,57,43,.3);   background: var(--red2); }
+.hv-verdict-card.yellow { border-color: rgba(184,134,11,.25); background: rgba(184,134,11,.05); }
+
+.hv-gauge-wrap { margin-top: 14px; }
+.hv-gauge-track { width: 100%; height: 10px; background: var(--panel2); border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }
+.hv-gauge-fill { height: 100%; border-radius: 999px; transition: width .6s ease, background .6s ease; }
+
+.hv-price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.hv-price-card { padding: 18px 20px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); }
+
+.hv-playbook { padding: 18px 20px; border-radius: var(--radius); border: 1px solid rgba(184,134,11,.25); border-left: 3px solid var(--yellow); background: rgba(184,134,11,.04); }
+.hv-playbook ul { margin: 8px 0 0; padding-left: 18px; }
+.hv-playbook li { font-size: 13px; color: var(--muted); line-height: 1.65; margin-bottom: 4px; }
+.hv-playbook li:last-child { margin-bottom: 0; }
+
+.hv-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hv-stat-cell { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel2); }
+.hv-stat-label { font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 1.5px; color: var(--muted2); text-transform: uppercase; margin-bottom: 6px; }
+.hv-stat-value { font-family: 'Rajdhani', sans-serif; font-size: 17px; font-weight: 700; line-height: 1.2; }
+
+.hv-orb-badge { font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 1.5px; color: var(--yellow); text-transform: uppercase; background: rgba(184,134,11,.08); border: 1px solid rgba(184,134,11,.2); border-radius: 4px; padding: 2px 8px; display: inline-block; margin-bottom: 10px; }
+
+.hv-sector-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.hv-sector-row:last-child { border-bottom: none; }
+.hv-sector-name { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.hv-sector-pct  { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; }
+
+.hv-donna-says { padding: 16px 18px; border-radius: var(--radius); border: 1px solid rgba(0,229,160,.12); background: rgba(0,229,160,.04); font-size: 13px; color: var(--muted); line-height: 1.65; font-style: italic; }
+.hv-donna-says-label { font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 2px; color: var(--green); text-transform: uppercase; font-style: normal; display: block; margin-bottom: 8px; }
+
+@media(max-width:1100px) {
+  .hv-layout, .hv-price-row { grid-template-columns: 1fr; }
+}
+
 /* ── RISK BAR PULSE ── */
 @keyframes strip-pulse-red {
   0%,100% { border-color:rgba(192,57,43,.2) }
@@ -1484,91 +1524,127 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   <div class="page" id="page-harvey">
     <div class="vstack">
 
-      <!-- VERDICT BANNER -->
-      <div class="verdict-banner yellow" id="harveyVerdict">
-        <div class="verdict-grid">
-          <div>
+      <!-- Execution status strip -->
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:6px 0 2px">
+        <div style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase">Bot</div>
+        <div id="hvBotStatus" style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700;color:var(--muted)">—</div>
+        <div style="color:var(--line2)">·</div>
+        <div style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase">Trades Left Today</div>
+        <div id="hvTradesLeft" style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">—</div>
+      </div>
+
+      <div class="hv-layout">
+        <!-- ── LEFT COLUMN ── -->
+        <div class="hv-left">
+
+          <!-- 1. VERDICT BANNER -->
+          <div class="hv-verdict-card yellow" id="hvVerdictCard">
             <div class="verdict-label">H.A.R.V.E.Y // Execution Verdict</div>
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px">
-              <div class="verdict-word" id="harveyVerdictWord">—</div>
-              <div id="harveyRegimeRow" style="display:flex;gap:8px;align-items:center;padding:4px 12px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
-                <span style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase">Regime</span>
-                <span id="harveyRegimeLabel" style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">—</span>
-                <span style="color:var(--muted2);font-size:11px">·</span>
-                <span style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase">Mode</span>
-                <span id="harveyHarveyMode" style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">—</span>
+            <div class="verdict-word" id="hvVerdictWord">—</div>
+            <div class="verdict-reason" id="hvVerdictReason">Loading execution intelligence...</div>
+            <div class="hv-gauge-wrap">
+              <div style="display:flex;justify-content:space-between;font-family:Space Mono,monospace;font-size:9px;color:var(--muted2);letter-spacing:1px;margin-bottom:6px">
+                <span style="color:var(--red)">SHORT</span>
+                <span id="hvBiasScore">— / 100</span>
+                <span style="color:var(--green)">LONG</span>
               </div>
-            </div>
-            <div class="verdict-reason" id="harveyVerdictReason">Loading execution intelligence...</div>
-          </div>
-          <div class="bias-wrap" style="padding:10px 0">
-            <div class="bias-score-big" id="harveyBiasScore">—</div>
-            <div class="bias-direction" id="harveyBiasDir">—</div>
-            <div style="width:100%;margin-top:8px">
-              <div style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;text-align:center">Bias Score / 100</div>
-              <div class="bias-gauge"><div class="bias-fill" id="harveyBiasFill" style="width:50%"></div></div>
-              <div style="display:flex;justify-content:space-between;margin-top:4px">
-                <span style="font-family:Space Mono,monospace;font-size:9px;color:var(--red)">SHORT</span>
-                <span style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted2)">NEUTRAL</span>
-                <span style="font-family:Space Mono,monospace;font-size:9px;color:var(--green)">LONG</span>
-              </div>
+              <div class="hv-gauge-track"><div class="hv-gauge-fill" id="hvGaugeFill" style="width:50%"></div></div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- ORB + SESSION ROW -->
-      <div class="harvey-top-grid">
-        <div class="orb-card">
-          <div class="kicker">Opening Range</div>
-          <div class="section-title" style="margin-bottom:14px">ORB Manager</div>
-          <div class="orb-status-pill orb-PENDING" id="harveyOrbPill">PENDING</div>
-          <div class="orb-status-label" id="harveyOrbStatus">—</div>
-          <div class="orb-note" id="harveyOrbNote">—</div>
-          <div style="margin-top:16px" id="harveyDivergence"></div>
-        </div>
-        <div class="panel">
-          <div class="kicker">Session</div>
-          <div class="section-title" style="margin-bottom:14px">Context</div>
-          <div class="kv-row"><span class="kv-k">Session</span><span class="kv-v" id="harveySession">—</span></div>
-          <div class="kv-row"><span class="kv-k">Day</span><span class="kv-v" id="harveyDay">—</span></div>
-          <div class="kv-row"><span class="kv-k">Next Event</span><span class="kv-v" id="harveyNextEvent">—</span></div>
-          <div class="kv-row"><span class="kv-k">Event Phase</span><span class="kv-v" id="harveyEventPhase">—</span></div>
-          <div class="kv-row"><span class="kv-k">Macro Risk</span><span class="kv-v" id="harveyMacroRisk">—</span></div>
-          <div class="kv-row"><span class="kv-k">Session Label</span><span class="kv-v" id="harveySessionLabel">—</span></div>
-          <div class="kv-row"><span class="kv-k">NQ Points</span><span class="kv-v up" id="harveyNqPts">—</span></div>
-          <div class="kv-row"><span class="kv-k">ES Points</span><span class="kv-v up" id="harveyEsPts">—</span></div>
-        </div>
-      </div>
-
-      <!-- PRICE INTELLIGENCE -->
-      <div class="harvey-mid-grid">
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div class="kicker" style="margin-bottom:0;color:var(--green)">NQ Futures</div>
-            <div style="font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700" id="harveyNqLast">—</div>
+          <!-- 2. NQ + ES PRICE CARDS -->
+          <div class="hv-price-row">
+            <div class="hv-price-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <div class="kicker" style="margin-bottom:0;color:var(--green)">NQ Futures</div>
+                <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700" id="hvNqLast">—</div>
+              </div>
+              <div style="font-family:Space Mono,monospace;font-size:11px" id="hvNqChg">—</div>
+              <div style="margin-top:8px;font-size:12px;color:var(--muted)" id="hvNqSummary">—</div>
+            </div>
+            <div class="hv-price-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <div class="kicker" style="margin-bottom:0;color:var(--blue)">ES Futures</div>
+                <div style="font-family:Rajdhani,sans-serif;font-size:28px;font-weight:700" id="hvEsLast">—</div>
+              </div>
+              <div style="font-family:Space Mono,monospace;font-size:11px" id="hvEsChg">—</div>
+              <div style="margin-top:8px;font-size:12px;color:var(--muted)" id="hvEsSummary">—</div>
+            </div>
           </div>
-          <div id="harveyNqPriceIntel"><div class="pi-verdict">Loading price intelligence…</div></div>
-        </div>
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div class="kicker" style="margin-bottom:0;color:var(--blue)">ES Futures</div>
-            <div style="font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700" id="harveyEsLast">—</div>
+
+          <!-- 3. DONNA'S PLAYBOOK -->
+          <div class="hv-playbook">
+            <div class="kicker" style="margin-bottom:8px;color:var(--yellow)">Donna's Playbook</div>
+            <ul id="hvPlaybook">
+              <li>Loading playbook rules...</li>
+            </ul>
           </div>
-          <div id="harveyEsPriceIntel"><div class="pi-verdict">Loading price intelligence…</div></div>
+
+          <!-- 4. SIGNAL HISTORY (last 5 from /alerts-data) -->
+          <div class="panel">
+            <div class="kicker">TradingView Feed</div>
+            <div class="section-title" style="margin-bottom:14px">Last 5 Signals</div>
+            <div id="hvSignals">
+              <div class="obs-item low"><div class="obs-body">No signals received yet. Connect your TradingView indicator to the webhook.</div></div>
+            </div>
+          </div>
+
         </div>
-        <div class="panel">
-          <div class="kicker">Execution View</div>
-          <div class="section-title" style="margin-bottom:14px">Trade Intel</div>
-          <div class="kv-row"><span class="kv-k">Bias</span><span class="kv-v" id="harveyMorningBias">—</span></div>
-          <div class="kv-row"><span class="kv-k">Open Quality</span><span class="kv-v" id="harveyOpenQuality">—</span></div>
-          <div class="kv-row"><span class="kv-k">Focus</span><span class="kv-v" id="harveyFocus">—</span></div>
-          <div class="kv-row"><span class="kv-k">Watch First</span><span class="kv-v" id="harveyWatchFirst">—</span></div>
-          <div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--line2);font-size:13px;color:var(--muted);line-height:1.6" id="harveyFirstRead">—</div>
+
+        <!-- ── RIGHT SIDEBAR ── -->
+        <div class="hv-right">
+
+          <!-- 1. SESSION STATS 2x2 -->
+          <div class="panel">
+            <div class="kicker">Context</div>
+            <div class="section-title" style="margin-bottom:12px">Session Stats</div>
+            <div class="hv-stats-grid">
+              <div class="hv-stat-cell">
+                <div class="hv-stat-label">Session</div>
+                <div class="hv-stat-value" id="hvSession">—</div>
+              </div>
+              <div class="hv-stat-cell">
+                <div class="hv-stat-label">Day</div>
+                <div class="hv-stat-value" id="hvDay">—</div>
+              </div>
+              <div class="hv-stat-cell">
+                <div class="hv-stat-label">Label</div>
+                <div class="hv-stat-value" id="hvSessionLabel">—</div>
+              </div>
+              <div class="hv-stat-cell">
+                <div class="hv-stat-label">Macro Risk</div>
+                <div class="hv-stat-value" id="hvMacroRisk">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. ORB STATUS (ES ONLY) -->
+          <div class="panel">
+            <div class="hv-orb-badge">ES ONLY</div>
+            <div class="kicker">Opening Range</div>
+            <div class="section-title" style="margin-bottom:12px">ORB Status</div>
+            <div class="orb-status-pill orb-PENDING" id="hvOrbPill">PENDING</div>
+            <div class="orb-status-label" id="hvOrbStatus" style="margin-top:10px">—</div>
+            <div class="orb-note" id="hvOrbNote">—</div>
+          </div>
+
+          <!-- 3. SECTOR BIAS (6 sectors from /sp500-heatmap) -->
+          <div class="panel">
+            <div class="kicker">Market Internals</div>
+            <div class="section-title" style="margin-bottom:12px">Sector Bias</div>
+            <div id="hvSectors"><div style="font-size:13px;color:var(--muted2)">Loading sectors...</div></div>
+          </div>
+
+          <!-- 4. DONNA SAYS -->
+          <div class="hv-donna-says">
+            <span class="hv-donna-says-label">Donna Says</span>
+            <span id="hvDonnaSays">Loading...</span>
+          </div>
+
         </div>
       </div>
 
-      <!-- ── RISK ENGINE PANEL ── -->
+      <!-- RISK ENGINE (preserved) -->
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
           <div>
@@ -1584,13 +1660,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <button class="re-reset-btn" id="reResetStop" title="Clear STOP flag">RESET STOP</button>
           </div>
         </div>
-
-        <!-- STOP TRADING BANNER -->
         <div class="re-stop-banner" id="reStopBanner">
           ⛔ STOP TRADING — Session risk limit reached. Clear flag to resume.
         </div>
-
-        <!-- 4-CELL GRID -->
         <div class="re-grid" id="reGrid" style="margin-top:14px">
           <div class="re-cell" id="rePosCell">
             <div class="re-label">Position Size</div>
@@ -1613,8 +1685,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div class="re-note" id="reLossNote">—</div>
           </div>
         </div>
-
-        <!-- TRADE CALCULATOR INPUTS -->
         <div class="re-calc-row">
           <input class="re-input" id="reEntry"  placeholder="Entry price"  type="number" step="any" />
           <input class="re-input" id="reStop"   placeholder="Stop price"   type="number" step="any" />
@@ -1624,26 +1694,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <option value="SHORT">SHORT</option>
           </select>
           <button class="re-calc-btn" id="reCalcBtn">CALCULATE</button>
-        </div>
-      </div>
-
-      <!-- SIGNAL HISTORY + WHAT MATTERS -->
-      <div class="harvey-bot-grid">
-        <div class="panel">
-          <div class="kicker">TradingView Feed</div>
-          <div class="section-title" style="margin-bottom:14px">Last 10 Signals</div>
-          <div id="harveySignals">
-            <div class="obs-item low"><div class="obs-body">No signals received yet. Connect your TradingView indicator to the webhook.</div></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="kicker">Donna Intelligence</div>
-          <div class="section-title" style="margin-bottom:14px">What Matters Now</div>
-          <div style="font-size:15px;font-weight:600;line-height:1.5;margin-bottom:12px;color:var(--text)" id="harveyWmHeadline">—</div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.65;margin-bottom:14px" id="harveyWmSummary">—</div>
-          <div class="kv-row"><span class="kv-k">Mode</span><span class="kv-v" id="harveyWmMode">—</span></div>
-          <div class="kv-row"><span class="kv-k">Risk to Conviction</span><span class="kv-v" id="harveyWmRtc">—</span></div>
-          <div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.12);font-size:13px;color:var(--muted);line-height:1.6" id="harveyWmFocus">—</div>
         </div>
       </div>
 
@@ -2143,202 +2193,87 @@ function renderCrossAsset(ca) {
 }
 
 // ═══════════════════════════════════════
-// H.A.R.V.E.Y RENDERER
+// H.A.R.V.E.Y NEW RENDERER
 // ═══════════════════════════════════════
 
-function renderHarvey(d) {
-  const bias      = d.bias_score      || 50;
-  const biasDir   = d.bias_direction  || 'NEUTRAL';
-  const verdict   = d.verdict         || 'WAIT';
-  const reason    = d.verdict_reason  || '—';
-  const vcolor    = d.verdict_color   || 'yellow';
-  const orb       = d.orb_status      || '—';
-  const orbNote   = d.orb_note        || '—';
-  const orbQ      = d.orb_quality     || 'PENDING';
-  const sig       = d.session_significance || {};
-  const morning   = d.morning_edge    || {};
-  const wm        = d.what_matters    || {};
-  const ctx       = d.session_context || {};
-  const signals   = d.last_signals    || d.raw_trade_alerts || [];
-  const div       = d.divergence      || null;
-  const nqLevels  = d.nq_levels        || {};
-  const esLevels  = d.es_levels        || {};
+function renderHarveyNew(d) {
+  // Verdict banner
+  const verdict = d.verdict || 'WAIT';
+  const vcolor  = d.verdict_color || 'yellow';
+  const card = document.getElementById('hvVerdictCard');
+  if (card) card.className = `hv-verdict-card ${vcolor}`;
+  setText('hvVerdictWord',   verdict);
+  setText('hvVerdictReason', d.verdict_reason || '—');
 
-  const vb = document.getElementById('harveyVerdict');
-  if (vb) vb.className = `verdict-banner ${vcolor}`;
-  setText('harveyVerdictWord',   verdict);
-  setText('harveyVerdictReason', reason);
-
-  // Regime row in verdict banner
-  const regimePayload  = d.regime || {};
-  const hvRcTextMap = {green:'var(--green)',blue:'var(--blue)',yellow:'var(--yellow)',red:'var(--red)',muted:'var(--muted2)'};
-  const hvRcColor = hvRcTextMap[regimePayload.regime_color] || 'var(--text)';
-  const hvRegimeEl = document.getElementById('harveyRegimeLabel');
-  if (hvRegimeEl) { hvRegimeEl.textContent = regimePayload.regime || '—'; hvRegimeEl.style.color = hvRcColor; }
-  const hvModeEl = document.getElementById('harveyHarveyMode');
-  if (hvModeEl) { hvModeEl.textContent = regimePayload.harvey_mode || '—'; hvModeEl.style.color = hvRcColor; }
-
+  // Bias gauge
+  const bias      = d.bias_score || 50;
+  const biasDir   = d.bias_direction || 'NEUTRAL';
   const biasColor = bias >= 60 ? 'var(--green)' : bias <= 40 ? 'var(--red)' : 'var(--yellow)';
-  const bsEl = document.getElementById('harveyBiasScore');
-  if (bsEl) { bsEl.textContent = bias; bsEl.style.color = biasColor; }
-  const bdEl = document.getElementById('harveyBiasDir');
-  if (bdEl) { bdEl.textContent = biasDir; bdEl.style.color = biasColor; }
-  const bfEl = document.getElementById('harveyBiasFill');
-  if (bfEl) {
-    bfEl.style.width = bias + '%';
-    bfEl.style.background = `linear-gradient(90deg, ${bias >= 60 ? 'var(--green)' : bias <= 40 ? 'var(--red)' : 'var(--yellow)'}, ${bias >= 60 ? '#00b37a' : bias <= 40 ? '#cc2244' : '#d97706'})`;
+  const scoreEl = document.getElementById('hvBiasScore');
+  if (scoreEl) { scoreEl.textContent = `${bias} / 100 — ${biasDir}`; scoreEl.style.color = biasColor; }
+  const fill = document.getElementById('hvGaugeFill');
+  if (fill) {
+    fill.style.width = bias + '%';
+    fill.style.background = bias >= 60
+      ? 'linear-gradient(90deg,var(--green),#00b37a)'
+      : bias <= 40
+        ? 'linear-gradient(90deg,#cc2244,var(--red))'
+        : 'linear-gradient(90deg,var(--yellow),#d97706)';
   }
 
-  const pillEl = document.getElementById('harveyOrbPill');
-  if (pillEl) { pillEl.className = `orb-status-pill orb-${orbQ}`; pillEl.textContent = orbQ; }
-  setText('harveyOrbStatus', orb);
-  setText('harveyOrbNote',   orbNote);
+  // Price cards
+  const nqC   = parseFloat(d.nq_last) || 0;
+  const esC   = parseFloat(d.es_last) || 0;
+  const nqPct = d.nq_pct || 0;
+  const esPct = d.es_pct || 0;
+  const fmtPx  = p => p > 0 ? p.toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
+  const fmtPct = p => (p >= 0 ? '+' : '') + parseFloat(p).toFixed(2) + '%';
+  const pctCol = p => p >= 0 ? 'var(--green)' : 'var(--red)';
 
-  const divEl = document.getElementById('harveyDivergence');
-  if (divEl) {
-    divEl.innerHTML = (div && div.active) ? `
-      <div class="divergence-alert">
-        <div class="divergence-icon">⚠</div>
-        <div class="divergence-text"><strong>NQ/ES Divergence Detected</strong><br>${div.note}</div>
-      </div>` : '';
-  }
+  const nqEl = document.getElementById('hvNqLast');
+  if (nqEl) { nqEl.textContent = fmtPx(nqC); nqEl.style.color = nqC > 0 ? pctCol(nqPct) : 'var(--muted)'; }
+  const nqChgEl = document.getElementById('hvNqChg');
+  if (nqChgEl) { nqChgEl.textContent = nqC > 0 ? fmtPct(nqPct) : '—'; nqChgEl.style.color = pctCol(nqPct); }
+  setText('hvNqSummary', nqC > 0 ? (nqPct >= 0 ? "Trading above yesterday's reference" : "Trading below yesterday's reference") : 'Waiting for price data...');
 
-  setText('harveySession',    ctx.session    || d.donna_session || '—');
-  setText('harveyDay',        ctx.day        || '—');
-  setText('harveyNextEvent',  ctx.next_event || '—');
-  setText('harveyEventPhase', ctx.event_phase|| '—');
-  setHtml('harveyMacroRisk',  riskBadge(d.macro_risk));
-  setText('harveySessionLabel', sig.label    || '—');
-  setText('harveyNqPts', sig.nq_points ? sig.nq_points + ' pts (' + (sig.nq_pct||0) + '%)' : '—');
-  setText('harveyEsPts', sig.es_points ? sig.es_points + ' pts (' + (sig.es_pct||0) + '%)' : '—');
+  const esEl = document.getElementById('hvEsLast');
+  if (esEl) { esEl.textContent = fmtPx(esC); esEl.style.color = esC > 0 ? pctCol(esPct) : 'var(--muted)'; }
+  const esChgEl = document.getElementById('hvEsChg');
+  if (esChgEl) { esChgEl.textContent = esC > 0 ? fmtPct(esPct) : '—'; esChgEl.style.color = pctCol(esPct); }
+  setText('hvEsSummary', esC > 0 ? (esPct >= 0 ? "Trading above yesterday's reference" : "Trading below yesterday's reference") : 'Waiting for price data...');
 
-  function renderPriceIntel(ticker, levels, curRaw) {
-    const fmt = p => (p != null && p > 0) ? p.toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
-    const c = parseFloat(curRaw) || 0;
+  // Playbook
+  const morning = d.morning_edge || {};
+  const wm = d.what_matters || {};
+  const rules = [];
+  if (morning.today_bias)   rules.push('Bias: ' + morning.today_bias);
+  if (morning.focus)        rules.push('Focus: ' + morning.focus);
+  if (morning.open_quality) rules.push('Open Quality: ' + morning.open_quality);
+  if (morning.first_read)   rules.push(morning.first_read);
+  if (wm.headline)          rules.push(wm.headline);
+  if (!rules.length) rules.push('Awaiting morning edge data...');
+  const pbEl = document.getElementById('hvPlaybook');
+  if (pbEl) pbEl.innerHTML = rules.map(r => '<li>' + r + '</li>').join('');
 
-    if (c <= 0) {
-      return `<div class="pi-verdict">Waiting for market data — price feed connecting.</div>`;
-    }
+  // Session stats
+  const ctx = d.session_context || {};
+  setText('hvSession',      ctx.session      || d.donna_session || '—');
+  setText('hvDay',          ctx.day          || '—');
+  setText('hvSessionLabel', (d.session_significance || {}).label || '—');
+  setHtml('hvMacroRisk',    riskBadge(d.macro_risk));
 
-    const open = levels?.today_open;
-    const high = levels?.today_high,  low  = levels?.today_low;
-    const pdh  = levels?.prev_high,   pdl  = levels?.prev_low;
-    const orbH = levels?.orb_high,    orbL = levels?.orb_low;
+  // ORB status (ES only)
+  const orbQ = d.orb_quality || 'PENDING';
+  const pill = document.getElementById('hvOrbPill');
+  if (pill) { pill.className = 'orb-status-pill orb-' + orbQ; pill.textContent = orbQ; }
+  setText('hvOrbStatus', d.orb_status || '—');
+  setText('hvOrbNote',   d.orb_note   || '—');
 
-    // ── Verdict ───────────────────────────────────────────────────
-    let verdict;
-    if (!open) {
-      verdict = `${ticker} at ${fmt(c)} — waiting for open price reference.`;
-    } else {
-      const diffPct = (c - open) / open;
-      if (diffPct > 0.0008) {
-        verdict = pdh && c > pdh
-          ? `Above today's open and above yesterday's high — strongly bullish.`
-          : `Above today's open — bullish bias.`;
-      } else if (diffPct < -0.0008) {
-        verdict = pdl && c < pdl
-          ? `Below today's open and below yesterday's low — strongly bearish.`
-          : `Below today's open — bearish bias.`;
-      } else {
-        verdict = `At today's open — balanced, neutral bias.`;
-      }
-    }
+  // Donna says
+  setText('hvDonnaSays', wm.focus_reason || wm.summary || d.verdict_reason || '—');
 
-    // ── Real levels only — skip anything null/zero ─────────────────
-    const candidates = [
-      { label: 'Prev Day High', price: pdh,  cls: 'pi-level-pdh' },
-      { label: 'Session High',  price: high, cls: '' },
-      { label: 'ORB High',      price: orbH, cls: 'pi-level-orb' },
-      { label: 'ORB Low',       price: orbL, cls: 'pi-level-orb' },
-      { label: 'Session Low',   price: low,  cls: '' },
-      { label: 'Prev Day Low',  price: pdl,  cls: 'pi-level-pdl' },
-    ].filter(lv => lv.price != null && lv.price > 0);
-
-    if (!candidates.length) {
-      return `<div class="pi-verdict">${verdict}</div>`
-           + `<div class="pi-verdict" style="margin-top:6px;color:var(--muted2)">Waiting for market data — levels load during market hours.</div>`;
-    }
-
-    candidates.sort((a, b) => b.price - a.price);
-
-    const curRow = `<tr class="pi-cur-row"><td colspan="3"><div class="pi-cur-line">`
-                 + `<span class="pi-cur-tag" style="color:var(--gold)">► ${fmt(c)}</span></div></td></tr>`;
-    let rows = '', inserted = false;
-    for (const lv of candidates) {
-      if (!inserted && lv.price < c) { rows += curRow; inserted = true; }
-      const badge = lv.price > c
-        ? `<td class="pi-rs"><span class="pi-tag-r">R</span></td>`
-        : `<td class="pi-rs"><span class="pi-tag-s">S</span></td>`;
-      rows += `<tr><td class="pi-label ${lv.cls}">${lv.label}</td>`
-            + `<td class="pi-price ${lv.cls}">${fmt(lv.price)}</td>${badge}</tr>`;
-    }
-    if (!inserted) rows += curRow;
-
-    // ── Session range bar ─────────────────────────────────────────
-    let rangeBar = '';
-    if (high && low && high > low) {
-      const rp = Math.max(0, Math.min(100, (c - low) / (high - low) * 100));
-      const dot = rp > 65 ? 'var(--green)' : rp < 35 ? 'var(--red)' : 'var(--yellow)';
-      rangeBar = `<div class="pi-range-wrap">
-        <div style="display:flex;justify-content:space-between;font-family:Space Mono,monospace;font-size:8px;color:var(--muted2);letter-spacing:.5px;margin-bottom:2px">
-          <span>DAY LOW</span><span>${rp.toFixed(1)}% through today's range</span><span>DAY HIGH</span>
-        </div>
-        <div class="pi-range-track">
-          <div class="pi-range-fill" style="width:${rp.toFixed(2)}%"></div>
-          <div class="pi-range-dot" style="left:${rp.toFixed(2)}%;background:${dot}"></div>
-        </div>
-      </div>`;
-    }
-
-    return `<div class="pi-verdict">${verdict}</div><table class="pi-table">${rows}</table>${rangeBar}`;
-  }
-
-  const nqC    = parseFloat(d.nq_last) || 0;
-  const esC    = parseFloat(d.es_last) || 0;
-  const nqOpen = nqLevels?.today_open || 0;
-  const esOpen = esLevels?.today_open || 0;
-  const nqDir  = nqC > 0 && nqOpen > 0 ? (nqC >= nqOpen ? 'up' : 'dn') : ((d.nq_pct || 0) >= 0 ? 'up' : 'dn');
-  const esDir  = esC > 0 && esOpen > 0 ? (esC >= esOpen ? 'up' : 'dn') : ((d.es_pct || 0) >= 0 ? 'up' : 'dn');
-  const nqEl = document.getElementById('harveyNqLast');
-  if (nqEl) { nqEl.textContent = d.nq_last || '—'; nqEl.className = nqDir; }
-  const esEl = document.getElementById('harveyEsLast');
-  if (esEl) { esEl.textContent = d.es_last || '—'; esEl.className = esDir; }
-  setHtml('harveyNqPriceIntel', renderPriceIntel('NQ', nqLevels, d.nq_last));
-  setHtml('harveyEsPriceIntel', renderPriceIntel('ES', esLevels, d.es_last));
-
-  setText('harveyMorningBias',  morning.today_bias   || '—');
-  setText('harveyOpenQuality',  morning.open_quality || '—');
-  setText('harveyFocus',        morning.focus        || '—');
-  setText('harveyWatchFirst',   (morning.watch_first || []).slice(0,4).join('  ·  ') || '—');
-  setText('harveyFirstRead',    morning.first_read   || '—');
-
-  setText('harveyWmHeadline', wm.headline    || '—');
-  setText('harveyWmSummary',  wm.summary     || '—');
-  setText('harveyWmMode',     (wm.mode||'—').replace(/_/g,' ').toUpperCase());
-  setText('harveyWmRtc',      wm.risk_to_conviction || '—');
-  setText('harveyWmFocus',    wm.focus_reason || '—');
-
-  const sigEl = document.getElementById('harveySignals');
-  if (sigEl) {
-    if (signals && signals.length) {
-      sigEl.innerHTML = signals.slice(0,10).map(s => `
-        <div class="signal-card">
-          <div class="signal-top">
-            <span class="signal-ticker">${s.ticker || '—'}</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <span style="font-family:Space Mono,monospace;font-size:10px;color:var(--muted2)">${s.timeframe||''}</span>
-              <span class="signal-verdict sv-${s.verdict||'SKIP'}">${s.verdict||'—'}</span>
-            </div>
-          </div>
-          <div class="signal-meta">${s.signal||''} · ${s.session||''} · $${s.price||'—'} · Confidence: ${s.confidence||'—'}</div>
-          <div class="signal-summary">${s.summary||''}</div>
-        </div>`).join('');
-    } else {
-      sigEl.innerHTML = '<div class="obs-item low"><div class="obs-body">No signals yet. Waiting for TradingView webhook.</div></div>';
-    }
-  }
-
-  if (d.cross_asset_intelligence && document.getElementById('caDivergenceList')) renderCrossAsset(d.cross_asset_intelligence);
+  // Risk engine
+  if (d.risk_engine) renderRiskEngine(d.risk_engine);
 }
 
 async function refreshHarvey() {
@@ -2346,11 +2281,90 @@ async function refreshHarvey() {
     const res = await fetch('/harvey-data');
     if (!res.ok) return;
     const d = await res.json();
-    renderHarvey(d);
-    if (d.risk_engine) renderRiskEngine(d.risk_engine);
+    renderHarveyNew(d);
   } catch(e) {
     console.error('HARVEY refresh error:', e);
   }
+}
+
+function renderHvSignals(signals) {
+  const el = document.getElementById('hvSignals');
+  if (!el) return;
+  if (!signals || !signals.length) {
+    el.innerHTML = '<div class="obs-item low"><div class="obs-body">No signals received yet. Connect your TradingView indicator to the webhook.</div></div>';
+    return;
+  }
+  el.innerHTML = signals.slice(0, 5).map(s =>
+    '<div class="signal-card">' +
+    '<div class="signal-top">' +
+    '<span class="signal-ticker">' + (s.ticker || '—') + '</span>' +
+    '<div style="display:flex;gap:8px;align-items:center">' +
+    '<span style="font-family:Space Mono,monospace;font-size:10px;color:var(--muted2)">' + (s.timeframe||'') + '</span>' +
+    '<span class="signal-verdict sv-' + (s.verdict||'SKIP') + '">' + (s.verdict||'—') + '</span>' +
+    '</div></div>' +
+    '<div class="signal-meta">' + (s.signal||'') + ' · ' + (s.session||'') + ' · $' + (s.price||'—') + '</div>' +
+    '<div class="signal-summary">' + (s.summary||'') + '</div>' +
+    '</div>'
+  ).join('');
+}
+
+async function refreshHvAlerts() {
+  try {
+    const res = await fetch('/alerts-data');
+    if (!res.ok) return;
+    const d = await res.json();
+    renderHvSignals(d.alerts || d.raw_trade_alerts || []);
+  } catch(e) {}
+}
+
+function _hvUpdateExec(d) {
+  const taken = d.daily_trades_taken !== undefined ? d.daily_trades_taken : null;
+  const limit = 2;
+  const left  = taken !== null ? Math.max(0, limit - taken) : null;
+
+  const botEl = document.getElementById('hvBotStatus');
+  if (botEl) {
+    const mode = d.broker_mode || (d.available ? 'LIVE' : 'OFFLINE');
+    botEl.textContent = mode;
+    botEl.style.color = d.available === false ? 'var(--red)' : 'var(--green)';
+  }
+  const leftEl = document.getElementById('hvTradesLeft');
+  if (leftEl) leftEl.textContent = left !== null ? left + ' of ' + limit + ' remaining' : '—';
+}
+
+async function refreshHvExec() {
+  try {
+    const res = await fetch('/execution-status');
+    if (!res.ok) return;
+    const d = await res.json();
+    _hvUpdateExec(d);
+  } catch(e) {}
+}
+
+function renderHvSectors(stocks) {
+  const el = document.getElementById('hvSectors');
+  if (!el) return;
+  if (!stocks || !stocks.length) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--muted2)">Loading sectors...</div>';
+    return;
+  }
+  el.innerHTML = stocks.slice(0, 6).map(s => {
+    const pct = parseFloat(s.percent_change) || 0;
+    const col = pct >= 0.5 ? 'var(--green)' : pct <= -0.5 ? 'var(--red)' : 'var(--yellow)';
+    return '<div class="hv-sector-row">' +
+      '<span class="hv-sector-name">' + (s.name || '—').toUpperCase() + '</span>' +
+      '<span class="hv-sector-pct" style="color:' + col + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</span>' +
+      '</div>';
+  }).join('');
+}
+
+async function refreshHvSectors() {
+  try {
+    const res = await fetch('/sp500-heatmap');
+    if (!res.ok) return;
+    const d = await res.json();
+    renderHvSectors(d.stocks || []);
+  } catch(e) {}
 }
 
 // ════════ RISK ENGINE ════════
@@ -3126,8 +3140,6 @@ async function refresh() {
     _lastDashData = d;
     try { renderDashboard(d); } catch(e) { console.error('renderDashboard failed:', e); }
     try { renderNews(d); } catch(e) { console.error('renderNews failed:', e); }
-    try { renderHarvey(d); } catch(e) { console.error('renderHarvey failed:', e); }
-    try { refreshHarvey(); } catch(e) { console.error('refreshHarvey failed:', e); }
   } catch(err) {
     console.error('Donna refresh error:', err);
     setText('lastUpdated', 'Sync error — retrying...');
@@ -3231,7 +3243,7 @@ function connectSSE() {
     refreshHarvey();
 
     // Flash verdict banner
-    const banner = document.getElementById('harveyVerdict');
+    const banner = document.getElementById('hvVerdictCard');
     if (banner) {
       banner.classList.remove('flash');
       void banner.offsetWidth; // reflow to restart animation
@@ -3587,6 +3599,14 @@ refreshSectorHeat();
 setInterval(refreshSectorHeat, 5 * 60 * 1000);
 refreshEconCalendar();
 setInterval(refreshEconCalendar, 5 * 60 * 1000);
+refreshHarvey();
+setInterval(refreshHarvey, 10000);
+refreshHvAlerts();
+setInterval(refreshHvAlerts, 30000);
+refreshHvExec();
+setInterval(refreshHvExec, 20000);
+refreshHvSectors();
+setInterval(refreshHvSectors, 60000);
 connectSSE();
 </script>
 </body>
