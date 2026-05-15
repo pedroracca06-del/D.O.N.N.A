@@ -574,14 +574,6 @@ tr:last-child td{border-bottom:none}
 .mover-pct.up{color:var(--green)}.mover-pct.dn{color:var(--red)}
 
 /* ── SECTOR HEAT / TREEMAP ── */
-.treemap-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px}
-.treemap-toggle{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
-.treemap-toggle-btn{
-  padding:5px 14px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;
-  text-transform:uppercase;cursor:pointer;border:none;outline:none;
-  background:var(--panel);color:var(--muted2);transition:all .15s;
-}
-.treemap-toggle-btn.active{background:var(--text);color:var(--panel)}
 #stockTreemap{width:100%;height:280px;border-radius:8px;overflow:hidden;background:#111;display:block}
 #stockTreemap svg{display:block}
 .tm-closed-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.07);color:var(--muted2)}
@@ -1362,15 +1354,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
           <!-- 2. SECTOR HEAT (full width main column) -->
           <div class="panel">
-            <div class="treemap-toggle-row" style="margin-bottom:10px">
-              <div style="display:flex;align-items:center;gap:10px">
-                <div class="kicker" style="margin-bottom:0">Sector Heat</div>
-                <span class="tm-closed-badge" id="tmClosedBadge" style="display:none">Market Closed</span>
-              </div>
-              <div class="treemap-toggle">
-                <button class="treemap-toggle-btn active" id="tmBtnSectors" onclick="setTreemapMode('sp')">S&amp;P</button>
-                <button class="treemap-toggle-btn" id="tmBtnNQ" onclick="setTreemapMode('nq')">NQ</button>
-              </div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <div class="kicker" style="margin-bottom:0">Sector Heat</div>
+              <span class="tm-closed-badge" id="tmClosedBadge" style="display:none">Market Closed</span>
             </div>
             <div id="stockTreemap">
               <svg width="100%" height="280"><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="rgba(255,255,255,.25)" font-size="12" font-family="Space Mono,monospace">Loading…</text></svg>
@@ -1854,9 +1840,26 @@ function saveIndexPrefs(prefs) {
   localStorage.setItem(LS_KEY, JSON.stringify(prefs));
 }
 
+let _liveBtcVix = {};
+
 function getSymbolData(sym, d) {
+  // BTC and VIX come from the dedicated /btc-vix endpoint
+  if (sym === 'BTC' || sym === 'VIX') {
+    const q = _liveBtcVix[sym] || {};
+    const last = q.last || 0;
+    if (!last) return {val: '—', chg: '—', pct: null, dir: ''};
+    const p = parseFloat(q.pct || 0);
+    const fmt = sym === 'BTC'
+      ? last.toLocaleString(undefined, {maximumFractionDigits: 0})
+      : last.toFixed(2);
+    return {
+      val: fmt, chg: (q.chg || 0).toFixed(2),
+      pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+      dir: p >= 0 ? 'up' : 'down'
+    };
+  }
   const snap = ((d.risk || {}).market_snapshot) || {};
-  const idxLabelMap = {NASDAQ:'NASDAQ', SPX:'S&P 500', DJIA:'DJIA', VIX:'VIX', US10Y:'US 10Y', DXY:'DXY'};
+  const idxLabelMap = {NASDAQ:'NASDAQ', SPX:'S&P 500', DJIA:'DJIA', DXY:'DXY'};
   const s = snap[sym];
   if (s && s.last && s.last !== '-') {
     const p = parseFloat(s.pct);
@@ -1875,6 +1878,10 @@ function getSymbolData(sym, d) {
 }
 
 function applyTileData(tileEl, sym, data) {
+  const noData = !data.val || data.val === '—' || data.val === '-'
+              || parseFloat(data.val) === 0;
+  tileEl.style.display = noData ? 'none' : '';
+  if (noData) return;
   const nameEl = tileEl.querySelector('.index-tile-name');
   const valEl  = tileEl.querySelector('.index-tile-val');
   const chgEl  = tileEl.querySelector('.index-tile-chg');
@@ -2512,22 +2519,40 @@ async function refreshGrokIntelligence() {
 // ════════ NEWS FUTURES STRIP ════════
 async function refreshNewsFuturesStrip() {
   try {
-    const [idxRes, pulseRes] = await Promise.all([
+    const [idxRes, pulseRes, bvRes] = await Promise.all([
       fetch('/major-indexes').then(r => r.json()),
       fetch('/futures-macro-pulse').then(r => r.json()),
+      fetch('/btc-vix').then(r => r.json()),
     ]);
     const map = {};
     (pulseRes.rows || []).forEach(r => { map[r.symbol] = r; });
     (idxRes.rows || []).forEach(r => {
-      const sym = r.symbol === 'US 10Y' ? 'US10Y' : r.symbol === 'S&P 500' ? 'SPX' : r.symbol;
+      const sym = r.symbol === 'S&P 500' ? 'SPX' : r.symbol;
       if (!map[sym]) map[sym] = r;
     });
-    const wanted = ['NQ','ES','DXY','GOLD','OIL','VIX','US10Y'];
+    // Merge BTC and VIX from dedicated endpoint
+    _liveBtcVix = bvRes;
+    ['BTC','VIX'].forEach(sym => {
+      const q = bvRes[sym] || {};
+      if (q.last) {
+        const p = parseFloat(q.pct || 0);
+        map[sym] = {
+          symbol: sym,
+          last: sym === 'BTC'
+            ? q.last.toLocaleString(undefined, {maximumFractionDigits: 0})
+            : q.last.toFixed(2),
+          pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+          dir: p >= 0 ? 'up' : 'dn',
+        };
+      }
+    });
+    const wanted = ['NQ','ES','DXY','GOLD','OIL','VIX','BTC'];
     let html = '';
     wanted.forEach(sym => {
-      const d = map[sym] || {};
-      const last = d.last || '—';
-      const pct  = d.pct  || '—';
+      const d    = map[sym] || {};
+      const last = d.last || '';
+      const pct  = d.pct  || '';
+      if (!last || last === '—' || last === '-') return; // skip missing
       const dir  = d.dir  || (String(pct).startsWith('+') ? 'up' : String(pct).startsWith('-') ? 'dn' : '');
       html += `<span class="nf-item"><span class="nf-sym">${sym}</span><span class="nf-val">${last}</span><span class="nf-pct ${dir}">${pct}</span></span>`;
     });
@@ -2561,7 +2586,6 @@ async function refreshTrendingMovers() {
 }
 
 // ════════ STOCK TREEMAP (D3) ════════
-let _tmMode = 'sp';
 
 function _tmColor(pct) {
   const n = parseFloat(pct);
@@ -2572,13 +2596,6 @@ function _tmColor(pct) {
   if (n > -0.5) return '#3a1a1a';
   if (n > -1)   return '#7f1d1d';
   return '#450a0a';
-}
-
-function setTreemapMode(mode) {
-  _tmMode = mode;
-  document.getElementById('tmBtnSectors').classList.toggle('active', mode === 'sp');
-  document.getElementById('tmBtnNQ').classList.toggle('active', mode === 'nq');
-  refreshSectorHeat();
 }
 
 function renderD3Treemap(stocks) {
@@ -2705,8 +2722,7 @@ function renderD3Treemap(stocks) {
 
 async function refreshSectorHeat() {
   try {
-    const endpoint = _tmMode === 'nq' ? '/nq-heatmap' : '/sp500-heatmap';
-    const res  = await fetch(endpoint);
+    const res  = await fetch('/sp500-heatmap');
     const data = await res.json();
     renderD3Treemap(data.stocks || []);
     const badge = document.getElementById('tmClosedBadge');

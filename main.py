@@ -545,6 +545,65 @@ async def nq_heatmap():
     return await asyncio.to_thread(_fetch_heatmap, _NQ_SYMBOLS, _NQ_HEATMAP_FILE)
 
 
+# ── BTC + VIX live quotes ──────────────────────────────────────
+
+_BTC_VIX_CACHE_FILE = Path(__file__).parent / 'donna_btc_vix_cache.json'
+
+
+def _finnhub_quote_raw(symbol: str) -> dict | None:
+    """Single Finnhub /quote call; returns {last, pct, chg} or None on failure."""
+    try:
+        r = requests.get(
+            f'https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}',
+            timeout=5,
+        )
+        r.raise_for_status()
+        q = r.json()
+        last = float(q.get('c', 0) or 0)
+        if last == 0:
+            return None
+        return {
+            'last': round(last, 2),
+            'pct':  round(float(q.get('dp', 0) or 0), 2),
+            'chg':  round(float(q.get('d',  0) or 0), 2),
+        }
+    except Exception:
+        return None
+
+
+def _fetch_btc_vix() -> dict:
+    from datetime import timezone as _tz
+    if _BTC_VIX_CACHE_FILE.exists():
+        try:
+            cached = json.loads(_BTC_VIX_CACHE_FILE.read_text(encoding='utf-8'))
+            age = (datetime.now(_tz.utc) - datetime.fromisoformat(
+                cached.get('fetched_at', '1970-01-01T00:00:00+00:00').replace('Z', '+00:00')
+            )).total_seconds()
+            if age < 60:
+                return cached
+        except Exception:
+            pass
+
+    btc = _finnhub_quote_raw('BINANCE:BTCUSDT') or _finnhub_quote_raw('COINBASE:BTC-USD')
+    vix = _finnhub_quote_raw('VIXY')   # VIXY tracks VIX; ^VIX not available on Finnhub free tier
+
+    result: dict = {
+        'BTC':        btc or {},
+        'VIX':        vix or {},
+        'fetched_at': utc_now_iso(),
+    }
+    try:
+        _BTC_VIX_CACHE_FILE.write_text(json.dumps(result, indent=2), encoding='utf-8')
+    except Exception:
+        pass
+    return result
+
+
+@app.get('/btc-vix')
+async def btc_vix():
+    return await asyncio.to_thread(_fetch_btc_vix)
+
+
 @app.get('/futures-macro-pulse')
 async def futures_macro_pulse():
     return {'rows': get_live_futures_macro_pulse()}
