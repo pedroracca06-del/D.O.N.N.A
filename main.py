@@ -207,23 +207,38 @@ async def position_outcomes_loop():
 
 
 async def eod_close_loop():
-    """At or after 3:45 PM ET on weekdays, force-close all open positions."""
-    _done_today = ''
+    closed_today = False
     while True:
         try:
-            ny        = now_ny()
-            today_str = ny.strftime('%Y-%m-%d')
-            m         = ny.hour * 60 + ny.minute
-            if (ny.weekday() < 5
-                    and m >= 15 * 60 + 45
-                    and m < 16 * 60 + 30
-                    and today_str != _done_today):
-                print(f'DONNA EOD close: running for {today_str}')
-                n = await asyncio.to_thread(close_all_positions_eod)
-                _done_today = today_str
-                print(f'DONNA EOD close: {n} position(s) closed')
+            now        = now_ny()
+            is_weekday = now.weekday() < 5
+            # Reset flag at start of new day
+            if now.hour < 15:
+                closed_today = False
+            # No new trades after 3:30 PM
+            if is_weekday and now.hour == 15 and now.minute >= 30:
+                if _EXECUTION_AVAILABLE:
+                    from donna_state_engine import state as _st
+                    if not _st.get('eod_lock'):
+                        disable_trade_permission('EOD_NO_NEW_ENTRIES_AFTER_1530')
+                        print(f'[EOD] {now.strftime("%H:%M ET")} — no new entries after 3:30 PM')
+            # Force close all at 3:45 PM — retry every 60s until flat
+            if is_weekday and now.hour == 15 and now.minute >= 45 and not closed_today:
+                if _EXECUTION_AVAILABLE:
+                    from donna_state_engine import state as _st
+                    positions = get_positions()
+                    if positions:
+                        print(f'[EOD] {now.strftime("%H:%M ET")} — closing {len(positions)} positions')
+                        closed = close_all_positions_eod()
+                        print(f'[EOD] Closed {closed} positions — eod_lock=True')
+                    else:
+                        print(f'[EOD] {now.strftime("%H:%M ET")} — already flat, setting eod_lock')
+                        _st.set('eod_lock', True)
+                        closed_today = True
+                    if not positions or closed > 0:
+                        closed_today = True
         except Exception as e:
-            print(f'EOD close loop error: {e}')
+            print(f'[EOD loop error] {e}')
         await asyncio.sleep(60)
 
 
@@ -1056,8 +1071,25 @@ async def assistant_chat(request: Request):
 
 @app.get('/journal/data')
 async def journal_data():
-    trades = load_journal()
-    stats  = compute_journal_stats(trades)
+    trades    = load_journal()
+    stats     = compute_journal_stats(trades)
+    today_str = now_ny().strftime('%Y-%m-%d')
+
+    today_pnl = sum(
+        float(t.get('realized_pnl', 0) or 0)
+        for t in trades
+        if t.get('trade_date') == today_str
+        and t.get('outcome') in ('WIN', 'LOSS')
+        and t.get('realized_pnl') is not None
+    )
+
+    closed_trades = [t for t in trades if t.get('outcome') in ('WIN', 'LOSS')]
+    wins          = len([t for t in closed_trades if t.get('outcome') == 'WIN'])
+    win_rate      = (wins / len(closed_trades) * 100) if closed_trades else 0
+
+    stats['today_pnl'] = round(today_pnl, 2)
+    stats['win_rate']  = round(win_rate, 1)
+
     return {'status': 'ok', 'trades': trades, 'stats': stats}
 
 

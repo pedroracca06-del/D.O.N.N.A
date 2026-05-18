@@ -736,8 +736,17 @@ def check_position_outcomes() -> int:
 
     if updated:
         save_journal(trades)
-        # Propagate first-trade outcome into daily risk state for trade-2 logic
         today_str = now_ny().strftime('%Y-%m-%d')
+        # Update daily P&L in state engine
+        new_today_pnl = sum(
+            float(t.get('realized_pnl') or 0)
+            for t in trades
+            if t.get('trade_date') == today_str
+            and t.get('outcome') in ('WIN', 'LOSS')
+            and t.get('realized_pnl') is not None
+        )
+        _state.set('daily_pnl', round(new_today_pnl, 2))
+        # Propagate first-trade outcome into daily risk state for trade-2 logic
         risk = load_risk_state()
         if risk.get('daily_trades_date') == today_str and not risk.get('first_trade_outcome'):
             closed_today = sorted(
@@ -781,16 +790,13 @@ def execute_rithmic(signal_data: dict) -> dict:
 
 # ── ALPACA_ETF execution ───────────────────────────────────────
 
-def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -> dict:
+def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, routed_etf: str, apply_size_reduction: bool = False) -> dict:
     """
     Rule 5 + order submission for ALPACA_ETF mode.
-    ES/MES → SPY shares, NQ/MNQ → QQQ shares.
+    Trades routed_etf (SPY or QQQ) as determined by execute_signal().
     Sizing follows DONNA official rules (session-aware, hard caps applied).
     """
-    etf = _map_etf(data)
-    if not etf:
-        return _log_skip(data, parsed,
-            'cannot resolve instrument to SPY or QQQ — check ticker/instrument field')
+    etf = routed_etf
 
     api = _client()
     if not api:
@@ -808,8 +814,8 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     stop_dist = sizing['stop']
     tgt_dist  = sizing['target']
 
-    # Trade 2 uses 50% size when first trade was WIN
-    if risk_state.get('size_reduction_active'):
+    # Trade 2 uses 50% size — decision made upstream in execute_signal()
+    if apply_size_reduction:
         qty = max(1, qty // 2)
 
     # Block if cumulative risk would hit $1,000 daily cap
@@ -983,13 +989,39 @@ def execute_signal(signal_result: dict) -> dict:
         print(f'[execute_signal] BLOCKED — {reason}')
         return {'status': 'skipped', 'reason': f'Execution blocked: {reason}', 'code': 'STATE_GATE_BLOCKED'}
 
+    # ── Determine routed instrument from signal
+    _sig_data  = signal_result.get('data', {})
+    instrument = _sig_data.get('instrument', '').upper()
+    ticker     = _sig_data.get('ticker', '').upper()
+
+    # Route: ES/MES → SPY, NQ/MNQ → QQQ
+    if instrument in ('ES', 'MES') or 'ES' in ticker:
+        routed_etf = 'SPY'
+    elif instrument in ('NQ', 'MNQ') or 'NQ' in ticker or 'MNQ' in ticker:
+        routed_etf = 'QQQ'
+    else:
+        print(f'[execute_signal] BLOCKED — unknown instrument: {instrument}')
+        return {'status': 'skipped', 'reason': f'Unknown instrument: {instrument}', 'code': 'UNKNOWN_INSTRUMENT'}
+
+    print(f'[execute_signal] Signal routed: {instrument} → {routed_etf}')
+
+    # Generate or use provided signal_id; check and store for dedup
+    signal_id      = _sig_data.get('signal_id') or f"{ticker}_{now_ny().strftime('%Y%m%d_%H%M%S')}"
+    last_signal_id = _state.get('last_signal_id')
+    if last_signal_id and last_signal_id == signal_id:
+        print(f'[execute_signal] BLOCKED — duplicate signal_id: {signal_id}')
+        return {'status': 'skipped', 'reason': 'Duplicate signal', 'code': 'DUPLICATE_SIGNAL'}
+    _state.set('last_signal_id', signal_id)
+
     # ── Snapshot time + session at moment of execution — ALWAYS server-time, never from webhook
     ts_et        = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
     session      = session_label()   # derived from server clock, ignores webhook payload
 
-    # ── Read + (if needed) reset daily counter immediately — persisted in donna_risk_state.json
-    risk_snap    = _get_daily_state()
-    trades_today = _state.get('daily_trade_count', 0)
+    # ── Read + (if needed) reset daily counter — persisted in donna_risk_state.json
+    risk_snap     = _get_daily_state()
+    trades_today  = _state.get('daily_trade_count', 0)
+    first_outcome = _state.get('first_trade_outcome')
+    loss_hit      = _state.get('daily_loss_trade_hit')
 
     print(f'[execute_signal] {ts_et} | session={session} | daily_trades_taken={trades_today}')
 
@@ -1001,30 +1033,25 @@ def execute_signal(signal_result: dict) -> dict:
         print(f'[execute_signal] {ts_et} | BLOCKED: verdict not TAKE')
         return {'status': 'skipped', 'reason': 'verdict not TAKE'}
 
-    # ── RULE 2: DAILY TRADE LIMIT — checked first, cheapest guard, counter persists in JSON
-    if trades_today >= _DAILY_TRADE_LIMIT:
-        print(f'[execute_signal] {ts_et} | BLOCKED RULE2: '
-              f'{trades_today}/{_DAILY_TRADE_LIMIT} trades taken today (session={session})')
-        return _log_skip(data, parsed,
-            f'daily trade limit reached — {trades_today}/{_DAILY_TRADE_LIMIT} trades taken today',
-            'DAILY_TRADE_LIMIT')
+    # ── State engine — sole authority for daily trade state
+    if loss_hit:
+        print('[execute_signal] BLOCKED — daily loss trade hit, trading stopped for day')
+        return {'status': 'skipped', 'reason': 'First trade loss — no more trades today', 'code': 'DAILY_LOSS_TRADE_HIT'}
 
-    # ── RULE 3b: DAILY LOSS TRADE — first trade of day was a LOSS → stop all trading
-    if risk_snap.get('daily_loss_trade_hit'):
-        print(f'[execute_signal] {ts_et} | BLOCKED: first trade was LOSS — halted for today')
-        return _log_skip(data, parsed,
-            'first trade of day was a LOSS — no more trades today',
-            'DAILY_LOSS_TRADE_HIT')
+    if trades_today >= 2:
+        print('[execute_signal] BLOCKED — daily limit reached (2 trades)')
+        return {'status': 'skipped', 'reason': 'Daily trade limit reached', 'code': 'DAILY_LIMIT_REACHED'}
 
-    # ── TRADE 2 LOGIC — second trade only allowed if first trade closed as WIN
-    if trades_today >= 1:
-        first_oc = risk_snap.get('first_trade_outcome', '')
-        if first_oc != 'WIN':
-            label = first_oc if first_oc else 'still open'
-            print(f'[execute_signal] {ts_et} | BLOCKED: trade 2 requires trade 1 WIN (current: {label})')
-            return _log_skip(data, parsed,
-                f'trade 2 blocked — first trade outcome is "{label}" (requires WIN)',
-                'TRADE2_BLOCKED_NO_WIN')
+    if trades_today == 1 and first_outcome != 'WIN':
+        print('[execute_signal] BLOCKED — trade 2 requires trade 1 WIN')
+        return {'status': 'skipped', 'reason': 'Trade 2 blocked — first trade not WIN', 'code': 'TRADE2_REQUIRES_WIN'}
+
+    # ── Size reduction for trade 2
+    if trades_today == 1 and first_outcome == 'WIN':
+        apply_size_reduction = True
+        print('[execute_signal] Reduced size active after first win')
+    else:
+        apply_size_reduction = False
 
     # ── RULE 1: RED FOLDER
     rf = _red_folder_status()
@@ -1076,7 +1103,7 @@ def execute_signal(signal_result: dict) -> dict:
           f'broker={BROKER_MODE} signal={signal} session={session} trades_today={trades_today}')
 
     if BROKER_MODE == 'ALPACA_ETF':
-        return _execute_alpaca_etf(data, parsed, session, is_long)
+        return _execute_alpaca_etf(data, parsed, session, is_long, routed_etf, apply_size_reduction)
     if BROKER_MODE == 'TRADOVATE':
         return execute_tradovate(signal_result)
     if BROKER_MODE == 'RITHMIC':
