@@ -310,6 +310,11 @@ async def startup():
             f'trades today: {_donna_state.get_trade_count()}'
         )
     await asyncio.to_thread(check_todays_breaking_events)
+    try:
+        await asyncio.to_thread(process_finnhub_cycle)
+        print('[startup] Initial finnhub cycle complete')
+    except Exception as e:
+        print(f'[startup] Initial finnhub cycle failed: {e}')
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
