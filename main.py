@@ -774,6 +774,33 @@ async def execution_gate():
     }
 
 
+@app.post('/execution/macro-lock')
+async def execution_macro_lock(request: Request):
+    """Set or clear the macro lock. Body: {"active": bool, "reason": str}"""
+    if not _EXECUTION_AVAILABLE:
+        raise HTTPException(status_code=503, detail='execution not loaded')
+    body   = await request.json()
+    active = bool(body.get('active', False))
+    reason = str(body.get('reason', '')).strip()
+    await asyncio.to_thread(set_macro_lock, active, reason)
+    return {'status': 'ok', 'macro_lock': active, 'reason': reason}
+
+
+@app.post('/execution/trade-permission')
+async def execution_trade_permission(request: Request):
+    """Enable or disable trade permission. Body: {"active": bool, "reason": str}"""
+    if not _EXECUTION_AVAILABLE:
+        raise HTTPException(status_code=503, detail='execution not loaded')
+    body   = await request.json()
+    active = bool(body.get('active', True))
+    reason = str(body.get('reason', 'manual')).strip()
+    if active:
+        await asyncio.to_thread(enable_trade_permission)
+    else:
+        await asyncio.to_thread(disable_trade_permission, reason)
+    return {'status': 'ok', 'trade_permission': active}
+
+
 @app.post('/execution/close')
 async def execution_close(request: Request):
     body   = await request.json()
