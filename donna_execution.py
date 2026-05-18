@@ -818,9 +818,9 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
     if apply_size_reduction:
         qty = max(1, qty // 2)
 
-    # Block if cumulative risk would hit $1,000 daily cap
+    # Block if cumulative risk would exceed $1,000 daily cap
     new_trade_risk = qty * stop_dist
-    if cumulative_risk + new_trade_risk >= 1000.0:
+    if cumulative_risk + new_trade_risk > 1000.0:
         return _log_skip(data, parsed,
             f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new >= $1,000 limit',
             'DAILY_RISK_LIMIT')
