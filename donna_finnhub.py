@@ -16,6 +16,8 @@ import os
 import time
 import requests
 
+from donna_state_engine import state as _state
+
 BASE_DIR          = Path(__file__).parent
 RISK_STATE_FILE   = BASE_DIR / 'donna_risk_state.json'
 NY_TZ             = ZoneInfo('America/New_York')
@@ -215,6 +217,17 @@ def process_finnhub_cycle():
     state['donna_day']      = now_ny.strftime('%A')
 
     _write_risk(state)
+
+    try:
+        regime_value  = state.get('market_regime', 'UNKNOWN')
+        session_value = session
+        _state.set_many({
+            'market_regime': regime_value,
+            'session_state': session_value,
+        })
+        print(f'[state_engine] Updated — regime: {regime_value} | session: {session_value}')
+    except Exception as e:
+        print(f'[state_engine] write failed: {e}')
 
     status = f'updated={updated}'
     if failed:

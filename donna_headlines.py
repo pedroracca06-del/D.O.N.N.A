@@ -15,6 +15,8 @@ import json
 import os
 import requests
 
+from donna_state_engine import state as _state
+
 BASE_DIR = Path(__file__).parent
 MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
 RISK_STATE_FILE   = BASE_DIR / 'donna_risk_state.json'
@@ -532,6 +534,22 @@ def process_headlines_cycle():
     risk['last_updated'] = _utc_iso()
     with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(risk, f, indent=2)
+
+    try:
+        cal_macro_risk = risk.get('macro_risk', 'low')
+        _state.set('macro_risk', cal_macro_risk)
+        print(f'[state_engine] Updated — macro_risk (calendar): {cal_macro_risk}')
+        try:
+            from donna_execution import set_red_folder_lock
+            if phase in ('LIVE', 'IMMINENT', 'APPROACHING') and next_event:
+                set_red_folder_lock(True, next_event)
+                print(f'[state_engine] red_folder_lock SET — {next_event}')
+            else:
+                set_red_folder_lock(False)
+        except Exception as _re:
+            print(f'[state_engine] set_red_folder_lock failed: {_re}')
+    except Exception as e:
+        print(f'[state_engine] write failed: {e}')
 
     print(f'[donna_headlines] Done — {len(week_events)} week, '
           f'{len(today_all)} today ({len(today_high)} HIGH). '

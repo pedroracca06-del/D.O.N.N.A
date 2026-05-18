@@ -9,6 +9,8 @@ import os
 import re
 import requests
 
+from donna_state_engine import state as _state
+
 # ── paths & config ────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
 RISK_STATE_FILE = BASE_DIR / 'donna_risk_state.json'
@@ -548,6 +550,20 @@ def process_news_guard_cycle():
         for i in items[:10]
     ]
     _write_risk(state)
+
+    try:
+        _state.set('macro_risk', macro_risk)
+        print(f'[state_engine] Updated — macro_risk: {macro_risk}')
+        try:
+            from donna_execution import set_macro_lock
+            if macro_risk == 'high':
+                set_macro_lock(True, 'macro_risk_HIGH_from_news_loop')
+            else:
+                set_macro_lock(False)
+        except Exception as _me:
+            print(f'[state_engine] set_macro_lock failed: {_me}')
+    except Exception as e:
+        print(f'[state_engine] write failed: {e}')
 
     print(f'[donna_news] Cycle complete — macro:{macro_risk} headline:{headline_risk} '
           f'market:{market_risk} phase:{event_phase} headlines:{len(items)}')
