@@ -215,11 +215,11 @@ async def eod_close_loop():
             # Reset flag at start of new day
             if now.hour < 15:
                 closed_today = False
-            # No new trades after 3:30 PM
+            # No new trades after 3:30 PM — guard runs once (only while permission is still on)
             if is_weekday and now.hour == 15 and now.minute >= 30:
                 if _EXECUTION_AVAILABLE:
                     from donna_state_engine import state as _st
-                    if not _st.get('eod_lock'):
+                    if not _st.get('eod_lock') and _st.get('trade_permission'):
                         disable_trade_permission('EOD_NO_NEW_ENTRIES_AFTER_1530')
                         print(f'[EOD] {now.strftime("%H:%M ET")} — no new entries after 3:30 PM')
             # Force close all at 3:45 PM — retry every 60s until flat
