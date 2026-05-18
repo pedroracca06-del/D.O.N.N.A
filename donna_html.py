@@ -454,7 +454,13 @@ tr:last-child td{border-bottom:none}
   padding:22px 26px 20px;border-radius:18px;
   border:1px solid var(--line);background:var(--panel);
   box-shadow:var(--shadow2);position:relative;overflow:hidden;
+  min-height:120px;
 }
+#hvPlaybook{min-height:80px}
+#hvSignals{min-height:80px}
+#newsList{min-height:120px}
+#hvSectors{min-height:80px}
+#caDivergenceList{min-height:60px}
 .grok-card::before{
   content:'';position:absolute;top:0;left:0;right:0;height:3px;
   background:linear-gradient(90deg,var(--green),var(--gold));
@@ -1360,11 +1366,11 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
       <!-- 5 INDEX TILES (customizable) -->
       <div class="index-tiles" id="indexTiles">
-        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">NASDAQ</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
+        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">NQ</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
         <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">ES</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
-        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">DJIA</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
+        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">VIX</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
+        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">DXY</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
         <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">GOLD</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
-        <div class="index-tile"><button class="tile-edit-btn" title="Change symbol">✎</button><div class="index-tile-name">OIL</div><div class="index-tile-val">—</div><div class="index-tile-chg">—</div></div>
       </div>
 
       <!-- MAIN 2-COLUMN GRID: 70% left / 30% right -->
@@ -1859,7 +1865,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 <script>
 // ════════ CUSTOMIZABLE INDEX TILES ════════
 const SYMBOL_LIST = ['NQ','ES','MNQ','MES','SPX','NASDAQ','DJIA','DXY','VIX','US10Y','GOLD','SILVER','OIL','BTC','ETH'];
-const DEFAULT_PREFS = ['NASDAQ','ES','DJIA','GOLD','OIL'];
+const DEFAULT_PREFS = ['NQ','ES','VIX','DXY','GOLD'];
 const LS_KEY = 'user_index_prefs';
 let _lastDashData = null;
 let _activePicker = null;
@@ -1877,35 +1883,49 @@ function saveIndexPrefs(prefs) {
 
 let _liveBtcVix = {};
 
+// Shared price formatter — always uses en-US locale with comma separators
+function formatPrice(val, decimals) {
+  const n = parseFloat(val);
+  if (isNaN(n) || n === 0) return '—';
+  const d = (decimals !== undefined) ? decimals : 2;
+  return n.toLocaleString('en-US', {minimumFractionDigits: d, maximumFractionDigits: d});
+}
+
 function getSymbolData(sym, d) {
-  // BTC and VIX come from the dedicated /btc-vix endpoint
-  if (sym === 'BTC' || sym === 'VIX') {
+  // BTC comes from the dedicated /btc-vix endpoint
+  if (sym === 'BTC') {
     const q = _liveBtcVix[sym] || {};
     const last = q.last || 0;
     if (!last) return {val: '—', chg: '—', pct: null, dir: ''};
     const p = parseFloat(q.pct || 0);
-    const fmt = sym === 'BTC'
-      ? last.toLocaleString(undefined, {maximumFractionDigits: 0})
-      : last.toFixed(2);
     return {
-      val: fmt, chg: (q.chg || 0).toFixed(2),
+      val: last.toLocaleString('en-US', {maximumFractionDigits: 0}),
+      chg: (q.chg || 0).toFixed(2),
       pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
       dir: p >= 0 ? 'up' : 'down'
     };
   }
 
-  // Helper: format a numeric price with comma separators
-  function fmtPrice(raw) {
-    const n = parseFloat(raw);
-    if (isNaN(n) || n === 0) return null;
-    return n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  // VIX: try btc-vix endpoint first, then fall through to snapshot
+  if (sym === 'VIX') {
+    const q = _liveBtcVix['VIX'] || {};
+    if (q.last) {
+      const p = parseFloat(q.pct || 0);
+      return {
+        val: formatPrice(q.last, 2),
+        chg: (q.chg || 0).toFixed(2),
+        pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+        dir: p >= 0 ? 'up' : 'down'
+      };
+    }
+    // fall through to snapshot below
   }
 
   // 1. Futures macro pulse: NQ, ES, OIL, GOLD, SILVER — authoritative full prices
   const pulseRow = (d.futures_macro_pulse || []).find(r => r.symbol === sym);
   if (pulseRow && pulseRow.last && pulseRow.last !== '-' && pulseRow.last !== '—') {
-    const disp = fmtPrice(pulseRow.last);
-    if (disp) return {val: disp, chg: pulseRow.chg || '—', pct: pulseRow.pct || null, dir: pulseRow.dir || ''};
+    const disp = formatPrice(pulseRow.last, 2);
+    if (disp !== '—') return {val: disp, chg: pulseRow.chg || '—', pct: pulseRow.pct || null, dir: pulseRow.dir || ''};
   }
 
   // 2. Major indexes: NASDAQ → 'NASDAQ', DJIA → 'DJIA', SPX → 'S&P 500', DXY, US10Y
@@ -1913,16 +1933,16 @@ function getSymbolData(sym, d) {
   const label = idxLabelMap[sym] || sym;
   const row = (d.major_indexes || []).find(r => r.symbol === label);
   if (row && row.last && row.last !== '-' && row.last !== '—') {
-    const disp = fmtPrice(row.last);
-    if (disp) return {val: disp, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || ''};
+    const disp = formatPrice(row.last, 2);
+    if (disp !== '—') return {val: disp, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || ''};
   }
 
   // 3. Last resort: market_snapshot (may be stale or from older calc)
   const snap = ((d.risk || {}).market_snapshot) || {};
   const s = snap[sym];
   if (s && s.last && s.last !== '-') {
-    const disp = fmtPrice(s.last);
-    if (disp) {
+    const disp = formatPrice(s.last, 2);
+    if (disp !== '—') {
       const p = parseFloat(s.pct);
       return {
         val: disp, chg: s.chg || '—',
@@ -1936,19 +1956,19 @@ function getSymbolData(sym, d) {
 }
 
 function applyTileData(tileEl, sym, data) {
-  const noData = !data.val || data.val === '—' || data.val === '-';
-  tileEl.style.display = noData ? 'none' : '';
-  if (noData) return;
+  // Always show all 5 tiles; keep existing displayed value when no new data arrives
+  tileEl.style.display = '';
   const nameEl = tileEl.querySelector('.index-tile-name');
   const valEl  = tileEl.querySelector('.index-tile-val');
   const chgEl  = tileEl.querySelector('.index-tile-chg');
   if (nameEl) nameEl.textContent = sym;
-  if (valEl) {
+  const noData = !data.val || data.val === '—' || data.val === '-';
+  if (!noData && valEl) {
     // data.val is pre-formatted by getSymbolData (e.g. "20,708.93")
     valEl.textContent = data.val;
     valEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--text)';
   }
-  if (chgEl) {
+  if (!noData && chgEl) {
     chgEl.textContent = data.pct || '—';
     chgEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--muted)';
   }
@@ -2233,7 +2253,7 @@ function renderHarveyNew(d) {
   const esC   = parseFloat(d.es_last) || 0;
   const nqPct = d.nq_pct || 0;
   const esPct = d.es_pct || 0;
-  const fmtPx  = p => p > 0 ? p.toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
+  const fmtPx  = p => p > 0 ? formatPrice(p, 2) : '—';
   const fmtPct = p => (p >= 0 ? '+' : '') + parseFloat(p).toFixed(2) + '%';
   const pctCol = p => p >= 0 ? 'var(--green)' : 'var(--red)';
 
@@ -3308,8 +3328,8 @@ function renderJournal(data) {
         const datDisp = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : '—');
         const vColor = t.harvey_verdict === 'BUY' ? 'var(--green)' : t.harvey_verdict === 'SELL' ? 'var(--red)' : 'var(--yellow)';
         const pnlStr = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
-        const entryDisp = t.entry_price !== null && t.entry_price !== undefined ? t.entry_price : '—';
-        const exitDisp  = t.exit_price  !== null && t.exit_price  !== undefined ? t.exit_price  : '—';
+        const entryDisp = t.entry_price !== null && t.entry_price !== undefined ? formatPrice(t.entry_price, 2) : '—';
+        const exitDisp  = t.exit_price  !== null && t.exit_price  !== undefined ? formatPrice(t.exit_price,  2) : '—';
         rows += `<tr>
           <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${datDisp}</td>
           <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${timeStr}</td>
