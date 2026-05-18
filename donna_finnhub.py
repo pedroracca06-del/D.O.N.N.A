@@ -159,6 +159,24 @@ def _compute_session_points(current_snapshot: dict, label: str, pct: float) -> f
     return 0.0
 
 
+def _derive_regime(nq_pct: float, es_pct: float, vix_last: float) -> str:
+    """Derive market regime from live NQ/ES move and VIX level."""
+    if vix_last and vix_last > 25:
+        return 'VOLATILE'
+    # Average the two index moves; fall back to whichever is non-zero
+    if nq_pct != 0 and es_pct != 0:
+        avg = (nq_pct + es_pct) / 2
+    else:
+        avg = nq_pct or es_pct
+    if avg >= 0.5:
+        return 'TRENDING_UP'
+    if avg <= -0.5:
+        return 'TRENDING_DOWN'
+    if abs(avg) < 0.2:
+        return 'RANGING'
+    return 'MIXED'
+
+
 # ── main cycle ────────────────────────────────────────────────
 def process_finnhub_cycle():
     """
@@ -199,6 +217,11 @@ def process_finnhub_cycle():
     snapshot['_updated_at'] = _utc_iso()
     state['market_snapshot'] = snapshot
 
+    # Derive market regime from live quote data — all inputs already fetched above
+    vix_last = _safe_float((snapshot.get('VIX') or {}).get('last'))
+    regime   = _derive_regime(nq_pct, es_pct, vix_last)
+    state['market_regime'] = regime
+
     # Patch donna session/time fields while we're here
     now_ny  = _now_ny()
     m = now_ny.hour * 60 + now_ny.minute
@@ -219,15 +242,13 @@ def process_finnhub_cycle():
     _write_risk(state)
 
     try:
-        regime_value  = state.get('market_regime', 'UNKNOWN')
-        session_value = session
         _state.set_many({
-            'market_regime': regime_value,
-            'session_state': session_value,
+            'market_regime': regime,
+            'session_state': session,
         })
-        print(f'[state_engine] Updated — regime: {regime_value} | session: {session_value}')
+        print(f'[state_engine] Updated — regime: {regime} | session: {session}')
     except Exception as e:
-        print(f'[state_engine] write failed: {e}')
+        print(f'[state_engine] regime write failed: {e}')
 
     status = f'updated={updated}'
     if failed:

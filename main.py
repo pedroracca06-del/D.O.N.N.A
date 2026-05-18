@@ -247,12 +247,6 @@ async def news_loop():
     while True:
         try:
             await asyncio.to_thread(process_news_guard_cycle)
-            if _EXECUTION_AVAILABLE:
-                _rs = load_risk_state()
-                if _rs.get('macro_risk') == 'high':
-                    set_macro_lock(True, 'macro_risk_HIGH')
-                else:
-                    set_macro_lock(False)
         except Exception as e:
             print('Donna News loop error:', str(e))
         await asyncio.sleep(300)
@@ -262,14 +256,6 @@ async def headline_loop():
     while True:
         try:
             await asyncio.to_thread(process_headlines_cycle)
-            if _EXECUTION_AVAILABLE:
-                _rs    = load_risk_state()
-                _phase = _rs.get('event_phase', '')
-                _next  = _rs.get('next_event', '')
-                if _phase in ('LIVE', 'IMMINENT', 'APPROACHING'):
-                    set_red_folder_lock(True, _next)
-                else:
-                    set_red_folder_lock(False)
         except Exception as e:
             print('Headline loop error:', str(e))
         await asyncio.sleep(900)
