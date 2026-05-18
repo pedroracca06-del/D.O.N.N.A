@@ -14,6 +14,7 @@ from donna_state import (
     load_macro_events,
     load_journal, save_journal,
 )
+from donna_state_engine import state as _state
 
 # ── Broker mode ────────────────────────────────────────────────
 # Change this one variable to switch execution backends.
@@ -231,10 +232,12 @@ def _red_folder_status() -> dict:
 # ── RULE 2: Daily trade limit ──────────────────────────────────
 
 def _get_daily_trades_taken() -> int:
-    return int(_get_daily_state().get('daily_trades_taken', 0))
+    return _state.get('daily_trade_count', 0)
 
 
 def _increment_daily_trades() -> None:
+    _state.increment_trade_count()
+    # Backup write to donna_risk_state.json
     risk      = load_risk_state()
     today_str = now_ny().strftime('%Y-%m-%d')
     if risk.get('daily_trades_date') != today_str:
@@ -350,6 +353,7 @@ def close_position(symbol: str) -> dict:
         return {'status': 'error', 'error': 'Alpaca not configured'}
     try:
         api.close_position(symbol)
+        _state.remove_position(symbol)
         return {'status': 'ok', 'symbol': symbol}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
@@ -397,6 +401,7 @@ def close_all_positions_eod() -> int:
 
         try:
             api.close_position(symbol)
+            _state.remove_position(symbol)
         except Exception as e:
             print(f'EOD close failed for {symbol}: {e}')
             continue
@@ -471,7 +476,7 @@ def get_execution_status() -> dict:
     acct = get_account()
     return {
         'broker_mode':              BROKER_MODE,
-        'daily_trades_taken':       int(risk.get('daily_trades_taken', 0)),
+        'daily_trades_taken':       _state.get('daily_trade_count', 0),
         'daily_loss_limit_hit':     bool(risk.get('daily_loss_limit_hit', False)),
         'daily_loss_trade_hit':     bool(risk.get('daily_loss_trade_hit', False)),
         'first_trade_outcome':      risk.get('first_trade_outcome', ''),
@@ -770,7 +775,19 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     except Exception as e:
         return {'status': 'error', 'reason': str(e)}
 
-    # Record counters only after confirmed order submission (atomic write)
+    # State engine — primary authority for these fields
+    _state.increment_trade_count()
+    _state.set('last_execution_time', utc_now_iso())
+    _state.add_position({
+        'symbol':    etf,
+        'side':      'buy' if is_long else 'sell',
+        'qty':       qty,
+        'entry_ref': entry_ref,
+        'order_id':  order_id,
+        'session':   session,
+        'timestamp': utc_now_iso(),
+    })
+    # Backup write to donna_risk_state.json
     risk_after = load_risk_state()
     today_str  = now_ny().strftime('%Y-%m-%d')
     if risk_after.get('daily_trades_date') != today_str:
@@ -882,7 +899,7 @@ def execute_signal(signal_result: dict) -> dict:
 
     # ── Read + (if needed) reset daily counter immediately — persisted in donna_risk_state.json
     risk_snap    = _get_daily_state()
-    trades_today = int(risk_snap.get('daily_trades_taken', 0))
+    trades_today = _state.get('daily_trade_count', 0)
 
     print(f'[execute_signal] {ts_et} | session={session} | daily_trades_taken={trades_today}')
 
