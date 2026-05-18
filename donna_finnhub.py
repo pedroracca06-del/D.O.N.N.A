@@ -1,8 +1,7 @@
 # ============================================================
 # donna_finnhub.py — DONNA v5.0 Live Market Snapshot Engine
-# Replaces the stub process_finnhub_cycle() in main.py
-#
-# DROP THIS FILE into your project root alongside main.py
+# Primary data source: yfinance (free, no API key required)
+# Finnhub retained only for news endpoint (/api/v1/news)
 # Called by finnhub_loop() in main.py every 3 minutes
 # ============================================================
 
@@ -15,16 +14,16 @@ import json
 import os
 import time
 import requests
+import yfinance as yf
 
 from donna_state_engine import state as _state
 
-BASE_DIR          = Path(__file__).parent
-RISK_STATE_FILE   = BASE_DIR / 'donna_risk_state.json'
-NY_TZ             = ZoneInfo('America/New_York')
+BASE_DIR        = Path(__file__).parent
+RISK_STATE_FILE = BASE_DIR / 'donna_risk_state.json'
+NY_TZ           = ZoneInfo('America/New_York')
 
-FINNHUB_API_KEY       = os.getenv('FINNHUB_API_KEY', '').strip()
-FMP_API_KEY           = os.getenv('FMP_API_KEY', '').strip()
-ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '').strip()
+# Finnhub key kept solely for the news endpoint
+FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY', '').strip()
 
 
 def _utc_iso():
@@ -63,107 +62,50 @@ def _write_risk(state: dict):
         json.dump(state, f, indent=2)
 
 
-# ── quote fetchers ────────────────────────────────────────────
-def _finnhub_quote(symbol: str) -> dict | None:
-    if not FINNHUB_API_KEY:
-        return None
-    data = _safe_get(
-        'https://finnhub.io/api/v1/quote',
-        {'symbol': symbol, 'token': FINNHUB_API_KEY}
-    )
-    if not data:
-        return None
-    c  = _safe_float(data.get('c'), None)
-    pc = _safe_float(data.get('pc'), None)
-    if not c or not pc or c == 0 or pc == 0:
-        return None
-    chg = c - pc
-    pct = (chg / pc) * 100
-    return {'last': round(c, 4), 'chg': round(chg, 4), 'pct': round(pct, 4)}
-
-
-def _fmp_quote(symbol: str) -> dict | None:
-    if not FMP_API_KEY:
-        return None
-    data = _safe_get(
-        f'https://financialmodelingprep.com/api/v3/quote/{symbol}',
-        {'apikey': FMP_API_KEY}
-    )
-    if not isinstance(data, list) or not data:
-        return None
-    item = data[0]
-    last = _safe_float(item.get('price'))
-    chg  = _safe_float(item.get('change'))
-    pct  = _safe_float(item.get('changesPercentage'))
-    if last == 0:
-        return None
-    return {'last': round(last, 4), 'chg': round(chg, 4), 'pct': round(pct, 4)}
-
-
-def _alpha_quote(symbol: str) -> dict | None:
-    if not ALPHA_VANTAGE_API_KEY:
-        return None
-    data = _safe_get(
-        'https://www.alphavantage.co/query',
-        {'function': 'GLOBAL_QUOTE', 'symbol': symbol, 'apikey': ALPHA_VANTAGE_API_KEY}
-    )
-    if not data:
-        return None
-    q = data.get('Global Quote', {})
-    last = _safe_float(q.get('05. price'))
-    chg  = _safe_float(q.get('09. change'))
-    pct  = _safe_float(str(q.get('10. change percent', '0')).replace('%', ''))
-    if last == 0:
-        return None
-    return {'last': round(last, 4), 'chg': round(chg, 4), 'pct': round(pct, 4)}
-
-
-def _quote(symbol: str, fallbacks: list[str] | None = None) -> dict | None:
-    """Try Finnhub → FMP → Alpha Vantage → fallback symbols."""
-    q = _finnhub_quote(symbol)
-    if q:
-        return q
-    for sym in (fallbacks or []):
-        q = _finnhub_quote(sym)
-        if q:
-            return q
-    q = _fmp_quote(symbol)
-    if q:
-        return q
-    q = _alpha_quote(symbol)
-    return q
+# ── yfinance quote fetcher ─────────────────────────────────────
+def _fetch_quote_yf(symbol: str) -> dict:
+    try:
+        ticker = yf.Ticker(symbol)
+        info   = ticker.fast_info
+        last   = round(float(info.last_price), 2)
+        prev   = round(float(info.previous_close), 2)
+        chg    = round(last - prev, 2)
+        pct    = round((chg / prev) * 100, 2) if prev else 0.0
+        return {'last': last, 'chg': chg, 'pct': pct, 'prev_close': prev}
+    except Exception as e:
+        print(f'[yfinance] {symbol} failed: {e}')
+        return {'last': 0, 'chg': 0, 'pct': 0, 'prev_close': 0}
 
 
 # ── symbol map ────────────────────────────────────────────────
-# Each entry: key → (primary_symbol, [fallbacks], snapshot_key)
+# (label, yfinance_symbol, snapshot_key)
 SNAPSHOT_MAP = [
-    ('SPX',    '^GSPC',   ['^SPX', 'SPY'],         'SPX'),
-    ('NASDAQ', '^IXIC',   ['^NDX', 'QQQ'],         'NASDAQ'),
-    ('DJIA',   '^DJI',    ['DIA'],                  'DJIA'),
-    ('VIX',    '^VIX',    [],                       'VIX'),
-    ('US10Y',  '^TNX',    [],                       'US10Y'),
-    ('DXY',    'DX-Y.NYB',['UUP'],                  'DXY'),
-    ('NQ',     'NQ1!',    ['^NDX'],                 'NQ'),
-    ('ES',     'ES1!',    ['^GSPC'],                'ES'),
-    ('OIL',    'CL=F',    ['USO'],                  'OIL'),
-    ('GOLD',   'GC=F',    ['GLD'],                  'GOLD'),
-    ('SILVER', 'SI=F',    ['SLV'],                  'SILVER'),
+    ('SPX',    '^GSPC',     'SPX'),
+    ('NASDAQ', '^IXIC',     'NASDAQ'),
+    ('DJIA',   '^DJI',      'DJIA'),
+    ('VIX',    '^VIX',      'VIX'),
+    ('US10Y',  '^TNX',      'US10Y'),
+    ('DXY',    'DX-Y.NYB',  'DXY'),
+    ('NQ',     'NQ=F',      'NQ'),
+    ('ES',     'ES=F',      'ES'),
+    ('OIL',    'CL=F',      'OIL'),
+    ('GOLD',   'GC=F',      'GOLD'),
+    ('SILVER', 'SI=F',      'SILVER'),
 ]
 
-# Session point tracking — NQ and ES
-def _compute_session_points(current_snapshot: dict, label: str, pct: float) -> float:
-    """Estimate session points from percentage move."""
-    last = _safe_float((current_snapshot.get(label) or {}).get('last'))
+
+# ── session point helper ───────────────────────────────────────
+def _compute_session_points(snapshot: dict, label: str, pct: float) -> float:
+    last = _safe_float((snapshot.get(label) or {}).get('last'))
     if last and last > 0 and pct != 0:
         return round(abs(last * pct / 100), 2)
     return 0.0
 
 
+# ── regime deriver ────────────────────────────────────────────
 def _derive_regime(nq_pct: float, es_pct: float, vix_last: float) -> str:
-    """Derive market regime from live NQ/ES move and VIX level."""
     if vix_last and vix_last > 25:
         return 'VOLATILE'
-    # Average the two index moves; fall back to whichever is non-zero
     if nq_pct != 0 and es_pct != 0:
         avg = (nq_pct + es_pct) / 2
     else:
@@ -181,18 +123,18 @@ def _derive_regime(nq_pct: float, es_pct: float, vix_last: float) -> str:
 def process_finnhub_cycle():
     """
     Main entry point — called by finnhub_loop() in main.py every 5 minutes.
-    Fetches live quotes and updates market_snapshot in donna_risk_state.json.
+    Fetches live quotes via yfinance and updates market_snapshot in donna_risk_state.json.
     """
     print(f'[donna_finnhub] Running cycle at {_now_ny().strftime("%H:%M:%S")} ET')
 
-    state = _read_risk()
+    state    = _read_risk()
     snapshot = state.get('market_snapshot', {})
-    updated = 0
-    failed  = []
+    updated  = 0
+    failed   = []
 
-    for label, primary, fallbacks, snap_key in SNAPSHOT_MAP:
-        q = _quote(primary, fallbacks)
-        time.sleep(0.5)
+    for label, yf_symbol, snap_key in SNAPSHOT_MAP:
+        q = _fetch_quote_yf(yf_symbol)
+        time.sleep(0.3)
         if q and q.get('last') not in (None, 0):
             snapshot[snap_key] = {
                 'last': q['last'],
@@ -203,7 +145,7 @@ def process_finnhub_cycle():
         else:
             failed.append(label)
 
-    # Update session points
+    # Session points for NQ and ES
     nq_data = snapshot.get('NQ', {})
     es_data = snapshot.get('ES', {})
     nq_pct  = _safe_float(nq_data.get('pct'))
@@ -214,16 +156,21 @@ def process_finnhub_cycle():
     if es_data.get('last') and es_pct != 0:
         snapshot['ES_SESSION_POINTS'] = _compute_session_points(snapshot, 'ES', es_pct)
 
+    # Diagnostic print for NQ and ES
+    nq_last = (snapshot.get('NQ') or {}).get('last', 0)
+    es_last = (snapshot.get('ES') or {}).get('last', 0)
+    print(f'[donna_finnhub] NQ={nq_last} ES={es_last}')
+
     snapshot['_updated_at'] = _utc_iso()
     state['market_snapshot'] = snapshot
 
-    # Derive market regime from live quote data — all inputs already fetched above
+    # Market regime
     vix_last = _safe_float((snapshot.get('VIX') or {}).get('last'))
     regime   = _derive_regime(nq_pct, es_pct, vix_last)
     state['market_regime'] = regime
 
-    # Patch donna session/time fields while we're here
-    now_ny  = _now_ny()
+    # Session / time fields
+    now_ny = _now_ny()
     m = now_ny.hour * 60 + now_ny.minute
     if m >= 19 * 60 or m < 3 * 60:
         session = 'ASIA'
