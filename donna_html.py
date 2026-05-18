@@ -1892,6 +1892,21 @@ function formatPrice(val, decimals) {
 }
 
 function getSymbolData(sym, d) {
+  // NQ and ES — always read from market_snapshot (yfinance source, most accurate)
+  if (sym === 'NQ' || sym === 'ES') {
+    const snap = ((d.risk || {}).market_snapshot) || {};
+    const s = snap[sym];
+    if (s && s.last && s.last > 1000) {
+      const p = parseFloat(s.pct || 0);
+      return {
+        val: formatPrice(s.last, 2),
+        chg: s.chg || '—',
+        pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+        dir: p >= 0 ? 'up' : 'down'
+      };
+    }
+  }
+
   // BTC comes from the dedicated /btc-vix endpoint
   if (sym === 'BTC') {
     const q = _liveBtcVix[sym] || {};
@@ -2582,6 +2597,20 @@ async function refreshNewsFuturesStrip() {
           last: sym === 'BTC'
             ? q.last.toLocaleString(undefined, {maximumFractionDigits: 0})
             : q.last.toFixed(2),
+          pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+          dir: p >= 0 ? 'up' : 'dn',
+        };
+      }
+    });
+    // Override NQ and ES from market_snapshot (yfinance) if value is valid (> 1000)
+    ['NQ','ES'].forEach(sym => {
+      const snap = ((_lastDashData || {}).risk || {}).market_snapshot || {};
+      const s = snap[sym];
+      if (s && s.last && s.last > 1000) {
+        const p = parseFloat(s.pct || 0);
+        map[sym] = {
+          symbol: sym,
+          last: formatPrice(s.last, 2),
           pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
           dir: p >= 0 ? 'up' : 'dn',
         };
