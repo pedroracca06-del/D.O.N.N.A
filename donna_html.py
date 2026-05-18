@@ -1867,6 +1867,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 const SYMBOL_LIST = ['NQ','ES','MNQ','MES','SPX','NASDAQ','DJIA','DXY','VIX','US10Y','GOLD','SILVER','OIL','BTC','ETH'];
 const DEFAULT_PREFS = ['NQ','ES','VIX','DXY','GOLD'];
 const LS_KEY = 'user_index_prefs';
+// Always reset to defaults — clear any stale browser cache
+localStorage.removeItem(LS_KEY);
 let _lastDashData = null;
 let _activePicker = null;
 
