@@ -166,6 +166,10 @@ def _get_daily_state() -> dict:
         risk['size_reduction_active']  = False
         risk['daily_loss_trade_hit']   = False
         save_risk_state(risk)
+        try:
+            _state.reset_daily()
+        except Exception as _e:
+            print(f'[state_engine] _get_daily_state reset failed: {_e}')
     return risk
 
 
@@ -261,11 +265,21 @@ def _check_daily_loss_limit(session: str, pnl_today: float) -> tuple[bool, str]:
     if session == 'ASIA' and pnl_today < _LOSS_LIMIT_ASIA:
         risk['daily_loss_limit_hit'] = True
         save_risk_state(risk)
+        try:
+            _state.set_many({'daily_loss_trade_hit': True, 'trade_permission': False})
+            _state.add_lockout('DAILY_LOSS_LIMIT_HIT')
+        except Exception as _e:
+            print(f'[state_engine] _check_daily_loss_limit write failed: {_e}')
         return True, 'DAILY_LOSS_LIMIT_ASIA'
 
     if session in ('LONDON', 'NEW_YORK_CASH') and pnl_today < _LOSS_LIMIT_NY_LON:
         risk['daily_loss_limit_hit'] = True
         save_risk_state(risk)
+        try:
+            _state.set_many({'daily_loss_trade_hit': True, 'trade_permission': False})
+            _state.add_lockout('DAILY_LOSS_LIMIT_HIT')
+        except Exception as _e:
+            print(f'[state_engine] _check_daily_loss_limit write failed: {_e}')
         return True, 'DAILY_LOSS_LIMIT_NY'
 
     return False, ''
@@ -305,6 +319,10 @@ def _set_asia_trade_taken() -> None:
     risk['asia_session_anchor'] = anchor
     risk['asia_trade_taken']    = True
     save_risk_state(risk)
+    try:
+        _state.set('asia_trade_taken', True)
+    except Exception as _e:
+        print(f'[state_engine] _set_asia_trade_taken write failed: {_e}')
 
 
 # ── Public helpers ─────────────────────────────────────────────
@@ -737,6 +755,14 @@ def check_position_outcomes() -> int:
                 elif first_oc == 'WIN':
                     risk['size_reduction_active'] = True
                 save_risk_state(risk)
+                try:
+                    _state.set_many({
+                        'first_trade_outcome':  first_oc,
+                        'daily_loss_trade_hit': risk.get('daily_loss_trade_hit', False),
+                        'size_reduction_active': risk.get('size_reduction_active', False),
+                    })
+                except Exception as _e:
+                    print(f'[state_engine] check_position_outcomes write failed: {_e}')
 
     return updated
 
@@ -846,6 +872,10 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool) -
     risk_after['daily_trades_taken']    = int(risk_after.get('daily_trades_taken', 0)) + 1
     risk_after['cumulative_risk_today'] = float(risk_after.get('cumulative_risk_today', 0.0)) + (qty * stop_dist)
     save_risk_state(risk_after)
+    try:
+        _state.set('cumulative_risk_today', float(risk_after.get('cumulative_risk_today', 0.0)))
+    except Exception as _e:
+        print(f'[state_engine] _execute_alpaca_etf cumulative_risk write failed: {_e}')
     if session == 'ASIA':
         _set_asia_trade_taken()
 

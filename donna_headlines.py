@@ -327,6 +327,11 @@ def is_red_folder_week() -> bool:
         risk['last_updated']    = _utc_iso()
         with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(risk, f, indent=2)
+        try:
+            _state.set_many({'macro_risk': 'high'})
+            print('[state_engine] Updated — macro_risk: high (red_folder_week)')
+        except Exception as _e:
+            print(f'[state_engine] is_red_folder_week write failed: {_e}')
         reason = 'key event name' if name_hit else f'{high_count} HIGH events'
         print(f'[donna_headlines] Red-folder week confirmed ({reason})')
 
