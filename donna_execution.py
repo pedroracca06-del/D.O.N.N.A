@@ -462,11 +462,60 @@ def close_all_positions_eod() -> int:
         )
         closed += 1
 
+    _state.set('eod_lock', True)
+    _state.add_lockout('EOD_LOCK_ACTIVE')
+    print('[EOD] eod_lock=True — no new executions until midnight reset')
     return closed
 
 
 def get_today_trade_count() -> int:
     return _get_daily_trades_taken()
+
+
+# ── Lock-control functions ─────────────────────────────────────
+
+def set_macro_lock(active: bool, reason: str = '') -> None:
+    _state.set('macro_lock', active)
+    if active:
+        _state.add_lockout(f'MACRO_LOCK: {reason}' if reason else 'MACRO_LOCK_ACTIVE')
+        print(f'[macro_lock] SET — {reason}')
+    else:
+        lockouts = [
+            l for l in (_state.get('risk_lockouts') or [])
+            if not (l.get('reason', '') if isinstance(l, dict) else l).startswith('MACRO_LOCK')
+        ]
+        _state.set_many({'macro_lock': False, 'risk_lockouts': lockouts})
+        print('[macro_lock] CLEARED')
+
+
+def set_red_folder_lock(active: bool, event_name: str = '') -> None:
+    _state.set('red_folder_lock', active)
+    if active:
+        _state.add_lockout(f'RED_FOLDER: {event_name}' if event_name else 'RED_FOLDER_WINDOW')
+        print(f'[red_folder_lock] SET — {event_name}')
+    else:
+        lockouts = [
+            l for l in (_state.get('risk_lockouts') or [])
+            if not (l.get('reason', '') if isinstance(l, dict) else l).startswith('RED_FOLDER')
+        ]
+        _state.set_many({'red_folder_lock': False, 'risk_lockouts': lockouts})
+        print('[red_folder_lock] CLEARED')
+
+
+def disable_trade_permission(reason: str = 'manual_disable') -> None:
+    _state.set_many({'trade_permission': False})
+    _state.add_lockout(f'TRADE_PERMISSION_DISABLED: {reason}')
+    print(f'[trade_permission] DISABLED — {reason}')
+
+
+def enable_trade_permission() -> None:
+    _state.set_many({'trade_permission': True})
+    lockouts = [
+        l for l in (_state.get('risk_lockouts') or [])
+        if not (l.get('reason', '') if isinstance(l, dict) else l).startswith('TRADE_PERMISSION')
+    ]
+    _state.set('risk_lockouts', lockouts)
+    print('[trade_permission] ENABLED')
 
 
 def get_execution_status() -> dict:
@@ -887,12 +936,23 @@ def execute_signal(signal_result: dict) -> dict:
     Apply DONNA's 5 official risk rules, then route to the active broker.
     To switch brokers: change BROKER_MODE at the top of this file.
 
+    Rule 0 — STATE GATE         can_execute() must be True (eod/macro/red_folder/permission locks).
     Rule 1 — RED FOLDER        ±30 min around any HIGH macro event → block.
     Rule 2 — DAILY TRADE LIMIT  max 2 trades per calendar day ET.
     Rule 3 — DAILY LOSS LIMIT   NY/London < -$1 000 | Asia < -$500 → block.
     Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
     Rule 5 — POSITION SIZING    broker-specific (ALPACA_ETF: floor($500/stop)).
     """
+    # ── Rule 0: State engine gate — must pass before any other logic
+    if not _state.can_execute():
+        lockouts = _state.get('risk_lockouts') or []
+        reason = (
+            ', '.join(l['reason'] if isinstance(l, dict) else l for l in lockouts)
+            if lockouts else 'execution_lock or trade_permission disabled'
+        )
+        print(f'[execute_signal] BLOCKED — {reason}')
+        return {'status': 'skipped', 'reason': f'Execution blocked: {reason}', 'code': 'STATE_GATE_BLOCKED'}
+
     # ── Snapshot time + session at moment of execution — ALWAYS server-time, never from webhook
     ts_et        = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
     session      = session_label()   # derived from server clock, ignores webhook payload

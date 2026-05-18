@@ -48,19 +48,25 @@ try:
         get_today_trade_count,
         get_execution_status,
         check_position_outcomes,
+        set_macro_lock, set_red_folder_lock,
+        disable_trade_permission, enable_trade_permission,
     )
     _EXECUTION_AVAILABLE = True
 except Exception:
     _EXECUTION_AVAILABLE = False
-    def execute_signal(r):              return {'status': 'unavailable'}
-    def get_account():                  return {'available': False}
-    def get_positions():                return []
-    def close_position(s):              return {'status': 'unavailable'}
-    def close_all_positions():          return {'status': 'unavailable'}
-    def close_all_positions_eod():      return 0
-    def get_today_trade_count():        return 0
-    def get_execution_status():         return {'available': False}
-    def check_position_outcomes():      return 0
+    def execute_signal(r):                  return {'status': 'unavailable'}
+    def get_account():                      return {'available': False}
+    def get_positions():                    return []
+    def close_position(s):                  return {'status': 'unavailable'}
+    def close_all_positions():              return {'status': 'unavailable'}
+    def close_all_positions_eod():          return 0
+    def get_today_trade_count():            return 0
+    def get_execution_status():             return {'available': False}
+    def check_position_outcomes():          return 0
+    def set_macro_lock(a, r=''):            pass
+    def set_red_folder_lock(a, e=''):       pass
+    def disable_trade_permission(r=''):     pass
+    def enable_trade_permission():          pass
 
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
@@ -241,6 +247,12 @@ async def news_loop():
     while True:
         try:
             await asyncio.to_thread(process_news_guard_cycle)
+            if _EXECUTION_AVAILABLE:
+                _rs = load_risk_state()
+                if _rs.get('macro_risk') == 'high':
+                    set_macro_lock(True, 'macro_risk_HIGH')
+                else:
+                    set_macro_lock(False)
         except Exception as e:
             print('Donna News loop error:', str(e))
         await asyncio.sleep(300)
@@ -250,6 +262,14 @@ async def headline_loop():
     while True:
         try:
             await asyncio.to_thread(process_headlines_cycle)
+            if _EXECUTION_AVAILABLE:
+                _rs    = load_risk_state()
+                _phase = _rs.get('event_phase', '')
+                _next  = _rs.get('next_event', '')
+                if _phase in ('LIVE', 'IMMINENT', 'APPROACHING'):
+                    set_red_folder_lock(True, _next)
+                else:
+                    set_red_folder_lock(False)
         except Exception as e:
             print('Headline loop error:', str(e))
         await asyncio.sleep(900)
@@ -738,6 +758,19 @@ async def execution_status():
         return {'available': False, 'error': 'donna_execution not loaded'}
     status = await asyncio.to_thread(get_execution_status)
     return {'available': True, **status}
+
+
+@app.get('/execution-gate')
+async def execution_gate():
+    return {
+        'can_execute':       _donna_state.can_execute(),
+        'trade_permission':  _donna_state.get('trade_permission'),
+        'eod_lock':          _donna_state.get('eod_lock'),
+        'macro_lock':        _donna_state.get('macro_lock'),
+        'red_folder_lock':   _donna_state.get('red_folder_lock'),
+        'risk_lockouts':     _donna_state.get('risk_lockouts'),
+        'daily_trade_count': _donna_state.get('daily_trade_count'),
+    }
 
 
 @app.post('/execution/close')
