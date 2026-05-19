@@ -80,17 +80,21 @@ def _fetch_quote_yf(symbol: str) -> dict:
 # ── symbol map ────────────────────────────────────────────────
 # (label, yfinance_symbol, snapshot_key)
 SNAPSHOT_MAP = [
+    ('NQ',     'NQ=F',      'NQ'),
+    ('ES',     'ES=F',      'ES'),
+    ('MNQ',    'NQ=F',      'MNQ'),
+    ('MES',    'ES=F',      'MES'),
     ('SPX',    '^GSPC',     'SPX'),
     ('NASDAQ', '^IXIC',     'NASDAQ'),
     ('DJIA',   '^DJI',      'DJIA'),
     ('VIX',    '^VIX',      'VIX'),
-    ('US10Y',  '^TNX',      'US10Y'),
     ('DXY',    'DX-Y.NYB',  'DXY'),
-    ('NQ',     'NQ=F',      'NQ'),
-    ('ES',     'ES=F',      'ES'),
-    ('OIL',    'CL=F',      'OIL'),
+    ('US10Y',  '^TNX',      'US10Y'),
     ('GOLD',   'GC=F',      'GOLD'),
     ('SILVER', 'SI=F',      'SILVER'),
+    ('OIL',    'CL=F',      'OIL'),
+    ('BTC',    'BTC-USD',   'BTC'),
+    ('ETH',    'ETH-USD',   'ETH'),
 ]
 
 

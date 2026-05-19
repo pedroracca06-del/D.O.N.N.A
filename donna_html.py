@@ -1864,11 +1864,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
 <script>
 // ════════ CUSTOMIZABLE INDEX TILES ════════
-const SYMBOL_LIST = ['NQ','ES','MNQ','MES','SPX','NASDAQ','DJIA','DXY','VIX','US10Y','GOLD','SILVER','OIL','BTC','ETH'];
+const SYMBOL_LIST = ['NQ','ES','SPX','NASDAQ','DJIA','DXY','VIX','US10Y','GOLD','SILVER','OIL','BTC','ETH'];
 const DEFAULT_PREFS = ['NQ','ES','VIX','DXY','GOLD'];
 const LS_KEY = 'user_index_prefs';
-// Always reset to defaults — clear any stale browser cache
-localStorage.removeItem(LS_KEY);
 let _lastDashData = null;
 let _activePicker = null;
 
@@ -1894,17 +1892,17 @@ function formatPrice(val, decimals) {
 }
 
 function getSymbolData(sym, d) {
-  // NQ and ES — always read from market_snapshot (yfinance source, most accurate)
-  if (sym === 'NQ' || sym === 'ES') {
-    const snap = ((d.risk || {}).market_snapshot) || {};
-    const s = snap[sym];
-    if (s && s.last && s.last > 1000) {
-      const p = parseFloat(s.pct || 0);
+  // Always try market_snapshot first for every symbol (yfinance — most accurate)
+  const snap = ((d.risk || {}).market_snapshot) || {};
+  const s = snap[sym];
+  if (s && s.last && s.last !== '-') {
+    const disp = formatPrice(s.last, 2);
+    if (disp !== '—') {
+      const p = parseFloat(s.pct);
       return {
-        val: formatPrice(s.last, 2),
-        chg: s.chg || '—',
-        pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
-        dir: p >= 0 ? 'up' : 'down'
+        val: disp, chg: s.chg || '—',
+        pct: isNaN(p) ? null : (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
+        dir: isNaN(p) ? '' : (p >= 0 ? 'up' : 'down')
       };
     }
   }
@@ -1923,7 +1921,7 @@ function getSymbolData(sym, d) {
     };
   }
 
-  // VIX: try btc-vix endpoint first, then fall through to snapshot
+  // VIX: try btc-vix endpoint
   if (sym === 'VIX') {
     const q = _liveBtcVix['VIX'] || {};
     if (q.last) {
@@ -1935,38 +1933,22 @@ function getSymbolData(sym, d) {
         dir: p >= 0 ? 'up' : 'down'
       };
     }
-    // fall through to snapshot below
   }
 
-  // 1. Futures macro pulse: NQ, ES, OIL, GOLD, SILVER — authoritative full prices
+  // Futures macro pulse
   const pulseRow = (d.futures_macro_pulse || []).find(r => r.symbol === sym);
   if (pulseRow && pulseRow.last && pulseRow.last !== '-' && pulseRow.last !== '—') {
     const disp = formatPrice(pulseRow.last, 2);
     if (disp !== '—') return {val: disp, chg: pulseRow.chg || '—', pct: pulseRow.pct || null, dir: pulseRow.dir || ''};
   }
 
-  // 2. Major indexes: NASDAQ → 'NASDAQ', DJIA → 'DJIA', SPX → 'S&P 500', DXY, US10Y
+  // Major indexes
   const idxLabelMap = {NASDAQ: 'NASDAQ', SPX: 'S&P 500', DJIA: 'DJIA', DXY: 'DXY', US10Y: 'US 10Y'};
   const label = idxLabelMap[sym] || sym;
   const row = (d.major_indexes || []).find(r => r.symbol === label);
   if (row && row.last && row.last !== '-' && row.last !== '—') {
     const disp = formatPrice(row.last, 2);
     if (disp !== '—') return {val: disp, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || ''};
-  }
-
-  // 3. Last resort: market_snapshot (may be stale or from older calc)
-  const snap = ((d.risk || {}).market_snapshot) || {};
-  const s = snap[sym];
-  if (s && s.last && s.last !== '-') {
-    const disp = formatPrice(s.last, 2);
-    if (disp !== '—') {
-      const p = parseFloat(s.pct);
-      return {
-        val: disp, chg: s.chg || '—',
-        pct: isNaN(p) ? null : (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
-        dir: isNaN(p) ? '' : (p >= 0 ? 'up' : 'down')
-      };
-    }
   }
 
   return {val: '—', chg: '—', pct: null, dir: ''};
