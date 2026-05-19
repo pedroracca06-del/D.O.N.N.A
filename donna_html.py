@@ -2161,7 +2161,7 @@ function renderDashboard() {
     execBadge.textContent = canExec ? 'EXECUTION ENABLED' : 'EXECUTION BLOCKED';
     execBadge.style.color = canExec ? 'var(--green)' : 'var(--red)';
   }
-  setText('dbExecReason', lockouts.length ? lockouts[0] : '');
+  setText('dbExecReason', lockouts.length ? lockouts[0].reason : '');
   const macroEl = document.getElementById('dbMacroPosture');
   if (macroEl) {
     macroEl.textContent = 'MACRO ' + macro.toUpperCase();
@@ -2239,7 +2239,8 @@ function renderDashboard() {
   setText('dbHvBias',       bias ? `${bias} / 100 — ${hv.bias_direction || 'NEUTRAL'}` : '—');
   const sigs    = hv.last_signals || [];
   const lastSig = sigs[0];
-  setText('dbHvLastSig', lastSig ? `${lastSig.ticker || '—'} · ${(lastSig.timestamp || '').slice(11,16)}` : 'No recent signals');
+  const _hvEt = lastSig && lastSig.timestamp ? new Date(lastSig.timestamp).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'America/New_York'}) : '';
+  setText('dbHvLastSig', lastSig ? `${lastSig.ticker || '—'} · ${_hvEt}` : 'No recent signals');
 
   // ── DONNA SAYS ──
   let donnaSays = hv.donna_read || '';
