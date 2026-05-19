@@ -2247,11 +2247,15 @@ function renderHarveyNew(d) {
         : 'linear-gradient(90deg,var(--yellow),#d97706)';
   }
 
-  // Price cards
-  const nqC   = parseFloat(d.nq_last) || 0;
-  const esC   = parseFloat(d.es_last) || 0;
-  const nqPct = d.nq_pct || 0;
-  const esPct = d.es_pct || 0;
+  // Price cards — prefer market_snapshot (yfinance) over harvey payload
+  let nqC   = parseFloat(d.nq_last) || 0;
+  let esC   = parseFloat(d.es_last) || 0;
+  let nqPct = d.nq_pct || 0;
+  let esPct = d.es_pct || 0;
+  const _hvSnap = ((_lastDashData || {}).risk || {}).market_snapshot || {};
+  const _nqS = _hvSnap['NQ'], _esS = _hvSnap['ES'];
+  if (_nqS && _nqS.last && _nqS.last > 1000) { nqC = parseFloat(_nqS.last) || nqC; nqPct = parseFloat(_nqS.pct) || nqPct; }
+  if (_esS && _esS.last && _esS.last > 1000) { esC = parseFloat(_esS.last) || esC; esPct = parseFloat(_esS.pct) || esPct; }
   const fmtPx  = p => p > 0 ? formatPrice(p, 2) : '—';
   const fmtPct = p => (p >= 0 ? '+' : '') + parseFloat(p).toFixed(2) + '%';
   const pctCol = p => p >= 0 ? 'var(--green)' : 'var(--red)';
