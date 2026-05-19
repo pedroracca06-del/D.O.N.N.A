@@ -687,7 +687,20 @@ async def scenario_data_refresh():
 
 @app.get('/harvey-data')
 async def harvey_data():
-    return build_harvey_payload()
+    payload  = build_harvey_payload()
+    risk     = load_risk_state()
+    snapshot = risk.get('market_snapshot', {})
+    nq_last  = snapshot.get('NQ', {}).get('last', 0)
+    es_last  = snapshot.get('ES', {}).get('last', 0)
+    nq_pct   = snapshot.get('NQ', {}).get('pct', 0)
+    es_pct   = snapshot.get('ES', {}).get('pct', 0)
+    if nq_last and nq_last > 1000:
+        payload['nq_last'] = nq_last
+        payload['nq_pct']  = nq_pct
+    if es_last and es_last > 1000:
+        payload['es_last'] = es_last
+        payload['es_pct']  = es_pct
+    return payload
 
 
 # ── Risk engine ────────────────────────────────────────────────
