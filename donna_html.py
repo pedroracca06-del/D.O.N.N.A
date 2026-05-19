@@ -1115,6 +1115,17 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   100% { box-shadow: 0 0 0 0 rgba(30,110,65,0) }
 }
 .verdict-banner.flash { animation: banner-flash .7s ease-out }
+.db-market-tile{padding:14px 16px;text-align:center}
+.db-tile-sym{font-size:9px;font-family:Space Mono,monospace;letter-spacing:1.5px;color:var(--muted2);margin-bottom:5px}
+.db-tile-val{font-size:22px;font-weight:700;font-family:Rajdhani,sans-serif;line-height:1}
+.db-tile-pct{font-size:11px;font-family:Space Mono,monospace;margin-top:3px}
+.db-hero-left{flex:1}
+.db-hero-right{text-align:right;min-width:220px}
+.db-exec-badge{font-size:20px;font-weight:700;font-family:Rajdhani,sans-serif;letter-spacing:1px}
+.db-posture-badge{display:inline-block;padding:3px 10px;border-radius:4px;font-family:Space Mono,monospace;font-size:10px;font-weight:700;margin-top:6px}
+.db-badge-card{padding:14px 16px}
+.db-badge-label{font-size:9px;font-family:Space Mono,monospace;letter-spacing:1.2px;color:var(--muted2);margin-bottom:6px}
+.db-badge-value{font-size:16px;font-weight:700;font-family:Rajdhani,sans-serif}
 </style>
 </head>
 <body>
@@ -1152,190 +1163,186 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
   <!-- ════════════════════ DASHBOARD ════════════════════ -->
   <div class="page active" id="page-dashboard">
-    <div class="vstack">
+    <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">
 
-      <!-- HERO (compact) -->
-      <div class="hero-banner">
-        <div class="hero-eyebrow">Command Overview</div>
-        <div class="hero-grid">
-          <div>
-            <div class="hero-title" id="heroTitle">Loading market intelligence...</div>
-            <div class="hero-sub" id="heroSub">Connecting to live data feeds.</div>
-            <div style="margin-top:8px;font-size:11px;color:var(--muted2)" id="donnaTime">—</div>
-          </div>
-          <div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px">
-              <div class="chip">
-                <span class="chip-label">Driver</span>
-                <span class="chip-value" id="driverDominant">—</span>
-              </div>
-              <div class="chip">
-                <span class="chip-label">Bias</span>
-                <span class="chip-value" id="morningBias">—</span>
-              </div>
-              <div class="chip" id="regimeChipWrap" style="border-color:rgba(255,255,255,.08)">
-                <span class="chip-label">Regime</span>
-                <span class="chip-value" id="regimeChipLabel">—</span>
-              </div>
-              <div class="chip">
-                <span class="chip-label">Session</span>
-                <span class="chip-value" id="sessionSig" style="font-size:13px">—</span>
-              </div>
+      <!-- ── LEFT MAIN COLUMN ── -->
+      <div class="vstack">
+
+        <!-- 1. HERO MARKET BANNER -->
+        <div id="dbHero" class="card" style="padding:22px 26px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px">
+            <div class="db-hero-left">
+              <div id="dbRegimeText" style="font-size:32px;font-weight:700;font-family:Rajdhani,sans-serif;letter-spacing:.5px;color:var(--muted)">—</div>
+              <div id="dbMarketTone" style="margin-top:5px;font-size:13px;color:var(--muted);line-height:1.4">—</div>
+              <div id="dbSessionLabel" style="margin-top:12px;font-size:11px;color:var(--muted2);font-family:Space Mono,monospace">—</div>
             </div>
-            <div class="hero-warn-list" id="warningsList"></div>
-            <div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5" id="morningRead">—</div>
+            <div class="db-hero-right">
+              <div id="dbExecBadge" class="db-exec-badge" style="color:var(--muted)">—</div>
+              <div id="dbExecReason" style="margin-top:4px;font-size:11px;color:var(--muted2);line-height:1.4">—</div>
+              <div id="dbMacroPosture" class="db-posture-badge">—</div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- RISK STRIP -->
-      <div class="stat-grid">
-        <div class="card stat-card">
-          <div class="s-lab">Macro Risk</div>
-          <div class="s-val" id="macroRisk">—</div>
-          <div class="s-sub">Event timing &amp; macro pressure</div>
+        <!-- 2. RISK BADGES ROW -->
+        <div id="dbBadges" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+          <div class="card db-badge-card">
+            <div class="db-badge-label">EXECUTION</div>
+            <div class="db-badge-value" id="dbBadgeExec" style="color:var(--muted)">—</div>
+          </div>
+          <div class="card db-badge-card">
+            <div class="db-badge-label">MACRO RISK</div>
+            <div class="db-badge-value" id="dbBadgeMacro" style="color:var(--muted)">—</div>
+          </div>
+          <div class="card db-badge-card">
+            <div class="db-badge-label">RED FOLDER</div>
+            <div class="db-badge-value" id="dbBadgeRedFolder" style="color:var(--muted)">—</div>
+          </div>
+          <div class="card db-badge-card">
+            <div class="db-badge-label">SESSION</div>
+            <div class="db-badge-value" id="dbBadgeSession" style="color:var(--muted)">—</div>
+          </div>
         </div>
-        <div class="card stat-card">
-          <div class="s-lab">Headline Risk</div>
-          <div class="s-val" id="headlineRisk">—</div>
-          <div class="s-sub">Breaking-news sensitivity</div>
-        </div>
-        <div class="card stat-card">
-          <div class="s-lab">Market Risk</div>
-          <div class="s-val" id="marketRisk">—</div>
-          <div class="s-sub">Company &amp; sector catalyst pressure</div>
-        </div>
-        <div class="card stat-card">
-          <div class="s-lab">NQ Session</div>
-          <div class="s-val" id="sessionSigBig" style="font-size:18px;line-height:1.2">—</div>
-          <div class="s-sub" id="sessionSigSub">—</div>
-        </div>
-      </div>
 
-      <!-- MAIN GRID -->
-      <div class="main-grid">
-
-        <!-- LEFT -->
-        <div class="left-stack">
-
-          <!-- MARKET DRIVER ENGINE (compressed) -->
+        <!-- 3. MARKET DRIVER PANEL -->
+        <div id="dbDriver" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="panel">
-            <div class="kicker" style="margin-bottom:8px">Market Driver Engine</div>
-            <div class="kv-row" style="padding:7px 0">
-              <span class="kv-k">Regime</span>
-              <span class="kv-v" id="driverRegime">—</span>
-            </div>
-            <div class="kv-row" style="padding:7px 0">
-              <span class="kv-k">Driver</span>
-              <span class="kv-v" id="driverDominant2">—</span>
-            </div>
-            <div style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.55" id="driverSummary">—</div>
+            <div class="kicker" style="margin-bottom:10px">MARKET DRIVER</div>
+            <div id="dbDriverPrimary" style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:5px;line-height:1.3">—</div>
+            <div id="dbDriverRegime" style="font-size:11px;color:var(--muted2);margin-bottom:10px;font-family:Space Mono,monospace">—</div>
+            <ul id="dbDriverBullets" style="margin:0;padding-left:16px;font-size:12px;color:var(--muted);line-height:1.7"></ul>
           </div>
-
-          <!-- CROSS-ASSET INTELLIGENCE -->
-          <div class="panel" id="crossAssetPanel">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-              <div class="kicker" style="margin-bottom:0">Cross-Asset Intelligence</div>
-              <span class="ca-mode-badge" id="caModeBadge">—</span>
-            </div>
-            <div id="caDivergenceList">
-              <div class="ca-clean">Assets are aligned — tape is clean</div>
-            </div>
-          </div>
-
-          <!-- MAJOR INDEXES -->
           <div class="panel">
-            <div class="kicker" style="margin-bottom:10px">Market Board</div>
-            <table>
-              <thead><tr><th>Index</th><th>Last</th><th>Chg</th><th>% Chg</th></tr></thead>
-              <tbody id="majorIndexesTable"></tbody>
-            </table>
+            <div class="kicker" style="margin-bottom:10px">PRIMARY CATALYST</div>
+            <div id="dbCatalystHeadline" style="font-size:14px;font-weight:700;color:var(--text);line-height:1.3;margin-bottom:8px">—</div>
+            <div id="dbCatalystSummary" style="font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:10px">—</div>
+            <div id="dbCatalystSentiment" style="display:inline-block;padding:3px 10px;border-radius:4px;font-family:Space Mono,monospace;font-size:10px;font-weight:700;background:var(--panel2);color:var(--muted2)">—</div>
           </div>
-
         </div>
 
-        <!-- RIGHT -->
-        <div class="right-stack">
-
-          <!-- TOP STORY -->
+        <!-- 4. EXECUTION MONITOR -->
+        <div id="dbExecution" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="panel">
-            <div class="kicker" style="margin-bottom:8px">Primary Catalyst</div>
-            <div style="font-size:20px;font-weight:700;font-family:Rajdhani,sans-serif;line-height:1.15;margin-bottom:8px" id="topStory">—</div>
-            <div style="font-size:12px;color:var(--muted);line-height:1.55" id="topStoryNote">—</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+              <div class="kicker" style="margin-bottom:0">EXECUTION MONITOR</div>
+              <span id="execStatusPill" class="exec-status-pill exec-status-active">
+                <span id="execStatusDot" class="exec-status-dot" style="background:var(--green)"></span>
+                <span id="execStatusText">ACTIVE</span>
+              </span>
+            </div>
+            <div id="execPnlBig" class="exec-pnl-big" style="margin-bottom:14px;color:var(--text)">—</div>
+            <div class="exec-row">
+              <span class="exec-row-label">Account Equity</span>
+              <span class="exec-row-val" id="execEquity">—</span>
+            </div>
+            <div class="exec-row">
+              <span class="exec-row-label">Trades Today</span>
+              <span class="exec-row-val" id="execTrades">—</span>
+            </div>
+            <div class="exec-row">
+              <span class="exec-row-label">Risk Used Today</span>
+              <span class="exec-row-val" id="execRiskUsed">—</span>
+            </div>
+            <div class="exec-row">
+              <span class="exec-row-label">Red Folder In</span>
+              <span class="exec-row-val" id="execRedFolder">—</span>
+            </div>
+            <div class="exec-row" style="align-items:flex-start;padding-top:10px;border-bottom:none">
+              <span class="exec-row-label">Last Signal</span>
+              <div id="execLastSignal" class="exec-row-val">—</div>
+            </div>
           </div>
-
+          <div class="panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div class="kicker" style="margin-bottom:0">SESSION SCORECARD</div>
+              <span id="donnaGrade" class="donna-grade-big" style="color:var(--muted2)">—</span>
+            </div>
+            <div id="scorecardPnlBig" class="exec-pnl-big" style="margin-bottom:10px;color:var(--text)">—</div>
+            <div class="sc-cells">
+              <div class="sc-cell"><div class="sc-cell-num up" id="scWins">0</div><div class="sc-cell-lab">Wins</div></div>
+              <div class="sc-cell"><div class="sc-cell-num dn" id="scLosses">0</div><div class="sc-cell-lab">Losses</div></div>
+              <div class="sc-cell"><div class="sc-cell-num" id="scBe" style="color:var(--muted)">0</div><div class="sc-cell-lab">B/E</div></div>
+            </div>
+            <div class="exec-row">
+              <span class="exec-row-label">Win Rate</span>
+              <span class="exec-row-val" id="scWinRate">—</span>
+            </div>
+            <div class="exec-row">
+              <span class="exec-row-label">Best Trade</span>
+              <span class="exec-row-val up" id="scBest">—</span>
+            </div>
+            <div class="exec-row" style="border-bottom:none">
+              <span class="exec-row-label">Worst Trade</span>
+              <span class="exec-row-val dn" id="scWorst">—</span>
+            </div>
+          </div>
         </div>
 
-      </div>
-
-      <!-- EXEC MONITOR + SESSION SCORECARD -->
-      <div class="exec-cards-grid">
-
-        <!-- LEFT: EXECUTION MONITOR -->
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-            <div class="kicker" style="margin-bottom:0">Execution Monitor</div>
-            <span id="execStatusPill" class="exec-status-pill exec-status-active">
-              <span id="execStatusDot" class="exec-status-dot" style="background:var(--green)"></span>
-              <span id="execStatusText">ACTIVE</span>
-            </span>
+        <!-- 5. MARKET BOARD -->
+        <div id="dbMarketBoard" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+          <div class="card db-market-tile" data-sym="NQ">
+            <div class="db-tile-sym">NQ</div>
+            <div class="db-tile-val" style="color:var(--text)">—</div>
+            <div class="db-tile-pct" style="color:var(--muted)">—</div>
           </div>
-          <div id="execPnlBig" class="exec-pnl-big" style="margin-bottom:14px;color:var(--text)">—</div>
-          <div class="exec-row">
-            <span class="exec-row-label">Account Equity</span>
-            <span class="exec-row-val" id="execEquity">—</span>
+          <div class="card db-market-tile" data-sym="ES">
+            <div class="db-tile-sym">ES</div>
+            <div class="db-tile-val" style="color:var(--text)">—</div>
+            <div class="db-tile-pct" style="color:var(--muted)">—</div>
           </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Trades Today</span>
-            <span class="exec-row-val" id="execTrades">—</span>
+          <div class="card db-market-tile" data-sym="VIX">
+            <div class="db-tile-sym">VIX</div>
+            <div class="db-tile-val" style="color:var(--text)">—</div>
+            <div class="db-tile-pct" style="color:var(--muted)">—</div>
           </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Red Folder In</span>
-            <span class="exec-row-val" id="execRedFolder">—</span>
+          <div class="card db-market-tile" data-sym="DXY">
+            <div class="db-tile-sym">DXY</div>
+            <div class="db-tile-val" style="color:var(--text)">—</div>
+            <div class="db-tile-pct" style="color:var(--muted)">—</div>
           </div>
-          <div class="exec-row" style="align-items:flex-start;padding-top:10px">
-            <span class="exec-row-label">Last Signal</span>
-            <div id="execLastSignal" class="exec-row-val">—</div>
+          <div class="card db-market-tile" data-sym="GOLD">
+            <div class="db-tile-sym">GOLD</div>
+            <div class="db-tile-val" style="color:var(--text)">—</div>
+            <div class="db-tile-pct" style="color:var(--muted)">—</div>
           </div>
         </div>
 
-        <!-- RIGHT: SESSION SCORECARD -->
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div class="kicker" style="margin-bottom:0">Session Scorecard</div>
-            <span id="donnaGrade" class="donna-grade-big" style="color:var(--muted2)">—</span>
-          </div>
-          <div id="scorecardPnlBig" class="exec-pnl-big" style="margin-bottom:10px;color:var(--text)">—</div>
-          <div class="sc-cells">
-            <div class="sc-cell">
-              <div class="sc-cell-num up" id="scWins">0</div>
-              <div class="sc-cell-lab">Wins</div>
-            </div>
-            <div class="sc-cell">
-              <div class="sc-cell-num dn" id="scLosses">0</div>
-              <div class="sc-cell-lab">Losses</div>
-            </div>
-            <div class="sc-cell">
-              <div class="sc-cell-num" id="scBe" style="color:var(--muted)">0</div>
-              <div class="sc-cell-lab">B/E</div>
-            </div>
+      </div><!-- end left column -->
+
+      <!-- ── RIGHT SIDEBAR ── -->
+      <div class="vstack">
+
+        <!-- HARVEY SNAPSHOT -->
+        <div id="dbHarveySnap" class="panel">
+          <div class="kicker" style="margin-bottom:10px">HARVEY SNAPSHOT</div>
+          <div id="dbHvVerdict" style="font-size:30px;font-weight:700;font-family:Rajdhani,sans-serif;letter-spacing:.5px;color:var(--yellow);margin-bottom:6px">—</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            <span id="dbHvConfidence" style="font-family:Space Mono,monospace;font-size:10px;color:var(--muted2)">—</span>
+            <span id="dbHvRegime" style="padding:2px 8px;border-radius:4px;font-family:Space Mono,monospace;font-size:9px;background:var(--panel2);color:var(--muted2)">—</span>
           </div>
           <div class="exec-row">
-            <span class="exec-row-label">Win Rate</span>
-            <span class="exec-row-val" id="scWinRate">—</span>
-          </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Best Trade</span>
-            <span class="exec-row-val up" id="scBest">—</span>
+            <span class="exec-row-label">Bias Score</span>
+            <span class="exec-row-val" id="dbHvBias">—</span>
           </div>
           <div class="exec-row" style="border-bottom:none">
-            <span class="exec-row-label">Worst Trade</span>
-            <span class="exec-row-val dn" id="scWorst">—</span>
+            <span class="exec-row-label">Last Signal</span>
+            <span class="exec-row-val" id="dbHvLastSig">—</span>
           </div>
-          <div id="scWhatMatters" style="margin-top:10px;font-size:11px;color:var(--muted2);line-height:1.5;font-style:italic">—</div>
         </div>
 
-      </div>
+        <!-- ECONOMIC CALENDAR -->
+        <div id="dbCalendar" class="panel">
+          <div class="kicker" style="margin-bottom:10px">ECONOMIC CALENDAR</div>
+          <div id="sidebarEconCalendar"></div>
+        </div>
+
+        <!-- DONNA SAYS -->
+        <div id="dbDonnaSays" class="panel">
+          <div class="kicker" style="margin-bottom:8px">DONNA SAYS</div>
+          <div id="dbDonnaSaysText" style="font-size:13px;color:var(--text);line-height:1.65">—</div>
+        </div>
+
+      </div><!-- end sidebar -->
 
     </div>
   </div>
@@ -2100,122 +2107,203 @@ function updateStrip(items) {
   if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
 }
 
-// ════════ RENDER DASHBOARD ════════
-function renderDashboard(d) {
-  const risk = d.risk || {};
-  const driver = d.driver || {};
-  const morning = d.morning_edge || {};
-  const sig = d.session_significance || {};
-  const wm = d.what_matters_now || {};
-  const alerts = d.raw_trade_alerts || [];
-  const movers = d.market_movers_engine || {};
+// ════════ DASHBOARD ENGINE ════════
+let _dbStateEngine = null;
+let _dbExecGate    = null;
+let _dbHarveyCache = null;
+let _dbGrokCache   = null;
 
-  const news = d.news || [];
+function renderDashboard() {
+  const se   = _dbStateEngine || {};
+  const eg   = _dbExecGate    || {};
+  const hv   = _dbHarveyCache || {};
+  const grok = _dbGrokCache   || {};
+  const risk = (_lastDashData || {}).risk || {};
+  const snap = risk.market_snapshot || {};
 
-  // Live strip + session
-  setText('sessionVal', risk.donna_session || '—');
-  updateStrip(d.live_strip || []);
-
-  // Risk bar pulse
+  // ── Live strip + session (shared topbar)
+  if (_lastDashData) {
+    setText('sessionVal', risk.donna_session || '—');
+    updateStrip((_lastDashData.live_strip) || []);
+  }
   const stripEl = document.querySelector('.ticker-wrap');
   if (stripEl) {
-    const macroLevel = (risk.macro_risk || '').toLowerCase();
-    stripEl.classList.remove('risk-high', 'risk-medium');
-    if (macroLevel === 'high') stripEl.classList.add('risk-high');
-    else if (macroLevel === 'medium') stripEl.classList.add('risk-medium');
+    const ml = (se.macro_risk || risk.macro_risk || '').toLowerCase();
+    stripEl.classList.remove('risk-high','risk-medium');
+    if (ml === 'high') stripEl.classList.add('risk-high');
+    else if (ml === 'medium') stripEl.classList.add('risk-medium');
   }
 
-  // Hero (compact)
-  setText('heroTitle', wm.headline || driver.dominant_driver || '—');
-  setText('heroSub', wm.summary || driver.market_summary || '—');
-  setText('donnaTime', risk.donna_time_ny ? risk.donna_time_ny.substring(0,19).replace('T',' ') + ' ET' : '—');
-  setText('driverDominant', driver.dominant_driver || '—');
-  setText('morningBias', morning.today_bias || '—');
+  // ── HERO ──
+  const regime = se.market_regime || 'UNKNOWN';
+  const macro  = (se.macro_risk || risk.macro_risk || 'low').toLowerCase();
+  const session = se.session_state || risk.donna_session || '';
+  const regimeEl = document.getElementById('dbRegimeText');
+  if (regimeEl) {
+    regimeEl.textContent = regime;
+    const rCol = {TRENDING_UP:'var(--green)',TRENDING_DOWN:'var(--red)',RANGING:'var(--yellow)',VOLATILE:'var(--red)',EVENT_DRIVEN:'var(--yellow)',UNKNOWN:'var(--muted)'};
+    regimeEl.style.color = rCol[regime] || 'var(--muted)';
+  }
+  const toneMap = {
+    TRENDING_UP:   macro === 'high' ? 'Trending higher — macro conditions elevated, respect event risk' : 'Trending higher — momentum environment, tech leading',
+    TRENDING_DOWN: macro === 'high' ? 'Trending lower — macro conditions elevated' : 'Trending lower — respect the tape',
+    RANGING:       'Range-bound tape — reduced edge, fade extremes only',
+    VOLATILE:      'Volatile conditions — reduce size, protect capital',
+    EVENT_DRIVEN:  'Macro conditions elevated — respect event risk',
+    UNKNOWN:       'Connecting to live market intelligence...',
+  };
+  setText('dbMarketTone', toneMap[regime] || '—');
 
-  // Regime chip (color-coded)
-  const regimeData = d.regime || {};
-  const rcColorMap = {green:'rgba(0,229,160,.35)',blue:'rgba(77,143,255,.35)',yellow:'rgba(255,201,60,.3)',red:'rgba(255,77,109,.35)',muted:'rgba(255,255,255,.08)'};
-  const rcTextMap  = {green:'var(--green)',blue:'var(--blue)',yellow:'var(--yellow)',red:'var(--red)',muted:'var(--muted)'};
-  const rcWrap = document.getElementById('regimeChipWrap');
-  if (rcWrap) rcWrap.style.borderColor = rcColorMap[regimeData.regime_color] || 'rgba(255,255,255,.08)';
-  const rcLabel = document.getElementById('regimeChipLabel');
-  if (rcLabel) {
-    rcLabel.textContent = regimeData.regime ? `${regimeData.regime}  ·  ${regimeData.harvey_mode}` : '—';
-    rcLabel.style.color = rcTextMap[regimeData.regime_color] || 'var(--text)';
+  const canExec = eg.can_execute !== false;
+  const lockouts = Array.isArray(eg.risk_lockouts) ? eg.risk_lockouts : [];
+  const execBadge = document.getElementById('dbExecBadge');
+  if (execBadge) {
+    execBadge.textContent = canExec ? 'EXECUTION ENABLED' : 'EXECUTION BLOCKED';
+    execBadge.style.color = canExec ? 'var(--green)' : 'var(--red)';
+  }
+  setText('dbExecReason', lockouts.length ? lockouts[0] : '');
+  const macroEl = document.getElementById('dbMacroPosture');
+  if (macroEl) {
+    macroEl.textContent = 'MACRO ' + macro.toUpperCase();
+    macroEl.style.color      = macro === 'high' ? 'var(--red)' : macro === 'medium' ? 'var(--yellow)' : 'var(--green)';
+    macroEl.style.background = macro === 'high' ? 'var(--red2)' : macro === 'medium' ? 'rgba(255,201,60,.1)' : 'rgba(0,229,160,.1)';
   }
 
-  // Session chip (hero 2×2 grid, bottom-right)
-  const sessionSigEl = document.getElementById('sessionSig');
-  if (sessionSigEl) { sessionSigEl.textContent = sig.label || '—'; }
+  // ── BADGES ──
+  const bExec = document.getElementById('dbBadgeExec');
+  if (bExec) { bExec.textContent = canExec ? 'ENABLED' : 'BLOCKED'; bExec.style.color = canExec ? 'var(--green)' : 'var(--red)'; }
+  const bMacro = document.getElementById('dbBadgeMacro');
+  if (bMacro) { bMacro.textContent = macro.toUpperCase(); bMacro.style.color = macro === 'high' ? 'var(--red)' : macro === 'medium' ? 'var(--yellow)' : 'var(--green)'; }
+  const rf   = eg.red_folder_lock;
+  const bRf  = document.getElementById('dbBadgeRedFolder');
+  if (bRf) {
+    const rfStr = rf === true ? 'ACTIVE' : rf === 'APPROACHING' ? 'APPROACHING' : 'CLEAR';
+    bRf.textContent = rfStr;
+    bRf.style.color = rf === true ? 'var(--red)' : rf === 'APPROACHING' ? 'var(--yellow)' : 'var(--green)';
+  }
+  const bSess = document.getElementById('dbBadgeSession');
+  if (bSess) {
+    const sLbl = {NEW_YORK_CASH:'NY CASH',LONDON:'LONDON',ASIA:'ASIA',OFF_HOURS:'OFF HOURS'};
+    const sCol = {NEW_YORK_CASH:'var(--green)',LONDON:'var(--blue)',ASIA:'var(--yellow)',OFF_HOURS:'var(--muted)'};
+    bSess.textContent = sLbl[session] || session || '—';
+    bSess.style.color = sCol[session] || 'var(--muted)';
+  }
 
-  // Warnings — compact hw-item list inside hero
-  const warnings = risk.active_warnings || [];
-  setHtml('warningsList', warnings.slice(0,3).map(w =>
-    `<div class="hw-item"><span class="hw-dot"></span>${w}</div>`
-  ).join('') || '');
-  setText('morningRead', morning.first_read || '—');
+  // ── DRIVER ──
+  const driver = (_lastDashData || {}).driver || {};
+  const wm     = (_lastDashData || {}).what_matters_now || {};
+  setText('dbDriverPrimary', driver.dominant_driver || wm.headline || '—');
+  setText('dbDriverRegime',  driver.market_regime   || regime || '—');
+  const bullets = [];
+  if (driver.market_summary) bullets.push(driver.market_summary);
+  if (wm.headline && wm.headline !== driver.dominant_driver) bullets.push(wm.headline);
+  if (wm.summary)  bullets.push(wm.summary);
+  const bullEl = document.getElementById('dbDriverBullets');
+  if (bullEl) setHtml('dbDriverBullets', bullets.slice(0,3).map(b => `<li>${b}</li>`).join('') || '<li>Awaiting market intelligence...</li>');
 
-  // Risk stat strip
-  setHtml('macroRisk', riskBadge(risk.macro_risk));
-  setHtml('headlineRisk', riskBadge(risk.headline_risk));
-  setHtml('marketRisk', riskBadge(risk.market_news_risk));
-  const sessionSigBig = document.getElementById('sessionSigBig');
-  if (sessionSigBig) sessionSigBig.textContent = sig.label || '—';
-  setText('sessionSigSub', sig.nq_points ? `NQ ${sig.nq_points}pts  ·  ES ${sig.es_points}pts` : '—');
+  // ── CATALYST ──
+  setText('dbCatalystHeadline', grok.top_story || risk.last_headline || '—');
+  setText('dbCatalystSummary',  grok.top_story_summary || grok.sentiment_reason || risk.headline_guidance || '—');
+  const sent    = (grok.market_sentiment || 'NEUTRAL').toUpperCase();
+  const sentEl  = document.getElementById('dbCatalystSentiment');
+  if (sentEl) {
+    sentEl.textContent      = sent;
+    const sCol = {BULLISH:'var(--green)',BEARISH:'var(--red)',MIXED:'var(--yellow)',NEUTRAL:'var(--muted)'};
+    const sBg  = {BULLISH:'rgba(0,229,160,.1)',BEARISH:'var(--red2)',MIXED:'rgba(255,201,60,.1)',NEUTRAL:'var(--panel2)'};
+    sentEl.style.color      = sCol[sent] || 'var(--muted)';
+    sentEl.style.background = sBg[sent]  || 'var(--panel2)';
+  }
 
-  // Driver engine (compressed — 2 rows + summary)
-  setText('driverDominant2', driver.dominant_driver || '—');
-  setText('driverRegime', driver.market_regime || '—');
-  setText('driverSummary', driver.market_summary || '—');
+  // ── MARKET BOARD ──
+  ['NQ','ES','VIX','DXY','GOLD'].forEach(sym => {
+    const data = getSymbolData(sym, _lastDashData || {});
+    const tile = document.querySelector(`.db-market-tile[data-sym="${sym}"]`);
+    if (!tile) return;
+    const valEl = tile.querySelector('.db-tile-val');
+    const pctEl = tile.querySelector('.db-tile-pct');
+    if (valEl) { valEl.textContent = data.val || '—'; valEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--text)'; }
+    if (pctEl) { pctEl.textContent = data.pct || '—'; pctEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--muted)'; }
+  });
 
-  // Major indexes
-  renderDashMajorIndexes(d);
+  // ── HARVEY SNAPSHOT (sidebar) ──
+  const verdict = hv.verdict || '—';
+  const vEl = document.getElementById('dbHvVerdict');
+  if (vEl) {
+    vEl.textContent = verdict;
+    const vCol = {BUY:'var(--green)',SELL:'var(--red)',WAIT:'var(--yellow)',STOP:'var(--red)'};
+    vEl.style.color = vCol[verdict] || 'var(--yellow)';
+  }
+  const bias = hv.bias_score || 0;
+  setText('dbHvConfidence', bias ? bias + '% confidence' : '—');
+  setText('dbHvRegime',     ((hv.regime || {}).regime) || regime || '—');
+  setText('dbHvBias',       bias ? `${bias} / 100 — ${hv.bias_direction || 'NEUTRAL'}` : '—');
+  const sigs    = hv.last_signals || [];
+  const lastSig = sigs[0];
+  setText('dbHvLastSig', lastSig ? `${lastSig.ticker || '—'} · ${(lastSig.timestamp || '').slice(11,16)}` : 'No recent signals');
 
-  // Top story
-  setText('topStory', risk.last_headline || wm.headline || '—');
-  setText('topStoryNote', risk.headline_guidance || wm.summary || '—');
+  // ── DONNA SAYS ──
+  let donnaSays = hv.donna_read || '';
+  if (!donnaSays) {
+    if (!canExec && macro === 'high') donnaSays = 'Macro conditions elevated. No entries until risk clears. Respect the lock.';
+    else if (!canExec)               donnaSays = 'Execution blocked. Review all lockout conditions before placing trades.';
+    else if (regime === 'TRENDING_UP')   donnaSays = 'Momentum environment. Look for pullbacks to key support. ES and NQ confirming direction.';
+    else if (regime === 'TRENDING_DOWN') donnaSays = 'Trend is down. Avoid chasing longs. Wait for clean setup at key structure.';
+    else if (regime === 'RANGING')       donnaSays = 'Range-bound tape. Reduce size. Fade extremes only.';
+    else if (regime === 'VOLATILE')      donnaSays = 'Volatile conditions. Reduce size. Protect capital above all else.';
+    else donnaSays = 'Connecting to live market intelligence...';
+  }
+  setText('dbDonnaSaysText', donnaSays);
 
-  // Scenarios — only render if container element exists
-  if (d.scenarios && document.getElementById('scenarioGrid')) renderScenarios(d.scenarios);
-
-  // Cross-asset intelligence card
-  if (d.cross_asset_intelligence && document.getElementById('caDivergenceList')) renderCrossAsset(d.cross_asset_intelligence);
-
-  // Footer
+  // ── Footer ──
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
 }
 
-// ════════ CROSS-ASSET INTELLIGENCE ════════
-function renderCrossAsset(ca) {
-  if (!ca) return;
-  const mode = ca.cross_asset_mode || 'ALIGNED';
-  const divs = ca.divergences || [];
+async function fetchStateEngine() {
+  try {
+    const res = await fetch('/state-engine');
+    if (!res.ok) return;
+    _dbStateEngine = await res.json();
+    renderDashboard();
+  } catch(e) { console.error('fetchStateEngine:', e); }
+}
 
-  const badge = document.getElementById('caModeBadge');
-  if (badge) {
-    badge.textContent = mode;
-    badge.className = 'ca-mode-badge ca-mode-' + mode;
-  }
+async function fetchExecutionGate() {
+  try {
+    const res = await fetch('/execution-gate');
+    if (!res.ok) return;
+    _dbExecGate = await res.json();
+    renderDashboard();
+  } catch(e) { console.error('fetchExecutionGate:', e); }
+}
 
-  const list = document.getElementById('caDivergenceList');
-  if (!list) return;
+async function fetchHarveyData() {
+  try {
+    const res = await fetch('/harvey-data');
+    if (!res.ok) return;
+    _dbHarveyCache = await res.json();
+    renderDashboard();
+  } catch(e) { console.error('fetchHarveyData:', e); }
+}
 
-  if (!divs.length) {
-    const clean = '<div class="ca-clean">Assets are aligned — tape is clean</div>';
-    if (list.innerHTML !== clean) list.innerHTML = clean;
-    return;
-  }
+async function fetchGrokIntel() {
+  try {
+    const res = await fetch('/grok-intelligence');
+    if (!res.ok) return;
+    const g = await res.json();
+    if (!g.error) { _dbGrokCache = g; renderDashboard(); }
+  } catch(e) { console.error('fetchGrokIntel:', e); }
+}
 
-  const html = divs.map(d => `
-    <div class="ca-div-item ${d.severity}">
-      <div class="ca-div-header">
-        <span class="ca-div-name">${d.name}</span>
-        <span class="ca-sev-badge ca-sev-${d.severity}">${d.severity}</span>
-      </div>
-      <div class="ca-div-meaning">${d.what_it_means}</div>
-      <div class="ca-div-watch"><b>Watch:</b> ${d.watch_for}</div>
-    </div>`).join('');
-  if (list.innerHTML !== html) list.innerHTML = html;
+function dashClock() {
+  const el = document.getElementById('dbSessionLabel');
+  if (!el) return;
+  const se = _dbStateEngine || {};
+  const session = se.session_state || '';
+  const sLbl = {NEW_YORK_CASH:'NY Cash',LONDON:'London',ASIA:'Asia',OFF_HOURS:'Off Hours'};
+  const label = sLbl[session] || session || '';
+  const now = new Date();
+  const nyTime = now.toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+  el.textContent = (label ? label + ' · ' : '') + nyTime + ' ET';
 }
 
 // ═══════════════════════════════════════
@@ -3041,7 +3129,7 @@ async function refresh() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     _lastDashData = d;
-    try { renderDashboard(d); } catch(e) { console.error('renderDashboard failed:', e); }
+    try { renderDashboard(); } catch(e) { console.error('renderDashboard failed:', e); }
     try { renderNews(d); } catch(e) { console.error('renderNews failed:', e); }
   } catch(err) {
     console.error('Donna refresh error:', err);
@@ -3497,9 +3585,9 @@ document.body.addEventListener('animationend', () => document.body.classList.rem
 
 initTileEditors();
 refresh();
-setInterval(refresh, 20000);
+setInterval(refresh, 30000);
 refreshJournal();
-setInterval(refreshJournal, 30000);
+setInterval(refreshJournal, 60000);
 refreshExecMonitor();
 refreshSessionScorecard();
 setInterval(refreshExecMonitor, 20000);
@@ -3514,6 +3602,16 @@ refreshEconCalendar();
 setInterval(refreshEconCalendar, 5 * 60 * 1000);
 refreshHarvey();
 setInterval(refreshHarvey, 10000);
+fetchStateEngine();
+setInterval(fetchStateEngine, 15000);
+fetchExecutionGate();
+setInterval(fetchExecutionGate, 15000);
+fetchHarveyData();
+setInterval(fetchHarveyData, 20000);
+fetchGrokIntel();
+setInterval(fetchGrokIntel, 5 * 60 * 1000);
+dashClock();
+setInterval(dashClock, 1000);
 refreshHvAlerts();
 setInterval(refreshHvAlerts, 30000);
 refreshHvExec();
