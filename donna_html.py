@@ -2161,7 +2161,10 @@ function renderDashboard() {
     execBadge.textContent = canExec ? 'EXECUTION ENABLED' : 'EXECUTION BLOCKED';
     execBadge.style.color = canExec ? 'var(--green)' : 'var(--red)';
   }
-  setText('dbExecReason', lockouts.length ? lockouts[0].reason : '');
+  const _rawReason = lockouts.length ? lockouts[0].reason : '';
+  const _reasonMap = {'MACRO_LOCK':'MACRO RISK HIGH','EOD_LOCK':'EOD LOCK ACTIVE','RED_FOLDER':'RED FOLDER ACTIVE','DAILY_LOSS':'DAILY LOSS LIMIT HIT','RISK_LIMIT':'RISK LIMIT REACHED'};
+  const _reasonKey = Object.keys(_reasonMap).find(k => _rawReason.toUpperCase().includes(k)) || '';
+  setText('dbExecReason', _reasonKey ? _reasonMap[_reasonKey] : _rawReason);
   const macroEl = document.getElementById('dbMacroPosture');
   if (macroEl) {
     macroEl.textContent = 'MACRO ' + macro.toUpperCase();
