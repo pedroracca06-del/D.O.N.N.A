@@ -356,17 +356,21 @@ def get_live_calendar():
     events = data.get('events', [])
     now    = now_ny()
 
-    def mins_until(t):
+    def mins_until(t, date_str=None):
         try:
             h, m = [int(x) for x in t.split(':')]
-            target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if date_str:
+                y, mo, d = [int(x) for x in date_str.split('-')]
+                target = now.replace(year=y, month=mo, day=d, hour=h, minute=m, second=0, microsecond=0)
+            else:
+                target = now.replace(hour=h, minute=m, second=0, microsecond=0)
             return int((target - now).total_seconds() // 60)
         except Exception:
             return None
 
     rows, next_event, next_minutes = [], None, None
     for ev in events:
-        mins = mins_until(str(ev.get('time_et', '')))
+        mins = mins_until(str(ev.get('time_et', '')), ev.get('date'))
         row  = dict(ev)
         row['minutes_to_event'] = mins
         rows.append(row)
