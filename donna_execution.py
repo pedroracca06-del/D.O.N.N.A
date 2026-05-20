@@ -875,6 +875,11 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         'session':   session,
         'timestamp': utc_now_iso(),
     })
+    # Set thesis and cooldown after execution
+    _state.set_cooldown(etf, minutes=30)
+    _direction_str = 'LONG' if is_long else 'SHORT'
+    _new_thesis = 'RISK_ON_BULL' if is_long else 'RISK_OFF_BEAR'
+    _state.set_thesis(_new_thesis, _direction_str)
     # Backup write to donna_risk_state.json
     risk_after = load_risk_state()
     today_str  = now_ny().strftime('%Y-%m-%d')
@@ -1061,6 +1066,33 @@ def execute_signal(signal_result: dict) -> dict:
     if routed_etf == 'QQQ' and 'SPY' in open_syms:
         print('[execute_signal] BLOCKED — ES/SPY position already open')
         return {'status': 'skipped', 'reason': 'ES_position_open', 'code': 'INSTRUMENT_CONFLICT'}
+
+    # ── ORCHESTRATION LAYER ──────────────────────────────────────
+    from donna_state_engine import state as _state
+    signal_type = str(data.get('signal', '')).upper()
+
+    # 1. Cooldown check
+    if _state.is_on_cooldown(routed_etf):
+        return {'status': 'skipped', 'reason': f'{routed_etf}_on_cooldown', 'code': 'COOLDOWN_ACTIVE'}
+
+    # 2. Thesis conflict check
+    _thesis = _state.get_thesis()
+    _active_thesis = _thesis.get('active_thesis', 'NEUTRAL')
+    _thesis_dir = _thesis.get('thesis_direction')
+    _signal_dir = 'LONG' if signal_type in ('BUY', 'LONG') else 'SHORT'
+
+    if _active_thesis != 'NEUTRAL' and _thesis_dir and _thesis_dir != _signal_dir:
+        # Opposite direction requires thesis to be older than 60 minutes
+        _thesis_set_at = _thesis.get('thesis_set_at')
+        if _thesis_set_at:
+            try:
+                from datetime import datetime, timezone
+                _set_dt = datetime.fromisoformat(_thesis_set_at.replace('Z', '+00:00'))
+                _mins_since = (datetime.now(timezone.utc) - _set_dt).total_seconds() / 60
+                if _mins_since < 60:
+                    return {'status': 'skipped', 'reason': 'thesis_conflict', 'code': 'THESIS_CONFLICT'}
+            except Exception:
+                pass
 
     # ── Size reduction for trade 2
     if trades_today == 1 and first_outcome == 'WIN':
