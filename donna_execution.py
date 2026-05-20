@@ -733,6 +733,10 @@ def check_position_outcomes() -> int:
             'outcome':      outcome,
         }
         updated += 1
+        try:
+            _state.remove_position(symbol)
+        except Exception as _rpe:
+            print(f'[check_position_outcomes] remove_position error: {_rpe}')
 
     if updated:
         save_journal(trades)
@@ -774,6 +778,22 @@ def check_position_outcomes() -> int:
                     print(f'[state_engine] check_position_outcomes write failed: {_e}')
 
     return updated
+
+
+def sync_positions_from_alpaca() -> None:
+    """Reconcile state engine open_positions against live Alpaca positions."""
+    try:
+        api = _client()
+        if not api:
+            return
+        live = {str(p.symbol).upper() for p in api.get_all_positions()}
+        for pos in _state.get_open_positions():
+            sym = str(pos.get('symbol', '')).upper()
+            if sym and sym not in live:
+                _state.remove_position(sym)
+                print(f'[sync] removed stale position {sym} — not found on Alpaca')
+    except Exception as e:
+        print(f'[sync_positions_from_alpaca] error: {e}')
 
 
 # ── Placeholder broker functions ───────────────────────────────

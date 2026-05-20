@@ -48,6 +48,7 @@ try:
         get_today_trade_count,
         get_execution_status,
         check_position_outcomes,
+        sync_positions_from_alpaca,
         set_macro_lock, set_red_folder_lock,
         disable_trade_permission, enable_trade_permission,
     )
@@ -63,6 +64,7 @@ except Exception:
     def get_today_trade_count():            return 0
     def get_execution_status():             return {'available': False}
     def check_position_outcomes():          return 0
+    def sync_positions_from_alpaca():       pass
     def set_macro_lock(a, r=''):            pass
     def set_red_folder_lock(a, e=''):       pass
     def disable_trade_permission(r=''):     pass
@@ -198,6 +200,7 @@ async def position_outcomes_loop():
             ny = now_ny()
             m  = ny.hour * 60 + ny.minute
             if ny.weekday() < 5 and 9 * 60 + 30 <= m <= 16 * 60 + 30:
+                await asyncio.to_thread(sync_positions_from_alpaca)
                 n = await asyncio.to_thread(check_position_outcomes)
                 if n:
                     print(f'[position_outcomes] Updated {n} journal entry/entries')
