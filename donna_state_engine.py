@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,14 @@ _DEFAULT_STATE: dict = {
     'risk_lockouts':         [],
     'state_date':            None,
     'last_updated':          None,
+    'active_thesis':         'NEUTRAL',
+    'thesis_set_at':         None,
+    'thesis_direction':      None,
+    'last_spy_execution':    None,
+    'last_qqq_execution':    None,
+    'spy_cooldown_until':    None,
+    'qqq_cooldown_until':    None,
+    'blocked_signals_today': [],
 }
 
 # Fields reset to their defaults each new ET calendar day
@@ -289,6 +297,62 @@ class DonnaStateEngine:
                 self._do_reset_unlocked()
             except Exception as exc:
                 print(f'[state_engine] reset_daily error: {exc}')
+
+    # ── Thesis ─────────────────────────────────────────────────
+
+    def set_thesis(self, thesis: str, direction: str | None) -> None:
+        """Set active thesis, direction, and timestamp."""
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                self._state['active_thesis']    = thesis
+                self._state['thesis_direction'] = direction
+                self._state['thesis_set_at']    = _utc_now_iso()
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] set_thesis error: {exc}')
+
+    def get_thesis(self) -> dict:
+        """Return active_thesis, thesis_direction, thesis_set_at."""
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            return {
+                'active_thesis':    self._state.get('active_thesis', 'NEUTRAL'),
+                'thesis_direction': self._state.get('thesis_direction'),
+                'thesis_set_at':    self._state.get('thesis_set_at'),
+            }
+
+    # ── Cooldowns ──────────────────────────────────────────────
+
+    def set_cooldown(self, symbol: str, minutes: int = 30) -> None:
+        """Set spy_cooldown_until or qqq_cooldown_until to now + minutes UTC."""
+        key = 'spy_cooldown_until' if symbol.upper() == 'SPY' else 'qqq_cooldown_until'
+        until = (
+            datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        ).strftime('%Y-%m-%dT%H:%M:%SZ')
+        with self._lock:
+            try:
+                self._maybe_reset_daily_unlocked()
+                self._state[key] = until
+                self._save_unlocked()
+            except Exception as exc:
+                print(f'[state_engine] set_cooldown error: {exc}')
+
+    def is_on_cooldown(self, symbol: str) -> bool:
+        """Return True if the symbol's cooldown timestamp is still in the future."""
+        key = 'spy_cooldown_until' if symbol.upper() == 'SPY' else 'qqq_cooldown_until'
+        with self._lock:
+            self._maybe_reset_daily_unlocked()
+            until_str = self._state.get(key)
+        if not until_str:
+            return False
+        try:
+            until_dt = datetime.strptime(until_str, '%Y-%m-%dT%H:%M:%SZ').replace(
+                tzinfo=timezone.utc
+            )
+            return datetime.now(timezone.utc) < until_dt
+        except Exception:
+            return False
 
 
 # ── Singleton ──────────────────────────────────────────────────
