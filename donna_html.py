@@ -1144,6 +1144,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
         <button class="tab-btn journal-btn" data-page="journal">Journal</button>
+        <button class="tab-btn" data-page="execution">Execution</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -1218,76 +1219,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div id="dbCatalystSummary" style="font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:10px">—</div>
             <div id="dbCatalystSentiment" style="display:inline-block;padding:3px 10px;border-radius:4px;font-family:Space Mono,monospace;font-size:10px;font-weight:700;background:var(--panel2);color:var(--muted2)">—</div>
           </div>
-        </div>
-
-        <!-- 4. EXECUTION MONITOR -->
-        <div id="dbExecution" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="panel">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-              <div class="kicker" style="margin-bottom:0">EXECUTION MONITOR</div>
-              <span id="execStatusPill" class="exec-status-pill exec-status-active">
-                <span id="execStatusDot" class="exec-status-dot" style="background:var(--green)"></span>
-                <span id="execStatusText">ACTIVE</span>
-              </span>
-            </div>
-            <div id="execPnlBig" class="exec-pnl-big" style="margin-bottom:14px;color:var(--text)">—</div>
-            <div class="exec-row">
-              <span class="exec-row-label">Account Equity</span>
-              <span class="exec-row-val" id="execEquity">—</span>
-            </div>
-            <div class="exec-row">
-              <span class="exec-row-label">Trades Today</span>
-              <span class="exec-row-val" id="execTrades">—</span>
-            </div>
-            <div class="exec-row">
-              <span class="exec-row-label">Risk Used Today</span>
-              <span class="exec-row-val" id="execRiskUsed">—</span>
-            </div>
-            <div class="exec-row">
-              <span class="exec-row-label">Red Folder In</span>
-              <span class="exec-row-val" id="execRedFolder">—</span>
-            </div>
-            <div class="exec-row" style="align-items:flex-start;padding-top:10px;border-bottom:none">
-              <span class="exec-row-label">Last Signal</span>
-              <div id="execLastSignal" class="exec-row-val">—</div>
-            </div>
-          </div>
-          <div class="panel">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div class="kicker" style="margin-bottom:0">SESSION SCORECARD</div>
-              <span id="donnaGrade" class="donna-grade-big" style="color:var(--muted2)">—</span>
-            </div>
-            <div id="scorecardPnlBig" class="exec-pnl-big" style="margin-bottom:10px;color:var(--text)">—</div>
-            <div class="sc-cells">
-              <div class="sc-cell"><div class="sc-cell-num up" id="scWins">0</div><div class="sc-cell-lab">Wins</div></div>
-              <div class="sc-cell"><div class="sc-cell-num dn" id="scLosses">0</div><div class="sc-cell-lab">Losses</div></div>
-              <div class="sc-cell"><div class="sc-cell-num" id="scBe" style="color:var(--muted)">0</div><div class="sc-cell-lab">B/E</div></div>
-            </div>
-            <div class="exec-row">
-              <span class="exec-row-label">Win Rate</span>
-              <span class="exec-row-val" id="scWinRate">—</span>
-            </div>
-            <div class="exec-row">
-              <span class="exec-row-label">Best Trade</span>
-              <span class="exec-row-val up" id="scBest">—</span>
-            </div>
-            <div class="exec-row" style="border-bottom:none">
-              <span class="exec-row-label">Worst Trade</span>
-              <span class="exec-row-val dn" id="scWorst">—</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 4b. EXECUTION ORCHESTRATION -->
-        <div class="panel" id="orchestrationPanel" style="margin-top:0">
-          <div class="kicker">EXECUTION ORCHESTRATION</div>
-          <div class="exec-row"><span class="exec-row-label">THESIS</span><span class="exec-row-val" id="orchThesis">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">THESIS AGE</span><span class="exec-row-val" id="orchThesisAge">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">SPY COOLDOWN</span><span class="exec-row-val" id="orchSpyCooldown">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">QQQ COOLDOWN</span><span class="exec-row-val" id="orchQqqCooldown">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">BLOCKED TODAY</span><span class="exec-row-val" id="orchBlocked">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">LAST BLOCK</span><span class="exec-row-val" id="orchLastBlock">—</span></div>
-          <div class="exec-row" style="border-bottom:none"><span class="exec-row-label">EXPOSURE</span><span class="exec-row-val" id="orchExposure">—</span></div>
         </div>
 
         <!-- 5. MARKET BOARD -->
@@ -1873,6 +1804,84 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     </div>
   </div>
 
+  <div class="page" id="page-execution">
+    <div class="vstack">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+
+        <!-- EXECUTION MONITOR -->
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <div class="kicker" style="margin-bottom:0">EXECUTION MONITOR</div>
+            <span id="execStatusPill" class="exec-status-pill exec-status-active">
+              <span id="execStatusDot" class="exec-status-dot" style="background:var(--green)"></span>
+              <span id="execStatusText">ACTIVE</span>
+            </span>
+          </div>
+          <div id="execPnlBig" class="exec-pnl-big" style="margin-bottom:14px;color:var(--text)">—</div>
+          <div class="exec-row">
+            <span class="exec-row-label">Account Equity</span>
+            <span class="exec-row-val" id="execEquity">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Trades Today</span>
+            <span class="exec-row-val" id="execTrades">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Risk Used Today</span>
+            <span class="exec-row-val" id="execRiskUsed">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Red Folder In</span>
+            <span class="exec-row-val" id="execRedFolder">—</span>
+          </div>
+          <div class="exec-row" style="align-items:flex-start;padding-top:10px;border-bottom:none">
+            <span class="exec-row-label">Last Signal</span>
+            <div id="execLastSignal" class="exec-row-val">—</div>
+          </div>
+        </div>
+
+        <!-- SESSION SCORECARD -->
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div class="kicker" style="margin-bottom:0">SESSION SCORECARD</div>
+            <span id="donnaGrade" class="donna-grade-big" style="color:var(--muted2)">—</span>
+          </div>
+          <div id="scorecardPnlBig" class="exec-pnl-big" style="margin-bottom:10px;color:var(--text)">—</div>
+          <div class="sc-cells">
+            <div class="sc-cell"><div class="sc-cell-num up" id="scWins">0</div><div class="sc-cell-lab">Wins</div></div>
+            <div class="sc-cell"><div class="sc-cell-num dn" id="scLosses">0</div><div class="sc-cell-lab">Losses</div></div>
+            <div class="sc-cell"><div class="sc-cell-num" id="scBe" style="color:var(--muted)">0</div><div class="sc-cell-lab">B/E</div></div>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Win Rate</span>
+            <span class="exec-row-val" id="scWinRate">—</span>
+          </div>
+          <div class="exec-row">
+            <span class="exec-row-label">Best Trade</span>
+            <span class="exec-row-val up" id="scBest">—</span>
+          </div>
+          <div class="exec-row" style="border-bottom:none">
+            <span class="exec-row-label">Worst Trade</span>
+            <span class="exec-row-val dn" id="scWorst">—</span>
+          </div>
+        </div>
+
+        <!-- EXECUTION ORCHESTRATION -->
+        <div class="panel" id="orchestrationPanel">
+          <div class="kicker">EXECUTION ORCHESTRATION</div>
+          <div class="exec-row"><span class="exec-row-label">THESIS</span><span class="exec-row-val" id="orchThesis">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">THESIS AGE</span><span class="exec-row-val" id="orchThesisAge">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">SPY COOLDOWN</span><span class="exec-row-val" id="orchSpyCooldown">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">QQQ COOLDOWN</span><span class="exec-row-val" id="orchQqqCooldown">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">BLOCKED TODAY</span><span class="exec-row-val" id="orchBlocked">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">LAST BLOCK</span><span class="exec-row-val" id="orchLastBlock">—</span></div>
+          <div class="exec-row" style="border-bottom:none"><span class="exec-row-label">EXPOSURE</span><span class="exec-row-val" id="orchExposure">—</span></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- FOOTER -->
   <div class="footer">
     <span>D.O.N.N.A v5.0 // LIVE MARKET CORE</span>
@@ -2072,6 +2081,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
+    if (btn.dataset.page === 'execution') { refreshExecMonitor(); refreshSessionScorecard(); refreshOrchestration(); }
   });
 });
 
