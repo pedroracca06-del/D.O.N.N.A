@@ -1445,7 +1445,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <!-- 3. ECONOMIC CALENDAR -->
           <div class="panel">
             <div class="kicker" style="margin-bottom:10px">Economic Calendar</div>
-            <div id="sidebarEconCalendar"><div class="econ-no-events">Loading events...</div></div>
+            <div id="sidebarEconCalendar2"><div class="econ-no-events">Loading events...</div></div>
           </div>
 
           <!-- 4. TRENDING MOVERS (compact vertical list) -->
@@ -2739,7 +2739,7 @@ async function refreshTrendingMovers() {
 // ════════ ECON CALENDAR ════════
 function renderEconCalendar(events) {
   console.log('renderEconCalendar called with', events.length, 'events', events);
-  const el = document.getElementById('sidebarEconCalendar');
+  const el = document.getElementById('sidebarEconCalendar') || document.getElementById('sidebarEconCalendar2');
   if (!el) return;
 
   const nyNow   = new Date(new Date().toLocaleString('en-US', { timeZone:'America/New_York' }));
