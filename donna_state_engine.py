@@ -154,6 +154,10 @@ class DonnaStateEngine:
         with self._lock:
             self._maybe_reset_daily_unlocked()
             s = self._state
+            _ny = _now_ny()
+            _h, _m = _ny.hour, _ny.minute
+            if _h < 9 or (_h == 9 and _m < 30) or _h >= 16:
+                return False
             return (
                 not s.get('execution_lock', False)
                 and bool(s.get('trade_permission', True))

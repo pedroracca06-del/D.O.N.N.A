@@ -841,6 +841,13 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         tgt_px  = round(entry_ref - tgt_dist,  2)
 
     try:
+        clock = api.get_clock()
+        if not clock.is_open:
+            return {'status': 'skipped', 'reason': 'market_closed', 'code': 'MARKET_CLOSED'}
+    except Exception as _ce:
+        print(f'[execution] clock check failed: {_ce}')
+
+    try:
         order = api.submit_order(
             MarketOrderRequest(
                 symbol        = etf,
