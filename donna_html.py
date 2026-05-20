@@ -2738,6 +2738,7 @@ async function refreshTrendingMovers() {
 
 // ════════ ECON CALENDAR ════════
 function renderEconCalendar(events) {
+  console.log('renderEconCalendar called with', events.length, 'events', events);
   const el = document.getElementById('sidebarEconCalendar');
   if (!el) return;
 
