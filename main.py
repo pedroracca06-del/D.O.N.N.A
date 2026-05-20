@@ -72,6 +72,8 @@ except Exception:
     def disable_trade_permission(r=''):     pass
     def enable_trade_permission():          pass
 
+from donna_analytics import compute_analytics
+
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
 )
@@ -853,6 +855,11 @@ async def orchestration_status():
         'macro_lock':                     s.get('macro_lock', False),
         'red_folder_lock':                s.get('red_folder_lock', False),
     }
+
+
+@app.get('/analytics-summary')
+async def analytics_summary():
+    return await asyncio.to_thread(compute_analytics)
 
 
 @app.post('/execution/macro-lock')
