@@ -978,6 +978,8 @@ async def webhook(request: Request):
                 'ict_step':        _sig.get('ict_step', ''),
                 'kill_zone':       _sig.get('kill_zone', ''),
                 'notes':           'auto-logged on execution',
+                'source':          'DONNA_AUTO',
+                'order_id':        execution.get('order_id', ''),
             }
             _trades = load_journal()
             _trades.append(_auto_trade)
