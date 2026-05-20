@@ -796,6 +796,33 @@ def sync_positions_from_alpaca() -> None:
         print(f'[sync_positions_from_alpaca] error: {e}')
 
 
+def reconcile_positions_from_alpaca() -> None:
+    """Add any live Alpaca positions missing from state engine open_positions."""
+    try:
+        api = _client()
+        if not api:
+            return
+        live = api.get_all_positions()
+        state_syms = {p.get('symbol', '').upper() for p in _state.get_open_positions()}
+        for p in live:
+            sym = str(p.symbol).upper()
+            if sym not in state_syms:
+                side = 'LONG' if float(p.qty) > 0 else 'SHORT'
+                _state.add_position({
+                    'symbol':    sym,
+                    'side':      side,
+                    'qty':       abs(float(p.qty)),
+                    'entry_ref': float(p.avg_entry_price),
+                    'order_id':  '',
+                    'session':   session_label(),
+                    'timestamp': utc_now_iso(),
+                    'source':    'ALPACA_RECONCILE',
+                })
+                print(f'[reconcile] added missing position {sym} {side} from Alpaca')
+    except Exception as e:
+        print(f'[reconcile_positions_from_alpaca] error: {e}')
+
+
 # ── Placeholder broker functions ───────────────────────────────
 
 def execute_tradovate(signal_data: dict) -> dict:

@@ -49,6 +49,7 @@ try:
         get_execution_status,
         check_position_outcomes,
         sync_positions_from_alpaca,
+        reconcile_positions_from_alpaca,
         set_macro_lock, set_red_folder_lock,
         disable_trade_permission, enable_trade_permission,
     )
@@ -65,6 +66,7 @@ except Exception:
     def get_execution_status():             return {'available': False}
     def check_position_outcomes():          return 0
     def sync_positions_from_alpaca():       pass
+    def reconcile_positions_from_alpaca():  pass
     def set_macro_lock(a, r=''):            pass
     def set_red_folder_lock(a, e=''):       pass
     def disable_trade_permission(r=''):     pass
@@ -200,6 +202,7 @@ async def position_outcomes_loop():
             ny = now_ny()
             m  = ny.hour * 60 + ny.minute
             if ny.weekday() < 5 and 9 * 60 + 30 <= m <= 16 * 60 + 30:
+                await asyncio.to_thread(reconcile_positions_from_alpaca)
                 await asyncio.to_thread(sync_positions_from_alpaca)
                 n = await asyncio.to_thread(check_position_outcomes)
                 if n:
@@ -324,6 +327,7 @@ async def startup():
     asyncio.create_task(grok_loop())
     asyncio.create_task(morning_brief_loop())
     if _EXECUTION_AVAILABLE:
+        await asyncio.to_thread(reconcile_positions_from_alpaca)
         asyncio.create_task(position_outcomes_loop())
         asyncio.create_task(eod_close_loop())
 
