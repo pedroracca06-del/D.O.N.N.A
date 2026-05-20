@@ -795,6 +795,62 @@ async def execution_gate():
     }
 
 
+@app.get('/orchestration-status')
+async def orchestration_status():
+    from datetime import datetime, timezone
+    s   = _donna_state.get_state()
+    now = datetime.now(timezone.utc)
+
+    def mins_remaining(iso_str):
+        if not iso_str:
+            return None
+        try:
+            dt = datetime.strptime(iso_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            r  = (dt - now).total_seconds() / 60
+            return round(max(r, 0), 1)
+        except Exception:
+            return None
+
+    def thesis_age(iso_str):
+        if not iso_str:
+            return None
+        try:
+            dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+            return round((now - dt).total_seconds() / 60, 1)
+        except Exception:
+            return None
+
+    spy_until  = s.get('spy_cooldown_until')
+    qqq_until  = s.get('qqq_cooldown_until')
+    thesis_set = s.get('thesis_set_at')
+
+    live_exposure = []
+    try:
+        live_exposure = await asyncio.to_thread(get_positions)
+    except Exception:
+        pass
+
+    blocked_today = s.get('blocked_signals_today', [])
+    return {
+        'active_thesis':                  s.get('active_thesis', 'NEUTRAL'),
+        'thesis_direction':               s.get('thesis_direction'),
+        'thesis_set_at':                  thesis_set,
+        'thesis_age_minutes':             thesis_age(thesis_set),
+        'spy_cooldown_until':             spy_until,
+        'qqq_cooldown_until':             qqq_until,
+        'spy_cooldown_remaining_minutes': mins_remaining(spy_until),
+        'qqq_cooldown_remaining_minutes': mins_remaining(qqq_until),
+        'blocked_signals_today':          blocked_today,
+        'last_block_reason':              blocked_today[-1].get('block_reason') if blocked_today else None,
+        'open_positions':                 s.get('open_positions', []),
+        'live_alpaca_exposure':           live_exposure,
+        'can_execute':                    _donna_state.can_execute(),
+        'trade_permission':               s.get('trade_permission', True),
+        'macro_lock':                     s.get('macro_lock', False),
+        'red_folder_lock':                s.get('red_folder_lock', False),
+    }
+
+
 @app.post('/execution/macro-lock')
 async def execution_macro_lock(request: Request):
     """Set or clear the macro lock. Body: {"active": bool, "reason": str}"""

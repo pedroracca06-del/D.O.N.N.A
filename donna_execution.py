@@ -1082,9 +1082,45 @@ def execute_signal(signal_result: dict) -> dict:
     open_syms = {p.get('symbol', '') for p in _state.get_open_positions()}
     if routed_etf == 'SPY' and 'QQQ' in open_syms:
         print('[execute_signal] BLOCKED — NQ/QQQ position already open')
+        _ic_st  = _state.get_state()
+        _ic_th  = _state.get_thesis()
+        _ic_dir = 'LONG' if str(data.get('signal', '')).upper() in ('BUY', 'LONG') else 'SHORT'
+        _ic_blk = {
+            'timestamp':          utc_now_iso(),
+            'ticker':             data.get('ticker', ''),
+            'routed_etf':         routed_etf,
+            'direction':          _ic_dir,
+            'block_reason':       'INSTRUMENT_CONFLICT',
+            'active_thesis':      _ic_th.get('active_thesis', 'NEUTRAL'),
+            'thesis_direction':   _ic_th.get('thesis_direction'),
+            'spy_cooldown_until': _ic_st.get('spy_cooldown_until'),
+            'qqq_cooldown_until': _ic_st.get('qqq_cooldown_until'),
+            'open_positions':     _state.get_open_positions(),
+        }
+        _ic_blocked = _ic_st.get('blocked_signals_today', [])
+        _ic_blocked.append(_ic_blk)
+        _state.set('blocked_signals_today', _ic_blocked[-20:])
         return {'status': 'skipped', 'reason': 'NQ_position_open', 'code': 'INSTRUMENT_CONFLICT'}
     if routed_etf == 'QQQ' and 'SPY' in open_syms:
         print('[execute_signal] BLOCKED — ES/SPY position already open')
+        _ic_st  = _state.get_state()
+        _ic_th  = _state.get_thesis()
+        _ic_dir = 'LONG' if str(data.get('signal', '')).upper() in ('BUY', 'LONG') else 'SHORT'
+        _ic_blk = {
+            'timestamp':          utc_now_iso(),
+            'ticker':             data.get('ticker', ''),
+            'routed_etf':         routed_etf,
+            'direction':          _ic_dir,
+            'block_reason':       'INSTRUMENT_CONFLICT',
+            'active_thesis':      _ic_th.get('active_thesis', 'NEUTRAL'),
+            'thesis_direction':   _ic_th.get('thesis_direction'),
+            'spy_cooldown_until': _ic_st.get('spy_cooldown_until'),
+            'qqq_cooldown_until': _ic_st.get('qqq_cooldown_until'),
+            'open_positions':     _state.get_open_positions(),
+        }
+        _ic_blocked = _ic_st.get('blocked_signals_today', [])
+        _ic_blocked.append(_ic_blk)
+        _state.set('blocked_signals_today', _ic_blocked[-20:])
         return {'status': 'skipped', 'reason': 'ES_position_open', 'code': 'INSTRUMENT_CONFLICT'}
 
     # ── ORCHESTRATION LAYER ──────────────────────────────────────
@@ -1093,6 +1129,24 @@ def execute_signal(signal_result: dict) -> dict:
 
     # 1. Cooldown check
     if _state.is_on_cooldown(routed_etf):
+        _cd_st  = _state.get_state()
+        _cd_th  = _state.get_thesis()
+        _cd_dir = 'LONG' if signal_type in ('BUY', 'LONG') else 'SHORT'
+        _block = {
+            'timestamp':          utc_now_iso(),
+            'ticker':             data.get('ticker', ''),
+            'routed_etf':         routed_etf,
+            'direction':          _cd_dir,
+            'block_reason':       'COOLDOWN_ACTIVE',
+            'active_thesis':      _cd_th.get('active_thesis', 'NEUTRAL'),
+            'thesis_direction':   _cd_th.get('thesis_direction'),
+            'spy_cooldown_until': _cd_st.get('spy_cooldown_until'),
+            'qqq_cooldown_until': _cd_st.get('qqq_cooldown_until'),
+            'open_positions':     _state.get_open_positions(),
+        }
+        _blocked = _cd_st.get('blocked_signals_today', [])
+        _blocked.append(_block)
+        _state.set('blocked_signals_today', _blocked[-20:])
         return {'status': 'skipped', 'reason': f'{routed_etf}_on_cooldown', 'code': 'COOLDOWN_ACTIVE'}
 
     # 2. Thesis conflict check
@@ -1110,6 +1164,22 @@ def execute_signal(signal_result: dict) -> dict:
                 _set_dt = datetime.fromisoformat(_thesis_set_at.replace('Z', '+00:00'))
                 _mins_since = (datetime.now(timezone.utc) - _set_dt).total_seconds() / 60
                 if _mins_since < 60:
+                    _tc_st = _state.get_state()
+                    _block = {
+                        'timestamp':          utc_now_iso(),
+                        'ticker':             data.get('ticker', ''),
+                        'routed_etf':         routed_etf,
+                        'direction':          _signal_dir,
+                        'block_reason':       'THESIS_CONFLICT',
+                        'active_thesis':      _active_thesis,
+                        'thesis_direction':   _thesis_dir,
+                        'spy_cooldown_until': _tc_st.get('spy_cooldown_until'),
+                        'qqq_cooldown_until': _tc_st.get('qqq_cooldown_until'),
+                        'open_positions':     _state.get_open_positions(),
+                    }
+                    _blocked = _tc_st.get('blocked_signals_today', [])
+                    _blocked.append(_block)
+                    _state.set('blocked_signals_today', _blocked[-20:])
                     return {'status': 'skipped', 'reason': 'thesis_conflict', 'code': 'THESIS_CONFLICT'}
             except Exception:
                 pass

@@ -1278,6 +1278,18 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           </div>
         </div>
 
+        <!-- 4b. EXECUTION ORCHESTRATION -->
+        <div class="panel" id="orchestrationPanel" style="margin-top:0">
+          <div class="kicker">EXECUTION ORCHESTRATION</div>
+          <div class="exec-row"><span class="exec-row-label">THESIS</span><span class="exec-row-val" id="orchThesis">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">THESIS AGE</span><span class="exec-row-val" id="orchThesisAge">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">SPY COOLDOWN</span><span class="exec-row-val" id="orchSpyCooldown">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">QQQ COOLDOWN</span><span class="exec-row-val" id="orchQqqCooldown">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">BLOCKED TODAY</span><span class="exec-row-val" id="orchBlocked">—</span></div>
+          <div class="exec-row"><span class="exec-row-label">LAST BLOCK</span><span class="exec-row-val" id="orchLastBlock">—</span></div>
+          <div class="exec-row" style="border-bottom:none"><span class="exec-row-label">EXPOSURE</span><span class="exec-row-val" id="orchExposure">—</span></div>
+        </div>
+
         <!-- 5. MARKET BOARD -->
         <div id="dbMarketBoard" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
           <div class="card db-market-tile" data-sym="NQ">
@@ -3127,6 +3139,23 @@ async function refreshSessionScorecard() {
   }
 }
 
+// ════════ ORCHESTRATION REFRESH ════════
+async function refreshOrchestration() {
+  try {
+    const res = await fetch('/orchestration-status');
+    if (!res.ok) return;
+    const d = await res.json();
+    setText('orchThesis', (d.active_thesis || '—') + (d.thesis_direction ? ' ' + d.thesis_direction : ''));
+    setText('orchThesisAge', d.thesis_age_minutes != null ? d.thesis_age_minutes + ' min ago' : '—');
+    setText('orchSpyCooldown', d.spy_cooldown_remaining_minutes != null && d.spy_cooldown_remaining_minutes > 0 ? d.spy_cooldown_remaining_minutes + ' min' : 'CLEAR');
+    setText('orchQqqCooldown', d.qqq_cooldown_remaining_minutes != null && d.qqq_cooldown_remaining_minutes > 0 ? d.qqq_cooldown_remaining_minutes + ' min' : 'CLEAR');
+    setText('orchBlocked', (d.blocked_signals_today || []).length + ' signals');
+    setText('orchLastBlock', d.last_block_reason || '—');
+    const exp = (d.open_positions || []).map(p => p.symbol + ' ' + p.side).join(', ');
+    setText('orchExposure', exp || 'FLAT');
+  } catch(e) {}
+}
+
 // ════════ MAIN REFRESH ════════
 async function refresh() {
   try {
@@ -3611,6 +3640,8 @@ fetchStateEngine();
 setInterval(fetchStateEngine, 15000);
 fetchExecutionGate();
 setInterval(fetchExecutionGate, 15000);
+refreshOrchestration();
+setInterval(refreshOrchestration, 15000);
 fetchHarveyData();
 setInterval(fetchHarveyData, 20000);
 fetchGrokIntel();
