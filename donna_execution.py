@@ -1002,9 +1002,9 @@ def execute_signal(signal_result: dict) -> dict:
     ticker     = _sig_data.get('ticker', '').upper()
 
     # Route: ES/MES → SPY, NQ/MNQ → QQQ
-    if instrument in ('ES', 'MES') or 'ES' in ticker:
+    if instrument in ('ES', 'MES') or ticker in ('ES', 'MES', 'ES1!', 'MES1!'):
         routed_etf = 'SPY'
-    elif instrument in ('NQ', 'MNQ') or 'NQ' in ticker or 'MNQ' in ticker:
+    elif instrument in ('NQ', 'MNQ') or ticker in ('NQ', 'MNQ', 'NQ1!', 'MNQ1!'):
         routed_etf = 'QQQ'
     else:
         print(f'[execute_signal] BLOCKED — unknown instrument: {instrument}')
@@ -1052,6 +1052,15 @@ def execute_signal(signal_result: dict) -> dict:
     if trades_today == 1 and first_outcome != 'WIN':
         print('[execute_signal] BLOCKED — trade 2 requires trade 1 WIN')
         return {'status': 'skipped', 'reason': 'Trade 2 blocked — first trade not WIN', 'code': 'TRADE2_REQUIRES_WIN'}
+
+    # ── One instrument family at a time — no simultaneous SPY+QQQ
+    open_syms = {p.get('symbol', '') for p in _state.get_open_positions()}
+    if routed_etf == 'SPY' and 'QQQ' in open_syms:
+        print('[execute_signal] BLOCKED — NQ/QQQ position already open')
+        return {'status': 'skipped', 'reason': 'NQ_position_open', 'code': 'INSTRUMENT_CONFLICT'}
+    if routed_etf == 'QQQ' and 'SPY' in open_syms:
+        print('[execute_signal] BLOCKED — ES/SPY position already open')
+        return {'status': 'skipped', 'reason': 'ES_position_open', 'code': 'INSTRUMENT_CONFLICT'}
 
     # ── Size reduction for trade 2
     if trades_today == 1 and first_outcome == 'WIN':
