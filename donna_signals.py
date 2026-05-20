@@ -1,6 +1,8 @@
 """donna_signals.py — signal processing, verdict engine, alert history."""
 from __future__ import annotations
 
+import time
+
 from donna_config import (
     TELEGRAM_ALERT_MODE, safe_float, utc_now_iso, now_ny, session_label,
     send_telegram_message,
@@ -18,15 +20,27 @@ _ORB_SETUPS   = {'ORB_LONG', 'ORB_SHORT'}
 
 def normalize_payload(payload: dict) -> dict:
     setup_type = str(payload.get('setup_type', 'unknown')).upper()
+    strategy_family = (
+        'ORB'            if setup_type.startswith('ORB') else
+        'ICT'            if setup_type.startswith('ICT') else
+        'FAILED_AUCTION' if setup_type == 'FAILED_AUCTION' else
+        'MOMENTUM'       if setup_type == 'MOMENTUM_CONTINUATION' else
+        'UNKNOWN'
+    )
+    ticker_raw = str(payload.get('ticker', 'UNKNOWN')).upper()
+    signal_raw = str(payload.get('signal', 'NONE')).upper()
+    signal_id  = f"{ticker_raw}_{signal_raw}_{int(time.time())}"
 
     return {
         # ── core fields ──────────────────────────────────────────
-        'ticker':           str(payload.get('ticker', 'UNKNOWN')),
+        'ticker':           ticker_raw,
         'price':            str(payload.get('price', '0')),
-        'signal':           str(payload.get('signal', 'NONE')).upper(),
+        'signal':           signal_raw,
         'timeframe':        str(payload.get('timeframe', 'unknown')),
         'session':          str(payload.get('session', session_label())),
         'setup_type':       setup_type,
+        'strategy_family':  strategy_family,
+        'signal_id':        signal_id,
         'signal_priority':  str(payload.get('signal_priority', 'unknown')),
         'context_strength': str(payload.get('context_strength', 'moderate')),
         'market_state':     str(payload.get('market_state', 'neutral')),

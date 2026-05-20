@@ -136,7 +136,7 @@ def compute_journal_stats(trades: list) -> dict:
             'total': 0, 'wins': 0, 'losses': 0, 'breakevens': 0,
             'win_rate': 0.0, 'avg_win': 0.0, 'avg_loss': 0.0,
             'profit_factor': 0.0, 'best_regime': '—', 'worst_regime': '—',
-            'by_regime': {}, 'by_session': {}, 'daily_pnl': empty_daily,
+            'by_regime': {}, 'by_session': {}, 'by_strategy_family': {}, 'daily_pnl': empty_daily,
         }
 
     today_str     = date.today().isoformat()
@@ -147,6 +147,7 @@ def compute_journal_stats(trades: list) -> dict:
     win_pnl, loss_pnl = [], []
     regime_buckets: dict = {}
     session_buckets: dict = {}
+    strategy_family_buckets: dict = {}
     daily_today = daily_yesterday = daily_week = 0.0
 
     for t in trades:
@@ -186,10 +187,15 @@ def compute_journal_stats(trades: list) -> dict:
         if trade_date >= week_start:
             daily_week += pnl
 
-        regime  = str(t.get('active_regime', 'UNKNOWN'))
-        session = str(t.get('session', 'UNKNOWN'))
+        regime          = str(t.get('active_regime', 'UNKNOWN'))
+        session         = str(t.get('session', 'UNKNOWN'))
+        strategy_family = str(t.get('strategy_family', 'UNKNOWN'))
 
-        for bucket, key in [(regime_buckets, regime), (session_buckets, session)]:
+        for bucket, key in [
+            (regime_buckets, regime),
+            (session_buckets, session),
+            (strategy_family_buckets, strategy_family),
+        ]:
             if key not in bucket:
                 bucket[key] = {'wins': 0, 'losses': 0, 'breakevens': 0}
             if outcome == 'WIN':
@@ -211,8 +217,9 @@ def compute_journal_stats(trades: list) -> dict:
         t_ = b['wins'] + b['losses'] + b['breakevens']
         return round(b['wins'] / t_ * 100, 1) if t_ else 0.0
 
-    by_regime  = {k: {**v, 'win_rate': regime_wr(v)} for k, v in regime_buckets.items()}
-    by_session = {k: {**v, 'win_rate': regime_wr(v)} for k, v in session_buckets.items()}
+    by_regime           = {k: {**v, 'win_rate': regime_wr(v)} for k, v in regime_buckets.items()}
+    by_session          = {k: {**v, 'win_rate': regime_wr(v)} for k, v in session_buckets.items()}
+    by_strategy_family  = {k: {**v, 'win_rate': regime_wr(v)} for k, v in strategy_family_buckets.items()}
 
     best_regime  = max(by_regime,  key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
     worst_regime = min(by_regime,  key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
@@ -221,7 +228,7 @@ def compute_journal_stats(trades: list) -> dict:
         'total': total, 'wins': wins, 'losses': losses, 'breakevens': breakevens,
         'win_rate': win_rate, 'avg_win': avg_win, 'avg_loss': avg_loss,
         'profit_factor': profit_factor, 'best_regime': best_regime, 'worst_regime': worst_regime,
-        'by_regime': by_regime, 'by_session': by_session,
+        'by_regime': by_regime, 'by_session': by_session, 'by_strategy_family': by_strategy_family,
         'daily_pnl': {
             'today':     round(daily_today, 2),
             'yesterday': round(daily_yesterday, 2),

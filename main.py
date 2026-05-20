@@ -943,6 +943,48 @@ async def webhook(request: Request):
         except Exception as e:
             execution = {'status': 'error', 'reason': str(e)}
 
+    if execution.get('status') == 'executed':
+        try:
+            _sig        = result['data']
+            _parsed     = result['parsed']
+            _snap       = load_risk_state()
+            _harvey     = build_harvey_payload()
+            _signal_dir = str(_sig.get('signal', '')).upper()
+            _direction  = 'LONG' if _signal_dir in ('LONG', 'BUY') else 'SHORT'
+            _auto_trade = {
+                'signal_id':       _sig.get('signal_id', ''),
+                'strategy_family': _sig.get('strategy_family', 'UNKNOWN'),
+                'setup_type':      _sig.get('setup_type', ''),
+                'ticker':          _sig.get('ticker', ''),
+                'direction':       _direction,
+                'entry_price':     execution.get('entry_ref'),
+                'exit_price':      None,
+                'size':            execution.get('shares', 1),
+                'realized_pnl':    None,
+                'pnl':             None,
+                'outcome':         'OPEN',
+                'session':         session_label(),
+                'trade_date':      datetime.now(NY_TZ).strftime('%Y-%m-%d'),
+                'timestamp':       utc_now_iso(),
+                'active_regime':   _harvey.get('regime', {}).get('regime', _snap.get('market_regime', 'UNKNOWN')),
+                'score':           _sig.get('score', ''),
+                'confidence':      _parsed.get('confidence', ''),
+                'trap_risk':       _sig.get('trap_risk', 'false'),
+                'macro_risk':      _snap.get('macro_risk', 'medium'),
+                'bias_score':      _harvey.get('bias_score', 50),
+                'harvey_verdict':  _harvey.get('verdict', 'WAIT'),
+                'timeframe':       _sig.get('timeframe', ''),
+                'tier':            _sig.get('tier', ''),
+                'ict_step':        _sig.get('ict_step', ''),
+                'kill_zone':       _sig.get('kill_zone', ''),
+                'notes':           'auto-logged on execution',
+            }
+            _trades = load_journal()
+            _trades.append(_auto_trade)
+            save_journal(_trades)
+        except Exception as _je:
+            print(f'[webhook] auto-journal error: {_je}')
+
     if _sse_clients:
         evt = json.dumps({
             'type':       'signal',
