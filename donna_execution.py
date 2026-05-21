@@ -1105,50 +1105,28 @@ def execute_signal(signal_result: dict) -> dict:
         print('[execute_signal] BLOCKED — trade 2 requires trade 1 WIN')
         return {'status': 'skipped', 'reason': 'Trade 2 blocked — first trade not WIN', 'code': 'TRADE2_REQUIRES_WIN'}
 
-    # ── One instrument family at a time — no simultaneous SPY+QQQ
-    open_syms = {p.get('symbol', '') for p in _state.get_open_positions()}
-    if routed_etf == 'SPY' and 'QQQ' in open_syms:
-        print('[execute_signal] BLOCKED — NQ/QQQ position already open')
-        _ic_st  = _state.get_state()
-        _ic_th  = _state.get_thesis()
-        _ic_dir = 'LONG' if str(data.get('signal', '')).upper() in ('BUY', 'LONG') else 'SHORT'
-        _ic_blk = {
+    # ── ONE POSITION AT A TIME ──────────────────────────────────
+    open_positions = _state.get_open_positions()
+    if len(open_positions) > 0:
+        _op_st  = _state.get_state()
+        _op_th  = _state.get_thesis()
+        _op_dir = 'LONG' if str(data.get('signal', '')).upper() in ('BUY', 'LONG') else 'SHORT'
+        _op_blk = {
             'timestamp':          utc_now_iso(),
             'ticker':             data.get('ticker', ''),
             'routed_etf':         routed_etf,
-            'direction':          _ic_dir,
-            'block_reason':       'INSTRUMENT_CONFLICT',
-            'active_thesis':      _ic_th.get('active_thesis', 'NEUTRAL'),
-            'thesis_direction':   _ic_th.get('thesis_direction'),
-            'spy_cooldown_until': _ic_st.get('spy_cooldown_until'),
-            'qqq_cooldown_until': _ic_st.get('qqq_cooldown_until'),
-            'open_positions':     _state.get_open_positions(),
+            'direction':          _op_dir,
+            'block_reason':       'POSITION_ALREADY_OPEN',
+            'active_thesis':      _op_th.get('active_thesis', 'NEUTRAL'),
+            'thesis_direction':   _op_th.get('thesis_direction'),
+            'spy_cooldown_until': _op_st.get('spy_cooldown_until'),
+            'qqq_cooldown_until': _op_st.get('qqq_cooldown_until'),
+            'open_positions':     open_positions,
         }
-        _ic_blocked = _ic_st.get('blocked_signals_today', [])
-        _ic_blocked.append(_ic_blk)
-        _state.set('blocked_signals_today', _ic_blocked[-20:])
-        return {'status': 'skipped', 'reason': 'NQ_position_open', 'code': 'INSTRUMENT_CONFLICT'}
-    if routed_etf == 'QQQ' and 'SPY' in open_syms:
-        print('[execute_signal] BLOCKED — ES/SPY position already open')
-        _ic_st  = _state.get_state()
-        _ic_th  = _state.get_thesis()
-        _ic_dir = 'LONG' if str(data.get('signal', '')).upper() in ('BUY', 'LONG') else 'SHORT'
-        _ic_blk = {
-            'timestamp':          utc_now_iso(),
-            'ticker':             data.get('ticker', ''),
-            'routed_etf':         routed_etf,
-            'direction':          _ic_dir,
-            'block_reason':       'INSTRUMENT_CONFLICT',
-            'active_thesis':      _ic_th.get('active_thesis', 'NEUTRAL'),
-            'thesis_direction':   _ic_th.get('thesis_direction'),
-            'spy_cooldown_until': _ic_st.get('spy_cooldown_until'),
-            'qqq_cooldown_until': _ic_st.get('qqq_cooldown_until'),
-            'open_positions':     _state.get_open_positions(),
-        }
-        _ic_blocked = _ic_st.get('blocked_signals_today', [])
-        _ic_blocked.append(_ic_blk)
-        _state.set('blocked_signals_today', _ic_blocked[-20:])
-        return {'status': 'skipped', 'reason': 'ES_position_open', 'code': 'INSTRUMENT_CONFLICT'}
+        _op_blocked = _op_st.get('blocked_signals_today', [])
+        _op_blocked.append(_op_blk)
+        _state.set('blocked_signals_today', _op_blocked[-20:])
+        return {'status': 'skipped', 'reason': 'position_already_open', 'code': 'POSITION_ALREADY_OPEN'}
 
     # ── ORCHESTRATION LAYER ──────────────────────────────────────
     from donna_state_engine import state as _state
