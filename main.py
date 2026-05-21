@@ -873,6 +873,17 @@ async def execution_macro_lock(request: Request):
     await asyncio.to_thread(set_macro_lock, active, reason)
     return {'status': 'ok', 'macro_lock': active, 'reason': reason}
 
+@app.post('/execution/red-folder-lock')
+async def execution_red_folder_lock(request: Request):
+    """Set or clear the red folder lock. Body: {"active": bool, "reason": str}"""
+    if not _EXECUTION_AVAILABLE:
+        raise HTTPException(status_code=503, detail='execution not loaded')
+    body   = await request.json()
+    active = bool(body.get('active', False))
+    reason = str(body.get('reason', '')).strip()
+    await asyncio.to_thread(set_red_folder_lock, active, reason)
+    return {'status': 'ok', 'red_folder_lock': active, 'reason': reason}
+
 
 @app.post('/execution/trade-permission')
 async def execution_trade_permission(request: Request):
