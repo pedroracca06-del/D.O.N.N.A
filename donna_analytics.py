@@ -2,12 +2,82 @@ from donna_state import load_journal
 from datetime import datetime
 
 
+def validate_trade(trade: dict) -> dict:
+    """Re-derive outcome and pnl mathematically. Flag any inconsistencies."""
+    try:
+        direction      = str(trade.get('direction', '')).upper()
+        entry          = float(trade.get('entry_price') or 0)
+        exit_          = float(trade.get('exit_price') or 0)
+        size           = float(trade.get('size') or 1)
+        stored_pnl     = float(trade.get('realized_pnl') or trade.get('pnl') or 0)
+        stored_outcome = str(trade.get('outcome', ''))
+
+        if not direction or not entry or not exit_:
+            return {'valid': False, 'reason': 'missing_fields'}
+
+        if direction == 'LONG':
+            correct_pnl = round((exit_ - entry) * size, 2)
+        elif direction == 'SHORT':
+            correct_pnl = round((entry - exit_) * size, 2)
+        else:
+            return {'valid': False, 'reason': 'unknown_direction'}
+
+        correct_outcome = 'WIN' if correct_pnl > 0 else ('LOSS' if correct_pnl < 0 else 'BREAKEVEN')
+
+        pnl_mismatch     = abs(correct_pnl - stored_pnl) > 0.01
+        outcome_mismatch = correct_outcome != stored_outcome
+
+        return {
+            'valid':            not pnl_mismatch and not outcome_mismatch,
+            'correct_pnl':      correct_pnl,
+            'stored_pnl':       stored_pnl,
+            'correct_outcome':  correct_outcome,
+            'stored_outcome':   stored_outcome,
+            'pnl_mismatch':     pnl_mismatch,
+            'outcome_mismatch': outcome_mismatch,
+        }
+    except Exception as e:
+        return {'valid': False, 'reason': str(e)}
+
+
 def compute_analytics() -> dict:
-    """Full analytics over closed trades only."""
-    trades = [t for t in load_journal() if t.get('outcome') in ('WIN', 'LOSS', 'BREAKEVEN')]
+    """Full analytics over closed trades only. Only valid trades enter analytics buckets."""
+    closed = [t for t in load_journal() if t.get('outcome') in ('WIN', 'LOSS', 'BREAKEVEN')]
+
+    if not closed:
+        return {'status': 'no_closed_trades', 'trade_count': 0}
+
+    valid_trades   = []
+    invalid_trades = []
+    for t in closed:
+        result = validate_trade(t)
+        if result.get('valid'):
+            valid_trades.append(t)
+        else:
+            invalid_trades.append({
+                'signal_id': t.get('signal_id', ''),
+                'ticker':    t.get('ticker', ''),
+                'trade_date': t.get('trade_date', ''),
+                'reason':    result.get('reason', ''),
+                'pnl_mismatch':     result.get('pnl_mismatch'),
+                'outcome_mismatch': result.get('outcome_mismatch'),
+                'stored_pnl':       result.get('stored_pnl'),
+                'correct_pnl':      result.get('correct_pnl'),
+                'stored_outcome':   result.get('stored_outcome'),
+                'correct_outcome':  result.get('correct_outcome'),
+            })
+
+    integrity_report = {
+        'total_closed':   len(closed),
+        'valid':          len(valid_trades),
+        'invalid':        len(invalid_trades),
+        'invalid_trades': invalid_trades,
+    }
+
+    trades = valid_trades
 
     if not trades:
-        return {'status': 'no_closed_trades', 'trade_count': 0}
+        return {'status': 'no_valid_trades', 'trade_count': 0, 'integrity_report': integrity_report}
 
     def bucket(trades_list, key_fn, label):
         buckets = {}
@@ -78,5 +148,6 @@ def compute_analytics() -> dict:
             'total_blocked': 0,
             'note': 'blocked_signals_today in state engine — resets daily',
         },
+        'integrity_report': integrity_report,
         'generated_at': datetime.utcnow().isoformat() + 'Z',
     }

@@ -72,7 +72,7 @@ except Exception:
     def disable_trade_permission(r=''):     pass
     def enable_trade_permission():          pass
 
-from donna_analytics import compute_analytics
+from donna_analytics import compute_analytics, validate_trade
 
 from donna_assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
@@ -860,6 +860,35 @@ async def orchestration_status():
 @app.get('/analytics-summary')
 async def analytics_summary():
     return await asyncio.to_thread(compute_analytics)
+
+@app.get('/analytics/validate')
+async def analytics_validate():
+    """Re-derive outcome and pnl for every closed trade. Returns integrity report."""
+    from donna_state import load_journal
+    def _run():
+        closed  = [t for t in load_journal() if t.get('outcome') in ('WIN', 'LOSS', 'BREAKEVEN')]
+        results = []
+        for t in closed:
+            v = validate_trade(t)
+            results.append({
+                'signal_id':        t.get('signal_id', ''),
+                'ticker':           t.get('ticker', ''),
+                'trade_date':       t.get('trade_date', ''),
+                'direction':        t.get('direction', ''),
+                'entry_price':      t.get('entry_price'),
+                'exit_price':       t.get('exit_price'),
+                'size':             t.get('size'),
+                **v,
+            })
+        valid   = [r for r in results if r.get('valid')]
+        invalid = [r for r in results if not r.get('valid')]
+        return {
+            'total_closed': len(closed),
+            'valid':        len(valid),
+            'invalid':      len(invalid),
+            'trades':       results,
+        }
+    return await asyncio.to_thread(_run)
 
 
 @app.post('/execution/macro-lock')
