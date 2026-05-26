@@ -26,6 +26,7 @@ SETTINGS_FILE      = BASE_DIR / 'donna_settings.json'
 MACRO_EVENTS_FILE  = BASE_DIR / 'donna_macro_events.json'
 MORNING_BRIEF_FILE = BASE_DIR / 'donna_morning_brief_state.json'
 JOURNAL_FILE       = BASE_DIR / 'donna_journal.json'
+REJECTIONS_FILE    = BASE_DIR / 'donna_rejections.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()
@@ -95,11 +96,9 @@ DEFAULT_SETTINGS = {
 }
 
 DEFAULT_MACRO_EVENTS = {
-    'source': 'ForexFactory/manual',
-    'events': [
-        {'title': '10:00 ET Data / Fed Window', 'time_et': '10:00', 'importance': 'high',   'category': 'macro', 'note': 'High-impact macro window.'},
-        {'title': '14:00 ET Fed / Rates Check',  'time_et': '14:00', 'importance': 'medium', 'category': 'fed',   'note': 'Rates-sensitive period.'},
-    ],
+    'source': 'empty',
+    'events': [],
+    'note': 'Populate with actual scheduled events via ForexFactory/manual entry. No events = no red-folder block.',
 }
 
 # ── Time helpers ──────────────────────────────────────────────

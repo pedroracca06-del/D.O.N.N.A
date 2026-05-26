@@ -151,6 +151,98 @@ def _log_skip(data: dict, parsed: dict, reason: str, code: str = '') -> dict:
     return {'status': 'skipped', 'reason': reason, 'reason_code': code}
 
 
+# ── Rejection observability ────────────────────────────────────
+
+def _rejection_context(
+    code: str,
+    reason: str,
+    data: dict | None = None,
+    parsed: dict | None = None,
+    direction: str = '',
+    routed_etf: str = '',
+    session: str = '',
+) -> dict:
+    """Snapshot all execution-gate context at the moment of rejection."""
+    data   = data   or {}
+    parsed = parsed or {}
+
+    try:
+        _st = _state.get_state()
+        _th = _state.get_thesis()
+    except Exception:
+        _st, _th = {}, {}
+
+    try:
+        macro_snap = load_risk_state()
+    except Exception:
+        macro_snap = {}
+
+    try:
+        rf = _red_folder_status()
+    except Exception:
+        rf = {'active': False, 'reason': ''}
+
+    _sig_str = str(data.get('signal', '')).upper()
+    _dir = direction or (
+        'LONG'  if _sig_str in ('BUY', 'LONG')  else
+        'SHORT' if _sig_str in ('SELL', 'SHORT') else ''
+    )
+
+    return {
+        'timestamp':         utc_now_iso(),
+        'timestamp_et':      now_ny().strftime('%Y-%m-%d %H:%M:%S ET'),
+        'ticker':            data.get('ticker', '') or '',
+        'direction':         _dir,
+        'routed_etf':        routed_etf,
+        'setup_type':        data.get('setup_type', '') or '',
+        'confidence':        str(parsed.get('confidence', '') or ''),
+        'session':           session or session_label(),
+        'rejection_code':    code,
+        'rejection_reason':  reason,
+        'tier':              data.get('tier', '') or '',
+        'active_thesis':     _th.get('active_thesis', 'NEUTRAL'),
+        'thesis_direction':  _th.get('thesis_direction'),
+        'thesis_set_at':     _th.get('thesis_set_at'),
+        'cooldown_state': {
+            'spy_cooldown_until': _st.get('spy_cooldown_until'),
+            'qqq_cooldown_until': _st.get('qqq_cooldown_until'),
+        },
+        'open_positions':    _state.get_open_positions(),
+        'daily_trade_count': _st.get('daily_trade_count', 0),
+        'macro_risk':        macro_snap.get('macro_risk', ''),
+        'headline_risk':     macro_snap.get('headline_risk', ''),
+        'red_folder_active': rf.get('active', False),
+        'red_folder_reason': rf.get('reason', ''),
+    }
+
+
+def _log_rejection(context: dict) -> None:
+    """Persist rejection record to donna_rejections.json (ring buffer, 200 max)."""
+    try:
+        from donna_state import load_rejections, save_rejections
+        history = load_rejections()
+        history.insert(0, context)
+        save_rejections(history[:200])
+        print(
+            f'[rejection_log] {context.get("rejection_code", "?")} | '
+            f'{context.get("ticker", "?")} {context.get("direction", "?")} | '
+            f'session={context.get("session", "?")} | '
+            f'thesis={context.get("active_thesis", "?")} | '
+            f'positions={len(context.get("open_positions") or [])}'
+        )
+    except Exception as _e:
+        print(f'[rejection_log] write error: {_e}')
+
+
+def get_rejections(limit: int = 50) -> list:
+    """Return recent rejection records for API/dashboard consumption."""
+    try:
+        from donna_state import load_rejections
+        return load_rejections()[:limit]
+    except Exception:
+        return []
+
+
 # ── Daily state helpers ────────────────────────────────────────
 
 def _get_daily_state() -> dict:
@@ -868,9 +960,15 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
     # Block if cumulative risk would exceed $1,000 daily cap
     new_trade_risk = qty * stop_dist
     if cumulative_risk + new_trade_risk > 1000.0:
-        return _log_skip(data, parsed,
-            f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new >= $1,000 limit',
-            'DAILY_RISK_LIMIT')
+        _risk_cap_reason = (
+            f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new >= $1,000 limit'
+        )
+        _log_rejection(_rejection_context(
+            'DAILY_RISK_LIMIT', _risk_cap_reason,
+            data, parsed,
+            direction='LONG' if is_long else 'SHORT',
+            routed_etf=etf, session=session))
+        return _log_skip(data, parsed, _risk_cap_reason, 'DAILY_RISK_LIMIT')
 
     side      = OrderSide.BUY if is_long else OrderSide.SELL
 
@@ -1038,6 +1136,10 @@ def execute_signal(signal_result: dict) -> dict:
     Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
     Rule 5 — POSITION SIZING    broker-specific (ALPACA_ETF: floor($500/stop)).
     """
+    # Pre-extract signal payload so all rejection gates have full context
+    data   = signal_result.get('data',   {})
+    parsed = signal_result.get('parsed', {})
+
     # ── Rule 0: State engine gate — must pass before any other logic
     if not _state.can_execute():
         lockouts = _state.get('risk_lockouts') or []
@@ -1046,12 +1148,13 @@ def execute_signal(signal_result: dict) -> dict:
             if lockouts else 'execution_lock or trade_permission disabled'
         )
         print(f'[execute_signal] BLOCKED — {reason}')
+        _log_rejection(_rejection_context(
+            'STATE_GATE_BLOCKED', f'Execution blocked: {reason}', data, parsed))
         return {'status': 'skipped', 'reason': f'Execution blocked: {reason}', 'code': 'STATE_GATE_BLOCKED'}
 
     # ── Determine routed instrument from signal
-    _sig_data  = signal_result.get('data', {})
-    instrument = _sig_data.get('instrument', '').upper()
-    ticker     = _sig_data.get('ticker', '').upper()
+    instrument = data.get('instrument', '').upper()
+    ticker     = data.get('ticker', '').upper()
 
     # Route: ES/MES → SPY, NQ/MNQ → QQQ
     if instrument in ('ES', 'MES') or ticker in ('ES', 'MES', 'ES1!', 'MES1!'):
@@ -1060,21 +1163,26 @@ def execute_signal(signal_result: dict) -> dict:
         routed_etf = 'QQQ'
     else:
         print(f'[execute_signal] BLOCKED — unknown instrument: {instrument}')
+        _log_rejection(_rejection_context(
+            'UNKNOWN_INSTRUMENT', f'Unknown instrument: {instrument}', data, parsed))
         return {'status': 'skipped', 'reason': f'Unknown instrument: {instrument}', 'code': 'UNKNOWN_INSTRUMENT'}
 
     print(f'[execute_signal] Signal routed: {instrument} → {routed_etf}')
 
     # Generate or use provided signal_id; check and store for dedup
-    signal_id      = _sig_data.get('signal_id') or f"{ticker}_{now_ny().strftime('%Y%m%d_%H%M%S')}"
+    signal_id      = data.get('signal_id') or f"{ticker}_{now_ny().strftime('%Y%m%d_%H%M%S')}"
     last_signal_id = _state.get('last_signal_id')
     if last_signal_id and last_signal_id == signal_id:
         print(f'[execute_signal] BLOCKED — duplicate signal_id: {signal_id}')
+        _log_rejection(_rejection_context(
+            'DUPLICATE_SIGNAL', f'Duplicate signal_id: {signal_id}',
+            data, parsed, routed_etf=routed_etf))
         return {'status': 'skipped', 'reason': 'Duplicate signal', 'code': 'DUPLICATE_SIGNAL'}
     _state.set('last_signal_id', signal_id)
 
     # ── Snapshot time + session at moment of execution — ALWAYS server-time, never from webhook
-    ts_et        = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
-    session      = session_label()   # derived from server clock, ignores webhook payload
+    ts_et   = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
+    session = session_label()   # derived from server clock, ignores webhook payload
 
     # ── Read + (if needed) reset daily counter — persisted in donna_risk_state.json
     risk_snap     = _get_daily_state()
@@ -1084,25 +1192,35 @@ def execute_signal(signal_result: dict) -> dict:
 
     print(f'[execute_signal] {ts_et} | session={session} | daily_trades_taken={trades_today}')
 
-    parsed = signal_result.get('parsed', {})
-    data   = signal_result.get('data', {})
-
-    # ── VERDICT — non-TAKE signals not logged as skips
+    # ── VERDICT — non-TAKE signals logged for observability
     if str(parsed.get('verdict', '')).upper() != 'TAKE':
         print(f'[execute_signal] {ts_et} | BLOCKED: verdict not TAKE')
+        _log_rejection(_rejection_context(
+            'VERDICT_NOT_TAKE', f'Signal verdict is not TAKE: {parsed.get("verdict", "")}',
+            data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'verdict not TAKE'}
 
     # ── State engine — sole authority for daily trade state
     if loss_hit:
         print('[execute_signal] BLOCKED — daily loss trade hit, trading stopped for day')
+        _log_rejection(_rejection_context(
+            'DAILY_LOSS_TRADE_HIT', 'First trade was a loss — no more trades today',
+            data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'First trade loss — no more trades today', 'code': 'DAILY_LOSS_TRADE_HIT'}
 
     if trades_today >= 2:
         print('[execute_signal] BLOCKED — daily limit reached (2 trades)')
+        _log_rejection(_rejection_context(
+            'DAILY_LIMIT_REACHED', f'Daily trade limit reached ({trades_today}/2)',
+            data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'Daily trade limit reached', 'code': 'DAILY_LIMIT_REACHED'}
 
     if trades_today == 1 and first_outcome != 'WIN':
         print('[execute_signal] BLOCKED — trade 2 requires trade 1 WIN')
+        _log_rejection(_rejection_context(
+            'TRADE2_REQUIRES_WIN',
+            f'Trade 2 blocked — first trade outcome is {first_outcome!r}, requires WIN',
+            data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'Trade 2 blocked — first trade not WIN', 'code': 'TRADE2_REQUIRES_WIN'}
 
     # ── ONE POSITION AT A TIME ──────────────────────────────────
@@ -1126,6 +1244,10 @@ def execute_signal(signal_result: dict) -> dict:
         _op_blocked = _op_st.get('blocked_signals_today', [])
         _op_blocked.append(_op_blk)
         _state.set('blocked_signals_today', _op_blocked[-20:])
+        _op_syms = [p.get('symbol', '?') for p in open_positions]
+        _log_rejection(_rejection_context(
+            'POSITION_ALREADY_OPEN', f'Position already open: {_op_syms}',
+            data, parsed, direction=_op_dir, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'position_already_open', 'code': 'POSITION_ALREADY_OPEN'}
 
     # ── ORCHESTRATION LAYER ──────────────────────────────────────
@@ -1152,6 +1274,10 @@ def execute_signal(signal_result: dict) -> dict:
         _blocked = _cd_st.get('blocked_signals_today', [])
         _blocked.append(_block)
         _state.set('blocked_signals_today', _blocked[-20:])
+        _cooldown_until = _cd_st.get(f'{routed_etf.lower()}_cooldown_until', '')
+        _log_rejection(_rejection_context(
+            'COOLDOWN_ACTIVE', f'{routed_etf} on cooldown until {_cooldown_until}',
+            data, parsed, direction=_cd_dir, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': f'{routed_etf}_on_cooldown', 'code': 'COOLDOWN_ACTIVE'}
 
     # 2. Thesis conflict check
@@ -1185,6 +1311,11 @@ def execute_signal(signal_result: dict) -> dict:
                     _blocked = _tc_st.get('blocked_signals_today', [])
                     _blocked.append(_block)
                     _state.set('blocked_signals_today', _blocked[-20:])
+                    _log_rejection(_rejection_context(
+                        'THESIS_CONFLICT',
+                        f'Signal {_signal_dir} conflicts with active thesis {_active_thesis} '
+                        f'({_thesis_dir}), {_mins_since:.0f} min old — requires ≥60 min to flip',
+                        data, parsed, direction=_signal_dir, routed_etf=routed_etf, session=session))
                     return {'status': 'skipped', 'reason': 'thesis_conflict', 'code': 'THESIS_CONFLICT'}
             except Exception:
                 pass
@@ -1200,6 +1331,9 @@ def execute_signal(signal_result: dict) -> dict:
     rf = _red_folder_status()
     if rf['active']:
         print(f'[execute_signal] {ts_et} | BLOCKED RULE1: {rf["reason"]}')
+        _log_rejection(_rejection_context(
+            'RED_FOLDER_WINDOW', rf['reason'],
+            data, parsed, routed_etf=routed_etf, session=session))
         return _log_skip(data, parsed, rf['reason'], 'RED_FOLDER_WINDOW')
 
     # ── Account P&L (fetched after cheap guards pass)
@@ -1209,12 +1343,17 @@ def execute_signal(signal_result: dict) -> dict:
     # ── RULE 3: DAILY LOSS LIMIT
     loss_hit, loss_code = _check_daily_loss_limit(session, pnl_today)
     if loss_hit:
-        limit = _LOSS_LIMIT_ASIA if session == 'ASIA' else _LOSS_LIMIT_NY_LON
+        limit        = _LOSS_LIMIT_ASIA if session == 'ASIA' else _LOSS_LIMIT_NY_LON
+        _loss_reason = (
+            f'daily loss limit hit — P&L ${pnl_today:,.2f} '
+            f'(limit ${limit:,.0f}) [{session}]'
+        )
         print(f'[execute_signal] {ts_et} | BLOCKED RULE3: '
               f'P&L=${pnl_today:,.2f} limit=${limit:,.0f} session={session}')
-        return _log_skip(data, parsed,
-            f'daily loss limit hit — P&L ${pnl_today:,.2f} (limit ${limit:,.0f}) [{session}]',
-            loss_code)
+        _log_rejection(_rejection_context(
+            loss_code, _loss_reason,
+            data, parsed, routed_etf=routed_etf, session=session))
+        return _log_skip(data, parsed, _loss_reason, loss_code)
 
     # ── RULE 4: ASIA SESSION RULES
     if session == 'ASIA':
@@ -1226,18 +1365,24 @@ def execute_signal(signal_result: dict) -> dict:
             confidence_val = 0.0
 
         if confidence_val < _ASIA_MIN_CONFIDENCE:
+            _asia_conf_reason = (
+                f'Asia session requires confidence ≥ {_ASIA_MIN_CONFIDENCE:.0f}% '
+                f'— signal is {confidence_val:.1f}%'
+            )
             print(f'[execute_signal] {ts_et} | BLOCKED RULE4a: '
                   f'confidence={confidence_val:.1f}% < {_ASIA_MIN_CONFIDENCE:.0f}% (Asia minimum)')
-            return _log_skip(data, parsed,
-                f'Asia session requires confidence ≥ {_ASIA_MIN_CONFIDENCE:.0f}% '
-                f'— signal is {confidence_val:.1f}%',
-                'ASIA_CONFIDENCE_TOO_LOW')
+            _log_rejection(_rejection_context(
+                'ASIA_CONFIDENCE_TOO_LOW', _asia_conf_reason,
+                data, parsed, routed_etf=routed_etf, session=session))
+            return _log_skip(data, parsed, _asia_conf_reason, 'ASIA_CONFIDENCE_TOO_LOW')
 
         if _get_asia_trade_taken():
+            _asia_trade_reason = 'Asia session trade already taken — max 1 trade per Asia session'
             print(f'[execute_signal] {ts_et} | BLOCKED RULE4b: Asia trade already taken this session')
-            return _log_skip(data, parsed,
-                'Asia session trade already taken — max 1 trade per Asia session',
-                'ASIA_TRADE_ALREADY_TAKEN')
+            _log_rejection(_rejection_context(
+                'ASIA_TRADE_ALREADY_TAKEN', _asia_trade_reason,
+                data, parsed, routed_etf=routed_etf, session=session))
+            return _log_skip(data, parsed, _asia_trade_reason, 'ASIA_TRADE_ALREADY_TAKEN')
 
     # ── RULE 5 + ORDER — all rules passed, route to active broker
     signal  = str(data.get('signal', '')).upper()

@@ -4,7 +4,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>D.O.N.N.A v5.0</title>
+<title>NOVA v5.0</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 <style>
@@ -584,34 +584,59 @@ tr:last-child td{border-bottom:none}
 .donna-says-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px}
 .donna-says-text{font-size:12px;color:#888;line-height:1.65}
 
-/* ── ECON CALENDAR ── */
-.econ-day-header{
-  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;
-  padding:6px 0 4px;margin-top:6px;border-bottom:1px solid var(--line);margin-bottom:4px;
-}
-.econ-day-header.today{color:var(--text);font-weight:700}
-.econ-day-header.other{color:var(--muted2)}
-.econ-day-header:first-child{margin-top:0}
-.econ-event{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid var(--line2)}
-.econ-event:last-child{border-bottom:none}
-.econ-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
-.econ-dot.high{background:#f87171}.econ-dot.medium{background:#fbbf24}.econ-dot.low{background:#facc15}
-.econ-time{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);flex-shrink:0;width:34px;padding-top:2px}
-.econ-body{flex:1;min-width:0}
-.econ-title-row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
-.econ-title{font-size:11px;color:var(--text);font-weight:600;line-height:1.35}
-.econ-date-muted{font-size:9px;color:var(--muted2);font-family:'Space Mono',monospace;white-space:nowrap}
-.econ-meta{font-size:9px;color:var(--muted2);margin-top:3px;font-family:'Space Mono',monospace;line-height:1.5}
-.econ-verdict{
-  display:inline-block;margin-left:4px;padding:1px 6px;border-radius:4px;
-  font-family:'Space Mono',monospace;font-size:8px;font-weight:700;letter-spacing:.5px;vertical-align:middle;
-}
-.econ-verdict.hot{background:#7f1d1d;color:#fca5a5}
-.econ-verdict.inline{background:#374151;color:#9ca3af}
-.econ-verdict.miss{background:#14532d;color:#86efac}
+/* ── MACRO RADAR (Economic Calendar) ── */
 .econ-no-events{font-size:12px;color:var(--muted2);padding:4px 0}
-.econ-sub{display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap}
-.econ-vals{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)}
+.mre-day-sep{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 0 6px;margin-top:10px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.mre-day-sep:first-child{margin-top:0}
+.mre-day-sep.today{color:var(--text);font-weight:700}
+.mre-day-sep.other{color:var(--muted2)}
+/* Event cards */
+.macro-radar-event{border-radius:10px;margin-bottom:8px;overflow:hidden;border:1px solid var(--line);border-left:3px solid transparent}
+.macro-radar-event.impact-high{border-color:rgba(192,57,43,.25);border-left-color:var(--red)}
+.macro-radar-event.impact-high.live{box-shadow:0 0 0 1px rgba(192,57,43,.2)}
+.macro-radar-event.impact-medium{border-left-color:var(--gold)}
+.macro-radar-event.impact-low{border-left-color:var(--line);border-color:transparent}
+.macro-radar-event.released{opacity:.55}
+.mre-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;gap:8px}
+.mre-header.impact-high{background:rgba(192,57,43,.04)}
+.mre-header.impact-medium{background:rgba(184,134,11,.03)}
+.mre-header.impact-low{background:transparent;padding:6px 10px}
+.mre-impact-badge{display:flex;align-items:center;gap:5px;font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;font-weight:700}
+.mre-impact-badge.high{color:var(--red)}
+.mre-impact-badge.medium{color:var(--gold)}
+.mre-impact-badge.low{color:var(--muted2)}
+.mre-impact-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.mre-impact-dot.high{background:var(--red)}
+.mre-impact-dot.medium{background:var(--gold)}
+.mre-impact-dot.low{background:var(--muted2);opacity:.5}
+/* Countdown badges */
+.mre-countdown{font-family:'Space Mono',monospace;font-size:8px;font-weight:700;letter-spacing:.8px;padding:3px 8px;border-radius:5px;text-transform:uppercase;white-space:nowrap;flex-shrink:0}
+.mre-countdown.live{background:rgba(192,57,43,.14);color:var(--red);animation:_mrePulse 1.4s ease-in-out infinite}
+.mre-countdown.lock{background:rgba(192,57,43,.1);color:var(--red)}
+.mre-countdown.soon{background:rgba(192,57,43,.08);color:var(--red)}
+.mre-countdown.upcoming{background:rgba(184,134,11,.08);color:var(--gold)}
+.mre-countdown.future{color:var(--muted2);padding:0}
+.mre-countdown.released{color:var(--muted2);padding:0}
+@keyframes _mrePulse{0%,100%{opacity:1}50%{opacity:.5}}
+/* Card body */
+.mre-body{padding:0 12px 10px}
+.mre-title-high{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;line-height:1.2;color:var(--text);margin-bottom:5px}
+.mre-title-med{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;line-height:1.2;color:var(--text);margin-bottom:4px}
+.mre-meta-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mre-time{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);white-space:nowrap}
+.mre-vals{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)}
+.mre-verdict{display:inline-block;padding:1px 6px;border-radius:4px;font-family:'Space Mono',monospace;font-size:8px;font-weight:700}
+.mre-verdict.hot{background:rgba(192,57,43,.1);color:var(--red)}
+.mre-verdict.miss{background:rgba(30,110,65,.1);color:var(--green)}
+.mre-verdict.inline{background:rgba(0,0,0,.05);color:var(--muted2)}
+/* Gov lock bar */
+.mre-gov-bar{padding:5px 12px;border-top:1px solid rgba(192,57,43,.15);background:rgba(192,57,43,.04);display:flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:7px;color:var(--red);letter-spacing:.5px;text-transform:uppercase}
+/* Compact LOW rows */
+.mre-compact{display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px}
+.mre-compact:hover{background:var(--panel2)}
+.mre-compact .mre-time{width:34px;flex-shrink:0}
+.mre-compact-title{font-size:11px;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mre-compact-dot{width:4px;height:4px;border-radius:50%;background:var(--muted2);opacity:.4;flex-shrink:0}
 
 /* ── ASSISTANT ── */
 .donna-header{
@@ -842,6 +867,84 @@ tr:last-child td{border-bottom:none}
 .regime-card .rc-sub{font-size:11px;color:var(--muted2);margin-top:4px}
 @media(max-width:900px){.journal-stats-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:540px){.journal-stats-grid{grid-template-columns:1fr}}
+
+/* ── TRADE CARDS ── */
+.j-date-group{margin-bottom:20px}
+.j-date-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;font-weight:700;padding:6px 0;border-bottom:1px solid rgba(240,180,41,.15);margin-bottom:10px}
+.trade-card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:14px 18px;margin-bottom:10px;transition:border-color .15s;border-left:3px solid transparent}
+.trade-card:hover{border-color:rgba(184,134,11,.3)}
+.trade-card.outcome-WIN{border-left-color:var(--green)}
+.trade-card.outcome-LOSS{border-left-color:var(--red)}
+.trade-card.outcome-BREAKEVEN{border-left-color:var(--yellow)}
+.trade-card.outcome-OPEN{border-left-color:var(--muted2)}
+.tc-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.tc-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.8px;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(0,0,0,.04);color:var(--muted2);border:1px solid var(--line)}
+.tc-badge.b-auto{background:rgba(184,134,11,.08);color:var(--gold);border-color:rgba(184,134,11,.25)}
+.tc-badge.b-tier{background:rgba(30,110,65,.07);color:var(--green);border-color:rgba(30,110,65,.2)}
+.tc-main{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+.tc-ticker{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;line-height:1}
+.tc-dir{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;padding:2px 8px;border-radius:5px;margin-left:8px;vertical-align:middle}
+.tc-dir.long{background:rgba(30,110,65,.1);color:var(--green)}
+.tc-dir.short{background:rgba(192,57,43,.09);color:var(--red)}
+.tc-pnl{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1}
+.tc-time{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);text-align:right;margin-top:2px}
+.tc-exec{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:8px;letter-spacing:.3px}
+.tc-ctx{font-size:11px;color:var(--muted2);display:flex;gap:14px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px;margin-top:8px;align-items:center;line-height:1.4}
+.tc-ctx strong{color:var(--text)}
+.tc-footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.tc-outcome-badge{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;font-weight:700;padding:3px 9px;border-radius:5px;text-transform:uppercase}
+.tc-outcome-badge.WIN{background:rgba(30,110,65,.09);color:var(--green)}
+.tc-outcome-badge.LOSS{background:rgba(192,57,43,.09);color:var(--red)}
+.tc-outcome-badge.BREAKEVEN{background:rgba(184,134,11,.09);color:var(--gold)}
+.tc-outcome-badge.OPEN{background:rgba(0,0,0,.05);color:var(--muted2)}
+/* ── TOGGLE BUTTONS ── */
+.toggle-group{display:flex;gap:6px}
+.toggle-btn{flex:1;padding:10px 6px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--muted2);font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.8px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.toggle-btn:hover{border-color:var(--muted2);color:var(--text)}
+.toggle-btn.active-long{background:rgba(30,110,65,.1);border-color:var(--green);color:var(--green)}
+.toggle-btn.active-short{background:rgba(192,57,43,.08);border-color:var(--red);color:var(--red)}
+.toggle-btn.active-win{background:rgba(30,110,65,.1);border-color:var(--green);color:var(--green)}
+.toggle-btn.active-loss{background:rgba(192,57,43,.08);border-color:var(--red);color:var(--red)}
+.toggle-btn.active-be{background:rgba(184,134,11,.08);border-color:var(--gold);color:var(--gold)}
+
+/* ── EXECUTION TAB v2 ── */
+.exec-heartbeat{display:flex;align-items:center;gap:14px;padding:14px 24px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);flex-wrap:wrap}
+.exec-pulse{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.exec-pulse.active{background:var(--green);box-shadow:0 0 7px rgba(30,110,65,.5)}
+.exec-pulse.blocked{background:var(--red);box-shadow:0 0 7px rgba(192,57,43,.5)}
+.exec-pulse.paused{background:var(--yellow);box-shadow:0 0 5px rgba(184,134,11,.4)}
+.exec-pulse.offline{background:var(--muted2)}
+.exec-hb-label{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1.2px;font-weight:700;text-transform:uppercase}
+.exec-hb-sep{width:1px;height:20px;background:var(--line);flex-shrink:0}
+.exec-hb-chip{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.8px;padding:4px 11px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--muted2);text-transform:uppercase;white-space:nowrap}
+.exec-hb-chip.green{background:rgba(30,110,65,.08);border-color:rgba(30,110,65,.25);color:var(--green)}
+.exec-hb-chip.red{background:rgba(192,57,43,.08);border-color:rgba(192,57,43,.25);color:var(--red)}
+.exec-hb-chip.yellow{background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.25);color:var(--gold)}
+.exec-hb-chip.blue{background:rgba(37,99,235,.07);border-color:rgba(37,99,235,.2);color:var(--blue)}
+.exec-state-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+.exec-kv{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.exec-kv:last-child{border-bottom:none}
+.exec-kv-lab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.8px;color:var(--muted2);text-transform:uppercase;flex-shrink:0}
+.exec-kv-val{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;text-align:right;line-height:1.2}
+.exec-kv-val.mono{font-family:'Space Mono',monospace;font-size:11px;font-weight:400}
+.exec-pnl-hero{font-family:'Rajdhani',sans-serif;font-size:38px;font-weight:700;line-height:1;letter-spacing:.5px;margin-bottom:16px}
+.rej-last-card{border:1px solid rgba(192,57,43,.2);border-radius:10px;background:rgba(192,57,43,.03);padding:14px 16px}
+.rej-code-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--red);text-transform:uppercase;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.2);padding:2px 7px;border-radius:4px;display:inline-block;margin-bottom:8px}
+.rej-ticker-row{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.rej-ticker{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700}
+.rej-reason{font-size:12px;color:var(--muted);line-height:1.5}
+.rej-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.rej-bar-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.6px;color:var(--muted2);text-transform:uppercase;flex:0 0 auto;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rej-bar-track{flex:1;height:4px;border-radius:3px;background:var(--line);overflow:hidden;min-width:30px}
+.rej-bar-fill{height:100%;border-radius:3px;background:rgba(192,57,43,.6)}
+.rej-count{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);width:24px;text-align:right;flex-shrink:0}
+.sc2-cells{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.sc2-cell{text-align:center;padding:14px 8px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+.sc2-num{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1;margin-bottom:4px}
+.sc2-lab{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--muted2);text-transform:uppercase}
+.sc2-detail-cell{padding:10px 14px;background:var(--panel2);border-radius:10px;border:1px solid var(--line)}
+.sc2-detail-cell .exec-kv-lab{display:block;margin-bottom:6px}
+@media(max-width:960px){.exec-state-grid{grid-template-columns:1fr}.sc2-cells{grid-template-columns:1fr 1fr}}
 
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -1134,7 +1237,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   <!-- TOPBAR -->
   <div class="topbar">
     <div class="brand">
-      <h1>D.O.N.N.A</h1>
+      <h1>NOVA</h1>
       <span class="brand-tag">v5.0 // LIVE MARKET CORE</span>
     </div>
     <div class="top-right">
@@ -1275,13 +1378,13 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
         <!-- ECONOMIC CALENDAR -->
         <div id="dbCalendar" class="panel">
-          <div class="kicker" style="margin-bottom:10px">ECONOMIC CALENDAR</div>
+          <div class="kicker" style="margin-bottom:10px">MACRO RADAR</div>
           <div id="sidebarEconCalendar"></div>
         </div>
 
-        <!-- DONNA SAYS -->
+        <!-- NOVA SAYS -->
         <div id="dbDonnaSays" class="panel">
-          <div class="kicker" style="margin-bottom:8px">DONNA SAYS</div>
+          <div class="kicker" style="margin-bottom:8px">NOVA SAYS</div>
           <div id="dbDonnaSaysText" style="font-size:13px;color:var(--text);line-height:1.65">—</div>
         </div>
 
@@ -1385,9 +1488,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div id="sidebarNextEvent" style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2)">—</div>
           </div>
 
-          <!-- 3. ECONOMIC CALENDAR -->
+          <!-- 3. MACRO RADAR -->
           <div class="panel">
-            <div class="kicker" style="margin-bottom:10px">Economic Calendar</div>
+            <div class="kicker" style="margin-bottom:10px">Macro Radar</div>
             <div id="sidebarEconCalendar2"><div class="econ-no-events">Loading events...</div></div>
           </div>
 
@@ -1401,9 +1504,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div id="moversLosers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>
           </div>
 
-          <!-- 5. DONNA SAYS -->
+          <!-- 5. NOVA SAYS -->
           <div class="donna-says-box">
-            <div class="donna-says-label">DONNA Says</div>
+            <div class="donna-says-label">NOVA Says</div>
             <div class="donna-says-text" id="donnaSaysText">Monitoring market conditions...</div>
           </div>
 
@@ -1421,14 +1524,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
       <!-- COMMAND INTERFACE PANEL -->
       <div class="panel" style="padding:0;overflow:hidden">
 
-        <!-- DONNA HEADER -->
+        <!-- NOVA HEADER -->
         <div class="donna-header">
-          <div class="donna-logo">D.O.N.N.A</div>
+          <div class="donna-logo">NOVA</div>
           <div class="donna-online-row">
             <div class="donna-online-dot"></div>
             <span class="donna-online-text">Online</span>
           </div>
-          <div class="donna-tagline">Dynamic Operations &amp; Neural Network Assistant · Command Interface v5</div>
+          <div class="donna-tagline">Neural Operations &amp; Volatility Assistant · Command Interface v5</div>
         </div>
 
         <!-- CHAT AREA -->
@@ -1576,9 +1679,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div id="hvSectors"><div style="font-size:13px;color:var(--muted2)">Loading sectors...</div></div>
           </div>
 
-          <!-- 4. DONNA SAYS -->
+          <!-- 4. NOVA SAYS -->
           <div class="hv-donna-says">
-            <span class="hv-donna-says-label">Donna Says</span>
+            <span class="hv-donna-says-label">NOVA Says</span>
             <span id="hvDonnaSays">Loading...</span>
           </div>
 
@@ -1703,19 +1806,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <div class="kicker">History</div>
           <div class="section-title" style="margin-bottom:12px">Trade Log</div>
           <div class="j-filter-bar" id="jFilterBar"></div>
-          <div style="overflow-x:auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th><th>Time (ET)</th><th>Ticker</th><th>Dir</th><th>Entry</th><th>Exit</th>
-                  <th>Size</th><th>P&amp;L</th><th>Setup</th><th>Regime</th><th>Session</th>
-                  <th>Bias</th><th>Verdict</th><th>Outcome</th><th></th>
-                </tr>
-              </thead>
-              <tbody id="journalTableBody">
-                <tr><td colspan="15" class="neutral" style="text-align:center;padding:20px">No trades logged yet.</td></tr>
-              </tbody>
-            </table>
+          <div id="journalCardList">
+            <div style="text-align:center;padding:24px;color:var(--muted2);font-size:13px">No trades logged yet.</div>
           </div>
         </div>
 
@@ -1734,21 +1826,19 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
                 <input class="trade-input" id="jDate" type="date" />
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <div>
-                <label class="trade-label">Direction</label>
-                <select class="trade-select" id="jDirection">
-                  <option value="LONG">LONG</option>
-                  <option value="SHORT">SHORT</option>
-                </select>
+            <div>
+              <label class="trade-label">Direction</label>
+              <div class="toggle-group">
+                <button type="button" class="toggle-btn active-long" id="jDirLong" onclick="setDir(\'LONG\')">▲ LONG</button>
+                <button type="button" class="toggle-btn" id="jDirShort" onclick="setDir(\'SHORT\')">▼ SHORT</button>
               </div>
-              <div>
-                <label class="trade-label">Outcome</label>
-                <select class="trade-select" id="jOutcome">
-                  <option value="WIN">WIN</option>
-                  <option value="LOSS">LOSS</option>
-                  <option value="BREAKEVEN">BREAKEVEN</option>
-                </select>
+            </div>
+            <div>
+              <label class="trade-label">Outcome</label>
+              <div class="toggle-group">
+                <button type="button" class="toggle-btn active-win" id="jOutWin" onclick="setOutcome(\'WIN\')">WIN</button>
+                <button type="button" class="toggle-btn" id="jOutLoss" onclick="setOutcome(\'LOSS\')">LOSS</button>
+                <button type="button" class="toggle-btn" id="jOutBE" onclick="setOutcome(\'BREAKEVEN\')">BE</button>
               </div>
             </div>
             <div>
@@ -1806,85 +1896,171 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
   <div class="page" id="page-execution">
     <div class="vstack">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
 
-        <!-- EXECUTION MONITOR -->
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-            <div class="kicker" style="margin-bottom:0">EXECUTION MONITOR</div>
-            <span id="execStatusPill" class="exec-status-pill exec-status-active">
-              <span id="execStatusDot" class="exec-status-dot" style="background:var(--green)"></span>
-              <span id="execStatusText">ACTIVE</span>
-            </span>
-          </div>
-          <div id="execPnlBig" class="exec-pnl-big" style="margin-bottom:14px;color:var(--text)">—</div>
-          <div class="exec-row">
-            <span class="exec-row-label">Account Equity</span>
-            <span class="exec-row-val" id="execEquity">—</span>
-          </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Trades Today</span>
-            <span class="exec-row-val" id="execTrades">—</span>
-          </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Risk Used Today</span>
-            <span class="exec-row-val" id="execRiskUsed">—</span>
-          </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Red Folder In</span>
-            <span class="exec-row-val" id="execRedFolder">—</span>
-          </div>
-          <div class="exec-row" style="align-items:flex-start;padding-top:10px;border-bottom:none">
-            <span class="exec-row-label">Last Signal</span>
-            <div id="execLastSignal" class="exec-row-val">—</div>
-          </div>
+      <!-- ── HEARTBEAT BAR ── -->
+      <div class="exec-heartbeat">
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <div class="exec-pulse offline" id="novaPulse"></div>
+          <span class="exec-hb-label" id="novaStatusLabel">CONNECTING</span>
         </div>
-
-        <!-- SESSION SCORECARD -->
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div class="kicker" style="margin-bottom:0">SESSION SCORECARD</div>
-            <span id="donnaGrade" class="donna-grade-big" style="color:var(--muted2)">—</span>
-          </div>
-          <div id="scorecardPnlBig" class="exec-pnl-big" style="margin-bottom:10px;color:var(--text)">—</div>
-          <div class="sc-cells">
-            <div class="sc-cell"><div class="sc-cell-num up" id="scWins">0</div><div class="sc-cell-lab">Wins</div></div>
-            <div class="sc-cell"><div class="sc-cell-num dn" id="scLosses">0</div><div class="sc-cell-lab">Losses</div></div>
-            <div class="sc-cell"><div class="sc-cell-num" id="scBe" style="color:var(--muted)">0</div><div class="sc-cell-lab">B/E</div></div>
-          </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Win Rate</span>
-            <span class="exec-row-val" id="scWinRate">—</span>
-          </div>
-          <div class="exec-row">
-            <span class="exec-row-label">Best Trade</span>
-            <span class="exec-row-val up" id="scBest">—</span>
-          </div>
-          <div class="exec-row" style="border-bottom:none">
-            <span class="exec-row-label">Worst Trade</span>
-            <span class="exec-row-val dn" id="scWorst">—</span>
-          </div>
-        </div>
-
-        <!-- EXECUTION ORCHESTRATION -->
-        <div class="panel" id="orchestrationPanel">
-          <div class="kicker">EXECUTION ORCHESTRATION</div>
-          <div class="exec-row"><span class="exec-row-label">THESIS</span><span class="exec-row-val" id="orchThesis">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">THESIS AGE</span><span class="exec-row-val" id="orchThesisAge">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">SPY COOLDOWN</span><span class="exec-row-val" id="orchSpyCooldown">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">QQQ COOLDOWN</span><span class="exec-row-val" id="orchQqqCooldown">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">BLOCKED TODAY</span><span class="exec-row-val" id="orchBlocked">—</span></div>
-          <div class="exec-row"><span class="exec-row-label">LAST BLOCK</span><span class="exec-row-val" id="orchLastBlock">—</span></div>
-          <div class="exec-row" style="border-bottom:none"><span class="exec-row-label">EXPOSURE</span><span class="exec-row-val" id="orchExposure">—</span></div>
-        </div>
-
+        <div class="exec-hb-sep"></div>
+        <span class="exec-hb-chip" id="novaSessionChip">SESSION</span>
+        <span class="exec-hb-chip" id="novaMacroChip">MACRO —</span>
+        <span class="exec-hb-chip" id="novaRedFolderChip">RED FOLDER —</span>
+        <span class="exec-hb-chip" id="novaThesisChip">THESIS —</span>
+        <div style="flex:1"></div>
+        <span style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);white-space:nowrap" id="novaLastSync">—</span>
       </div>
+
+      <!-- ── SECTION 1: LIVE EXECUTION STATE ── -->
+      <div class="exec-state-grid">
+
+        <!-- Current State -->
+        <div class="panel">
+          <div class="kicker">NOVA EXECUTION STATE</div>
+          <div id="novaPnlHero" class="exec-pnl-hero" style="color:var(--muted2)">—</div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Active Thesis</span>
+            <span class="exec-kv-val" id="novaThesisVal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Market Regime</span>
+            <span class="exec-kv-val" id="novaRegimeVal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Session</span>
+            <span class="exec-kv-val" id="novaSessionVal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Trades Today</span>
+            <span class="exec-kv-val" id="novaTradesVal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Risk Used</span>
+            <span class="exec-kv-val" id="novaRiskVal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Open Exposure</span>
+            <span class="exec-kv-val" id="novaExposureVal">FLAT</span>
+          </div>
+        </div>
+
+        <!-- Governance State -->
+        <div class="panel">
+          <div class="kicker">GOVERNANCE STATE</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Active locks and cooldowns constraining execution.</div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Execution Gate</span>
+            <span class="exec-kv-val" id="novaCanExec">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Macro Lock</span>
+            <span class="exec-kv-val" id="novaMacroLock">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Red Folder</span>
+            <span class="exec-kv-val" id="novaRedFolderVal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">SPY Cooldown</span>
+            <span class="exec-kv-val mono" id="novaSpyCooldown">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">QQQ Cooldown</span>
+            <span class="exec-kv-val mono" id="novaQqqCooldown">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Thesis Age</span>
+            <span class="exec-kv-val mono" id="novaThesisAge">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SECTION 2: REJECTION INTELLIGENCE ── -->
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+          <div>
+            <div class="kicker" style="margin-bottom:4px">REJECTION INTELLIGENCE</div>
+            <div class="section-title">Blocked Signal Flow</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">Every blocked signal is logged. NOVA is self-aware.</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-family:\'Rajdhani\',sans-serif;font-size:36px;font-weight:700;line-height:1;color:var(--text)" id="rejTodayCount">—</div>
+            <div style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-top:2px">blocked today</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+
+          <!-- Last blocked signal -->
+          <div>
+            <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px">Last Blocked Signal</div>
+            <div id="rejLastCard">
+              <div style="color:var(--muted2);font-size:12px;font-style:italic">No rejections logged yet.</div>
+            </div>
+          </div>
+
+          <!-- Rejection breakdown -->
+          <div>
+            <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px">Top Rejection Reasons</div>
+            <div id="rejBreakdownList">
+              <div style="color:var(--muted2);font-size:12px;font-style:italic">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SECTION 3: SESSION SCORECARD ── -->
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div>
+            <div class="kicker" style="margin-bottom:4px">SESSION SCORECARD</div>
+            <div class="section-title">Execution Quality</div>
+          </div>
+          <span id="novaGrade" style="font-family:\'Rajdhani\',sans-serif;font-size:48px;font-weight:700;line-height:1;color:var(--muted2)">—</span>
+        </div>
+
+        <div class="sc2-cells">
+          <div class="sc2-cell">
+            <div class="sc2-num" id="sc2Taken" style="color:var(--text)">0</div>
+            <div class="sc2-lab">Taken</div>
+          </div>
+          <div class="sc2-cell">
+            <div class="sc2-num" id="sc2Blocked" style="color:var(--muted2)">—</div>
+            <div class="sc2-lab">Blocked Today</div>
+          </div>
+          <div class="sc2-cell">
+            <div class="sc2-num" id="sc2WinRate" style="color:var(--muted2)">—</div>
+            <div class="sc2-lab">Win Rate</div>
+          </div>
+          <div class="sc2-cell">
+            <div class="sc2-num" id="sc2Pnl" style="color:var(--muted2)">—</div>
+            <div class="sc2-lab">P&amp;L Today</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="sc2-detail-cell">
+            <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Best Trade</div>
+            <div class="exec-kv-val" id="sc2Best" style="text-align:left">—</div>
+          </div>
+          <div class="sc2-detail-cell">
+            <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Worst Trade</div>
+            <div class="exec-kv-val" id="sc2Worst" style="text-align:left">—</div>
+          </div>
+          <div class="sc2-detail-cell">
+            <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Governance Actions</div>
+            <div class="exec-kv-val mono" id="sc2GovActions" style="text-align:left">—</div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
   <!-- FOOTER -->
   <div class="footer">
-    <span>D.O.N.N.A v5.0 // LIVE MARKET CORE</span>
+    <span>NOVA v5.0 // LIVE MARKET CORE</span>
     <span id="lastUpdated">Connecting...</span>
   </div>
 
@@ -2081,7 +2257,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
-    if (btn.dataset.page === 'execution') { refreshExecMonitor(); refreshSessionScorecard(); refreshOrchestration(); }
+    if (btn.dataset.page === 'execution') { refreshExecutionTab(); }
   });
 });
 
@@ -2759,16 +2935,18 @@ async function refreshTrendingMovers() {
 
 
 // ════════ ECON CALENDAR ════════
+// ════════ MACRO RADAR (Economic Calendar) ════════
 function renderEconCalendar(events) {
-  console.log('renderEconCalendar called with', events.length, 'events', events);
-  const el = document.getElementById('sidebarEconCalendar') || document.getElementById('sidebarEconCalendar2');
-  if (!el) return;
+  const targets = [
+    document.getElementById('sidebarEconCalendar'),
+    document.getElementById('sidebarEconCalendar2'),
+  ].filter(Boolean);
+  if (!targets.length) return;
 
-  const nyNow   = new Date(new Date().toLocaleString('en-US', { timeZone:'America/New_York' }));
+  const nyNow    = new Date(new Date().toLocaleString('en-US', { timeZone:'America/New_York' }));
   const todayStr = nyNow.toISOString().slice(0,10);
   const nowMin   = nyNow.getHours() * 60 + nyNow.getMinutes();
 
-  // Build Mon–Fri dates for this week
   const dow = nyNow.getDay();
   const monOffset = dow === 0 ? -6 : 1 - dow;
   const weekDays = [];
@@ -2787,7 +2965,6 @@ function renderEconCalendar(events) {
     return `${DAY_ABBR[dt.getDay()]} ${MON_ABBR[dt.getMonth()]} ${d}`;
   }
 
-  // Group events by date
   const byDate = {};
   (events || []).forEach(ev => {
     const k = (ev.date || todayStr).slice(0,10);
@@ -2795,53 +2972,102 @@ function renderEconCalendar(events) {
     byDate[k].push(ev);
   });
 
-  function verdict(ev) {
+  function _verdictHtml(ev) {
     const a = parseFloat(ev.actual), f = parseFloat(ev.forecast);
     if (isNaN(a) || isNaN(f) || f === 0) return '';
     const diff = (a - f) / Math.abs(f);
-    if (diff >  0.05) return '<span class="econ-verdict hot">HOT</span>';
-    if (diff < -0.05) return '<span class="econ-verdict miss">MISS</span>';
-    return '<span class="econ-verdict inline">INLINE</span>';
+    if (diff >  0.05) return '<span class="mre-verdict hot">HOT</span>';
+    if (diff < -0.05) return '<span class="mre-verdict miss">MISS</span>';
+    return '<span class="mre-verdict inline">INLINE</span>';
   }
 
-  function evRow(ev, isToday) {
-    const imp    = (ev.importance || 'low').toLowerCase();
-    const dotCls = imp === 'high' ? 'high' : imp === 'medium' ? 'medium' : 'low';
-    const [hh,mm]= (ev.time_et || '00:00').split(':').map(Number);
-    const isPast = isToday && (hh * 60 + mm) <= nowMin;
-    let sub = '';
-    if (isToday && isPast) {
-      const a = ev.actual   != null ? ev.actual   : '—';
-      const f = ev.forecast != null ? ev.forecast : '—';
-      sub = `<div class="econ-sub"><span class="econ-vals">A:${a} · F:${f}</span>${verdict(ev)}</div>`;
-    } else if (ev.forecast != null || ev.previous != null) {
-      const parts = [];
-      if (ev.forecast != null) parts.push(`F:${ev.forecast}`);
-      if (ev.previous != null) parts.push(`P:${ev.previous}`);
-      sub = `<div class="econ-sub"><span class="econ-vals">${parts.join(' · ')}</span></div>`;
+  function _countdown(evMin, hasActual, isToday) {
+    if (!isToday) return null;
+    const diff = evMin - nowMin;
+    if (hasActual || diff < -45) return { label: 'RELEASED', cls: 'released' };
+    if (diff < 0)               return { label: 'POST EVENT', cls: 'released' };
+    if (diff === 0)             return { label: 'LIVE NOW',   cls: 'live' };
+    if (diff <= 5)              return { label: 'IMMINENT',   cls: 'live' };
+    if (diff <= 20)             return { label: `IN ${diff} MIN`, cls: 'soon' };
+    if (diff <= 90)             return { label: `IN ${diff} MIN`, cls: 'upcoming' };
+    const h = Math.floor(diff / 60), m = diff % 60;
+    return { label: `IN ${h}h${m ? ` ${m}m` : ''}`, cls: 'future' };
+  }
+
+  function evCard(ev, isToday) {
+    const imp      = (ev.importance || 'low').toLowerCase();
+    const isHigh   = imp === 'high';
+    const isMedium = imp === 'medium';
+    const [hh, mm] = (ev.time_et || '00:00').split(':').map(Number);
+    const evMin    = hh * 60 + mm;
+    const hasActual = ev.actual != null && ev.actual !== '' && ev.actual !== '—';
+    const cd       = _countdown(evMin, hasActual, isToday);
+    const isLive   = cd && cd.cls === 'live';
+    const isRel    = cd && cd.cls === 'released';
+
+    // Data values row
+    const valParts = [];
+    if (hasActual)            valParts.push(`A: ${ev.actual}`);
+    if (ev.forecast != null)  valParts.push(`F: ${ev.forecast}`);
+    if (ev.previous != null && !hasActual) valParts.push(`P: ${ev.previous}`);
+    const valsHtml    = valParts.length ? `<span class="mre-vals">${valParts.join(' · ')}</span>` : '';
+    const verdictHtml = hasActual ? _verdictHtml(ev) : '';
+
+    const cdHtml = cd ? `<span class="mre-countdown ${cd.cls}">${cd.label}</span>` : '';
+
+    // LOW — compact inline row
+    if (!isHigh && !isMedium) {
+      return `<div class="macro-radar-event impact-low${isRel?' released':''}">
+  <div class="mre-compact">
+    <span class="mre-compact-dot"></span>
+    <span class="mre-time">${ev.time_et || '?'}</span>
+    <span class="mre-compact-title">${ev.title || '—'}</span>
+    ${valsHtml}
+    ${cdHtml}
+  </div>
+</div>`;
     }
-    return `<div class="econ-event">
-      <div class="econ-dot ${dotCls}"></div>
-      <div class="econ-time">${ev.time_et || '?'}</div>
-      <div class="econ-body"><div class="econ-title">${ev.title || '—'}</div>${sub}</div>
-    </div>`;
+
+    // MEDIUM / HIGH — full card
+    const govBar = isHigh && !isRel
+      ? `<div class="mre-gov-bar">⚠ RED FOLDER WINDOW · EXECUTION MAY LOCK DURING THIS EVENT</div>`
+      : '';
+    const cardCls = `macro-radar-event impact-${imp}${isLive ? ' live' : ''}${isRel ? ' released' : ''}`;
+
+    return `<div class="${cardCls}">
+  <div class="mre-header impact-${imp}">
+    <div class="mre-impact-badge ${imp}">
+      <div class="mre-impact-dot ${imp}"></div>${imp.toUpperCase()}
+    </div>
+    ${cdHtml}
+  </div>
+  <div class="mre-body">
+    <div class="${isHigh ? 'mre-title-high' : 'mre-title-med'}">${ev.title || '—'}</div>
+    <div class="mre-meta-row">
+      <span class="mre-time">${ev.time_et || '?'} ET</span>
+      ${valsHtml}${verdictHtml}
+    </div>
+  </div>
+  ${govBar}
+</div>`;
   }
 
   let html = '';
   for (const ds of weekDays) {
-    const dayEvts = byDate[ds] || [];
+    const dayEvts = (byDate[ds] || []).sort((a, b) => (a.time_et || '').localeCompare(b.time_et || ''));
     const isToday = ds === todayStr;
     if (!isToday && !dayEvts.length) continue;
-    const label = isToday ? `TODAY — ${dayLabel(ds)}` : dayLabel(ds);
-    html += `<div class="econ-day-header ${isToday ? 'today' : 'other'}">${label}</div>`;
+    const todayLabel = `▶ TODAY · ${dayLabel(ds)}`;
+    html += `<div class="mre-day-sep ${isToday ? 'today' : 'other'}">${isToday ? todayLabel : dayLabel(ds)}</div>`;
     if (dayEvts.length) {
-      html += dayEvts.map(ev => evRow(ev, isToday)).join('');
+      html += dayEvts.map(ev => evCard(ev, isToday)).join('');
     } else {
       html += '<div class="econ-no-events">No scheduled events</div>';
     }
   }
 
-  el.innerHTML = html || '<div class="econ-no-events">No events this week</div>';
+  const final = html || '<div class="econ-no-events">No events this week</div>';
+  targets.forEach(el => { el.innerHTML = final; });
 }
 
 async function refreshEconCalendar() {
@@ -2941,7 +3167,7 @@ function renderNews(d) {
   if (donnaSays) setText('donnaSaysText', donnaSays);
 }
 
-// ════════ EXEC MONITOR + SESSION SCORECARD ════════
+// ════════ EXECUTION TAB v2 ════════
 function _fmtPnl(v) {
   const n = parseFloat(v);
   if (v == null || isNaN(n)) return '—';
@@ -2952,218 +3178,261 @@ function _fmtUsd(v) {
   if (v == null || isNaN(n)) return '—';
   return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
-function _donnaGrade(winRate, todayPnl) {
+function _execGrade(winRate, todayPnl) {
   if (winRate >= 65 && todayPnl > 0) return 'A';
   if (winRate >= 50 && todayPnl >= 0) return 'B';
   if (winRate >= 40) return 'C';
   return 'D';
 }
+function _setChip(id, text, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'exec-hb-chip' + (cls ? ' ' + cls : '');
+}
+function _setKv(id, text, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (color) el.style.color = color;
+}
 
-async function refreshExecMonitor() {
-  const _setExecPlaceholder = (msg) => {
-    const pillEl = document.getElementById('execStatusPill');
-    const dotEl  = document.getElementById('execStatusDot');
-    const txtEl  = document.getElementById('execStatusText');
-    if (pillEl) pillEl.className = 'exec-status-pill exec-status-paused';
-    if (dotEl)  dotEl.style.background = 'var(--muted2)';
-    if (txtEl)  txtEl.textContent = 'CONNECTING';
-    const pnlEl = document.getElementById('execPnlBig');
-    if (pnlEl) { pnlEl.textContent = '$0.00'; pnlEl.style.color = 'var(--muted)'; }
-    ['execEquity','execTrades'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) { el.textContent = '—'; el.style.color = 'var(--muted2)'; }
-    });
-    const rfEl = document.getElementById('execRedFolder');
-    if (rfEl) { rfEl.textContent = 'Checking schedule...'; rfEl.style.color = 'var(--muted2)'; }
-    const sigEl = document.getElementById('execLastSignal');
-    if (sigEl) { sigEl.textContent = msg; sigEl.style.color = 'var(--muted2)'; }
-  };
+async function refreshExecutionTab() {
   try {
-    const res = await fetch('/execution-status');
-    if (!res.ok) { _setExecPlaceholder('Execution monitor — connect Alpaca to activate'); return; }
-    const s = await res.json();
-    if (!s.available) {
-      _setExecPlaceholder('Execution monitor offline — Alpaca credentials not configured');
-      return;
-    }
+    // Parallel fetch: orchestration + execution-status + rejections + journal
+    const [orchRes, execRes, rejRes, jRes] = await Promise.all([
+      fetch('/orchestration-status'),
+      fetch('/execution-status'),
+      fetch('/execution/rejections?limit=50'),
+      fetch('/journal/data'),
+    ]);
 
-    const pillEl = document.getElementById('execStatusPill');
-    const dotEl  = document.getElementById('execStatusDot');
-    const txtEl  = document.getElementById('execStatusText');
-    if (s.daily_loss_limit_hit) {
-      if (pillEl) pillEl.className = 'exec-status-pill exec-status-blocked';
-      if (dotEl)  dotEl.style.background = 'var(--red)';
-      if (txtEl)  txtEl.textContent = 'BLOCKED';
-    } else if (s.red_folder_window_active) {
-      if (pillEl) pillEl.className = 'exec-status-pill exec-status-paused';
-      if (dotEl)  dotEl.style.background = 'var(--yellow)';
-      if (txtEl)  txtEl.textContent = 'PAUSED';
-    } else {
-      if (pillEl) pillEl.className = 'exec-status-pill exec-status-active';
-      if (dotEl)  dotEl.style.background = 'var(--green)';
-      if (txtEl)  txtEl.textContent = 'ACTIVE';
-    }
+    const orch = orchRes.ok  ? await orchRes.json() : null;
+    const exec = execRes.ok  ? await execRes.json() : null;
+    const rej  = rejRes.ok   ? await rejRes.json()  : null;
+    const j    = jRes.ok     ? await jRes.json()    : null;
 
-    const pnl   = s.current_pnl_today ?? s.account?.pnl_today;
-    const pnlEl = document.getElementById('execPnlBig');
-    if (pnlEl) {
-      pnlEl.textContent = _fmtPnl(pnl);
-      const n = parseFloat(pnl);
-      pnlEl.style.color = isNaN(n) ? 'var(--muted)' : n >= 0 ? 'var(--green)' : 'var(--red)';
-    }
+    _renderHeartbeat(orch, exec);
+    _renderExecutionState(orch, exec);
+    _renderGovernanceState(orch, exec);
+    _renderRejections(rej);
+    _renderSessionScorecard(j, rej);
 
-    const eqEl = document.getElementById('execEquity');
-    if (eqEl) { eqEl.textContent = _fmtUsd(s.account?.equity); eqEl.style.color = 'var(--text)'; }
-
-    const trEl = document.getElementById('execTrades');
-    if (trEl) { trEl.textContent = s.daily_trades_taken != null ? `${s.daily_trades_taken} today` : '0 today'; trEl.style.color = 'var(--text)'; }
-
-    const rfEl = document.getElementById('execRedFolder');
-    if (rfEl) {
-      if (s.red_folder_window_active) {
-        rfEl.textContent = 'ACTIVE NOW';
-        rfEl.style.color = 'var(--red)';
-      } else if (s.minutes_to_next_event != null) {
-        const mins = Math.round(parseFloat(s.minutes_to_next_event));
-        rfEl.textContent = mins > 0 ? `${mins} min — ${s.next_red_folder_event || ''}` : 'Imminent';
-        rfEl.style.color = mins <= 15 ? 'var(--yellow)' : 'var(--text)';
-      } else {
-        rfEl.textContent = 'No event scheduled';
-        rfEl.style.color = 'var(--muted)';
-      }
-    }
+    const syncEl = document.getElementById('novaLastSync');
+    if (syncEl) syncEl.textContent = 'Synced ' + new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true}) + ' ET';
   } catch(e) {
-    _setExecPlaceholder('Execution monitor — connecting...');
-    console.error('refreshExecMonitor failed:', e);
+    console.error('refreshExecutionTab failed:', e);
   }
 }
 
-async function refreshSessionScorecard() {
-  const _setScorecardPlaceholder = (msg) => {
-    const pnlEl = document.getElementById('scorecardPnlBig');
-    if (pnlEl) { pnlEl.textContent = '$0.00'; pnlEl.style.color = 'var(--muted2)'; }
-    const gradeEl = document.getElementById('donnaGrade');
-    if (gradeEl) { gradeEl.textContent = '—'; gradeEl.style.color = 'var(--muted2)'; }
-    const wEl = document.getElementById('scWins');   if (wEl) wEl.textContent = '0';
-    const lEl = document.getElementById('scLosses'); if (lEl) lEl.textContent = '0';
-    const bEl = document.getElementById('scBe');     if (bEl) bEl.textContent = '0';
-    const wrEl = document.getElementById('scWinRate'); if (wrEl) wrEl.textContent = '—';
-    const bestEl  = document.getElementById('scBest');  if (bestEl)  bestEl.textContent  = '—';
-    const worstEl = document.getElementById('scWorst'); if (worstEl) worstEl.textContent = '—';
-    const wmEl = document.getElementById('scWhatMatters');
-    if (wmEl) { wmEl.textContent = msg; wmEl.style.color = 'var(--muted2)'; }
-  };
-  try {
-    const [jRes, sRes] = await Promise.all([fetch('/journal/data'), fetch('/execution-status')]);
-    const j = jRes.ok ? await jRes.json() : null;
-    const s = sRes.ok ? await sRes.json() : null;
+function _renderHeartbeat(orch, exec) {
+  const pulseEl = document.getElementById('novaPulse');
+  const labelEl = document.getElementById('novaStatusLabel');
 
-    if (!j) { _setScorecardPlaceholder('Session scorecard — connecting...'); return; }
+  const canExec   = orch?.can_execute !== false;
+  const macroLock = orch?.macro_lock;
+  const rfLock    = orch?.red_folder_lock;
+  const daily     = exec?.daily_loss_limit_hit;
 
-    const trades = j?.trades || [];
-    const stats  = j?.stats  || {};
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'OPEN');
+  let pulseClass = 'active', labelText = 'ACTIVE';
+  if (daily || macroLock) { pulseClass = 'blocked'; labelText = 'BLOCKED'; }
+  else if (rfLock)        { pulseClass = 'paused';  labelText = 'PAUSED'; }
+  else if (!exec?.available) { pulseClass = 'offline'; labelText = 'OFFLINE'; }
 
-    // Bug 6: today P&L — only sum realized_pnl from WIN and LOSS trades, never OPEN or null
-    const todayPnl = todayTrades
-      .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS')
-      .reduce((sum, t) => {
-        const v = parseFloat(t.realized_pnl ?? t.pnl ?? 'x');
-        return sum + (isNaN(v) ? 0 : v);
-      }, 0);
+  if (pulseEl) pulseEl.className = 'exec-pulse ' + pulseClass;
+  if (labelEl) { labelEl.textContent = labelText; labelEl.style.color = pulseClass === 'active' ? 'var(--green)' : pulseClass === 'blocked' ? 'var(--red)' : pulseClass === 'paused' ? 'var(--gold)' : 'var(--muted2)'; }
 
-    if (todayTrades.length === 0) {
-      _setScorecardPlaceholder('No trades today — scorecard updates after first trade');
-      return;
-    }
+  // Session chip
+  const session = exec?.session || orch?.session || (_lastDashData?.risk?.donna_session) || '';
+  const sessMap = {NEW_YORK_CASH:'NY CASH',LONDON:'LONDON',ASIA:'ASIA',OFF_HOURS:'OFF HOURS'};
+  const sessColMap = {NEW_YORK_CASH:'green',LONDON:'blue',ASIA:'yellow',OFF_HOURS:''};
+  _setChip('novaSessionChip', sessMap[session] || session || 'SESSION', sessColMap[session] || '');
 
-    const pnlEl = document.getElementById('scorecardPnlBig');
-    if (pnlEl) {
-      pnlEl.textContent = _fmtPnl(todayPnl);
-      pnlEl.style.color = todayPnl >= 0 ? 'var(--green)' : 'var(--red)';
-    }
+  // Macro chip
+  const macro = (_lastDashData?.risk?.macro_risk || '').toUpperCase();
+  _setChip('novaMacroChip', 'MACRO ' + (macro || '—'), macro === 'HIGH' ? 'red' : macro === 'MEDIUM' ? 'yellow' : macro === 'LOW' ? 'green' : '');
 
-    const tw = todayTrades.filter(t => t.outcome === 'WIN').length;
-    const tl = todayTrades.filter(t => t.outcome === 'LOSS').length;
-    const tb = todayTrades.filter(t => t.outcome === 'BREAKEVEN').length;
-    // Bug 7: win rate denominator = only WIN + LOSS (exclude BREAKEVEN from rate)
-    const tt = tw + tl;
-    const twr = tt > 0 ? Math.round(tw / tt * 100) : 0;
+  // Red folder chip
+  _setChip('novaRedFolderChip', rfLock === true ? 'RED FOLDER ACTIVE' : rfLock === 'APPROACHING' ? 'RED FOLDER SOON' : 'RED FOLDER CLEAR', rfLock === true ? 'red' : rfLock === 'APPROACHING' ? 'yellow' : 'green');
 
-    const wEl = document.getElementById('scWins');   if (wEl) wEl.textContent = tw;
-    const lEl = document.getElementById('scLosses'); if (lEl) lEl.textContent = tl;
-    const bEl = document.getElementById('scBe');     if (bEl) bEl.textContent = tb;
-    const wrEl = document.getElementById('scWinRate');
-    if (wrEl) wrEl.textContent = tt > 0 ? `${twr}%  (${tw}W / ${tl}L)` : '—';
+  // Thesis chip
+  const thesis = orch?.active_thesis || '—';
+  const thesisDir = orch?.thesis_direction || '';
+  _setChip('novaThesisChip', 'THESIS ' + thesis + (thesisDir ? ' ' + thesisDir : ''), thesis === 'NEUTRAL' || thesis === '—' ? '' : 'blue');
+}
 
-    const todayPnls = todayTrades
-      .map(t => parseFloat(t.realized_pnl ?? t.pnl ?? 'x'))
-      .filter(n => !isNaN(n));
-    const bestEl  = document.getElementById('scBest');
-    const worstEl = document.getElementById('scWorst');
-    if (todayPnls.length) {
-      if (bestEl)  bestEl.textContent  = _fmtPnl(Math.max(...todayPnls));
-      if (worstEl) worstEl.textContent = _fmtPnl(Math.min(...todayPnls));
+function _renderExecutionState(orch, exec) {
+  const pnl = exec?.current_pnl_today ?? exec?.account?.pnl_today;
+  const pnlEl = document.getElementById('novaPnlHero');
+  if (pnlEl) {
+    pnlEl.textContent = _fmtPnl(pnl);
+    const n = parseFloat(pnl);
+    pnlEl.style.color = isNaN(n) ? 'var(--muted2)' : n >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+
+  const thesis = orch?.active_thesis || '—';
+  const thesisDir = orch?.thesis_direction || '';
+  _setKv('novaThesisVal', thesis + (thesisDir ? ' · ' + thesisDir : ''), thesis === 'NEUTRAL' || thesis === '—' ? 'var(--muted2)' : 'var(--blue)');
+
+  const regime = (_lastDashData?.risk?.active_regime) || exec?.regime || '—';
+  const rCol = {TRENDING_UP:'var(--green)',TRENDING_DOWN:'var(--red)',RANGING:'var(--yellow)',VOLATILE:'var(--red)',EVENT_DRIVEN:'var(--gold)',UNKNOWN:'var(--muted2)'};
+  _setKv('novaRegimeVal', regime.replace(/_/g,' '), rCol[regime] || 'var(--text)');
+
+  const session = exec?.session || (_lastDashData?.risk?.donna_session) || '';
+  const sessMap = {NEW_YORK_CASH:'NY CASH',LONDON:'LONDON',ASIA:'ASIA',OFF_HOURS:'OFF HOURS'};
+  _setKv('novaSessionVal', sessMap[session] || session || '—');
+
+  _setKv('novaTradesVal', exec?.daily_trades_taken != null ? exec.daily_trades_taken + ' today' : '—');
+  _setKv('novaRiskVal', exec?.risk_used_today != null ? _fmtUsd(exec.risk_used_today) + ' / $1,000' : '—');
+
+  const positions = orch?.open_positions || [];
+  const liveExp   = orch?.live_alpaca_exposure || [];
+  const posStr = positions.length ? positions.map(p => (p.symbol || p.ticker || '?') + (p.side ? ' ' + p.side : '')).join(', ')
+               : liveExp.length   ? liveExp.map(p => (p.symbol || '?') + (p.side ? ' ' + p.side : '')).join(', ')
+               : 'FLAT';
+  _setKv('novaExposureVal', posStr, positions.length || liveExp.length ? 'var(--text)' : 'var(--muted2)');
+}
+
+function _renderGovernanceState(orch, exec) {
+  const canExec = orch?.can_execute !== false;
+  _setKv('novaCanExec', canExec ? 'OPEN' : 'BLOCKED', canExec ? 'var(--green)' : 'var(--red)');
+
+  const macroLock = orch?.macro_lock;
+  _setKv('novaMacroLock', macroLock ? 'LOCKED' : 'CLEAR', macroLock ? 'var(--red)' : 'var(--green)');
+
+  const rf = orch?.red_folder_lock;
+  const rfTxt = rf === true ? 'ACTIVE' : rf === 'APPROACHING' ? 'APPROACHING' : 'CLEAR';
+  _setKv('novaRedFolderVal', rfTxt, rf === true ? 'var(--red)' : rf === 'APPROACHING' ? 'var(--gold)' : 'var(--green)');
+
+  const spyMins = orch?.spy_cooldown_remaining_minutes;
+  _setKv('novaSpyCooldown', spyMins > 0 ? spyMins + ' min remaining' : 'CLEAR', spyMins > 0 ? 'var(--gold)' : 'var(--green)');
+
+  const qqqMins = orch?.qqq_cooldown_remaining_minutes;
+  _setKv('novaQqqCooldown', qqqMins > 0 ? qqqMins + ' min remaining' : 'CLEAR', qqqMins > 0 ? 'var(--gold)' : 'var(--green)');
+
+  const thesisAge = orch?.thesis_age_minutes;
+  _setKv('novaThesisAge', thesisAge != null ? Math.round(thesisAge) + ' min ago' : '—');
+}
+
+function _renderRejections(rej) {
+  if (!rej) return;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const records  = rej.records || [];
+  const todayRecs = records.filter(r => (r.timestamp_et || r.timestamp || '').startsWith(todayStr));
+  const totalToday = todayRecs.length;
+
+  const countEl = document.getElementById('rejTodayCount');
+  if (countEl) { countEl.textContent = totalToday; countEl.style.color = totalToday > 0 ? 'var(--red)' : 'var(--muted2)'; }
+
+  // Last blocked signal card
+  const last = records[0];
+  const lastEl = document.getElementById('rejLastCard');
+  if (lastEl) {
+    if (!last) {
+      lastEl.innerHTML = '<div style="color:var(--muted2);font-size:12px;font-style:italic">No rejections logged yet.</div>';
     } else {
-      if (bestEl)  bestEl.textContent  = '—';
-      if (worstEl) worstEl.textContent = '—';
+      const code    = last.rejection_code || 'UNKNOWN';
+      const ticker  = last.ticker || '—';
+      const dir     = last.direction || '';
+      const conf    = last.confidence ? last.confidence + ' conf' : '';
+      const sess    = (last.session || '').replace(/_/g,' ');
+      const reason  = last.rejection_reason || last.rejection_code || '—';
+      const tsRaw   = last.timestamp_et || last.timestamp || '';
+      const tsDisp  = tsRaw ? tsRaw.slice(0,16).replace('T',' ') : '—';
+      const setup   = last.setup_type || '';
+      const dirIcon = dir === 'LONG' ? '▲' : dir === 'SHORT' ? '▼' : '';
+      const dirCol  = dir === 'LONG' ? 'var(--green)' : dir === 'SHORT' ? 'var(--red)' : 'var(--muted2)';
+      lastEl.innerHTML = `<div class="rej-last-card">
+  <span class="rej-code-badge">${code}</span>
+  <div class="rej-ticker-row">
+    <span class="rej-ticker">${ticker}</span>
+    ${dir ? `<span style="font-family:'Space Mono',monospace;font-size:10px;font-weight:700;color:${dirCol}">${dirIcon} ${dir}</span>` : ''}
+    ${conf ? `<span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)">${conf}</span>` : ''}
+  </div>
+  <div class="rej-reason">${reason}</div>
+  <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+    ${setup ? `<span style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);background:var(--panel);border:1px solid var(--line);padding:2px 7px;border-radius:4px">${setup}</span>` : ''}
+    ${sess  ? `<span style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);background:var(--panel);border:1px solid var(--line);padding:2px 7px;border-radius:4px">${sess}</span>` : ''}
+    <span style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);margin-left:auto">${tsDisp}</span>
+  </div>
+</div>`;
     }
+  }
 
-    const grade   = _donnaGrade(twr, todayPnl);
-    const gradeEl = document.getElementById('donnaGrade');
-    if (gradeEl) {
-      gradeEl.textContent = grade;
-      gradeEl.style.color = {A:'var(--green)',B:'var(--blue)',C:'var(--yellow)',D:'var(--red)'}[grade] || 'var(--muted2)';
+  // Rejection breakdown bars
+  const byCode = rej.by_code || {};
+  const breakdownEl = document.getElementById('rejBreakdownList');
+  if (breakdownEl) {
+    const entries = Object.entries(byCode).sort((a,b) => b[1] - a[1]).slice(0, 8);
+    const maxVal  = entries[0]?.[1] || 1;
+    if (!entries.length) {
+      breakdownEl.innerHTML = '<div style="color:var(--muted2);font-size:12px;font-style:italic">No rejection history.</div>';
+    } else {
+      breakdownEl.innerHTML = entries.map(([code, count]) => {
+        const pct = Math.round(count / maxVal * 100);
+        const friendly = {
+          THESIS_CONFLICT:'Thesis Conflict', COOLDOWN_ACTIVE:'Cooldown Active',
+          RED_FOLDER_WINDOW:'Red Folder', MACRO_RISK:'Macro Risk',
+          DAILY_LOSS_LIMIT_HIT:'Daily Loss Limit', DUPLICATE_SIGNAL:'Duplicate Signal',
+          VERDICT_NOT_TAKE:'Verdict: No Take', POSITION_ALREADY_OPEN:'Already In Position',
+          TRADE2_REQUIRES_WIN:'Trade 2 Requires Win', DAILY_RISK_LIMIT:'Daily Risk Cap',
+          ASIA_CONFIDENCE_TOO_LOW:'Asia Conf Low', ASIA_TRADE_ALREADY_TAKEN:'Asia Limit',
+          UNKNOWN_INSTRUMENT:'Unknown Instrument', STATE_GATE_BLOCKED:'State Gate',
+        }[code] || code.replace(/_/g,' ');
+        return `<div class="rej-bar-row">
+  <span class="rej-bar-label">${friendly}</span>
+  <div class="rej-bar-track"><div class="rej-bar-fill" style="width:${pct}%"></div></div>
+  <span class="rej-count">${count}</span>
+</div>`;
+      }).join('');
     }
-
-    // Last DONNA_AUTO signal → Execution Monitor last signal cell
-    const auto = [...trades].reverse().find(t => t.source === 'DONNA_AUTO');
-    const sigEl = document.getElementById('execLastSignal');
-    if (sigEl) {
-      if (auto) {
-        const verdict = auto.harvey_verdict || auto.outcome || '—';
-        const vclr = verdict === 'TAKE' || verdict === 'WIN' ? 'var(--green)'
-                   : verdict === 'LOSS' ? 'var(--red)' : 'var(--yellow)';
-        const conf = auto.confidence ? `<span style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted2);margin-left:4px">${auto.confidence}</span>` : '';
-        const ts   = auto.time || (auto.timestamp || '').slice(11,16);
-        sigEl.innerHTML = `<span style="font-weight:700">${auto.ticker || '—'}</span>
-          <span style="font-family:Space Mono,monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(128,128,128,.1);color:${vclr};margin-left:4px">${verdict}</span>${conf}
-          <div style="font-size:11px;color:var(--muted2);margin-top:2px">${ts}</div>`;
-      } else {
-        sigEl.textContent = 'No auto trades yet';
-        sigEl.style.color = 'var(--muted2)';
-      }
-    }
-
-    // What matters now — pull from cached dashboard data
-    const wmEl = document.getElementById('scWhatMatters');
-    if (wmEl) {
-      const wm = _lastDashData?.what_matters_now;
-      wmEl.textContent = wm?.headline || wm?.summary || '—';
-    }
-
-  } catch(e) {
-    _setScorecardPlaceholder('Session scorecard — connecting...');
-    console.error('refreshSessionScorecard failed:', e);
   }
 }
 
-// ════════ ORCHESTRATION REFRESH ════════
-async function refreshOrchestration() {
-  try {
-    const res = await fetch('/orchestration-status');
-    if (!res.ok) return;
-    const d = await res.json();
-    setText('orchThesis', (d.active_thesis || '—') + (d.thesis_direction ? ' ' + d.thesis_direction : ''));
-    setText('orchThesisAge', d.thesis_age_minutes != null ? d.thesis_age_minutes + ' min ago' : '—');
-    setText('orchSpyCooldown', d.spy_cooldown_remaining_minutes != null && d.spy_cooldown_remaining_minutes > 0 ? d.spy_cooldown_remaining_minutes + ' min' : 'CLEAR');
-    setText('orchQqqCooldown', d.qqq_cooldown_remaining_minutes != null && d.qqq_cooldown_remaining_minutes > 0 ? d.qqq_cooldown_remaining_minutes + ' min' : 'CLEAR');
-    setText('orchBlocked', (d.blocked_signals_today || []).length + ' signals');
-    setText('orchLastBlock', d.last_block_reason || '—');
-    const exp = (d.open_positions || []).map(p => p.symbol + ' ' + p.side).join(', ');
-    setText('orchExposure', exp || 'FLAT');
-  } catch(e) {}
+function _renderSessionScorecard(j, rej) {
+  const trades    = j?.trades || [];
+  const todayStr  = new Date().toISOString().slice(0, 10);
+  const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'OPEN');
+
+  const todayPnl = todayTrades
+    .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS')
+    .reduce((sum, t) => {
+      const v = parseFloat(t.realized_pnl ?? t.pnl ?? 'x');
+      return sum + (isNaN(v) ? 0 : v);
+    }, 0);
+
+  const tw = todayTrades.filter(t => t.outcome === 'WIN').length;
+  const tl = todayTrades.filter(t => t.outcome === 'LOSS').length;
+  const tt = tw + tl;
+  const twr = tt > 0 ? Math.round(tw / tt * 100) : 0;
+
+  const takenEl = document.getElementById('sc2Taken');
+  if (takenEl) { takenEl.textContent = todayTrades.length; takenEl.style.color = todayTrades.length > 0 ? 'var(--text)' : 'var(--muted2)'; }
+
+  const rejCount = (rej?.records || []).filter(r => (r.timestamp_et || r.timestamp || '').startsWith(todayStr)).length;
+  const blockedEl = document.getElementById('sc2Blocked');
+  if (blockedEl) { blockedEl.textContent = rejCount; blockedEl.style.color = rejCount > 0 ? 'var(--red)' : 'var(--muted2)'; }
+
+  const wrEl = document.getElementById('sc2WinRate');
+  if (wrEl) { wrEl.textContent = tt > 0 ? twr + '%' : '—'; wrEl.style.color = twr >= 55 ? 'var(--green)' : twr >= 45 ? 'var(--gold)' : tt > 0 ? 'var(--red)' : 'var(--muted2)'; }
+
+  const pnlEl = document.getElementById('sc2Pnl');
+  if (pnlEl) { pnlEl.textContent = todayTrades.length ? _fmtPnl(todayPnl) : '—'; pnlEl.style.color = todayPnl > 0 ? 'var(--green)' : todayPnl < 0 ? 'var(--red)' : 'var(--muted2)'; }
+
+  const todayPnls = todayTrades.map(t => parseFloat(t.realized_pnl ?? t.pnl ?? 'x')).filter(n => !isNaN(n));
+  const bestEl  = document.getElementById('sc2Best');
+  const worstEl = document.getElementById('sc2Worst');
+  if (bestEl)  { bestEl.textContent = todayPnls.length ? _fmtPnl(Math.max(...todayPnls)) : '—'; bestEl.style.color = todayPnls.length && Math.max(...todayPnls) > 0 ? 'var(--green)' : 'var(--muted2)'; }
+  if (worstEl) { worstEl.textContent = todayPnls.length ? _fmtPnl(Math.min(...todayPnls)) : '—'; worstEl.style.color = todayPnls.length && Math.min(...todayPnls) < 0 ? 'var(--red)' : 'var(--muted2)'; }
+
+  // Governance actions = rejections + any DONNA_AUTO skipped entries
+  const govEl = document.getElementById('sc2GovActions');
+  if (govEl) { govEl.textContent = rejCount > 0 ? rejCount + ' block' + (rejCount !== 1 ? 's' : '') : '—'; govEl.style.color = rejCount > 0 ? 'var(--gold)' : 'var(--muted2)'; }
+
+  const grade = tt > 0 ? _execGrade(twr, todayPnl) : '—';
+  const gradeEl = document.getElementById('novaGrade');
+  if (gradeEl) { gradeEl.textContent = grade; gradeEl.style.color = {A:'var(--green)',B:'var(--blue)',C:'var(--gold)',D:'var(--red)'}[grade] || 'var(--muted2)'; }
 }
 
 // ════════ MAIN REFRESH ════════
@@ -3358,6 +3627,20 @@ document.getElementById('scenarioGenBtn')?.addEventListener('click', () => refre
 // ════════ JOURNAL ════════
 let journalFilter = 'all';
 let _journalData  = null;
+let _jDirection   = 'LONG';
+let _jOutcome     = 'WIN';
+
+function setDir(d) {
+  _jDirection = d;
+  document.getElementById('jDirLong').className  = 'toggle-btn' + (d === 'LONG'  ? ' active-long'  : '');
+  document.getElementById('jDirShort').className = 'toggle-btn' + (d === 'SHORT' ? ' active-short' : '');
+}
+function setOutcome(o) {
+  _jOutcome = o;
+  document.getElementById('jOutWin').className  = 'toggle-btn' + (o === 'WIN'       ? ' active-win'  : '');
+  document.getElementById('jOutLoss').className = 'toggle-btn' + (o === 'LOSS'      ? ' active-loss' : '');
+  document.getElementById('jOutBE').className   = 'toggle-btn' + (o === 'BREAKEVEN' ? ' active-be'   : '');
+}
 
 function fmtTimeET(isoStr) {
   if (!isoStr) return '—';
@@ -3458,48 +3741,84 @@ function renderJournal(data) {
   });
   const sortedDates = Object.keys(grouped).sort((a,b) => b.localeCompare(a));
 
-  let rows = '';
+  let cards = '';
   if (sortedDates.length === 0) {
-    rows = `<tr><td colspan="15" class="neutral" style="text-align:center;padding:20px">${trades.length ? 'No trades in this period.' : 'No trades logged yet. Log your first trade using the form.'}</td></tr>`;
+    cards = `<div style="text-align:center;padding:24px;color:var(--muted2);font-size:13px">${trades.length ? 'No trades in this period.' : 'No trades logged yet. Log your first trade using the form →'}</div>`;
   } else {
     sortedDates.forEach(dk => {
       const dayItems = grouped[dk].slice().reverse();
       const count = dayItems.length;
-      rows += `<tr class="j-date-header"><td colspan="15">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span></td></tr>`;
+      cards += `<div class="j-date-group"><div class="j-date-label">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span></div>`;
       dayItems.forEach(({t, origIdx}) => {
-        const outcome = (t.outcome || '').toUpperCase();
-        const rawPnl = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl || 0);
-        const pnl = parseFloat(rawPnl) || 0;
-        const dir = (t.direction || '').toUpperCase();
-        const pnlColor = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--yellow)';
-        const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
-        const timeStr = fmtTimeET(t.timestamp);
-        const datDisp = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : '—');
-        const vColor = t.harvey_verdict === 'BUY' ? 'var(--green)' : t.harvey_verdict === 'SELL' ? 'var(--red)' : 'var(--yellow)';
-        const pnlStr = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
-        const entryDisp = t.entry_price !== null && t.entry_price !== undefined ? formatPrice(t.entry_price, 2) : '—';
-        const exitDisp  = t.exit_price  !== null && t.exit_price  !== undefined ? formatPrice(t.exit_price,  2) : '—';
-        rows += `<tr>
-          <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${datDisp}</td>
-          <td style="font-size:11px;color:var(--muted2);white-space:nowrap">${timeStr}</td>
-          <td style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700">${t.ticker||'—'}</td>
-          <td style="color:${dirColor};font-weight:700;font-size:12px">${dir}</td>
-          <td>${entryDisp}</td>
-          <td>${exitDisp}</td>
-          <td>${t.size||'—'}</td>
-          <td style="color:${pnlColor};font-weight:700">${pnlStr}</td>
-          <td style="font-size:12px;color:var(--muted)">${t.setup_type||'—'}</td>
-          <td style="font-size:11px">${t.active_regime||'—'}</td>
-          <td style="font-size:11px">${(t.session||'—').replace(/_/g,' ')}</td>
-          <td style="font-family:Rajdhani,sans-serif;font-size:15px;font-weight:700">${t.bias_score||'—'}</td>
-          <td style="font-size:11px;color:${vColor};font-weight:700">${t.harvey_verdict||'—'}</td>
-          <td><span class="risk-badge outcome-${outcome}" style="font-size:10px;padding:3px 7px">${outcome}</span></td>
-          <td><button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button></td>
-        </tr>`;
+        const outcome    = (t.outcome || 'OPEN').toUpperCase();
+        const dir        = (t.direction || '').toUpperCase();
+        const dirClass   = dir === 'LONG' ? 'long' : 'short';
+        const dirIcon    = dir === 'LONG' ? '▲' : '▼';
+        const rawPnl     = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl || 0);
+        const pnl        = parseFloat(rawPnl) || 0;
+        const pnlStr     = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        const pnlColor   = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
+        const timeStr    = fmtTimeET(t.timestamp);
+        const srcLabel   = t.source === 'DONNA_AUTO' ? 'DONNA AUTO' : 'MANUAL';
+        const isAuto     = t.source === 'DONNA_AUTO';
+        const tierLabel  = t.tier ? String(t.tier).toUpperCase() : '';
+        const sessLabel  = (t.session || '').replace(/_/g, ' ');
+        const setupLabel = t.setup_type || '';
+
+        // Badges
+        let badges = `<span class="tc-badge${isAuto?' b-auto':''}">${srcLabel}</span>`;
+        if (setupLabel) badges += `<span class="tc-badge">${setupLabel}</span>`;
+        if (tierLabel)  badges += `<span class="tc-badge b-tier">${tierLabel}</span>`;
+        if (sessLabel)  badges += `<span class="tc-badge">${sessLabel}</span>`;
+
+        // Execution detail: entry → exit
+        const hasEntry = t.entry_price !== null && t.entry_price !== undefined;
+        const hasExit  = t.exit_price  !== null && t.exit_price  !== undefined;
+        let execHtml = '';
+        if (hasEntry && hasExit) {
+          execHtml = `${formatPrice(t.entry_price,2)} <span style="color:var(--muted2);margin:0 5px">→</span> ${formatPrice(t.exit_price,2)}<span style="color:var(--muted2);margin-left:8px">× ${t.size||1}</span>`;
+        } else if (hasEntry) {
+          execHtml = `Entry ${formatPrice(t.entry_price,2)}<span style="color:var(--muted2);margin-left:8px">× ${t.size||1}</span><span style="color:var(--muted2);margin-left:8px;font-style:italic">exit pending</span>`;
+        } else if (t.size) {
+          execHtml = `<span style="color:var(--muted2)">Size</span> ${t.size}`;
+        }
+
+        // Context chips
+        const ctxParts = [];
+        if (t.active_regime) ctxParts.push(`<span><span style="color:var(--muted2)">Regime</span> <strong>${t.active_regime}</strong></span>`);
+        if (t.confidence)    ctxParts.push(`<span><span style="color:var(--muted2)">Conf</span> <strong>${t.confidence}</strong></span>`);
+        if (t.bias_score)    ctxParts.push(`<span><span style="color:var(--muted2)">Bias</span> <strong>${t.bias_score}</strong></span>`);
+        if (t.broker_mode)   ctxParts.push(`<span><span style="color:var(--muted2)">Mode</span> <strong>${t.broker_mode}</strong></span>`);
+        if (t.harvey_verdict) {
+          const vc = t.harvey_verdict==='BUY'?'var(--green)':t.harvey_verdict==='SELL'?'var(--red)':'var(--yellow)';
+          ctxParts.push(`<span><span style="color:var(--muted2)">Verdict</span> <strong style="color:${vc}">${t.harvey_verdict}</strong></span>`);
+        }
+        if (t.notes) ctxParts.push(`<span style="font-style:italic;color:var(--muted)">"${t.notes}"</span>`);
+
+        cards += `<div class="trade-card outcome-${outcome}">
+  <div class="tc-badges">${badges}</div>
+  <div class="tc-main">
+    <div style="display:flex;align-items:baseline;gap:4px">
+      <span class="tc-ticker">${t.ticker||'—'}</span>
+      <span class="tc-dir ${dirClass}">${dirIcon} ${dir}</span>
+    </div>
+    <div style="text-align:right">
+      <div class="tc-pnl" style="color:${pnlColor}">${pnlStr}</div>
+      <div class="tc-time">${timeStr}</div>
+    </div>
+  </div>
+  ${execHtml ? `<div class="tc-exec">${execHtml}</div>` : ''}
+  ${ctxParts.length ? `<div class="tc-ctx">${ctxParts.join('')}</div>` : ''}
+  <div class="tc-footer">
+    <span class="tc-outcome-badge ${outcome}">${outcome}</span>
+    <button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button>
+  </div>
+</div>`;
       });
+      cards += '</div>';
     });
   }
-  setHtml('journalTableBody', rows);
+  setHtml('journalCardList', cards);
 
   // Regime breakdown
   const byRegime = stats.by_regime || {};
@@ -3555,8 +3874,8 @@ async function deleteTrade(index) {
 
 document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   const ticker        = (document.getElementById('jTicker').value || '').trim().toUpperCase();
-  const direction     = document.getElementById('jDirection').value;
-  const outcome       = document.getElementById('jOutcome').value;
+  const direction     = _jDirection;
+  const outcome       = _jOutcome;
   const realizedRaw   = document.getElementById('jRealizedPnl').value;
   const realized_pnl  = realizedRaw !== '' ? parseFloat(realizedRaw) : null;
   const entryRaw      = document.getElementById('jEntry').value;
@@ -3598,6 +3917,7 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
     if (data.status === 'ok') {
       ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('jDate').value = todayDateStr();
+      setDir('LONG'); setOutcome('WIN');
       showMsg('Trade logged.', 'var(--green)');
       setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
       refreshJournal();
@@ -3632,10 +3952,8 @@ refresh();
 setInterval(refresh, 30000);
 refreshJournal();
 setInterval(refreshJournal, 60000);
-refreshExecMonitor();
-refreshSessionScorecard();
-setInterval(refreshExecMonitor, 20000);
-setInterval(refreshSessionScorecard, 20000);
+// Execution tab refreshes on-demand via tab click; also poll in background
+setInterval(refreshExecutionTab, 30000);
 refreshGrokIntelligence();
 setInterval(refreshGrokIntelligence, 5 * 60 * 1000);
 refreshNewsFuturesStrip();
@@ -3650,8 +3968,6 @@ fetchStateEngine();
 setInterval(fetchStateEngine, 15000);
 fetchExecutionGate();
 setInterval(fetchExecutionGate, 15000);
-refreshOrchestration();
-setInterval(refreshOrchestration, 15000);
 fetchHarveyData();
 setInterval(fetchHarveyData, 20000);
 fetchGrokIntel();

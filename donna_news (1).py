@@ -87,11 +87,15 @@ def _score_text(text: str) -> tuple[str, str, str]:
     """
     t = text.lower()
 
-    macro = 'low'
-    if any(k in t for k in HIGH_MACRO):
+    macro_hits = sum(1 for k in HIGH_MACRO if k in t)
+    if macro_hits >= 3:
         macro = 'high'
+    elif macro_hits >= 1:
+        macro = 'medium'
     elif any(k in t for k in MEDIUM_MACRO):
         macro = 'medium'
+    else:
+        macro = 'low'
 
     headline = 'low'
     if any(k in t for k in HIGH_HEADLINE):
@@ -347,6 +351,7 @@ def process_news_guard_cycle():
     top_market = market_items[0]['headline'] if market_items else ranked[1]['headline'] if len(ranked) > 1 else top_macro
 
     # 5. Try LLM upgrade
+    state = _read_risk()
     all_headlines = [i['headline'] for i in items[:12]]
     llm_data = _llm_classify(all_headlines)
 
@@ -372,12 +377,30 @@ def process_news_guard_cycle():
                              if market_risk == 'high'
                              else 'No dominant company catalyst right now.')
 
+    # 5b. Calendar coupling — event phase drives macro_risk floor
+    if event_phase in ('LIVE', 'IMMINENT'):
+        macro_risk = 'high'
+        state['last_event_live_at'] = _utc_iso()
+    elif event_phase == 'APPROACHING' and macro_risk != 'high':
+        macro_risk = 'medium'
+    elif event_phase in ('PASSED', 'NONE'):
+        last_live = state.get('last_event_live_at')
+        if last_live:
+            try:
+                last_live_dt = datetime.fromisoformat(last_live)
+                mins_since = (datetime.now(timezone.utc) - last_live_dt).total_seconds() / 60
+                if mins_since >= 30:
+                    state.pop('last_event_live_at', None)
+                elif macro_risk == 'low':
+                    macro_risk = 'medium'
+            except Exception:
+                pass
+
     # 6. Severity label + warnings
     severity = _severity_label(macro_risk, headline_risk, market_risk)
     warnings = _build_warnings(macro_risk, headline_risk, market_risk, next_event, event_phase)
 
-    # 7. Read current state and patch — never destroy existing market_snapshot or other fields
-    state = _read_risk()
+    # 7. Patch state — read above in step 5; never destroy existing market_snapshot or other fields
 
     state['macro_risk']           = macro_risk
     state['headline_risk']        = headline_risk
@@ -408,7 +431,7 @@ def process_news_guard_cycle():
 
     print(f'[donna_news] Cycle complete — macro:{macro_risk} headline:{headline_risk} '
           f'market:{market_risk} phase:{event_phase} headlines:{len(items)}')
-
+1
 
 # ── immediate risk check (on-demand / every 5 min) ────────────
 _IMMEDIATE_TRIGGERS = [

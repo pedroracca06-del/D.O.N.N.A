@@ -5,7 +5,7 @@ import json
 
 from donna_config import (
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE,
-    MACRO_EVENTS_FILE, JOURNAL_FILE,
+    MACRO_EVENTS_FILE, JOURNAL_FILE, REJECTIONS_FILE,
     DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS,
     now_ny, now_utc, utc_now_iso, day_name, session_label,
 )
@@ -41,6 +41,8 @@ def ensure_files():
         write_json_file(MACRO_EVENTS_FILE, DEFAULT_MACRO_EVENTS)
     if not JOURNAL_FILE.exists():
         write_json_file(JOURNAL_FILE, [])
+    if not REJECTIONS_FILE.exists():
+        write_json_file(REJECTIONS_FILE, [])
 
 
 # ── Risk state ────────────────────────────────────────────────
@@ -115,6 +117,16 @@ def load_macro_events() -> dict:
     if not isinstance(data.get('events'), list):
         data['events'] = list(DEFAULT_MACRO_EVENTS['events'])
     return data
+
+
+# ── Rejection history ─────────────────────────────────────────
+def load_rejections() -> list:
+    data = read_json_file(REJECTIONS_FILE, [])
+    return data if isinstance(data, list) else []
+
+
+def save_rejections(rejections: list):
+    write_json_file(REJECTIONS_FILE, rejections[:200])
 
 
 # ── Journal ───────────────────────────────────────────────────

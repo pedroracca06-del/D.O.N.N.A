@@ -52,6 +52,7 @@ try:
         reconcile_positions_from_alpaca,
         set_macro_lock, set_red_folder_lock,
         disable_trade_permission, enable_trade_permission,
+        get_rejections,
     )
     _EXECUTION_AVAILABLE = True
 except Exception:
@@ -67,6 +68,7 @@ except Exception:
     def check_position_outcomes():          return 0
     def sync_positions_from_alpaca():       pass
     def reconcile_positions_from_alpaca():  pass
+    def get_rejections(limit=50):           return []
     def set_macro_lock(a, r=''):            pass
     def set_red_folder_lock(a, e=''):       pass
     def disable_trade_permission(r=''):     pass
@@ -798,6 +800,21 @@ async def execution_gate():
         'red_folder_lock':   _donna_state.get('red_folder_lock'),
         'risk_lockouts':     _donna_state.get('risk_lockouts'),
         'daily_trade_count': _donna_state.get('daily_trade_count'),
+    }
+
+
+@app.get('/execution/rejections')
+async def execution_rejections(limit: int = 50):
+    """Return recent signal rejections with full gate context for observability."""
+    records = await asyncio.to_thread(get_rejections, min(limit, 200))
+    by_code: dict = {}
+    for r in records:
+        code = r.get('rejection_code', 'UNKNOWN')
+        by_code[code] = by_code.get(code, 0) + 1
+    return {
+        'total':    len(records),
+        'by_code':  by_code,
+        'records':  records,
     }
 
 
