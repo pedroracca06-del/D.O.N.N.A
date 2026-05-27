@@ -79,6 +79,7 @@ _DAILY_RESET_FIELDS: dict = {
     'cumulative_risk_today': 0.0,
     'daily_pnl':             0.0,
     'eod_lock':              False,
+    'red_folder_lock':       False,
     'asia_trade_taken':      False,
     'risk_lockouts':         [],
 }

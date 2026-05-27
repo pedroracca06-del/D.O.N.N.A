@@ -308,7 +308,8 @@ def is_red_folder_week() -> bool:
     """
     Returns True when CPI / NFP / FOMC / PPI / Retail Sales are present
     this week, OR when 3+ HIGH-impact USD events are scheduled.
-    Auto-writes red_folder_week=True and macro_risk=high to risk state.
+    Writes red_folder_week=True to risk state — does NOT set macro_risk;
+    that is owned exclusively by today's event logic in process_headlines_cycle().
     """
     macro       = _read_json(MACRO_EVENTS_FILE, {})
     week_events = macro.get('events', [])
@@ -323,15 +324,9 @@ def is_red_folder_week() -> bool:
     if is_red:
         risk = _read_json(RISK_STATE_FILE, {})
         risk['red_folder_week'] = True
-        risk['macro_risk']      = 'high'
         risk['last_updated']    = _utc_iso()
         with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(risk, f, indent=2)
-        try:
-            _state.set_many({'macro_risk': 'high'})
-            print('[state_engine] Updated — macro_risk: high (red_folder_week)')
-        except Exception as _e:
-            print(f'[state_engine] is_red_folder_week write failed: {_e}')
         reason = 'key event name' if name_hit else f'{high_count} HIGH events'
         print(f'[donna_headlines] Red-folder week confirmed ({reason})')
 
@@ -381,11 +376,12 @@ def check_todays_breaking_events() -> dict:
     if risk_escalated or is_red:
         risk = _read_json(RISK_STATE_FILE, {})
         if risk_escalated:
+            # Only today's HIGH events justify macro_risk=high
             risk['macro_risk']    = 'high'
             risk['headline_risk'] = 'high'
         if is_red:
+            # Week-level flag only — macro_risk is set by today's events, not week presence
             risk['red_folder_week'] = True
-            risk['macro_risk']      = 'high'
         risk['last_updated'] = _utc_iso()
         with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(risk, f, indent=2)
@@ -402,7 +398,7 @@ def check_todays_breaking_events() -> dict:
         'red_keywords_hit': red_keywords_hit,
         'next_high_event':  next_event,
         'minutes_away':     mins,
-        'macro_risk':       'high' if (risk_escalated or is_red) else 'unchanged',
+        'macro_risk':       'high' if risk_escalated else 'unchanged',
         'headline_risk':    'high' if risk_escalated else 'unchanged',
     }
 
@@ -442,8 +438,8 @@ def check_todays_events():
     risk['minutes_to_event'] = mins
     risk['event_phase']      = phase
 
-    if today_high:
-        risk['macro_risk'] = 'high'
+    # Actively clear macro_risk when no HIGH events are scheduled today
+    risk['macro_risk'] = 'high' if today_high else 'low'
 
     risk['last_updated'] = _utc_iso()
     with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
@@ -522,8 +518,8 @@ def process_headlines_cycle():
     risk['morning_brief_lead']  = morning_brief_lead
     risk['red_folder_week']     = is_red
 
-    if today_high:
-        risk['macro_risk'] = 'high'
+    # Actively clear macro_risk when no HIGH events are scheduled today
+    risk['macro_risk'] = 'high' if today_high else 'low'
 
     try:
         if today_all:
@@ -546,9 +542,13 @@ def process_headlines_cycle():
         print(f'[state_engine] Updated — macro_risk (calendar): {cal_macro_risk}')
         try:
             from donna_execution import set_red_folder_lock
-            if phase in ('LIVE', 'IMMINENT', 'APPROACHING') and next_event:
-                set_red_folder_lock(True, next_event)
-                print(f'[state_engine] red_folder_lock SET — {next_event}')
+            # red_folder_lock only triggers for HIGH events — MEDIUM events never block execution
+            _, high_phase_mins = _compute_next_event(today_high) if today_high else (None, None)
+            high_phase = _phase_from_mins(high_phase_mins)
+            if today_high and high_phase in ('LIVE', 'IMMINENT', 'APPROACHING'):
+                next_high_name = today_high[0]['title'] if today_high else next_event
+                set_red_folder_lock(True, next_high_name)
+                print(f'[state_engine] red_folder_lock SET — {next_high_name} ({high_phase})')
             else:
                 set_red_folder_lock(False)
         except Exception as _re:

@@ -286,11 +286,16 @@ def _red_folder_status() -> dict:
         return result  # fail open — don't block on unreadable calendar
 
     now_et      = now_ny()
+    today_str   = now_et.strftime('%Y-%m-%d')
     now_et_mins = now_et.hour * 60 + now_et.minute
     upcoming: list[tuple[int, str]] = []
 
     for event in events:
         if str(event.get('importance', '')).lower() != 'high':
+            continue
+        # Only evaluate events scheduled for today — prevents stale/off-date events from
+        # triggering the blackout window
+        if event.get('date') and event.get('date') != today_str:
             continue
         time_str = str(event.get('time_et', '')).strip()
         if not time_str:
