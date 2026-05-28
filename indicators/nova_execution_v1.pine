@@ -1103,6 +1103,60 @@ if prosContinuationBear
     prosConBarBear := na
 
 //====================================================
+// PROS CONTEXT ENGINE — PHASE A5
+// OTE quality weighting + displacement stretch context
+// Contextual only — informs quality grading, not hard gate logic
+//====================================================
+
+// Retracement depth (current bar, fib-relative)
+// 0=above leg high  1=shallow(above 0.5)  2=mid(0.5–0.618)
+// 3=OTE(0.618–0.705)  4=deep(0.705–0.786)  5=too deep(below 0.786)
+prosRetraceDepthBull =
+     not prosLegValidBull or na(prosFib50Bull) ? 0 :
+     close >= prosLegHighBull                  ? 0 :
+     close >= prosFib50Bull                    ? 1 :
+     close >= prosFib618Bull                   ? 2 :
+     close >= prosFib705Bull                   ? 3 :
+     close >= prosFib786Bull                   ? 4 : 5
+
+prosRetraceDepthBear =
+     not prosLegValidBear or na(prosFib50Bear) ? 0 :
+     close <= prosLegLowBear                   ? 0 :
+     close <= prosFib50Bear                    ? 1 :
+     close <= prosFib618Bear                   ? 2 :
+     close <= prosFib705Bear                   ? 3 :
+     close <= prosFib786Bear                   ? 4 : 5
+
+// Accumulate deepest retrace reached during this leg's life
+var int prosDeepestBull = 0
+var int prosDeepestBear = 0
+if newDay
+    prosDeepestBull := 0
+    prosDeepestBear := 0
+if not prosLegValidBull
+    prosDeepestBull := 0
+if not prosLegValidBear
+    prosDeepestBear := 0
+if prosLegValidBull and prosRetraceDepthBull > prosDeepestBull
+    prosDeepestBull := prosRetraceDepthBull
+if prosLegValidBear and prosRetraceDepthBear > prosDeepestBear
+    prosDeepestBear := prosRetraceDepthBear
+
+// Convenience aliases — active direction depth + deepest reached
+prosActiveDepth   = prosLegValidBull ? prosRetraceDepthBull : prosLegValidBear ? prosRetraceDepthBear : 0
+prosActiveDeepest = prosLegValidBull ? prosDeepestBull      : prosLegValidBear ? prosDeepestBear      : 0
+
+// OTE context: deepest retrace entered the 0.618–0.786 zone (defended = continuation quality)
+prosOteTaggedBull = prosDeepestBull >= 3 and prosDeepestBull <= 4
+prosOteTaggedBear = prosDeepestBear >= 3 and prosDeepestBear <= 4
+
+// Displacement stretch: leg size as multiple of ATR(14)
+// High multiple = potentially extended / exhausted displacement
+prosLegSize     = prosLegValidBull ? (prosLegHighBull - prosLegLowBull) :
+                  prosLegValidBear ? (prosLegHighBear - prosLegLowBear) : 0.0
+prosStretchMult = atrValue > 0 ? prosLegSize / atrValue : 0.0
+
+//====================================================
 // PART 3 = SESSION BOXES + SIGNAL ENGINE + SCORE
 //====================================================
 
@@ -2409,8 +2463,10 @@ dashSessionBg =
 
 // NOVA TABLE — all charts, right side
 var table dash2 = table.new(position.top_right, 2, 11, border_width=1)
-// ORB TABLE — ES/MES only, bottom right (11 rows: 0-9 original + CTX row)
+// ORB TABLE — ES/MES only, bottom right
 var table orbDash = table.new(position.bottom_right, 2, 11, border_width=1)
+// PROS TABLE — dedicated continuation intelligence, bottom left
+var table prosDash = table.new(position.bottom_left, 2, 8, border_width=1)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2535,6 +2591,105 @@ prosTextColor =
      prosContinuationBear or prosRejectionBear ? colBear :
      prosLegValidBull or prosLegValidBear       ? colWarn : colMuted
 
+// ================ PROS DASHBOARD DISPLAY ================
+
+// Engine state — high-level summary for the header row
+prosEngineState =
+     prosContinuationBull                              ? "CONTINUATION ▲" :
+     prosContinuationBear                              ? "CONTINUATION ▼" :
+     prosConFreshBull                                  ? "BUILDING ▲"     :
+     prosConFreshBear                                  ? "BUILDING ▼"     :
+     prosZoneTouchedBull                               ? "IN ZONE ▲"      :
+     prosZoneTouchedBear                               ? "IN ZONE ▼"      :
+     prosLegValidBull and prosRetraceDepthBull >= 1    ? "RETRACING ▲"    :
+     prosLegValidBear and prosRetraceDepthBear >= 1    ? "RETRACING ▼"    :
+     prosLegValidBull or prosLegValidBear              ? "ACTIVE"         : "WAIT"
+
+// Displacement direction text
+prosDisplText =
+     bullDisplacement ? "BULL ▲" :
+     bearDisplacement ? "BEAR ▼" :
+     prosLegValidBull ? "BULL ▲" :
+     prosLegValidBear ? "BEAR ▼" : "—"
+
+// Current retracement depth (where price is right now)
+prosRetraceText =
+     prosActiveDepth == 5                            ? "TOO DEEP" :
+     prosActiveDepth == 4                            ? "DEEP"     :
+     prosActiveDepth == 3                            ? "OTE"      :
+     prosActiveDepth == 2                            ? "MID"      :
+     prosActiveDepth == 1                            ? "SHALLOW"  :
+     (prosLegValidBull or prosLegValidBear)          ? "ABOVE"    : "—"
+
+// OTE context — deepest retrace reached during this leg
+prosOteText =
+     prosActiveDeepest >= 3 and prosActiveDeepest <= 4 ? "TAGGED"   :
+     prosActiveDeepest == 2                            ? "MID ONLY" :
+     prosActiveDeepest == 1                            ? "SHALLOW"  :
+     (prosLegValidBull or prosLegValidBear)            ? "—"        : "—"
+
+// Continuation phase — operational detail for the CONT row
+prosContText =
+     prosContinuationBull                              ? "CONFIRMED ▲"   :
+     prosContinuationBear                              ? "CONFIRMED ▼"   :
+     prosConFreshBull                                  ? "BUILDING ▲"    :
+     prosConFreshBear                                  ? "BUILDING ▼"    :
+     prosZoneTouchedBull                               ? "ZONE TOUCH ▲"  :
+     prosZoneTouchedBear                               ? "ZONE TOUCH ▼"  :
+     prosLegValidBull and prosRetraceDepthBull == 5    ? "DEEP RISK ▲"   :
+     prosLegValidBear and prosRetraceDepthBear == 5    ? "DEEP RISK ▼"   :
+     prosLegValidBull and prosRetraceDepthBull >= 1    ? "RETRACING ▲"   :
+     prosLegValidBear and prosRetraceDepthBear >= 1    ? "RETRACING ▼"   :
+     prosLegValidBull or prosLegValidBear              ? "WAIT"          : "—"
+
+// Quality grade — retracement depth + continuation phase + displacement health
+prosQualText =
+     (prosContinuationBull or prosContinuationBear) and
+     (prosOteTaggedBull or prosOteTaggedBear) and
+     prosStretchMult < 4.0                                                         ? "ELITE"  :
+     (prosContinuationBull or prosContinuationBear)                                ? "STRONG" :
+     ((prosConFreshBull or prosConFreshBear) and prosActiveDeepest >= 2) or
+     (prosRejectionBull  or prosRejectionBear)                                     ? "GOOD"   :
+     (prosLegValidBull   or prosLegValidBear)                                      ? "WEAK"   : "—"
+
+// StdDev stretch context — displacement health
+prosStdvText =
+     prosStretchMult >= 4.0                            ? "EXTREME"   :
+     prosStretchMult >= 2.5                            ? "STRETCHED" :
+     (prosLegValidBull or prosLegValidBear)            ? "NORMAL"    : "—"
+
+// Background for engine header and CONT row
+prosEngineBg =
+     prosContinuationBull                              ? color.new(#002a18, 0) :
+     prosContinuationBear                              ? color.new(#280008, 0) :
+     prosConFreshBull or prosConFreshBear              ? color.new(#001824, 0) :
+     prosZoneTouchedBull or prosZoneTouchedBear        ? color.new(#0d1a22, 0) :
+     prosLegValidBull or prosLegValidBear              ? color.new(#0a1424, 0) :
+     color.new(#060e1a, 0)
+
+// Text color for engine state
+prosEngineCol =
+     prosContinuationBull                              ? colBull  :
+     prosContinuationBear                              ? colBear  :
+     prosConFreshBull or prosConFreshBear              ? colTeal  :
+     prosZoneTouchedBull or prosZoneTouchedBear        ? colWarn  :
+     prosLegValidBull or prosLegValidBear              ? colWarn  : colMuted
+
+// Text colors for individual rows
+prosDisplCol   = prosLegValidBull ? colBull : prosLegValidBear ? colBear : colMuted
+prosRetraceCol = prosActiveDepth == 3 ? colBull :
+                 prosActiveDepth == 4 ? colWarn :
+                 prosActiveDepth == 5 ? colBear :
+                 prosActiveDepth >= 1 ? colWhite : colMuted
+prosOteCol     = prosActiveDeepest >= 3 and prosActiveDeepest <= 4 ? colBull :
+                 prosActiveDeepest == 2                            ? colWarn : colMuted
+prosQualCol    = prosQualText == "ELITE"  ? colWarn  :
+                 prosQualText == "STRONG" ? colBull  :
+                 prosQualText == "GOOD"   ? colTeal  : colMuted
+prosStdvCol    = prosStdvText == "EXTREME"   ? colBear :
+                 prosStdvText == "STRETCHED" ? colWarn :
+                 prosStdvText == "NORMAL"    ? colTeal : colMuted
+
 // ================ CONT DISPLAY HELPERS ================
 ictBg =
      step3LongElite  or step3ShortElite    ? color.new(color.lime,   5)  :
@@ -2649,6 +2804,57 @@ if showDashboard and barstate.islast
          text_color=donnaConfScore >= 65 ? colBull :
                     donnaConfScore >= 35 ? colWarn : colBear,
          bgcolor=ictCellColor, text_size=size.tiny)
+
+// ================ PROS TABLE RENDER ================
+if showDashboard and barstate.islast
+    // ── HEADER ──────────────────────────────────────
+    table.cell(prosDash, 0, 0, "PROS ENGINE",
+         text_color=colTeal, bgcolor=novLabelBg, text_size=size.small)
+    table.cell(prosDash, 1, 0, prosEngineState,
+         text_color=prosEngineCol, bgcolor=prosEngineBg, text_size=size.small)
+
+    // ── DISPLACEMENT ─────────────────────────────────
+    table.cell(prosDash, 0, 1, "DISPL",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 1, prosDisplText,
+         text_color=prosDisplCol, bgcolor=ictCellColor, text_size=size.small)
+
+    // ── RETRACEMENT DEPTH (current) ──────────────────
+    table.cell(prosDash, 0, 2, "RETRACE",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 2, prosRetraceText,
+         text_color=prosRetraceCol, bgcolor=ictCellColor, text_size=size.small)
+
+    // ── OTE CONTEXT (deepest reached) ────────────────
+    table.cell(prosDash, 0, 3, "OTE",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 3, prosOteText,
+         text_color=prosOteCol, bgcolor=ictCellColor, text_size=size.small)
+
+    // ── CONTINUATION (dominant row) ──────────────────
+    table.cell(prosDash, 0, 4, "CONT",
+         text_color=colTeal, bgcolor=novLabelBg, text_size=size.small)
+    table.cell(prosDash, 1, 4, prosContText,
+         text_color=prosEngineCol, bgcolor=prosEngineBg, text_size=size.small)
+
+    // ── QUALITY ──────────────────────────────────────
+    table.cell(prosDash, 0, 5, "QUALITY",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 5, prosQualText,
+         text_color=prosQualCol, bgcolor=ictCellColor, text_size=size.small)
+
+    // ── STDV CONTEXT ─────────────────────────────────
+    table.cell(prosDash, 0, 6, "STDV",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 6, prosStdvText,
+         text_color=prosStdvCol, bgcolor=ictCellColor, text_size=size.tiny)
+
+    // ── SESSION ──────────────────────────────────────
+    table.cell(prosDash, 0, 7, "SESS",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 7, dashSessionText,
+         text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
+         bgcolor=dashSessionBg, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE
