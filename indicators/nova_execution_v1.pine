@@ -978,6 +978,35 @@ prosLegValidBull = prosLegFreshBull and not na(prosLegLowBull)  and not na(prosL
 prosLegValidBear = prosLegFreshBear and not na(prosLegHighBear) and not na(prosLegLowBear)  and prosLegHighBear > prosLegLowBear
 
 //====================================================
+// PROS FIB ZONE CALCULATION — PHASE A2
+// Retracement levels computed from the displacement leg endpoints.
+// Bull: price retraces DOWN from leg high toward leg origin.
+// Bear: price retraces UP from leg low toward leg origin.
+// No existing logic is modified here.
+//====================================================
+
+prosFib50Bull  = prosLegValidBull ? prosLegHighBull - (prosLegHighBull - prosLegLowBull) * 0.500 : na
+prosFib618Bull = prosLegValidBull ? prosLegHighBull - (prosLegHighBull - prosLegLowBull) * 0.618 : na
+prosFib705Bull = prosLegValidBull ? prosLegHighBull - (prosLegHighBull - prosLegLowBull) * 0.705 : na
+prosFib786Bull = prosLegValidBull ? prosLegHighBull - (prosLegHighBull - prosLegLowBull) * 0.786 : na
+
+prosFib50Bear  = prosLegValidBear ? prosLegLowBear + (prosLegHighBear - prosLegLowBear) * 0.500 : na
+prosFib618Bear = prosLegValidBear ? prosLegLowBear + (prosLegHighBear - prosLegLowBear) * 0.618 : na
+prosFib705Bear = prosLegValidBear ? prosLegLowBear + (prosLegHighBear - prosLegLowBear) * 0.705 : na
+prosFib786Bear = prosLegValidBear ? prosLegLowBear + (prosLegHighBear - prosLegLowBear) * 0.786 : na
+
+// Close is within the retracement zone (50% to 78.6%)
+atProsFibBull = prosLegValidBull and not na(prosFib50Bull)  and not na(prosFib786Bull) and
+                close >= prosFib786Bull and close <= prosFib50Bull
+
+atProsFibBear = prosLegValidBear and not na(prosFib50Bear)  and not na(prosFib786Bear) and
+                close <= prosFib786Bear and close >= prosFib50Bear
+
+// Wick tagged 61.8% or deeper — used by rejection detection in Phase A3
+prosTaggedFibBull = prosLegValidBull and not na(prosFib618Bull) and low  <= prosFib618Bull
+prosTaggedFibBear = prosLegValidBear and not na(prosFib618Bear) and high >= prosFib618Bear
+
+//====================================================
 // PART 3 = SESSION BOXES + SIGNAL ENGINE + SCORE
 //====================================================
 
