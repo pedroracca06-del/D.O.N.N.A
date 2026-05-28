@@ -1,0 +1,2416 @@
+//@version=6
+indicator("NOVA EXECUTION V1", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=200)
+
+//====================================================
+// NOVA EXECUTION V1
+// Base: HARVEY V4 + ORB Contextual Auction Intelligence
+//====================================================
+
+//================ COLORS ================
+bullColor    = color.new(color.lime, 0)
+bearColor    = color.new(color.red, 0)
+neutralColor = color.new(color.gray, 20)
+panelBg      = color.new(color.black, 0)
+panelHeader  = color.new(color.black, 0)
+panelText    = color.white
+softBull     = color.new(color.lime, 80)
+softBear     = color.new(color.red, 80)
+orbColor     = color.new(color.aqua, 80)
+midColor     = color.new(color.yellow, 0)
+
+//================ INPUTS ================
+showDashboard = input.bool(true,  "Show Dashboard")
+showORB       = input.bool(true,  "Show ORB")
+showSessions  = input.bool(true,  "Show Session Background")
+showSignals   = input.bool(true,  "Show Signals")
+
+showHistBoxes = input.bool(true, "Show Historical Session Boxes", group="Historical Memory")
+showHistORB   = input.bool(true, "Show Historical ORB Boxes",     group="Historical Memory")
+histLookback  = input.int(3, "Lookback Days", minval=1, maxval=5, group="Historical Memory")
+histFadeStart = input.int(72, "Fade Start Transparency",          minval=55, maxval=88, group="Historical Memory")
+
+tz = "America/New_York"
+
+//================ SIGNAL PLACEHOLDERS ================
+var bool buySignal  = false
+var bool sellSignal = false
+var int  buyScore   = 0
+var int  sellScore  = 0
+
+var string commandText  = "WAIT"
+var string activeGrade  = "NA"
+var string signalReason = "NO SIGNAL"
+var string targetText   = "NONE"
+var string riskText     = "NORMAL"
+
+//================ HELPERS ================
+f_clamp(val, minVal, maxVal) =>
+    math.max(minVal, math.min(maxVal, val))
+
+//================ TIME ================
+hourNow   = hour(time, tz)
+minuteNow = minute(time, tz)
+
+//================ SESSION ENGINE ================
+inAsia      = hourNow >= 19 or hourNow < 4
+inLondon    = hourNow >= 3  and hourNow < 12
+inNYPre     = hourNow >= 8  and (hourNow < 9 or (hourNow == 9 and minuteNow < 30))
+inNYCash    = (hourNow > 9  or  (hourNow == 9 and minuteNow >= 30)) and hourNow < 16
+isNYOpen    = (hourNow == 9 and minuteNow >= 30 and minuteNow < 45)
+isLunch     = hourNow >= 12 and hourNow < 13
+isPowerHour = hourNow >= 15 and hourNow < 16
+isDeadHours = not inAsia and not inLondon and not inNYPre and not inNYCash
+
+//================ SESSION START FLAGS ================
+newAsia   = inAsia   and not inAsia[1]
+newLondon = inLondon and not inLondon[1]
+newNYPre  = inNYPre  and not inNYPre[1]
+newNYCash = inNYCash and not inNYCash[1]
+
+//================ SESSION BACKGROUNDS ================
+sessionBg =
+     inNYCash ? color.new(color.blue,   92) :
+     inLondon ? color.new(color.teal,   93) :
+     inAsia   ? color.new(color.purple, 94) : na
+bgcolor(showSessions ? sessionBg : na)
+
+//================ DAY RESET ================
+newDay = ta.change(time("D")) != 0
+
+//================ CANDLE MATH ================
+body        = math.abs(close - open)
+candleRange = high - low
+avgBody     = ta.sma(body, 20)
+avgRange    = ta.sma(candleRange, 20)
+upperWick   = high - math.max(close, open)
+lowerWick   = math.min(close, open) - low
+
+isESChart  = str.contains(str.upper(syminfo.ticker), "ES")
+isNQChart  = str.contains(str.upper(syminfo.ticker), "NQ")
+//================ ORB INPUTS ================
+orbStartHour   = input.int(8,  "ORB Start Hour",   minval=0, maxval=23)
+orbStartMinute = input.int(0,  "ORB Start Minute", minval=0, maxval=59)
+orbEndHour     = input.int(8,  "ORB End Hour",     minval=0, maxval=23)
+orbEndMinute   = input.int(15, "ORB End Minute",   minval=0, maxval=59)
+orbKillHour    = input.int(11, "ORB Kill Hour",    minval=0, maxval=23)
+
+//================ ORB VARS ================
+var float orbHigh = na
+var float orbLow  = na
+var float orbMid  = na
+var int   orbStartBar = na
+var int   orbEndBar   = na
+var box   orbBox      = na
+var line  orbHighLine = na
+var line  orbLowLine  = na
+var line  orbMidLine  = na
+
+var array<box>   histORBBoxes    = array.new<box>()
+var array<float> histORBMids    = array.new<float>()
+var array<line>  histORBMidLines = array.new<line>()
+var array<box>   histAsiaBoxes   = array.new<box>()
+var array<box>   histLondonBoxes = array.new<box>()
+var array<box>   histNYBoxes     = array.new<box>()
+
+isOrbStartBar = hourNow == orbStartHour and minuteNow == orbStartMinute
+isORBWindow   = (hourNow == orbStartHour and minuteNow >= orbStartMinute) and (hourNow < orbEndHour or (hourNow == orbEndHour and minuteNow < orbEndMinute))
+isOrbEndBar   = hourNow == orbEndHour and minuteNow == orbEndMinute
+orbActive     = (hourNow > orbEndHour or (hourNow == orbEndHour and minuteNow >= orbEndMinute)) and hourNow < orbKillHour
+orbVisible    = not na(orbHigh) and not na(orbLow) and hourNow < orbKillHour
+orbNYOpenGate = (hourNow > 9 or (hourNow == 9 and minuteNow >= 30))
+orbLive       = orbActive and orbNYOpenGate and isESChart
+if newDay
+    orbHigh := na
+    orbLow  := na
+    orbMid  := na
+    orbStartBar := na
+    orbEndBar   := na
+    if not na(orbBox)
+        if showHistORB
+            array.push(histORBBoxes, orbBox)
+            array.push(histORBMids, nz(orbMid, na))
+            while array.size(histORBBoxes) > histLookback
+                box.delete(array.shift(histORBBoxes))
+            while array.size(histORBMids) > histLookback
+                array.shift(histORBMids)
+            for i = 0 to array.size(histORBBoxes) - 1
+                _histAge   = array.size(histORBBoxes) - i
+                _histTrans = math.min(histFadeStart + (_histAge - 1) * 5, 90)
+                box.set_bgcolor(array.get(histORBBoxes, i), color.new(color.aqua, _histTrans))
+                box.set_border_color(array.get(histORBBoxes, i), color.new(color.aqua, math.min(20 + (_histAge - 1) * 15, 65)))
+        else
+            box.delete(orbBox)
+    if not na(orbHighLine)
+        line.delete(orbHighLine)
+    if not na(orbLowLine)
+        line.delete(orbLowLine)
+    if not na(orbMidLine)
+        line.delete(orbMidLine)
+    orbBox      := na
+    orbHighLine := na
+    orbLowLine  := na
+    orbMidLine  := na
+
+if isOrbStartBar
+    orbHigh     := high
+    orbLow      := low
+    orbStartBar := bar_index
+    orbEndBar   := na
+
+if isORBWindow
+    orbHigh := na(orbHigh) ? high : math.max(orbHigh, high)
+    orbLow  := na(orbLow)  ? low  : math.min(orbLow,  low)
+    orbMid  := (orbHigh + orbLow) / 2.0
+
+if isOrbEndBar and not na(orbStartBar)
+    orbEndBar := bar_index
+
+//================ ORB REFINEMENT V3 ================
+orbInside    = orbLive and not na(orbHigh) and not na(orbLow) and close <= orbHigh and close >= orbLow
+orbAboveBox  = orbLive and not na(orbHigh) and close > orbHigh
+orbBelowBox  = orbLive and not na(orbLow)  and close < orbLow
+orbBullBreak = orbAboveBox and close > open and close > high[1]
+orbBearBreak = orbBelowBox and close < open and close < low[1]
+
+orbMidRejectBull = orbLive and not na(orbMid) and low  <= orbMid and close > orbMid and close > open and lowerWick > body * 0.8
+orbMidRejectBear = orbLive and not na(orbMid) and high >= orbMid and close < orbMid and close < open and upperWick > body * 0.8
+orbMidBreachBull = orbLive and not na(orbMid) and close[1] < orbMid and close > orbMid and close > open
+orbMidBreachBear = orbLive and not na(orbMid) and close[1] > orbMid and close < orbMid and close < open
+orbAboveMid      = orbLive and not na(orbMid) and close > orbMid
+orbBelowMid      = orbLive and not na(orbMid) and close < orbMid
+
+orbRetestBull = orbLive and not na(orbHigh) and low  <= orbHigh and close > orbHigh and close > open and lowerWick > body * 0.5
+orbRetestBear = orbLive and not na(orbLow)  and high >= orbLow  and close < orbLow  and close < open and upperWick > body * 0.5
+
+// REJECTION QUALITY — tracks 2-3 candle rejection sequences
+// Type 1: midpoint rejection sequence
+var int orbMidRejectBullCount = 0
+var int orbMidRejectBearCount = 0
+if newDay
+    orbMidRejectBullCount := 0
+    orbMidRejectBearCount := 0
+if orbLive and not na(orbMid)
+    if close > orbMid and lowerWick > body * 0.5
+        orbMidRejectBullCount := math.min(orbMidRejectBullCount + 1, 3)
+    else if close < orbMid
+        orbMidRejectBullCount := 0
+    if close < orbMid and upperWick > body * 0.5
+        orbMidRejectBearCount := math.min(orbMidRejectBearCount + 1, 3)
+    else if close > orbMid
+        orbMidRejectBearCount := 0
+
+// Type 2: edge rejection sequence
+var int orbEdgeRejectBullCount = 0
+var int orbEdgeRejectBearCount = 0
+if newDay
+    orbEdgeRejectBullCount := 0
+    orbEdgeRejectBearCount := 0
+if orbLive and not na(orbLow)
+    if low <= orbLow and close > orbLow and lowerWick > body * 0.5
+        orbEdgeRejectBullCount := math.min(orbEdgeRejectBullCount + 1, 3)
+    else if close < orbLow
+        orbEdgeRejectBullCount := 0
+if orbLive and not na(orbHigh)
+    if high >= orbHigh and close < orbHigh and upperWick > body * 0.5
+        orbEdgeRejectBearCount := math.min(orbEdgeRejectBearCount + 1, 3)
+    else if close > orbHigh
+        orbEdgeRejectBearCount := 0
+
+// Quality gates — require at least 2 candle rejection sequence
+orbMidRejectQualityBull = orbMidRejectBullCount >= 2
+orbMidRejectQualityBear = orbMidRejectBearCount >= 2
+orbEdgeRejectQualityBull = orbEdgeRejectBullCount >= 2
+orbEdgeRejectQualityBear = orbEdgeRejectBearCount >= 2
+
+orbLostMidBull = orbLive and not na(orbMid) and close < orbMid and close < open
+orbLostMidBear = orbLive and not na(orbMid) and close > orbMid and close > open
+
+// TRUE ORB FAILURE — auction ownership transfer logic
+// Failure = midpoint accepted by opposite side AND opposite expansion confirms
+// This is permanent. No recovery allowed.
+
+var bool orbMidAcceptedBull = false
+var bool orbMidAcceptedBear = false
+var bool orbBullThesisDead  = false
+var bool orbBearThesisDead  = false
+
+if newDay
+    orbMidAcceptedBull := false
+    orbMidAcceptedBear := false
+    orbBullThesisDead  := false
+    orbBearThesisDead  := false
+
+// Step 1 — track midpoint acceptance (2 consecutive closes on same side)
+if orbLive and not na(orbMid)
+    if close > orbMid and close > open and close[1] > orbMid
+        orbMidAcceptedBull := true
+        orbMidAcceptedBear := false
+    if close < orbMid and close < open and close[1] < orbMid
+        orbMidAcceptedBear := true
+        orbMidAcceptedBull := false
+
+// Step 2 — opposite expansion confirmation
+// Bull expansion: closed above ORB high with momentum
+orbOppExpansionBull =
+     not na(orbHigh) and
+     close > orbHigh and close > open and
+     (isNQChart ? (close - orbHigh) >= 15 : (close - orbHigh) >= 5)
+
+// Bear expansion: closed below ORB low with momentum
+orbOppExpansionBear =
+     not na(orbLow) and
+     close < orbLow and close < open and
+     (isNQChart ? (orbLow - close) >= 15 : (orbLow - close) >= 5)
+
+// Step 3 — permanent thesis death
+// Bearish thesis dies: bull mid acceptance + bull expansion confirms
+if orbLive and orbMidAcceptedBull and orbOppExpansionBull
+    orbBearThesisDead := true
+// orbFailBull/Bear are now thesis-death flags — permanent
+orbFailBull = orbBullThesisDead
+orbFailBear = orbBearThesisDead
+
+// STATE MACHINE VARS
+var int orbBullBreakBar = na
+var int orbBearBreakBar = na
+if newDay
+    orbBullBreakBar := na
+    orbBearBreakBar := na
+if orbLive and not na(orbHigh) and close > orbHigh and close > open and close > high[1]
+    orbBullBreakBar := bar_index
+if orbLive and not na(orbLow) and close < orbLow and close < open and close < low[1]
+    orbBearBreakBar := bar_index
+
+// Thesis death only valid AFTER a confirmed breakout in that direction
+// Bear thesis dies only after bull breakout was confirmed first
+// Bear thesis dies: bear broke out first, then bulls reclaimed mid and expanded
+if orbLive and orbMidAcceptedBull and orbOppExpansionBull and not na(orbBearBreakBar)
+    orbBearThesisDead := true
+// Bull thesis dies: bull broke out first, then bears reclaimed mid and expanded
+if orbLive and orbMidAcceptedBear and orbOppExpansionBear and not na(orbBullBreakBar)
+    orbBullThesisDead := true
+// ALSO: if mid accepted by opposite side with NO prior breakout — pure mid failure
+if orbLive and orbMidAcceptedBull and not na(orbBearBreakBar) and close > orbHigh
+    orbBearThesisDead := true
+if orbLive and orbMidAcceptedBear and not na(orbBullBreakBar) and close < orbLow
+    orbBullThesisDead := true
+    
+orbAcceptedBull = not na(orbBullBreakBar) and (bar_index - orbBullBreakBar >= 2) and close > orbHigh and not orbFailBull
+orbAcceptedBear = not na(orbBearBreakBar) and (bar_index - orbBearBreakBar >= 2) and close < orbLow  and not orbFailBear
+
+orbStateMachine =
+     hourNow >= orbKillHour                                  ? "ORB_EXPIRED"      :
+     orbBullThesisDead and orbBearThesisDead                 ? "ORB_FAILED"       :
+     orbBullThesisDead                                       ? "ORB_FAILED"       :
+     orbBearThesisDead                                       ? "ORB_FAILED"       :
+     orbAcceptedBull                                         ? "ORB_ACCEPTED_BULL":
+     orbAcceptedBear                                         ? "ORB_ACCEPTED_BEAR":
+     orbLive and not na(orbHigh) and close > orbHigh         ? "ORB_EXPANDING"    :
+     orbLive and not na(orbLow)  and close < orbLow          ? "ORB_EXPANDING"    :
+     orbLive and (orbMidRejectQualityBull or orbMidRejectQualityBear or
+                  orbEdgeRejectQualityBull or orbEdgeRejectQualityBear) ? "ORB_RETESTING" :
+     orbLive                                                 ? "ORB_READY"        :
+     isORBWindow                                             ? "ORB_FORMING"      : "ORB_INACTIVE"
+orbIsActive = orbLive and orbStateMachine != "ORB_EXPIRED" and orbStateMachine != "ORB_FAILED" and orbStateMachine != "ORB_INACTIVE" and orbStateMachine != "ORB_FORMING"
+
+orbDead =
+     hourNow >= orbKillHour or
+     orbFailBull or orbFailBear
+
+//================ ORB DRAWING ================
+if showORB and orbVisible and not na(orbStartBar)
+    orbRightEdge = hourNow < orbKillHour ? bar_index : nz(orbEndBar, bar_index)
+    if na(orbBox)
+        orbBox := box.new(orbStartBar, orbHigh, orbRightEdge, orbLow,
+             bgcolor=color.new(color.aqua, 86), border_color=color.new(color.aqua, 0), border_width=1)
+    else
+        box.set_left(orbBox, orbStartBar)
+        box.set_right(orbBox, orbRightEdge)
+        box.set_top(orbBox, orbHigh)
+        box.set_bottom(orbBox, orbLow)
+        box.set_bgcolor(orbBox, color.new(color.aqua, 86))
+        box.set_border_color(orbBox, color.new(color.aqua, 0))
+    if na(orbHighLine)
+        orbHighLine := line.new(orbStartBar, orbHigh, orbRightEdge, orbHigh, color=color.new(color.aqua, 0), width=2)
+        orbLowLine  := line.new(orbStartBar, orbLow,  orbRightEdge, orbLow,  color=color.new(color.aqua, 0), width=2)
+        orbMidLine  := line.new(orbStartBar, orbMid,  orbRightEdge, orbMid,  color=midColor, width=2, style=line.style_dashed)
+    else
+        line.set_x1(orbHighLine, orbStartBar)
+        line.set_x2(orbHighLine, orbRightEdge)
+        line.set_y1(orbHighLine, orbHigh)
+        line.set_y2(orbHighLine, orbHigh)
+        line.set_x1(orbLowLine,  orbStartBar)
+        line.set_x2(orbLowLine,  orbRightEdge)
+        line.set_y1(orbLowLine,  orbLow)
+        line.set_y2(orbLowLine,  orbLow)
+        line.set_x1(orbMidLine,  orbStartBar)
+        line.set_x2(orbMidLine,  orbRightEdge)
+        line.set_y1(orbMidLine,  orbMid)
+        line.set_y2(orbMidLine,  orbMid)
+
+if barstate.islast and showHistORB
+    for i = 0 to array.size(histORBMidLines) - 1
+        line.delete(array.get(histORBMidLines, i))
+    array.clear(histORBMidLines)
+    _nMids = math.min(array.size(histORBBoxes), array.size(histORBMids))
+    if _nMids > 0
+        for i = 0 to _nMids - 1
+            _midVal  = array.get(histORBMids, i)
+            _midBox  = array.get(histORBBoxes, i)
+            _midAge  = _nMids - i
+            if not na(_midVal)
+                _midTrans = math.min(25 + (_midAge - 1) * 15, 68)
+                _ml = line.new(box.get_left(_midBox), _midVal, box.get_right(_midBox), _midVal,
+                     color=color.new(color.yellow, _midTrans), width=1, style=line.style_dashed)
+                array.push(histORBMidLines, _ml)
+
+//====================================================
+// PART 2 = CORE SERIES + LIQUIDITY ENGINE
+//====================================================
+
+//================ CORE SERIES ================
+emaFast  = ta.ema(close, 9)
+emaSlow  = ta.ema(close, 21)
+emaTrend = ta.ema(close, 50)
+atrValue = ta.atr(14)
+
+//================ MTF BIAS ================
+f_tfBull(tf) =>
+    c = request.security(syminfo.tickerid, tf, close)
+    f = request.security(syminfo.tickerid, tf, ta.ema(close, 9))
+    s = request.security(syminfo.tickerid, tf, ta.ema(close, 21))
+    t = request.security(syminfo.tickerid, tf, ta.ema(close, 50))
+    c > t and f > s
+
+bull5  = f_tfBull("5")
+bull15 = f_tfBull("15")
+bull1h = f_tfBull("60")
+
+trendBull = bull5 and bull15
+trendBear = not bull5 and not bull15
+htfBull   = bull15 and bull1h
+htfBear   = not bull15 and not bull1h
+
+//================ MARKET REGIME ENGINE ================
+range20 = ta.highest(high, 20) - ta.lowest(low, 20)
+range10 = ta.highest(high, 10) - ta.lowest(low, 10)
+atrFast = ta.atr(5)
+atrSlow = ta.sma(atrValue, 20)
+
+emaSpread     = math.abs(emaFast - emaSlow)
+trendStrength = emaSpread / atrValue
+
+trendUp   = close > emaTrend and emaFast > emaSlow and trendStrength > 0.15
+trendDown = close < emaTrend and emaFast < emaSlow and trendStrength > 0.15
+
+isCompression = atrFast < atrSlow * 0.85 and range10 < range20 * 0.72
+isExpansion   = atrFast > atrSlow * 1.20 and candleRange > avgRange * 1.15
+isChop        = not trendUp and not trendDown and not isCompression and not isExpansion
+
+regimeText =
+     trendUp       ? "TREND UP"    :
+     trendDown     ? "TREND DOWN"  :
+     isCompression ? "COMPRESSION" :
+     isExpansion   ? "EXPANSION"   : "RANGE"
+
+regimeBuyMod  = trendUp ? 10 : isExpansion and close > emaFast ? 6 : isCompression ? -4 : isChop ? -8 : 0
+regimeSellMod = trendDown ? 10 : isExpansion and close < emaFast ? 6 : isCompression ? -4 : isChop ? -8 : 0
+
+//================ ADAPTIVE WEIGHTS ================
+orbWeight =
+     isExpansion          ? 20 :
+     trendUp or trendDown ? 18 :
+     isCompression        ? 10 :
+     isChop               ?  8 : 16
+
+ictWeight =
+     trendUp or trendDown ? 24 :
+     isExpansion          ? 20 :
+     isChop               ? 16 :
+     isCompression        ? 12 : 20
+
+liqWeight =
+     isChop               ? 18 :
+     isCompression        ? 16 :
+     trendUp or trendDown ? 10 :
+     isExpansion          ? 14 : 12
+
+chochWeight =
+     isChop               ? 16 :
+     isCompression        ? 14 :
+     trendUp or trendDown ?  8 : 10
+
+//================ SESSION RANGE STORAGE ================
+var float asiaHigh   = na
+var float asiaLow    = na
+var float londonHigh = na
+var float londonLow  = na
+var float nyHigh     = na
+var float nyLow      = na
+
+if newAsia
+    asiaHigh := high
+    asiaLow  := low
+if inAsia
+    asiaHigh := na(asiaHigh) ? high : math.max(asiaHigh, high)
+    asiaLow  := na(asiaLow)  ? low  : math.min(asiaLow,  low)
+if newLondon
+    londonHigh := high
+    londonLow  := low
+if inLondon
+    londonHigh := na(londonHigh) ? high : math.max(londonHigh, high)
+    londonLow  := na(londonLow)  ? low  : math.min(londonLow,  low)
+if newNYCash
+    nyHigh := high
+    nyLow  := low
+if inNYCash
+    nyHigh := na(nyHigh) ? high : math.max(nyHigh, high)
+    nyLow  := na(nyLow)  ? low  : math.min(nyLow,  low)
+
+//================ PREVIOUS SESSION STORAGE ================
+var float prevAsiaHigh   = na
+var float prevAsiaLow    = na
+var float prevLondonHigh = na
+var float prevLondonLow  = na
+var float prevNYHigh     = na
+var float prevNYLow      = na
+
+if not inAsia and inAsia[1]
+    prevAsiaHigh := asiaHigh
+    prevAsiaLow  := asiaLow
+if not inLondon and inLondon[1]
+    prevLondonHigh := londonHigh
+    prevLondonLow  := londonLow
+if not inNYCash and inNYCash[1]
+    prevNYHigh := nyHigh
+    prevNYLow  := nyLow
+
+prevSessionHigh = math.max(nz(prevAsiaHigh, -1e10), math.max(nz(prevLondonHigh, -1e10), nz(prevNYHigh, -1e10)))
+prevSessionLow  = math.min(nz(prevAsiaLow,   1e10), math.min(nz(prevLondonLow,   1e10), nz(prevNYLow,   1e10)))
+prevSessionHigh := prevSessionHigh == -1e10 ? na : prevSessionHigh
+prevSessionLow  := prevSessionLow  ==  1e10 ? na : prevSessionLow
+
+//================ HIGHER TIMEFRAME LIQUIDITY ================
+prevDayHigh  = request.security(syminfo.tickerid, "D", high[1])
+prevDayLow   = request.security(syminfo.tickerid, "D", low[1])
+prevWeekHigh = request.security(syminfo.tickerid, "W", high[1])
+prevWeekLow  = request.security(syminfo.tickerid, "W", low[1])
+
+//================ LIQUIDITY HELPERS ================
+liqThresh = atrValue * 0.25
+
+f_near(level, thresh) =>
+    not na(level) and math.abs(close - level) <= thresh
+
+f_swept_high(level) =>
+    not na(level) and high > level and close < level
+
+f_swept_low(level) =>
+    not na(level) and low < level and close > level
+
+//================ ORB LIQUIDITY INTERACTION ================
+orbHighNearPSH = not na(orbHigh) and not na(prevSessionHigh) and math.abs(orbHigh - prevSessionHigh) < atrValue * 0.5
+orbHighNearPDH = not na(orbHigh) and not na(prevDayHigh)     and math.abs(orbHigh - prevDayHigh)     < atrValue * 0.5
+orbLowNearPSL  = not na(orbLow)  and not na(prevSessionLow)  and math.abs(orbLow  - prevSessionLow)  < atrValue * 0.5
+orbLowNearPDL  = not na(orbLow)  and not na(prevDayLow)      and math.abs(orbLow  - prevDayLow)      < atrValue * 0.5
+
+orbHighLiqAligned = orbHighNearPSH or orbHighNearPDH
+orbLowLiqAligned  = orbLowNearPSL  or orbLowNearPDL
+
+//================ NEAREST LIQUIDITY ================
+nearestLiqHigh =
+     not na(prevDayHigh)     and prevDayHigh     > close ? prevDayHigh     :
+     not na(prevSessionHigh) and prevSessionHigh > close ? prevSessionHigh :
+     not na(prevWeekHigh)    and prevWeekHigh    > close ? prevWeekHigh    : na
+
+nearestLiqLow =
+     not na(prevDayLow)     and prevDayLow     < close ? prevDayLow     :
+     not na(prevSessionLow) and prevSessionLow < close ? prevSessionLow :
+     not na(prevWeekLow)    and prevWeekLow    < close ? prevWeekLow    : na
+
+//================ ORB LIQUIDITY SIGNALS ================
+orbBullBreakIntoLiq = orbBullBreak and orbHighLiqAligned and not na(nearestLiqHigh)
+orbBearBreakIntoLiq = orbBearBreak and orbLowLiqAligned  and not na(nearestLiqLow)
+
+// Type 3: liquidity rejection — auction expands into liq, fails acceptance
+orbLiqRejectBull =
+     orbLive and orbLowLiqAligned and
+     low <= orbLow and close > orbLow and close > open and
+     lowerWick > body * 0.8 and
+     not orbMidAcceptedBear
+
+orbLiqRejectBear =
+     orbLive and orbHighLiqAligned and
+     high >= orbHigh and close < orbHigh and close < open and
+     upperWick > body * 0.8 and
+     not orbMidAcceptedBull
+
+
+orbHighLiqReject =
+     orbLive and orbIsActive and orbHighLiqAligned and
+     high >= orbHigh and close < orbHigh and close < open and
+     upperWick > body * 1.0
+
+orbLowLiqReject =
+     orbLive and orbIsActive and orbLowLiqAligned and
+     low <= orbLow and close > orbLow and close > open and
+     lowerWick > body * 1.0
+
+//================ ORB CONTEXTUAL AUCTION INTELLIGENCE ================
+// Evaluates WHY a liquidity event matters, not just THAT it happened.
+// Significance comes from confluence: which external levels were interacted with,
+// whether liquidity stacked, reclaim quality, and whether auction ownership shifted.
+// Asia H/L are contextual references inside the ORB auction — not a standalone strategy.
+// This block produces modifiers that feed the score model and CTX display row only.
+// No existing state machine, signals, alerts, or execution logic is modified here.
+
+// --- EXTERNAL LEVEL SWEEP DETECTION (per-bar, within ORB active window) ---
+// Identifies which significant level price swept and reclaimed this bar.
+// Asia H/L carry the highest contextual weight because they represent overnight
+// auction participants who built positions — sweeping them traps those participants.
+orbAsiaLowSweepNow  = orbLive and not na(asiaLow)  and low <= asiaLow  and close > asiaLow  and lowerWick > body * 0.5
+orbAsiaHighSweepNow = orbLive and not na(asiaHigh) and high >= asiaHigh and close < asiaHigh and upperWick > body * 0.5
+
+// Tier of the most significant level interacted with (bull = swept a low)
+// 4 = Asia session H/L (overnight trapped participants, highest weight)
+// 3 = Previous week H/L (external weekly liquidity)
+// 2 = Previous day H/L (daily range auction boundary)
+// 1 = Previous session H/L (intraday significance)
+orbExtLiqTierBull =
+     orbAsiaLowSweepNow                               ? 4 :
+     orbLive and f_swept_low(prevWeekLow)             ? 3 :
+     orbLive and f_swept_low(prevDayLow)              ? 2 :
+     orbLive and f_swept_low(prevSessionLow)          ? 1 : 0
+
+orbExtLiqTierBear =
+     orbAsiaHighSweepNow                              ? 4 :
+     orbLive and f_swept_high(prevWeekHigh)           ? 3 :
+     orbLive and f_swept_high(prevDayHigh)            ? 2 :
+     orbLive and f_swept_high(prevSessionHigh)        ? 1 : 0
+
+// --- STACKED LIQUIDITY INTERACTION ---
+// Multiple external levels swept or aligned in the same direction elevates significance.
+// Stacked liq = larger pool of trapped participants = stronger reversal fuel.
+orbStackedBull = orbLive and (
+     (orbAsiaLowSweepNow  and (f_swept_low(prevDayLow) or f_swept_low(prevSessionLow))) or
+     (f_swept_low(prevDayLow) and f_swept_low(prevSessionLow)) or
+     (orbLowNearPSL and orbLowNearPDL))
+
+orbStackedBear = orbLive and (
+     (orbAsiaHighSweepNow and (f_swept_high(prevDayHigh) or f_swept_high(prevSessionHigh))) or
+     (f_swept_high(prevDayHigh) and f_swept_high(prevSessionHigh)) or
+     (orbHighNearPSH and orbHighNearPDH))
+
+// --- RECLAIM QUALITY TRACKING ---
+// Consecutive bars closing beyond the swept level = auction is rejecting the sweep.
+// 1 bar = initial wick rejection (weak, could be noise)
+// 2 bars = confirmed reclaim (participants defending the level)
+// 3+ bars = aggressive reclaim / acceptance building (trapped participants covering)
+var int   orbReclaimBullBars = 0
+var int   orbReclaimBearBars = 0
+var int   orbSweepTierBull   = 0
+var int   orbSweepTierBear   = 0
+var float orbSweepLevelBull  = na
+var float orbSweepLevelBear  = na
+
+if newDay
+    orbReclaimBullBars := 0
+    orbReclaimBearBars := 0
+    orbSweepTierBull   := 0
+    orbSweepTierBear   := 0
+    orbSweepLevelBull  := na
+    orbSweepLevelBear  := na
+
+// Capture bull sweep event (update if equal/higher tier than current)
+if orbExtLiqTierBull > 0 and orbExtLiqTierBull >= orbSweepTierBull
+    orbSweepTierBull  := orbExtLiqTierBull
+    orbSweepLevelBull :=
+         orbAsiaLowSweepNow                                                   ? asiaLow       :
+         orbExtLiqTierBull == 3 and not na(prevWeekLow)                       ? prevWeekLow   :
+         orbExtLiqTierBull == 2 and not na(prevDayLow)                        ? prevDayLow    :
+         not na(prevSessionLow)                                               ? prevSessionLow : na
+    orbReclaimBullBars := 1
+else if orbSweepTierBull > 0 and not na(orbSweepLevelBull)
+    if close > orbSweepLevelBull
+        orbReclaimBullBars := math.min(orbReclaimBullBars + 1, 6)
+    else if close < orbSweepLevelBull and close < open
+        // Bears recaptured the swept level — auction reversal failed
+        orbReclaimBullBars := 0
+        orbSweepTierBull   := 0
+        orbSweepLevelBull  := na
+
+// Capture bear sweep event
+if orbExtLiqTierBear > 0 and orbExtLiqTierBear >= orbSweepTierBear
+    orbSweepTierBear  := orbExtLiqTierBear
+    orbSweepLevelBear :=
+         orbAsiaHighSweepNow                                                  ? asiaHigh      :
+         orbExtLiqTierBear == 3 and not na(prevWeekHigh)                      ? prevWeekHigh  :
+         orbExtLiqTierBear == 2 and not na(prevDayHigh)                       ? prevDayHigh   :
+         not na(prevSessionHigh)                                              ? prevSessionHigh : na
+    orbReclaimBearBars := 1
+else if orbSweepTierBear > 0 and not na(orbSweepLevelBear)
+    if close < orbSweepLevelBear
+        orbReclaimBearBars := math.min(orbReclaimBearBars + 1, 6)
+    else if close > orbSweepLevelBear and close > open
+        orbReclaimBearBars := 0
+        orbSweepTierBear   := 0
+        orbSweepLevelBear  := na
+
+// --- FAILED ACCEPTANCE BEYOND SWEPT LEVEL ---
+// After sweep, price attempted to accept BEYOND the level but failed and returned.
+// Failed acceptance is a very strong auction reversal signal — market rejected expansion.
+orbFailedAcceptBull =
+     orbSweepTierBull > 0 and not na(orbSweepLevelBull) and
+     orbReclaimBullBars >= 1 and
+     low[1] < orbSweepLevelBull and close > orbSweepLevelBull and  // previous bar was below, now above
+     body > body[1] and close > open                               // current bar is stronger than sweep bar
+
+orbFailedAcceptBear =
+     orbSweepTierBear > 0 and not na(orbSweepLevelBear) and
+     orbReclaimBearBars >= 1 and
+     high[1] > orbSweepLevelBear and close < orbSweepLevelBear and
+     body > body[1] and close < open
+
+// --- AUCTION OWNERSHIP SHIFT ---
+// Most significant contextual confirmation: sweep + sustained reclaim + close beyond ORB midpoint.
+// When auction ownership shifts, the original thesis for the sweep is invalidated.
+// Not fired on a single-bar wick — requires 2+ bars of sustained position beyond swept level.
+orbOwnershipShiftBull =
+     orbSweepTierBull > 0 and orbReclaimBullBars >= 2 and
+     not na(orbMid) and close > orbMid and
+     not orbMidAcceptedBear and not orbFailBull
+
+orbOwnershipShiftBear =
+     orbSweepTierBear > 0 and orbReclaimBearBars >= 2 and
+     not na(orbMid) and close < orbMid and
+     not orbMidAcceptedBull and not orbFailBear
+
+// --- CONTEXTUAL AUCTION MODIFIER ---
+// Composite score from: sweep tier + stacked liquidity + reclaim quality + ownership shift.
+// Each factor contributes independently — confluence across multiple factors = elevated significance.
+// Capped at 30 to serve as a modifier, not a replacement, within the existing score model.
+orbAuctionCtxBullMod =
+     (orbSweepTierBull == 4 ? 10 : orbSweepTierBull == 3 ? 7 : orbSweepTierBull == 2 ? 5 : orbSweepTierBull == 1 ? 3 : 0) +
+     (orbStackedBull ? 6 : 0)                     +
+     (orbReclaimBullBars >= 3 ? 8 : orbReclaimBullBars == 2 ? 5 : orbReclaimBullBars == 1 ? 2 : 0) +
+     (orbFailedAcceptBull  ? 5 : 0)               +
+     (orbOwnershipShiftBull ? 6 : 0)
+
+orbAuctionCtxBearMod =
+     (orbSweepTierBear == 4 ? 10 : orbSweepTierBear == 3 ? 7 : orbSweepTierBear == 2 ? 5 : orbSweepTierBear == 1 ? 3 : 0) +
+     (orbStackedBear ? 6 : 0)                     +
+     (orbReclaimBearBars >= 3 ? 8 : orbReclaimBearBars == 2 ? 5 : orbReclaimBearBars == 1 ? 2 : 0) +
+     (orbFailedAcceptBear  ? 5 : 0)               +
+     (orbOwnershipShiftBear ? 6 : 0)
+
+orbCtxBullBonus = math.min(orbAuctionCtxBullMod, 30)
+orbCtxBearBonus = math.min(orbAuctionCtxBearMod, 30)
+
+//================ ORB BIAS + SIGNALS ================
+orbMidHeldBull = orbLive and not na(orbMid) and close > orbMid and close > open and low > orbMid
+orbMidHeldBear = orbLive and not na(orbMid) and close < orbMid and close < open and high < orbMid
+
+orbBullBias =
+     orbIsActive and not orbFailBull and
+     (orbBullBreak or orbRetestBull or orbMidRejectBull or orbMidHeldBull or
+      orbMidBreachBull or orbBullBreakIntoLiq or orbLowLiqReject or orbOwnershipShiftBull)
+
+orbBearBias =
+     orbIsActive and not orbFailBear and
+     (orbBearBreak or orbRetestBear or orbMidRejectBear or orbMidHeldBear or
+      orbMidBreachBear or orbBearBreakIntoLiq or orbHighLiqReject or orbOwnershipShiftBear)
+// Scenario 1 — Mid rejection
+orbMidRejectLong  = orbLive and orbIsActive and not na(orbMid) and low <= orbMid and close > orbMid and close > open and lowerWick > body * 0.8
+orbMidRejectShort = orbLive and orbIsActive and not na(orbMid) and high >= orbMid and close < orbMid and close < open and upperWick > body * 0.8
+
+// Scenario 2 — Edge rejection (tap top or bottom of box and reject)
+orbTopRejectShort =
+     orbLive and orbIsActive and not na(orbHigh) and
+     high >= orbHigh and
+     close < orbHigh and
+     close < open and
+     upperWick > body * 0.8
+
+orbBottomRejectLong =
+     orbLive and orbIsActive and not na(orbLow) and
+     low <= orbLow and
+     close > orbLow and
+     close > open and
+     lowerWick > body * 0.8
+
+// Valid breakout — 5 to 20 points beyond edge
+orbValidBreakBull =
+     orbLive and orbIsActive and not na(orbHigh) and
+     close > orbHigh and
+     (isNQChart ? (close - orbHigh) >= 15 and (close - orbHigh) < 60 :
+                  (close - orbHigh) >= 5  and (close - orbHigh) < 20) and
+     close > open
+
+orbValidBreakBear =
+     orbLive and orbIsActive and not na(orbLow) and
+     close < orbLow and
+     (isNQChart ? (orbLow - close) >= 15 and (orbLow - close) < 60 :
+                  (orbLow - close) >= 5  and (orbLow - close) < 20) and
+     close < open
+
+// Final ORB signals — extended with contextual auction scenarios
+orbLongSignal =
+     isESChart and
+     not orbFailBull and
+     (orbMidRejectLong or orbBottomRejectLong or orbValidBreakBull or orbLowLiqReject or orbOwnershipShiftBull)
+
+orbShortSignal =
+     isESChart and
+     not orbFailBear and
+     (orbMidRejectShort or orbTopRejectShort or orbValidBreakBear or orbHighLiqReject or orbOwnershipShiftBear)
+orbContextText =
+     orbOwnershipShiftBull ? "OWNERSHIP SHIFT BULL" :
+     orbOwnershipShiftBear ? "OWNERSHIP SHIFT BEAR" :
+     orbFailedAcceptBull   ? "FAILED ACCEPT BULL"   :
+     orbFailedAcceptBear   ? "FAILED ACCEPT BEAR"   :
+     orbHighLiqReject      ? "ORB HIGH LIQ REJECT"  :
+     orbLowLiqReject       ? "ORB LOW LIQ REJECT"   :
+     orbBullBreakIntoLiq   ? "ORB BREAK INTO LIQ"   :
+     orbBearBreakIntoLiq   ? "ORB BREAK INTO LIQ"   :
+     orbHighLiqAligned     ? "ORB HIGH = LIQ"        :
+     orbLowLiqAligned      ? "ORB LOW = LIQ"         :
+     orbMidRejectBull      ? "MID REJECT BULL"       :
+     orbMidRejectBear      ? "MID REJECT BEAR"       :
+     orbMidBreachBull      ? "MID BREACH BULL"       :
+     orbMidBreachBear      ? "MID BREACH BEAR"       :
+     orbAboveMid           ? "ABOVE MID"             :
+     orbBelowMid           ? "BELOW MID"             : "ORB FORMING"
+
+//================ LIQUIDITY ENGINE V2 ================
+nearPSH = f_near(prevSessionHigh, liqThresh)
+nearPSL = f_near(prevSessionLow,  liqThresh)
+nearPDH = f_near(prevDayHigh,     liqThresh)
+nearPDL = f_near(prevDayLow,      liqThresh)
+nearPWH = f_near(prevWeekHigh,    liqThresh)
+nearPWL = f_near(prevWeekLow,     liqThresh)
+
+sweptPSH = f_swept_high(prevSessionHigh)
+sweptPSL = f_swept_low(prevSessionLow)
+sweptPDH = f_swept_high(prevDayHigh)
+sweptPDL = f_swept_low(prevDayLow)
+sweptPWH = f_swept_high(prevWeekHigh)
+sweptPWL = f_swept_low(prevWeekLow)
+
+acceptedAbovePSH = not na(prevSessionHigh) and close > prevSessionHigh and open > prevSessionHigh
+acceptedBelowPSL = not na(prevSessionLow)  and close < prevSessionLow  and open < prevSessionLow
+acceptedAbovePDH = not na(prevDayHigh)     and close > prevDayHigh     and open > prevDayHigh
+acceptedBelowPDL = not na(prevDayLow)      and close < prevDayLow      and open < prevDayLow
+acceptedAbovePWH = not na(prevWeekHigh)    and close > prevWeekHigh    and open > prevWeekHigh
+acceptedBelowPWL = not na(prevWeekLow)     and close < prevWeekLow     and open < prevWeekLow
+
+liqAboveTier   = nearPWH ? 4 : nearPDH ? 3 : nearPSH ? 2 : 0
+liqBelowTier   = nearPWL ? 4 : nearPDL ? 3 : nearPSL ? 2 : 0
+sweepHighTier  = sweptPWH ? 4 : sweptPDH ? 3 : sweptPSH ? 2 : 0
+sweepLowTier   = sweptPWL ? 4 : sweptPDL ? 3 : sweptPSL ? 2 : 0
+acceptHighTier = acceptedAbovePWH ? 4 : acceptedAbovePDH ? 3 : acceptedAbovePSH ? 2 : 0
+acceptLowTier  = acceptedBelowPWL ? 4 : acceptedBelowPDL ? 3 : acceptedBelowPSL ? 2 : 0
+
+nearLiquidityHigh = liqAboveTier  > 0
+nearLiquidityLow  = liqBelowTier  > 0
+sweepHigh         = sweepHighTier > 0
+sweepLow          = sweepLowTier  > 0
+acceptedHigh      = acceptHighTier > 0
+acceptedLow       = acceptLowTier  > 0
+
+liqBullDraw = acceptedHigh or (nearLiquidityHigh and not sweepHigh)
+liqBearDraw = acceptedLow  or (nearLiquidityLow  and not sweepLow)
+
+sweepHighLabel  = sweptPWH ? "SWEEP PW HIGH" : sweptPDH ? "SWEEP PD HIGH" : sweptPSH ? "SWEEP PS HIGH" : "NONE"
+sweepLowLabel   = sweptPWL ? "SWEEP PW LOW"  : sweptPDL ? "SWEEP PD LOW"  : sweptPSL ? "SWEEP PS LOW"  : "NONE"
+liqAboveLabel   = nearPWH  ? "PW HIGH"       : nearPDH  ? "PD HIGH"       : nearPSH  ? "PS HIGH"       : "NONE"
+liqBelowLabel   = nearPWL  ? "PW LOW"        : nearPDL  ? "PD LOW"        : nearPSL  ? "PS LOW"        : "NONE"
+acceptHighLabel = acceptedAbovePWH ? "ABOVE PW HIGH" : acceptedAbovePDH ? "ABOVE PD HIGH" : acceptedAbovePSH ? "ABOVE PS HIGH" : "NONE"
+acceptLowLabel  = acceptedBelowPWL ? "BELOW PW LOW"  : acceptedBelowPDL ? "BELOW PD LOW"  : acceptedBelowPSL ? "BELOW PS LOW"  : "NONE"
+
+longTargetLabel  = not na(prevDayHigh) and prevDayHigh > close ? "PDH" : not na(prevSessionHigh) and prevSessionHigh > close ? "PSH" : not na(prevWeekHigh) and prevWeekHigh > close ? "PWH" : "OPEN"
+shortTargetLabel = not na(prevDayLow)  and prevDayLow  < close ? "PDL" : not na(prevSessionLow)  and prevSessionLow  < close ? "PSL" : not na(prevWeekLow)  and prevWeekLow  < close ? "PWL" : "OPEN"
+
+highSweepReject = (nearPSH or nearPDH or nearPWH or sweptPSH or sweptPDH or sweptPWH) and close < open and upperWick > body * 1.10 and close < high[1]
+lowSweepReject  = (nearPSL or nearPDL or nearPWL or sweptPSL or sweptPDL or sweptPWL) and close > open and lowerWick > body * 1.10 and close > low[1]
+
+highBreakHold = (acceptedAbovePSH or acceptedAbovePDH or acceptedAbovePWH) and close > emaFast and close > open
+lowBreakHold  = (acceptedBelowPSL or acceptedBelowPDL or acceptedBelowPWL) and close < emaFast and close < open
+
+liqStateText =
+     sweepHigh         ? sweepHighLabel  :
+     sweepLow          ? sweepLowLabel   :
+     acceptedHigh      ? acceptHighLabel :
+     acceptedLow       ? acceptLowLabel  :
+     nearLiquidityHigh ? liqAboveLabel   :
+     nearLiquidityLow  ? liqBelowLabel   : "CLEAR"
+
+liqBiasText = liqBullDraw and not liqBearDraw ? "BULL DRAW" : liqBearDraw and not liqBullDraw ? "BEAR DRAW" : "NEUTRAL"
+
+//================ LIQUIDITY CLUSTER DETECTION ================
+clusterThresh = atrValue * 1.0
+levelsAbove1 = not na(prevDayHigh)     and prevDayHigh     > close and prevDayHigh     - close < clusterThresh
+levelsAbove2 = not na(prevSessionHigh) and prevSessionHigh > close and prevSessionHigh - close < clusterThresh
+levelsAbove3 = not na(prevWeekHigh)    and prevWeekHigh    > close and prevWeekHigh    - close < clusterThresh
+levelsBelow1 = not na(prevDayLow)      and prevDayLow      < close and close - prevDayLow      < clusterThresh
+levelsBelow2 = not na(prevSessionLow)  and prevSessionLow  < close and close - prevSessionLow  < clusterThresh
+levelsBelow3 = not na(prevWeekLow)     and prevWeekLow     < close and close - prevWeekLow     < clusterThresh
+
+aboveCount = (levelsAbove1 ? 1 : 0) + (levelsAbove2 ? 1 : 0) + (levelsAbove3 ? 1 : 0)
+belowCount = (levelsBelow1 ? 1 : 0) + (levelsBelow2 ? 1 : 0) + (levelsBelow3 ? 1 : 0)
+
+clusterAbove = aboveCount >= 2
+clusterBelow = belowCount >= 2
+
+liqClusterText =
+     clusterAbove and sweepHigh ? "SWEPT CLUSTER HIGH" :
+     clusterBelow and sweepLow  ? "SWEPT CLUSTER LOW"  :
+     clusterAbove               ? "CLUSTER ABOVE (" + str.tostring(aboveCount) + ")" :
+     clusterBelow               ? "CLUSTER BELOW (" + str.tostring(belowCount) + ")" :
+     liqStateText
+
+clusterBuyMod  = clusterBelow and liqBearDraw ? -6 : clusterAbove and sweepHigh ? 8 : 0
+clusterSellMod = clusterAbove and liqBullDraw ? -6 : clusterBelow and sweepLow  ? 8 : 0
+
+//================ STRUCTURE MEMORY ================
+pivLow  = ta.pivotlow(low,  3, 3)
+pivHigh = ta.pivothigh(high, 3, 3)
+var float lastLow  = na
+var float lastHigh = na
+if not na(pivLow)
+    lastLow  := pivLow
+if not na(pivHigh)
+    lastHigh := pivHigh
+
+swingBull = not na(lastHigh) and close > lastHigh
+swingBear = not na(lastLow)  and close < lastLow
+var int swingDir = 0
+if swingBull
+    swingDir := 1
+if swingBear
+    swingDir := -1
+
+//================ ORDER BLOCK ================
+var float bullOBHigh = na
+var float bullOBLow  = na
+var float bearOBHigh = na
+var float bearOBLow  = na
+
+obBody     = math.abs(close - open)
+obAvgBody  = ta.sma(math.abs(close - open), 20)
+obAvgRange = ta.sma(high - low, 20)
+
+bullDisplacement = close > open and obBody > obAvgBody * 1.20 and (high - low) > obAvgRange * 1.10 and close > ta.highest(high[1], 3)
+bearDisplacement = close < open and obBody > obAvgBody * 1.20 and (high - low) > obAvgRange * 1.10 and close < ta.lowest(low[1],  3)
+
+bullOBValid = bullDisplacement and close[1] < open[1] and (high - low) > obAvgRange * 0.50
+bearOBValid = bearDisplacement and close[1] > open[1] and (high - low) > obAvgRange * 0.50
+
+if bullOBValid
+    bullOBHigh := open[1]
+    bullOBLow  := low[1]
+if bearOBValid
+    bearOBHigh := high[1]
+    bearOBLow  := open[1]
+
+if not na(bullOBHigh) and close < bullOBLow
+    bullOBHigh := na
+    bullOBLow  := na
+if not na(bearOBHigh) and close > bearOBHigh
+    bearOBHigh := na
+    bearOBLow  := na
+
+atBullOB         = not na(bullOBHigh) and not na(bullOBLow) and low  <= bullOBHigh and high >= bullOBLow
+atBearOB         = not na(bearOBHigh) and not na(bearOBLow) and high >= bearOBLow  and low  <= bearOBHigh
+bullOBSupport    = atBullOB and close > open
+bearOBResistance = atBearOB and close < open
+
+//====================================================
+// PROS DISPLACEMENT LEG TRACKING — PHASE A1
+// Captures the origin and end of each displacement leg.
+// These feed the fib zone calculation in Phase A2.
+// No existing logic is modified here.
+//====================================================
+
+var float prosLegLowBull  = na
+var float prosLegHighBull = na
+var float prosLegHighBear = na
+var float prosLegLowBear  = na
+var int   prosLegBarBull  = na
+var int   prosLegBarBear  = na
+
+if newDay
+    prosLegLowBull  := na
+    prosLegHighBull := na
+    prosLegHighBear := na
+    prosLegLowBear  := na
+    prosLegBarBull  := na
+    prosLegBarBear  := na
+
+// Bull leg: origin = lowest low of 10 bars before displacement; end = displacement candle high
+if bullDisplacement
+    prosLegLowBull  := ta.lowest(low[1], 10)
+    prosLegHighBull := high
+    prosLegBarBull  := bar_index
+
+// Bear leg: origin = highest high of 10 bars before displacement; end = displacement candle low
+if bearDisplacement
+    prosLegHighBear := ta.highest(high[1], 10)
+    prosLegLowBear  := low
+    prosLegBarBear  := bar_index
+
+// Invalidate if price closes through the leg origin — leg structure broken
+if not na(prosLegLowBull) and close < prosLegLowBull
+    prosLegLowBull  := na
+    prosLegHighBull := na
+    prosLegBarBull  := na
+
+if not na(prosLegHighBear) and close > prosLegHighBear
+    prosLegHighBear := na
+    prosLegLowBear  := na
+    prosLegBarBear  := na
+
+// Freshness — leg expires after 50 bars
+prosLegFreshBull = not na(prosLegBarBull) and (bar_index - prosLegBarBull) <= 50
+prosLegFreshBear = not na(prosLegBarBear) and (bar_index - prosLegBarBear) <= 50
+
+// Valid leg = both endpoints present, fresh, positive range
+prosLegValidBull = prosLegFreshBull and not na(prosLegLowBull)  and not na(prosLegHighBull) and prosLegHighBull > prosLegLowBull
+prosLegValidBear = prosLegFreshBear and not na(prosLegHighBear) and not na(prosLegLowBear)  and prosLegHighBear > prosLegLowBear
+
+//====================================================
+// PART 3 = SESSION BOXES + SIGNAL ENGINE + SCORE
+//====================================================
+
+//================ SESSION BOX VISUALS ================
+showSessionBoxes = input.bool(true, "Show Session Boxes")
+asiaBoxColor     = input.color(color.new(color.yellow, 88), "Asia Box Color")
+londonBoxColor   = input.color(color.new(color.blue,   86), "London Box Color")
+nyBoxColor       = input.color(color.new(color.red,    86), "NY Box Color")
+
+var box asiaBox   = na
+var box londonBox = na
+var box nyBox     = na
+
+if showSessionBoxes
+    if newAsia
+        if not na(asiaBox)
+            if showHistBoxes
+                array.push(histAsiaBoxes, asiaBox)
+                while array.size(histAsiaBoxes) > histLookback
+                    box.delete(array.shift(histAsiaBoxes))
+                for i = 0 to array.size(histAsiaBoxes) - 1
+                    _histAge   = array.size(histAsiaBoxes) - i
+                    _histTrans = math.min(histFadeStart + 12 + (_histAge - 1) * 2, 97)
+                    box.set_bgcolor(array.get(histAsiaBoxes, i), color.new(asiaBoxColor, _histTrans))
+            else
+                box.delete(asiaBox)
+        asiaBox := box.new(bar_index, high, bar_index, low, bgcolor=asiaBoxColor, border_width=0)
+    if inAsia
+        if na(asiaBox)
+            asiaBox := box.new(bar_index, high, bar_index, low, bgcolor=asiaBoxColor, border_width=0)
+        box.set_right(asiaBox, bar_index)
+        box.set_top(asiaBox, asiaHigh)
+        box.set_bottom(asiaBox, asiaLow)
+    if newLondon
+        if not na(londonBox)
+            if showHistBoxes
+                array.push(histLondonBoxes, londonBox)
+                while array.size(histLondonBoxes) > histLookback
+                    box.delete(array.shift(histLondonBoxes))
+                for i = 0 to array.size(histLondonBoxes) - 1
+                    _histAge   = array.size(histLondonBoxes) - i
+                    _histTrans = math.min(histFadeStart + 12 + (_histAge - 1) * 2, 97)
+                    box.set_bgcolor(array.get(histLondonBoxes, i), color.new(londonBoxColor, _histTrans))
+            else
+                box.delete(londonBox)
+        londonBox := box.new(bar_index, high, bar_index, low, bgcolor=londonBoxColor, border_width=0)
+    if inLondon
+        if na(londonBox)
+            londonBox := box.new(bar_index, high, bar_index, low, bgcolor=londonBoxColor, border_width=0)
+        box.set_right(londonBox, bar_index)
+        box.set_top(londonBox, londonHigh)
+        box.set_bottom(londonBox, londonLow)
+    if newNYCash
+        if not na(nyBox)
+            if showHistBoxes
+                array.push(histNYBoxes, nyBox)
+                while array.size(histNYBoxes) > histLookback
+                    box.delete(array.shift(histNYBoxes))
+                for i = 0 to array.size(histNYBoxes) - 1
+                    _histAge   = array.size(histNYBoxes) - i
+                    _histTrans = math.min(histFadeStart + 12 + (_histAge - 1) * 2, 97)
+                    box.set_bgcolor(array.get(histNYBoxes, i), color.new(nyBoxColor, _histTrans))
+            else
+                box.delete(nyBox)
+        nyBox := box.new(bar_index, high, bar_index, low, bgcolor=nyBoxColor, border_width=0)
+    if inNYCash
+        if na(nyBox)
+            nyBox := box.new(bar_index, high, bar_index, low, bgcolor=nyBoxColor, border_width=0)
+        box.set_right(nyBox, bar_index)
+        box.set_top(nyBox, nyHigh)
+        box.set_bottom(nyBox, nyLow)
+
+//================ OB VISUAL REDESIGN ================
+showOBZones = input.bool(true, "Show OB Zones")
+
+var box   bullOBBox     = na
+var box   bearOBBox     = na
+var line  bullOBTopLine = na
+var line  bearOBTopLine = na
+var label bullOBLabel   = na
+var label bearOBLabel   = na
+
+bullOBColor     = color.new(color.lime, 82)
+bullOBBorder    = color.new(color.lime, 20)
+bullOBLineColor = color.new(color.lime, 10)
+bearOBColor     = color.new(color.red,  82)
+bearOBBorder    = color.new(color.red,  20)
+bearOBLineColor = color.new(color.red,  10)
+obLookback  = 6
+obLabelSize = size.small
+
+if showOBZones and barstate.islast
+    if not na(bullOBBox)
+        box.delete(bullOBBox)
+    if not na(bearOBBox)
+        box.delete(bearOBBox)
+    if not na(bullOBTopLine)
+        line.delete(bullOBTopLine)
+    if not na(bearOBTopLine)
+        line.delete(bearOBTopLine)
+    if not na(bullOBLabel)
+        label.delete(bullOBLabel)
+    if not na(bearOBLabel)
+        label.delete(bearOBLabel)
+    bullOBBox     := na
+    bearOBBox     := na
+    bullOBTopLine := na
+    bearOBTopLine := na
+    bullOBLabel   := na
+    bearOBLabel   := na
+    if not na(bullOBHigh) and not na(bullOBLow)
+        bullOBBox     := box.new(bar_index - obLookback, bullOBHigh, bar_index + 6, bullOBLow, bgcolor=bullOBColor, border_color=bullOBBorder, border_width=1)
+        bullOBTopLine := line.new(bar_index - obLookback, bullOBHigh, bar_index + 6, bullOBHigh, color=bullOBLineColor, width=2)
+        bullOBLabel   := label.new(bar_index + 7, bullOBHigh, "BULL OB\n" + str.tostring(math.round(bullOBHigh, 2)) + "\n" + str.tostring(math.round(bullOBLow, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=bullOBLineColor, size=obLabelSize)
+    if not na(bearOBHigh) and not na(bearOBLow)
+        bearOBBox     := box.new(bar_index - obLookback, bearOBHigh, bar_index + 6, bearOBLow, bgcolor=bearOBColor, border_color=bearOBBorder, border_width=1)
+        bearOBTopLine := line.new(bar_index - obLookback, bearOBHigh, bar_index + 6, bearOBHigh, color=bearOBLineColor, width=2)
+        bearOBLabel   := label.new(bar_index + 7, bearOBHigh, "BEAR OB\n" + str.tostring(math.round(bearOBHigh, 2)) + "\n" + str.tostring(math.round(bearOBLow, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=bearOBLineColor, size=obLabelSize)
+
+//================ SESSION BOX LABELS ================
+var label asiaLabel   = na
+var label londonLabel = na
+var label nyLabel     = na
+
+if barstate.islast
+    if not na(asiaLabel)
+        label.delete(asiaLabel)
+    if not na(londonLabel)
+        label.delete(londonLabel)
+    if not na(nyLabel)
+        label.delete(nyLabel)
+    if not na(asiaHigh) and not na(asiaLow)
+        asiaLabel   := label.new(bar_index + 2, asiaHigh,   "ASIA",     style=label.style_label_left, color=color.new(color.yellow, 15), textcolor=color.white, size=size.tiny)
+    if not na(londonHigh) and not na(londonLow)
+        londonLabel := label.new(bar_index + 2, londonHigh, "LONDON",   style=label.style_label_left, color=color.new(color.blue,   15), textcolor=color.white, size=size.tiny)
+    if not na(nyHigh) and not na(nyLow)
+        nyLabel     := label.new(bar_index + 2, nyHigh,     "NEW YORK", style=label.style_label_left, color=color.new(color.red,    15), textcolor=color.white, size=size.tiny)
+
+//================ SESSION INTELLIGENCE ================
+sessionBuyMod  = isNYOpen ? 10 : isPowerHour ? 6 : inNYCash ? 4 : inLondon ? 3 : inAsia ? -2 : isLunch ? -8 : -3
+sessionSellMod = isNYOpen ? 10 : isPowerHour ? 6 : inNYCash ? 4 : inLondon ? 3 : inAsia ? -2 : isLunch ? -8 : -3
+
+sessionStateText =
+     isNYOpen    ? "OPEN DRIVE"  :
+     isLunch     ? "LUNCH"       :
+     isPowerHour ? "POWER HOUR"  :
+     inNYCash    ? "NEW YORK"    :
+     inLondon    ? "LONDON"      :
+     inAsia      ? "ASIA"        : "OFF HOURS"
+
+//================ SESSION BIAS CARRY ================
+var int   londonCloseBias  = 0
+var float londonClosePrice = na
+
+if not inLondon and inLondon[1]
+    londonClosePrice := close
+    londonCloseBias  := trendBull ? 1 : trendBear ? -1 : 0
+
+carryActive          = (inNYPre or isNYOpen) and londonCloseBias != 0 and not na(londonClosePrice)
+carryInvalidatedBull = londonCloseBias == 1  and not na(londonClosePrice) and close < londonClosePrice - atrValue * 1.0
+carryInvalidatedBear = londonCloseBias == -1 and not na(londonClosePrice) and close > londonClosePrice + atrValue * 1.0
+carryBull = carryActive and londonCloseBias == 1  and not carryInvalidatedBull
+carryBear = carryActive and londonCloseBias == -1 and not carryInvalidatedBear
+carryText = carryBull ? "LONDON BULL CARRY" : carryBear ? "LONDON BEAR CARRY" : "NO CARRY"
+
+//================ LOCAL TREND BIAS ================
+emaFastSlope = emaFast - emaFast[3]
+emaSlowSlope = emaSlow - emaSlow[3]
+slopeBull = emaFastSlope > 0 and emaSlowSlope > 0 and close > emaFast
+slopeBear = emaFastSlope < 0 and emaSlowSlope < 0 and close < emaFast
+
+localBullBias = trendBull or trendUp   or slopeBull or (htfBull and close > emaFast) or carryBull
+localBearBias = trendBear or trendDown or slopeBear or (htfBear and close < emaFast) or carryBear
+
+//================ ES/NQ CROSS-MARKET ENGINE ================
+peerSymbol = isESChart ? "CME_MINI:NQ1!" : "CME_MINI:ES1!"
+
+peerClose    = request.security(peerSymbol, timeframe.period, close)
+peerOpen     = request.security(peerSymbol, timeframe.period, open)
+peerHigh     = request.security(peerSymbol, timeframe.period, high)
+peerLow      = request.security(peerSymbol, timeframe.period, low)
+peerEmaFast  = request.security(peerSymbol, timeframe.period, ta.ema(close, 9))
+peerEmaSlow  = request.security(peerSymbol, timeframe.period, ta.ema(close, 21))
+peerEmaTrend = request.security(peerSymbol, timeframe.period, ta.ema(close, 50))
+
+peerBullBias = peerClose > peerEmaTrend and peerEmaFast > peerEmaSlow
+peerBearBias = peerClose < peerEmaTrend and peerEmaFast < peerEmaSlow
+
+crossBullAligned = localBullBias and peerBullBias
+crossBearAligned = localBearBias and peerBearBias
+crossBullLag     = localBullBias and not peerBullBias
+crossBearLag     = localBearBias and not peerBearBias
+crossConflict    = (localBullBias and peerBearBias) or (localBearBias and peerBullBias)
+
+crossBuyMod     = crossBullAligned ? 8 : crossBullLag ? -4 : crossConflict ? -8 : 0
+crossSellMod    = crossBearAligned ? 8 : crossBearLag ? -4 : crossConflict ? -8 : 0
+crossMarketText = crossBullAligned ? "BULL ALIGN" : crossBearAligned ? "BEAR ALIGN" : crossBullLag ? "BULL LAG" : crossBearLag ? "BEAR LAG" : crossConflict ? "CONFLICT" : "NEUTRAL"
+
+//================ SMT ENGINE ================
+smtLookback  = input.int(20, "SMT Lookback", minval=5, maxval=100)
+localHighRef = ta.highest(high, smtLookback)
+localLowRef  = ta.lowest(low,   smtLookback)
+peerHighRef  = request.security(peerSymbol, timeframe.period, ta.highest(high, smtLookback))
+peerLowRef   = request.security(peerSymbol, timeframe.period, ta.lowest(low,   smtLookback))
+
+peerHighDiff = not na(peerHighRef) and not na(localHighRef) ? math.abs(peerHighRef - peerClose) / atrValue : 0
+peerLowDiff  = not na(peerLowRef)  and not na(localLowRef)  ? math.abs(peerClose   - peerLowRef) / atrValue : 0
+
+bearishSMT = high >= localHighRef and peerClose < peerHighRef and peerHighDiff > 0.5
+bullishSMT = low  <= localLowRef  and peerClose > peerLowRef  and peerLowDiff  > 0.5
+
+peerBullMomentum = peerClose > peerClose[3]
+peerBearMomentum = peerClose < peerClose[3]
+bullishSMT := bullishSMT and peerBullMomentum
+bearishSMT := bearishSMT and peerBearMomentum
+
+smtBullSupport = bullishSMT and localBullBias
+smtBearSupport = bearishSMT and localBearBias
+smtConflict    = (bullishSMT and localBearBias) or (bearishSMT and localBullBias)
+smtBuyMod      = smtBullSupport ? 6 : smtConflict ? -6 : 0
+smtSellMod     = smtBearSupport ? 6 : smtConflict ? -6 : 0
+smtText        = smtBullSupport ? "BULL SMT" : smtBearSupport ? "BEAR SMT" : smtConflict ? "SMT CONFLICT" : "NONE"
+
+
+//================ BOS / CHoCH (1m structure) ================
+var float bosHighLevel = na
+var float bosLowLevel  = na
+var int   bosHighBar   = na
+var int   bosLowBar    = na
+var int   bosDir       = 0
+
+bullBOS = not na(lastHigh) and close > lastHigh and close > open
+bearBOS = not na(lastLow)  and close < lastLow  and close < open
+
+if bullBOS
+    bosHighLevel := lastHigh
+    bosHighBar   := bar_index
+    bosDir       := 1
+if bearBOS
+    bosLowLevel := lastLow
+    bosLowBar   := bar_index
+    bosDir      := -1
+
+bosActive = not na(bosDir) and (bar_index - (bosDir == 1 ? nz(bosHighBar) : nz(bosLowBar)) <= 20)
+
+var int chochDir = 0
+chochBull = bosDir == -1 and not na(bosLowLevel)  and close > bosLowLevel  and close > open
+chochBear = bosDir == 1  and not na(bosHighLevel) and close < bosHighLevel and close < open
+if chochBull
+    chochDir := 1
+if chochBear
+    chochDir := -1
+
+
+//====================================================
+// ICT BRAIN V2 — FULL 6 STEP MODEL
+//====================================================
+
+//================ KILL ZONE ENGINE ================
+isLondonKZ    = hourNow >= 2  and hourNow < 5
+isNYKZ        = hourNow >= 7  and hourNow < 11
+isLondonClose = hourNow >= 10 and hourNow < 12
+isKillZone    = isLondonKZ or isNYKZ or isLondonClose
+
+killZoneText =
+     isLondonKZ    ? "LONDON KZ"  :
+     isNYKZ        ? "NY KZ"      :
+     isLondonClose ? "LDN CLOSE"  : "OFF KZ"
+
+//================ HTF SWING LEVELS ================
+htf1hSwingHigh = request.security(syminfo.tickerid, "60",  ta.pivothigh(high, 3, 3))
+htf1hSwingLow  = request.security(syminfo.tickerid, "60",  ta.pivotlow(low,   3, 3))
+htf4hSwingHigh = request.security(syminfo.tickerid, "240", ta.pivothigh(high, 3, 3))
+htf4hSwingLow  = request.security(syminfo.tickerid, "240", ta.pivotlow(low,   3, 3))
+
+var float last1hSwingHigh = na
+var float last1hSwingLow  = na
+var float last4hSwingHigh = na
+var float last4hSwingLow  = na
+
+if not na(htf1hSwingHigh)
+    last1hSwingHigh := htf1hSwingHigh
+if not na(htf1hSwingLow)
+    last1hSwingLow  := htf1hSwingLow
+if not na(htf4hSwingHigh)
+    last4hSwingHigh := htf4hSwingHigh
+if not na(htf4hSwingLow)
+    last4hSwingLow  := htf4hSwingLow
+
+//================ DEALING RANGE ================
+dealingRangeHigh = not na(prevDayHigh) ? prevDayHigh : not na(last1hSwingHigh) ? last1hSwingHigh : na
+dealingRangeLow  = not na(prevDayLow)  ? prevDayLow  : not na(last1hSwingLow)  ? last1hSwingLow  : na
+dealingRangeMid  = not na(dealingRangeHigh) and not na(dealingRangeLow) ? (dealingRangeHigh + dealingRangeLow) / 2 : na
+
+inDealingPremium  = not na(dealingRangeMid) and close > dealingRangeMid
+inDealingDiscount = not na(dealingRangeMid) and close < dealingRangeMid
+
+dealingRangeText  = inDealingPremium ? "PREMIUM" : inDealingDiscount ? "DISCOUNT" : "EQUILIBRIUM"
+dealingRangeLongOK  = inDealingDiscount
+dealingRangeShortOK = inDealingPremium
+
+//================ PREVIOUS DAY BIAS ================
+prevDayOpen    = request.security(syminfo.tickerid, "D", open[1])
+prevDayClose   = request.security(syminfo.tickerid, "D", close[1])
+prevDayBullish = not na(prevDayClose) and not na(prevDayOpen) and prevDayClose > prevDayOpen
+prevDayBearish = not na(prevDayClose) and not na(prevDayOpen) and prevDayClose < prevDayOpen
+
+prevDaySweepHigh = not na(prevDayHigh) and not na(prevWeekHigh) and prevDayHigh > prevWeekHigh
+prevDaySweepLow  = not na(prevDayLow)  and not na(prevWeekLow)  and prevDayLow  < prevWeekLow
+
+prevDayBiasLong  = prevDayBullish
+prevDayBiasShort = prevDayBearish
+prevDayBiasText  = prevDayBiasLong ? "PREV BULL" : prevDayBiasShort ? "PREV BEAR" : "PREV NEUTRAL"
+
+//================ STEP 1 — HTF LIQUIDITY SWEEP ================
+sweep1hHigh = not na(last1hSwingHigh) and high > last1hSwingHigh and close < last1hSwingHigh
+sweep1hLow  = not na(last1hSwingLow)  and low  < last1hSwingLow  and close > last1hSwingLow
+sweep4hHigh = not na(last4hSwingHigh) and high > last4hSwingHigh and close < last4hSwingHigh
+sweep4hLow  = not na(last4hSwingLow)  and low  < last4hSwingLow  and close > last4hSwingLow
+
+// Also use session lows and prev day as sweep targets directly
+htfSweepHigh = sweep1hHigh or sweep4hHigh or sweptPDH or sweptPSH or sweptPWH
+htfSweepLow  = sweep1hLow  or sweep4hLow  or sweptPDL or sweptPSL or sweptPWL
+
+var float sweptHighLevel  = na
+var float sweptLowLevel   = na
+var int   sweptHighBar    = na
+var int   sweptLowBar     = na
+var float sweepHighOrigin = na
+var float sweepLowOrigin  = na
+
+if htfSweepHigh
+    sweptHighLevel  := high
+    sweptHighBar    := bar_index
+    sweepHighOrigin := ta.lowest(low, 10)
+
+if htfSweepLow
+    sweptLowLevel  := low
+    sweptLowBar    := bar_index
+    sweepLowOrigin := ta.highest(high, 10)
+
+sweepHighFresh = not na(sweptHighBar) and (bar_index - sweptHighBar <= 20)
+sweepLowFresh  = not na(sweptLowBar)  and (bar_index - sweptLowBar  <= 20)
+
+//================ STEP 1b — SESSION GATE ================
+var bool sweepHighInAsia   = false
+var bool sweepHighInLondon = false
+var bool sweepLowInAsia    = false
+var bool sweepLowInLondon  = false
+
+if htfSweepHigh
+    sweepHighInAsia   := inAsia
+    sweepHighInLondon := inLondon
+if htfSweepLow
+    sweepLowInAsia   := inAsia
+    sweepLowInLondon := inLondon
+
+sweepHighGateOK = sweepHighFresh and (not (sweepHighInAsia or sweepHighInLondon) or isNYKZ)
+sweepLowGateOK  = sweepLowFresh  and (not (sweepLowInAsia  or sweepLowInLondon)  or isNYKZ)
+
+//================ STEP 2 — HTF BOS ================
+htf5mBullBOS  = request.security(syminfo.tickerid, "5",  ta.crossover(close,  ta.highest(high, 10)[1]))
+htf5mBearBOS  = request.security(syminfo.tickerid, "5",  ta.crossunder(close, ta.lowest(low,   10)[1]))
+htf15mBullBOS = request.security(syminfo.tickerid, "15", ta.crossover(close,  ta.highest(high, 10)[1]))
+htf15mBearBOS = request.security(syminfo.tickerid, "15", ta.crossunder(close, ta.lowest(low,   10)[1]))
+
+htfBullBOS = htf5mBullBOS or htf15mBullBOS
+htfBearBOS = htf5mBearBOS or htf15mBearBOS
+
+var bool step2BullConfirmed = false
+var bool step2BearConfirmed = false
+var int  step2BullBar       = na
+var int  step2BearBar       = na
+
+if sweepLowGateOK and htfBullBOS
+    step2BullConfirmed := true
+    step2BullBar       := bar_index
+if sweepHighGateOK and htfBearBOS
+    step2BearConfirmed := true
+    step2BearBar       := bar_index
+
+step2BullActive = step2BullConfirmed and not na(step2BullBar) and (bar_index - step2BullBar <= 30)
+step2BearActive = step2BearConfirmed and not na(step2BearBar) and (bar_index - step2BearBar <= 30)
+
+//================ FVG DETECTION ================
+var float bullFVGHigh = na
+var float bullFVGLow  = na
+var float bearFVGHigh = na
+var float bearFVGLow  = na
+var int   bullFVGBar  = na
+var int   bearFVGBar  = na
+
+bullFVG = low > high[2] and close[1] > open[1]
+bearFVG = high < low[2] and close[1] < open[1]
+
+if bullFVG
+    bullFVGHigh := low
+    bullFVGLow  := high[2]
+    bullFVGBar  := bar_index
+if bearFVG
+    bearFVGHigh := high[2]
+    bearFVGLow  := high
+    bearFVGBar  := bar_index
+
+if not na(bullFVGHigh) and close < bullFVGLow
+    bullFVGHigh := na
+    bullFVGLow  := na
+if not na(bearFVGHigh) and close > bearFVGHigh
+    bearFVGHigh := na
+    bearFVGLow  := na
+
+bullFVGActive = not na(bullFVGHigh) and not na(bullFVGLow)
+bearFVGActive = not na(bearFVGHigh) and not na(bearFVGLow)
+atBullFVG     = bullFVGActive and low  <= bullFVGHigh and high >= bullFVGLow
+atBearFVG     = bearFVGActive and high >= bearFVGLow  and low  <= bearFVGHigh
+
+//================ STEP 2b — HTF OB / FVG ZONE ================
+var float htfBullOBHigh = na
+var float htfBullOBLow  = na
+var float htfBearOBHigh = na
+var float htfBearOBLow  = na
+
+if step2BullConfirmed and bullDisplacement and close[1] < open[1]
+    htfBullOBHigh := open[1]
+    htfBullOBLow  := low[1]
+if step2BearConfirmed and bearDisplacement and close[1] > open[1]
+    htfBearOBHigh := high[1]
+    htfBearOBLow  := open[1]
+
+if not na(htfBullOBHigh) and close < htfBullOBLow
+    htfBullOBHigh := na
+    htfBullOBLow  := na
+if not na(htfBearOBHigh) and close > htfBearOBHigh
+    htfBearOBHigh := na
+    htfBearOBLow  := na
+
+atHTFBullOB = not na(htfBullOBHigh) and not na(htfBullOBLow) and low  <= htfBullOBHigh and high >= htfBullOBLow
+atHTFBearOB = not na(htfBearOBHigh) and not na(htfBearOBLow) and high >= htfBearOBLow  and low  <= htfBearOBHigh
+
+ictEntryZoneLong  = step2BullActive and (atHTFBullOB or atBullFVG) and dealingRangeLongOK
+ictEntryZoneShort = step2BearActive and (atHTFBearOB or atBearFVG) and dealingRangeShortOK
+
+//================ STEP 3 — 79% EXTENSION + 1M BOS ================
+ext79Bull = not na(sweptLowLevel) and not na(sweepLowOrigin) ?
+     sweptLowLevel + (sweepLowOrigin - sweptLowLevel) * 0.79 : na
+
+ext79Bear = not na(sweptHighLevel) and not na(sweepHighOrigin) ?
+     sweptHighLevel - (sweptHighLevel - sweepHighOrigin) * 0.79 : na
+
+at79Bull = not na(ext79Bull) and low  <= ext79Bull * 1.001 and close > ext79Bull and close > open
+at79Bear = not na(ext79Bear) and high >= ext79Bear * 0.999 and close < ext79Bear and close < open
+
+oneMBullBOS = not na(lastHigh) and close > lastHigh and close > open
+oneMBearBOS = not na(lastLow)  and close < lastLow  and close < open
+
+step3LongReady  = step2BullActive and ictEntryZoneLong  and (oneMBullBOS or at79Bull) and isKillZone
+step3ShortReady = step2BearActive and ictEntryZoneShort and (oneMBearBOS or at79Bear) and isKillZone
+
+step3LongElite  = step2BullActive and ictEntryZoneLong  and oneMBullBOS and at79Bull and isKillZone
+step3ShortElite = step2BearActive and ictEntryZoneShort and oneMBearBOS and at79Bear and isKillZone
+
+//================ STEP 4 — SMT CONFIRMATION ================
+ictSMTLong  = step3LongReady  and bullishSMT
+ictSMTShort = step3ShortReady and bearishSMT
+
+//================ ICT SIGNAL READY ================
+ictLongReady =
+     (step3LongReady or (bullBOS and atBullFVG and isKillZone) or (sweepLowFresh and bullBOS and atBullOB)) and
+     localBullBias and
+     not nearLiquidityHigh
+
+ictShortReady =
+     (step3ShortReady or (bearBOS and atBearFVG and isKillZone) or (sweepHighFresh and bearBOS and atBearOB)) and
+     localBearBias and
+     not nearLiquidityLow
+
+//================ ICT STEP STATE TEXT ================
+ictStepText =
+     step3LongElite    ? "S3 ELITE LONG"     :
+     step3ShortElite   ? "S3 ELITE SHORT"    :
+     ictLongReady      ? "ICT LONG READY"    :
+     ictShortReady     ? "ICT SHORT READY"   :
+     step3LongReady    ? "S3 LONG"           :
+     step3ShortReady   ? "S3 SHORT"          :
+     ictEntryZoneLong  ? "S2b ENTRY LONG"    :
+     ictEntryZoneShort ? "S2b ENTRY SHORT"   :
+     step2BullActive   ? "S2 BOS BULL"       :
+     step2BearActive   ? "S2 BOS BEAR"       :
+     sweepLowFresh     ? "S1 SWEEP LOW"      :
+     sweepHighFresh    ? "S1 SWEEP HIGH"     :
+     bullBOS           ? "1M BOS BULL"       :
+     bearBOS           ? "1M BOS BEAR"       :
+     at79Bull          ? "79% HOLD BULL"     :
+     at79Bear          ? "79% HOLD BEAR"     :
+     atBullFVG         ? "AT BULL FVG"       :
+     atBearFVG         ? "AT BEAR FVG"       : "WATCHING"
+//================ SMART SIGNAL ENGINE ================
+var int lastSmartBuyBar   = na
+var int lastSmartSellBar  = na
+var int lastBuyScorePeak  = 0
+var int lastSellScorePeak = 0
+var int buyDecayBar       = na
+var int sellDecayBar      = na
+
+smartCooldownBars = input.int(20, "Signal Cooldown Bars", minval=2, maxval=30)
+canSmartBuy  = na(lastSmartBuyBar)  or (bar_index - lastSmartBuyBar  > smartCooldownBars)
+canSmartSell = na(lastSmartSellBar) or (bar_index - lastSmartSellBar > smartCooldownBars)
+
+orbLongReady  = orbLongSignal  and isESChart
+orbShortReady = orbShortSignal and isESChart
+liqLongReady  = lowSweepReject  and localBullBias and not nearLiquidityHigh
+liqShortReady = highSweepReject and localBearBias and not nearLiquidityLow
+
+//================ ORB TARGETS ================
+orbRange    = not na(orbHigh) and not na(orbLow) ? orbHigh - orbLow : na
+orbATRRatio = not na(orbRange) and not na(atrValue) ? orbRange / atrValue : 1.0
+orbScale1   = orbATRRatio < 0.5 ? 0.75 : orbATRRatio < 1.0 ? 1.0 : orbATRRatio < 2.0 ? 1.25 : 1.5
+orbScale2   = orbATRRatio < 0.5 ? 1.25 : orbATRRatio < 1.0 ? 1.5 : orbATRRatio < 2.0 ? 2.0  : 2.5
+orbTarget1Bull = not na(orbHigh) and not na(orbRange) ? orbHigh + orbRange * orbScale1 : na
+orbTarget2Bull = not na(orbHigh) and not na(orbRange) ? orbHigh + orbRange * orbScale2 : na
+orbTarget1Bear = not na(orbLow)  and not na(orbRange) ? orbLow  - orbRange * orbScale1 : na
+orbTarget2Bear = not na(orbLow)  and not na(orbRange) ? orbLow  - orbRange * orbScale2 : na
+
+//================ INTER-BRAIN COMMUNICATION ================
+orbBullTarget = orbBullBias and not na(nearestLiqHigh) ? nearestLiqHigh : orbBullBias and not na(orbTarget1Bull) ? orbTarget1Bull : na
+orbBearTarget = orbBearBias and not na(nearestLiqLow)  ? nearestLiqLow  : orbBearBias and not na(orbTarget1Bear) ? orbTarget1Bear : na
+
+orbConfirmedBullDraw = orbBullBias and liqBullDraw and not na(orbBullTarget)
+orbConfirmedBearDraw = orbBearBias and liqBearDraw and not na(orbBearTarget)
+
+orbBullTrap = orbBullBias and not na(orbBullTarget) and highSweepReject and math.abs(high - orbBullTarget) < atrValue * 0.5
+orbBearTrap = orbBearBias and not na(orbBearTarget) and lowSweepReject  and math.abs(low  - orbBearTarget) < atrValue * 0.5
+
+brainBullAgree = orbConfirmedBullDraw and (liqLongReady  or ictLongReady)  and not orbBullTrap
+brainBearAgree = orbConfirmedBearDraw and (liqShortReady or ictShortReady) and not orbBearTrap
+brainConflict  = (orbBullBias and localBearBias) or (orbBearBias and localBullBias) or orbBullTrap or orbBearTrap
+
+brainBuyMod    = brainBullAgree ? 15 : brainConflict ? -12 : 0
+brainSellMod   = brainBearAgree ? 15 : brainConflict ? -12 : 0
+brainStateText = brainBullAgree ? "BRAINS ALIGNED BULL" : brainBearAgree ? "BRAINS ALIGNED BEAR" : orbBullTrap ? "ORB BULL TRAP" : orbBearTrap ? "ORB BEAR TRAP" : brainConflict ? "BRAIN CONFLICT" : "INDEPENDENT"
+
+//================ DONNA TRAP RISK ================
+donnaTrapRisk =
+     orbBullTrap or orbBearTrap or brainConflict or
+     (buySignal and nearLiquidityHigh) or (sellSignal and nearLiquidityLow)
+
+//================ FAILED AUCTION DETECTION ================
+var float faLevelBull  = na
+var float faLevelBear  = na
+var int   faBarBull    = na
+var int   faBarBear    = na
+var bool  faActiveBull = false
+var bool  faActiveBear = false
+
+if orbBullBreak or acceptedAbovePDH or acceptedAbovePSH
+    faLevelBull  := orbBullBreak ? orbHigh : acceptedAbovePDH ? prevDayHigh : prevSessionHigh
+    faBarBull    := bar_index
+    faActiveBull := true
+if orbBearBreak or acceptedBelowPDL or acceptedBelowPSL
+    faLevelBear  := orbBearBreak ? orbLow : acceptedBelowPDL ? prevDayLow : prevSessionLow
+    faBarBear    := bar_index
+    faActiveBear := true
+
+failedAuctionBear =
+     faActiveBull and not na(faLevelBull) and not na(faBarBull) and
+     (bar_index - faBarBull <= 15) and close < faLevelBull and close < open and body > avgBody * 1.10
+
+failedAuctionBull =
+     faActiveBear and not na(faLevelBear) and not na(faBarBear) and
+     (bar_index - faBarBear <= 15) and close > faLevelBear and close > open and body > avgBody * 1.10
+
+if failedAuctionBear
+    faActiveBull := false
+if failedAuctionBull
+    faActiveBear := false
+
+//================ DONNA HIGHER ORDER SCENARIO LOGIC ================
+donnaTier1Bull =
+     sweepLow and bullBOS and ictLongReady and localBullBias and
+     crossBullAligned and not brainConflict and not donnaTrapRisk and buyScore >= 60
+
+donnaTier1Bear =
+     sweepHigh and bearBOS and ictShortReady and localBearBias and
+     crossBearAligned and not brainConflict and not donnaTrapRisk and sellScore >= 60
+
+donnaTier2Bull = bullBOS and ictLongReady  and localBullBias and (crossBullAligned or brainBullAgree) and not donnaTrapRisk and buyScore  >= 52
+donnaTier2Bear = bearBOS and ictShortReady and localBearBias and (crossBearAligned or brainBearAgree) and not donnaTrapRisk and sellScore >= 52
+
+donnaTier3Bull = (bullBOS or failedAuctionBull or step3LongReady)  and localBullBias and buyScore  >= 45
+donnaTier3Bear = (bearBOS or failedAuctionBear or step3ShortReady) and localBearBias and sellScore >= 45
+
+londonSweepNYCont     = carryBull and sweepLow  and inNYPre and localBullBias
+londonSweepNYContBear = carryBear and sweepHigh and inNYPre and localBearBias
+
+po3Bull = isCompression and sweepLow  and bullBOS and localBullBias
+po3Bear = isCompression and sweepHigh and bearBOS and localBearBias
+
+openDriveBull = isNYOpen and orbBullBias and localBullBias and crossBullAligned and not orbFailBull
+openDriveBear = isNYOpen and orbBearBias and localBearBias and crossBearAligned and not orbFailBear
+
+eliteICTLong  = step3LongElite  and brainBullAgree
+eliteICTShort = step3ShortElite and brainBearAgree
+
+donnaTier = donnaTier1Bull or donnaTier1Bear ? 1 : donnaTier2Bull or donnaTier2Bear ? 2 : donnaTier3Bull or donnaTier3Bear ? 3 : 0
+
+donnaHigherOrder =
+     eliteICTLong          ? "ELITE ICT LONG"      :
+     eliteICTShort         ? "ELITE ICT SHORT"     :
+     donnaTier1Bull        ? "T1 FULL ICT LONG"    :
+     donnaTier1Bear        ? "T1 FULL ICT SHORT"   :
+     po3Bull               ? "PO3 BULL"            :
+     po3Bear               ? "PO3 BEAR"            :
+     londonSweepNYCont     ? "LONDON → NY LONG"    :
+     londonSweepNYContBear ? "LONDON → NY SHORT"   :
+     openDriveBull         ? "OPEN DRIVE BULL"     :
+     openDriveBear         ? "OPEN DRIVE BEAR"     :
+     donnaTier2Bull        ? "T2 STRONG LONG"      :
+     donnaTier2Bear        ? "T2 STRONG SHORT"     :
+     donnaTier3Bull        ? "T3 DEVELOPING LONG"  :
+     donnaTier3Bear        ? "T3 DEVELOPING SHORT" : ""
+
+donnaHigherBuyMod  = eliteICTLong  ? 20 : donnaTier1Bull ? 15 : po3Bull ? 12 : londonSweepNYCont ? 10 : openDriveBull ? 10 : donnaTier2Bull ? 8 : donnaTier3Bull ? 5 : 0
+donnaHigherSellMod = eliteICTShort ? 20 : donnaTier1Bear ? 15 : po3Bear ? 12 : londonSweepNYContBear ? 10 : openDriveBear ? 10 : donnaTier2Bear ? 8 : donnaTier3Bear ? 5 : 0
+
+//================ SCORE MODEL ================
+buyScore  := 0
+sellScore := 0
+
+// BASE BIAS
+buyScore  += localBullBias ? 20 : 0
+sellScore += localBearBias ? 20 : 0
+
+// STRUCTURE
+buyScore  += bullBOS           ? 12 : 0
+sellScore += bearBOS           ? 12 : 0
+buyScore  += trendUp           ? 10 : 0
+sellScore += trendDown         ? 10 : 0
+buyScore  += bullDisplacement  ?  8 : 0
+sellScore += bearDisplacement  ?  8 : 0
+buyScore  += failedAuctionBull ? 20 : 0
+sellScore += failedAuctionBear ? 20 : 0
+
+// ICT STEP MODEL — adaptive weights
+buyScore  += orbLongReady    ? orbWeight  : 0
+sellScore += orbShortReady   ? orbWeight  : 0
+buyScore  += ictLongReady    ? ictWeight  : 0
+sellScore += ictShortReady   ? ictWeight  : 0
+buyScore  += step3LongElite  ? 15 : 0
+sellScore += step3ShortElite ? 15 : 0
+buyScore  += at79Bull        ?  8 : 0
+sellScore += at79Bear        ?  8 : 0
+buyScore  += ictSMTLong      ? 10 : 0
+sellScore += ictSMTShort     ? 10 : 0
+buyScore  += liqLongReady    ? liqWeight  : 0
+sellScore += liqShortReady   ? liqWeight  : 0
+
+// ORB LIQUIDITY BONUSES — contextual when sweep data exists, flat fallback otherwise
+// orbCtxBullBonus/BearBonus carries: sweep tier + stacked liq + reclaim quality + ownership shift
+buyScore  += orbCtxBullBonus > 0 ? orbCtxBullBonus : (orbLowLiqReject  ? 12 : 0)
+buyScore  += orbBullBreakIntoLiq ? 10 : 0
+sellScore += orbCtxBearBonus > 0 ? orbCtxBearBonus : (orbHighLiqReject ? 12 : 0)
+sellScore += orbBearBreakIntoLiq ? 10 : 0
+buyScore  += orbMidRejectBull    ?  8 : 0
+buyScore  += orbMidBreachBull    ?  6 : 0
+sellScore += orbMidRejectBear    ?  8 : 0
+sellScore += orbMidBreachBear    ?  6 : 0
+
+// CONFIRMATION
+buyScore  += lowSweepReject  ?  6 : 0
+sellScore += highSweepReject ?  6 : 0
+buyScore  += bullOBSupport   ?  8 : 0
+sellScore += bearOBResistance?  8 : 0
+buyScore  += atBullFVG and bullFVGActive ? 8 : 0
+sellScore += atBearFVG and bearFVGActive ? 8 : 0
+
+// KILL ZONE + DEALING RANGE + PREV DAY BIAS
+buyScore  += isKillZone          ?  8 : 0
+sellScore += isKillZone          ?  8 : 0
+buyScore  -= not isKillZone      ? 10 : 0
+sellScore -= not isKillZone      ? 10 : 0
+buyScore  += dealingRangeLongOK  ?  6 : 0
+sellScore += dealingRangeShortOK ?  6 : 0
+buyScore  += prevDayBiasLong     ?  6 : 0
+sellScore += prevDayBiasShort    ?  6 : 0
+
+// CONTEXT MODIFIERS
+buyScore  += sessionBuyMod
+sellScore += sessionSellMod
+buyScore  += regimeBuyMod
+sellScore += regimeSellMod
+buyScore  += crossBuyMod
+sellScore += crossSellMod
+buyScore  += smtBuyMod
+sellScore += smtSellMod
+buyScore  += clusterBuyMod
+sellScore += clusterSellMod
+buyScore  += carryBull ? 8 : 0
+sellScore += carryBear ? 8 : 0
+
+// PENALTIES
+buyScore  -= nearLiquidityHigh ? 10 : 0
+sellScore -= nearLiquidityLow  ? 10 : 0
+buyScore  -= orbFailBull       ? 20 : 0
+sellScore -= orbFailBear       ? 20 : 0
+
+// BRAIN + DONNA
+buyScore  += brainBullAgree ? 12 : 0
+sellScore += brainBearAgree ? 12 : 0
+buyScore  += donnaHigherBuyMod
+sellScore += donnaHigherSellMod
+buyScore  -= (orbBullTrap or (orbBearBias and localBullBias and not orbBullBias)) ? 8 : 0
+sellScore -= (orbBearTrap or (orbBullBias and localBearBias and not orbBearBias)) ? 8 : 0
+
+buyScore  := math.round(f_clamp(buyScore,  0, 100))
+sellScore := math.round(f_clamp(sellScore, 0, 100))
+
+//================ SIGNAL QUALITY — SPLIT PATHS ================
+minGap          = 8
+scoreGap        = math.abs(buyScore - sellScore)
+mixedConditions = scoreGap <= 8
+
+freshLongSetup  = ictLongReady  or orbLongReady or liqLongReady
+freshShortSetup = ictShortReady or orbShortReady or liqShortReady
+
+//================ ORB VALIDATION ================
+
+// Valid ORB expansion range
+validOrbBullExpansion =
+     not na(orbHigh) and
+     high > orbHigh and
+     (high - orbHigh) >= 5 and
+     (high - orbHigh) <= 20
+
+validOrbBearExpansion =
+     not na(orbLow) and
+     low < orbLow and
+     (orbLow - low) >= 5 and
+     (orbLow - low) <= 20
+
+// ORB valid trading window — ES/MES only, requires NY open gate + not expired/failed
+orbTradingWindow =
+     orbLive and
+     orbIsActive and
+     isESChart and
+     not orbDead
+
+// REJECTION CONFIRMATION — requires quality (2+ candle sequence) or liquidity rejection
+// Type 1: midpoint rejection with quality
+// Type 2: edge rejection with quality
+// Type 3: liquidity rejection
+orbBullRejectionConfirmed =
+     (orbMidRejectLong    and orbMidRejectQualityBull)  or
+     (orbBottomRejectLong and orbEdgeRejectQualityBull) or
+     orbLiqRejectBull
+
+orbBearRejectionConfirmed =
+     (orbMidRejectShort   and orbMidRejectQualityBear)  or
+     (orbTopRejectShort   and orbEdgeRejectQualityBear) or
+     orbLiqRejectBear
+//================ PURE ORB EXECUTION ================
+// Ownership shift provides an alternative execution path that bypasses the
+// expansion range check — the auction is reversing from a swept level, not
+// breaking out of the ORB box in the traditional sense.
+
+orbBuyPass =
+     isESChart and
+     orbTradingWindow and
+     not orbFailBull and
+     not orbBullTrap and
+     ((validOrbBullExpansion and orbBullRejectionConfirmed) or orbOwnershipShiftBull)
+
+orbSellPass =
+     isESChart and
+     orbTradingWindow and
+     not orbFailBear and
+     not orbBearTrap and
+     ((validOrbBearExpansion and orbBearRejectionConfirmed) or orbOwnershipShiftBear)
+//================ STRATEGY OWNERSHIP ================
+orbBuySignal  = orbBuyPass  and canSmartBuy
+orbSellSignal = orbSellPass and canSmartSell
+ictBuySignal  = ictLongReady  and canSmartBuy
+ictSellSignal = ictShortReady and canSmartSell
+
+//================ TASK 2+3 — STRATEGY METADATA ================
+// strategy_family: which framework owns this signal
+strategy_family =
+     orbBuySignal or orbSellSignal                        ? "ORB"           :
+     ictBuySignal  and (step3LongElite or step3ShortElite) ? "ICT"           :
+     ictBuySignal  or ictSellSignal                       ? "ICT"           :
+     failedAuctionBull or failedAuctionBear               ? "FAILED_AUCTION":
+     liqLongReady  or liqShortReady                       ? "REVERSAL"      : "UNKNOWN"
+
+// setup_type: specific setup classification
+setup_type =
+     orbBuySignal  and orbMidRejectLong    ? "ORB_MIDPOINT_REJECT"  :
+     orbSellSignal and orbMidRejectShort   ? "ORB_MIDPOINT_REJECT"  :
+     orbBuySignal  and orbRetestBull       ? "ORB_RETEST"           :
+     orbSellSignal and orbRetestBear       ? "ORB_RETEST"           :
+     orbBuySignal  and orbValidBreakBull   ? "ORB_BREAKOUT"         :
+     orbSellSignal and orbValidBreakBear   ? "ORB_BREAKOUT"         :
+     orbBuySignal  and orbLiqRejectBull    ? "ORB_LIQ_REJECTION"    :
+     orbSellSignal and orbLiqRejectBear    ? "ORB_LIQ_REJECTION"    :
+     orbFailBull   or orbFailBear          ? "ORB_FAILURE"          :
+     ictBuySignal  and step3LongElite      ? "ICT_ELITE"            :
+     ictSellSignal and step3ShortElite     ? "ICT_ELITE"            :
+     ictBuySignal  and ictSMTLong          ? "ICT_SMT_CONFIRMATION" :
+     ictSellSignal and ictSMTShort         ? "ICT_SMT_CONFIRMATION" :
+     ictBuySignal  and atBullFVG           ? "ICT_OB_FVG_ENTRY"     :
+     ictSellSignal and atBearFVG           ? "ICT_OB_FVG_ENTRY"     :
+     ictBuySignal  and sweepLowFresh       ? "ICT_LIQUIDITY_SWEEP"  :
+     ictSellSignal and sweepHighFresh      ? "ICT_LIQUIDITY_SWEEP"  :
+     failedAuctionBull or failedAuctionBear ? "FAILED_AUCTION"      :
+     liqLongReady  or liqShortReady        ? "MOMENTUM_CONTINUATION": "UNKNOWN"
+
+//================ TASK 6 — FRAMEWORK ANALYTICS PREP ================
+analytics_regime    = regimeText
+analytics_session   = sessionStateText
+analytics_score     = buySignal ? buyScore : sellSignal ? sellScore : 0
+analytics_confidence = 0
+//================ SIGNAL ASSIGNMENT ================
+buySignal  := orbBuySignal  or ictBuySignal
+sellSignal := orbSellSignal or ictSellSignal
+
+if buySignal
+    lastSmartBuyBar   := bar_index
+    lastBuyScorePeak  := buyScore
+    buyDecayBar       := bar_index
+if sellSignal
+    lastSmartSellBar  := bar_index
+    lastSellScorePeak := sellScore
+    sellDecayBar      := bar_index
+
+decayRate     = 3
+buyDecayBars  = na(buyDecayBar)  ? 0 : bar_index - buyDecayBar
+sellDecayBars = na(sellDecayBar) ? 0 : bar_index - sellDecayBar
+buyScoreDecay  = buyDecayBars  > 2 ? math.min(buyDecayBars  * decayRate, 30) : 0
+sellScoreDecay = sellDecayBars > 2 ? math.min(sellDecayBars * decayRate, 30) : 0
+
+if freshLongSetup
+    buyDecayBar  := bar_index
+if freshShortSetup
+    sellDecayBar := bar_index
+
+buyScore  := math.round(f_clamp(buyScore  - buyScoreDecay,  0, 100))
+sellScore := math.round(f_clamp(sellScore - sellScoreDecay, 0, 100))
+
+buyGrade  = buyScore  >= 78 ? "A" : buyScore  >= 65 ? "B" : buyScore  >= 58 ? "C" : "D"
+sellGrade = sellScore >= 78 ? "A" : sellScore >= 65 ? "B" : sellScore >= 58 ? "C" : "D"
+
+if buyScore  > sellScore
+    activeGrade := buyGrade
+if sellScore > buyScore
+    activeGrade := sellGrade
+
+commandText :=
+     buySignal  ? "BUY"  :
+     sellSignal ? "SELL" :
+     buyScore  >= 58 and buyScore  > sellScore ? "WATCH LONG"  :
+     sellScore >= 58 and sellScore > buyScore  ? "WATCH SHORT" : "WAIT"
+
+signalReason :=
+     orbBuySignal  and orbValidBreakBull   ? "ORB BREAKOUT LONG" :
+     orbSellSignal and orbValidBreakBear   ? "ORB BREAKOUT SHORT" :
+     orbBuySignal  and orbMidRejectLong    ? "ORB MIDPOINT REJECT LONG" :
+     orbSellSignal and orbMidRejectShort   ? "ORB MIDPOINT REJECT SHORT" :
+     ictBuySignal  and step3LongElite      ? "ICT ELITE LONG" :
+     ictSellSignal and step3ShortElite     ? "ICT ELITE SHORT" :
+     ictBuySignal  and ictLongReady        ? "ICT LONG" :
+     ictSellSignal and ictShortReady       ? "ICT SHORT" :
+     "NO SIGNAL"
+targetText :=
+     buySignal  ? longTargetLabel  :
+     sellSignal ? shortTargetLabel :
+     buyScore  > sellScore ? longTargetLabel  :
+     sellScore > buyScore  ? shortTargetLabel : "NONE"
+
+riskText :=
+     orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
+     nearLiquidityHigh and buySignal  ? "OVERHEAD LIQUIDITY" :
+     nearLiquidityLow  and sellSignal ? "BELOW LIQUIDITY"    :
+     isLunch                          ? "LUNCH CONDITIONS"   :
+     inAsia                           ? "ASIA CONDITIONS"    : "NORMAL"
+         
+//================ SIGNAL LABELS ================
+var label buyLabel  = na
+var label sellLabel = na
+labelExpiry = 6
+
+buyLabelText =
+     orbBuySignal and orbMidRejectLong  ? "ORB MID REJECT LONG"  :
+     orbBuySignal and orbRetestBull     ? "ORB RETEST LONG"       :
+     orbBuySignal and orbValidBreakBull ? "ORB BREAKOUT LONG"     :
+     orbBuySignal                       ? "ORB BUY"               :
+     ictBuySignal and step3LongElite    ? "ICT ELITE LONG"        :
+     ictBuySignal and ictSMTLong       ? "ICT SMT LONG"          :
+     ictBuySignal                       ? "ICT LONG"              : "BUY"
+
+sellLabelText =
+     orbSellSignal and orbMidRejectShort  ? "ORB MID REJECT SHORT" :
+     orbSellSignal and orbRetestBear      ? "ORB RETEST SHORT"      :
+     orbSellSignal and orbValidBreakBear  ? "ORB BREAKOUT SHORT"    :
+     orbSellSignal                        ? "ORB SELL"              :
+     ictSellSignal and step3ShortElite    ? "ICT ELITE SHORT"       :
+     ictSellSignal and ictSMTShort       ? "ICT SMT SHORT"         :
+     ictSellSignal                        ? "ICT SHORT"             : "SELL"
+
+if buySignal and not buySignal[1]
+    if not na(buyLabel)
+        label.delete(buyLabel)
+    buyLabel := label.new(bar_index, low - atrValue * 0.18, buyLabelText,
+         style=label.style_label_up, color=bullColor, textcolor=color.white, size=size.small)
+
+if sellSignal and not sellSignal[1]
+    if not na(sellLabel)
+        label.delete(sellLabel)
+    sellLabel := label.new(bar_index, high + atrValue * 0.18, sellLabelText,
+         style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
+
+if not na(buyLabel) and bar_index - label.get_x(buyLabel) > labelExpiry
+    label.delete(buyLabel)
+    buyLabel := na
+if not na(sellLabel) and bar_index - label.get_x(sellLabel) > labelExpiry
+    label.delete(sellLabel)
+    sellLabel := na
+
+//================ ALERTS ================
+alertcondition(buySignal,      "HARVEY BUY",       "HARVEY BUY signal")
+alertcondition(sellSignal,     "HARVEY SELL",      "HARVEY SELL signal")
+alertcondition(step3LongElite, "ICT ELITE LONG",   "HARVEY ICT Elite Long")
+alertcondition(step3ShortElite,"ICT ELITE SHORT",  "HARVEY ICT Elite Short")
+alertcondition(orbLongSignal, "ORB LONG",  "HARVEY ORB long signal")
+alertcondition(orbShortSignal, "ORB SHORT", "HARVEY ORB short signal")
+//================ LIQUIDITY MARKERS ================
+var line pshLine = na
+var line pslLine = na
+var line pdhLine = na
+var line pdlLine = na
+var line pwhLine = na
+var line pwlLine = na
+
+if barstate.islast
+    if not na(pshLine)
+        line.delete(pshLine)
+    if not na(pslLine)
+        line.delete(pslLine)
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if not na(pwhLine)
+        line.delete(pwhLine)
+    if not na(pwlLine)
+        line.delete(pwlLine)
+    if not na(prevSessionHigh)
+        pshLine := line.new(bar_index, prevSessionHigh, bar_index + 12, prevSessionHigh, color=color.new(color.green, 40), width=2)
+    if not na(prevSessionLow)
+        pslLine := line.new(bar_index, prevSessionLow,  bar_index + 12, prevSessionLow,  color=color.new(color.red,   40), width=2)
+    if not na(prevDayHigh)
+        pdhLine := line.new(bar_index, prevDayHigh,     bar_index + 12, prevDayHigh,     color=color.green, width=2)
+    if not na(prevDayLow)
+        pdlLine := line.new(bar_index, prevDayLow,      bar_index + 12, prevDayLow,      color=color.red,   width=2)
+    if not na(prevWeekHigh)
+        pwhLine := line.new(bar_index, prevWeekHigh,    bar_index + 12, prevWeekHigh,    color=color.new(color.green, 0), width=1, style=line.style_dashed)
+    if not na(prevWeekLow)
+        pwlLine := line.new(bar_index, prevWeekLow,     bar_index + 12, prevWeekLow,     color=color.new(color.red,   0), width=1, style=line.style_dashed)
+
+//====================================================
+// SMART TARGETS ENGINE
+//====================================================
+meanRevTarget = not na(orbMid) ? orbMid : na
+
+smartTargetPrice =
+     buySignal  and not na(nearestLiqHigh) ? nearestLiqHigh :
+     buySignal  and not na(orbTarget1Bull) ? orbTarget1Bull :
+     sellSignal and not na(nearestLiqLow)  ? nearestLiqLow  :
+     sellSignal and not na(orbTarget1Bear) ? orbTarget1Bear : na
+
+smartTarget2Price =
+     buySignal  and not na(orbTarget1Bull) and not na(nearestLiqHigh) ? orbTarget1Bull :
+     buySignal  and not na(orbTarget2Bull)                            ? orbTarget2Bull :
+     sellSignal and not na(orbTarget1Bear) and not na(nearestLiqLow)  ? orbTarget1Bear :
+     sellSignal and not na(orbTarget2Bear)                            ? orbTarget2Bear : na
+
+showMeanRev = not buySignal and not sellSignal and not na(meanRevTarget)
+showTargets = input.bool(true, "Show Smart Targets")
+
+var line  tgt1Line   = na
+var line  tgt2Line   = na
+var line  tgtMRLine  = na
+var label tgt1Label  = na
+var label tgt2Label  = na
+var label tgtMRLabel = na
+
+tgtColor1  = buySignal ? color.new(color.lime,   10) : color.new(color.red,    10)
+tgtColor2  = buySignal ? color.new(color.lime,   40) : color.new(color.red,    40)
+tgtMRColor = color.new(color.yellow, 20)
+tgtLineLen = 20
+
+if showTargets and barstate.islast
+    if not na(tgt1Line)
+        line.delete(tgt1Line)
+    if not na(tgt2Line)
+        line.delete(tgt2Line)
+    if not na(tgtMRLine)
+        line.delete(tgtMRLine)
+    if not na(tgt1Label)
+        label.delete(tgt1Label)
+    if not na(tgt2Label)
+        label.delete(tgt2Label)
+    if not na(tgtMRLabel)
+        label.delete(tgtMRLabel)
+    tgt1Line   := na
+    tgt2Line   := na
+    tgtMRLine  := na
+    tgt1Label  := na
+    tgt2Label  := na
+    tgtMRLabel := na
+    if not na(smartTargetPrice)
+        tgt1Line  := line.new(bar_index, smartTargetPrice, bar_index + tgtLineLen, smartTargetPrice, color=tgtColor1, width=2, style=line.style_dashed)
+        tgt1Label := label.new(bar_index + tgtLineLen + 1, smartTargetPrice, "T1  " + str.tostring(math.round(smartTargetPrice, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=tgtColor1, size=size.small)
+    if not na(smartTarget2Price)
+        tgt2Line  := line.new(bar_index, smartTarget2Price, bar_index + tgtLineLen, smartTarget2Price, color=tgtColor2, width=1, style=line.style_dashed)
+        tgt2Label := label.new(bar_index + tgtLineLen + 1, smartTarget2Price, "T2  " + str.tostring(math.round(smartTarget2Price, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=tgtColor2, size=size.small)
+    if showMeanRev
+        tgtMRLine  := line.new(bar_index, meanRevTarget, bar_index + tgtLineLen, meanRevTarget, color=tgtMRColor, width=1, style=line.style_dotted)
+        tgtMRLabel := label.new(bar_index + tgtLineLen + 1, meanRevTarget, "MR  " + str.tostring(math.round(meanRevTarget, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=tgtMRColor, size=size.small)
+
+//====================================================
+// DONNA — PERFORMANCE MEMORY
+//====================================================
+var int   donnaWinBuy      = 0
+var int   donnaLossBuy     = 0
+var int   donnaWinSell     = 0
+var int   donnaLossSell    = 0
+var float donnaLastBuyPrice  = na
+var float donnaLastSellPrice = na
+var int   donnaLastBuyBar    = na
+var int   donnaLastSellBar   = na
+outcomeWindow = 5
+
+if buySignal and not buySignal[1]
+    donnaLastBuyPrice := close
+    donnaLastBuyBar   := bar_index
+if sellSignal and not sellSignal[1]
+    donnaLastSellPrice := close
+    donnaLastSellBar   := bar_index
+
+if not na(donnaLastBuyBar) and (bar_index - donnaLastBuyBar == outcomeWindow)
+    if close > donnaLastBuyPrice
+        donnaWinBuy  := math.min(donnaWinBuy  + 1, 3)
+        donnaLossBuy := math.max(donnaLossBuy - 1, 0)
+    else
+        donnaLossBuy := math.min(donnaLossBuy + 1, 3)
+        donnaWinBuy  := math.max(donnaWinBuy  - 1, 0)
+
+if not na(donnaLastSellBar) and (bar_index - donnaLastSellBar == outcomeWindow)
+    if close < donnaLastSellPrice
+        donnaWinSell  := math.min(donnaWinSell  + 1, 3)
+        donnaLossSell := math.max(donnaLossSell - 1, 0)
+    else
+        donnaLossSell := math.min(donnaLossSell + 1, 3)
+        donnaWinSell  := math.max(donnaWinSell  - 1, 0)
+
+donnaBuyHot   = donnaWinBuy   >= 2
+donnaBuyCold  = donnaLossBuy  >= 2
+donnaSellHot  = donnaWinSell  >= 2
+donnaSellCold = donnaLossSell >= 2
+donnaMemBuyMod  = donnaBuyHot  ? -5 : donnaBuyCold  ? 15 : 0
+donnaMemSellMod = donnaSellHot ? -5 : donnaSellCold ? 15 : 0
+
+//====================================================
+// DONNA — PROBABILISTIC CONFIDENCE
+//====================================================
+var float donnaConfScore = 0.0
+donnaConfScore := 0.0
+
+donnaConfScore += localBullBias and crossBullAligned and trendUp   ? 12.0 : 0.0
+donnaConfScore += localBearBias and crossBearAligned and trendDown ? 12.0 : 0.0
+donnaConfScore += localBullBias and not crossBullAligned           ?  6.0 : 0.0
+donnaConfScore += localBearBias and not crossBearAligned           ?  6.0 : 0.0
+donnaConfScore += trendUp                                          ?  8.0 : 0.0
+donnaConfScore += trendDown                                        ?  8.0 : 0.0
+donnaConfScore += slopeBull                                        ?  5.0 : 0.0
+donnaConfScore += slopeBear                                        ?  5.0 : 0.0
+donnaConfScore += donnaTier == 1 ? 18.0 : donnaTier == 2 ? 12.0 : donnaTier == 3 ? 6.0 : 0.0
+donnaConfScore += bullBOS                                          ?  8.0 : 0.0
+donnaConfScore += bearBOS                                          ?  8.0 : 0.0
+donnaConfScore += ictLongReady  or ictShortReady                   ? 12.0 : 0.0
+donnaConfScore += step3LongElite or step3ShortElite                ? 15.0 : 0.0
+donnaConfScore += liqLongReady  or liqShortReady                   ?  8.0 : 0.0
+donnaConfScore += orbLongReady  or orbShortReady                   ?  8.0 : 0.0
+donnaConfScore += at79Bull      or at79Bear                        ?  8.0 : 0.0
+donnaConfScore += sweepLow      or sweepHigh                       ?  8.0 : 0.0
+donnaConfScore += clusterAbove  or clusterBelow                    ?  5.0 : 0.0
+donnaConfScore += failedAuctionBull or failedAuctionBear           ? 10.0 : 0.0
+donnaConfScore += isNYOpen                                         ? 12.0 : 0.0
+donnaConfScore += isPowerHour                                      ?  8.0 : 0.0
+donnaConfScore += inNYCash                                         ?  5.0 : 0.0
+donnaConfScore += inLondon                                         ?  4.0 : 0.0
+donnaConfScore += isKillZone                                       ?  8.0 : 0.0
+donnaConfScore += isLunch                                          ? -6.0 : 0.0
+donnaConfScore += inAsia                                           ? -3.0 : 0.0
+donnaConfScore += trendUp or trendDown                             ?  8.0 : 0.0
+donnaConfScore += isExpansion                                      ?  6.0 : 0.0
+donnaConfScore += isCompression                                    ? -5.0 : 0.0
+donnaConfScore += isChop                                           ? -8.0 : 0.0
+donnaConfScore += po3Bull or po3Bear                               ? 10.0 : 0.0
+donnaConfScore += londonSweepNYCont or londonSweepNYContBear       ?  8.0 : 0.0
+donnaConfScore += openDriveBull or openDriveBear                   ?  8.0 : 0.0
+donnaConfScore += brainBullAgree or brainBearAgree                 ?  8.0 : 0.0
+donnaConfScore += smtBullSupport or smtBearSupport                 ?  5.0 : 0.0
+donnaConfScore += donnaBuyHot  or donnaSellHot                     ?  5.0 : 0.0
+donnaConfScore -= donnaBuyCold or donnaSellCold                    ?  5.0 : 0.0
+donnaConfScore -= donnaTrapRisk                                    ? 15.0 : 0.0
+donnaConfScore -= brainConflict                                    ?  8.0 : 0.0
+donnaConfScore := math.max(0.0, math.min(100.0, donnaConfScore))
+analytics_confidence := math.round(donnaConfScore)
+
+donnaConfText =
+     donnaConfScore >= 80 ? "ELITE " + str.tostring(math.round(donnaConfScore)) + "%" :
+     donnaConfScore >= 65 ? "HIGH  " + str.tostring(math.round(donnaConfScore)) + "%" :
+     donnaConfScore >= 50 ? "MED   " + str.tostring(math.round(donnaConfScore)) + "%" :
+     donnaConfScore >= 35 ? "LOW   " + str.tostring(math.round(donnaConfScore)) + "%" :
+     "NONE  " + str.tostring(math.round(donnaConfScore)) + "%"
+
+donnaConfBg =
+     donnaConfScore >= 80 ? color.new(color.lime,   10) :
+     donnaConfScore >= 65 ? color.new(color.lime,   25) :
+     donnaConfScore >= 50 ? color.new(color.orange, 20) :
+     donnaConfScore >= 35 ? color.new(color.gray,   20) :
+     color.new(color.gray, 35)
+
+//====================================================
+// DONNA — SCENARIO ENGINE
+//====================================================
+donnaFullICTLong  = sweepLow  and bullBOS and ictLongReady  and localBullBias and not brainConflict
+donnaFullICTShort = sweepHigh and bearBOS and ictShortReady and localBearBias and not brainConflict
+
+donnaORBExpansionBull = orbBuyPass  and orbConfirmedBullDraw and not orbBullTrap and crossBullAligned
+donnaORBExpansionBear = orbSellPass and orbConfirmedBearDraw and not orbBearTrap and crossBearAligned
+
+donnaLiqReversalLong  = sweepLow  and lowSweepReject  and localBullBias and (clusterBelow or nearLiquidityLow)  and bullOBSupport
+donnaLiqReversalShort = sweepHigh and highSweepReject and localBearBias and (clusterAbove or nearLiquidityHigh) and bearOBResistance
+
+donnaMeanRevLong  = inDealingDiscount and bullOBSupport    and localBullBias and not bullBOS and close < emaFast[5]
+donnaMeanRevShort = inDealingPremium  and bearOBResistance and localBearBias and not bearBOS and close > emaFast[5]
+
+donnaChop = isChop and not bullBOS and not bearBOS and not sweepHigh and not sweepLow and scoreGap <= 10
+
+donnaHighConv = donnaFullICTLong or donnaFullICTShort or donnaORBExpansionBull or donnaORBExpansionBear
+donnaMedConv  = donnaLiqReversalLong or donnaLiqReversalShort or donnaMeanRevLong or donnaMeanRevShort
+donnaLowConv  = donnaChop or donnaTrapRisk
+
+donnaThreshBuy  = (donnaHighConv ? 45 : donnaMedConv ? 52 : donnaLowConv ? 70 : 52) + donnaMemBuyMod
+donnaThreshSell = (donnaHighConv ? 45 : donnaMedConv ? 52 : donnaLowConv ? 70 : 52) + donnaMemSellMod
+
+donnaScenario =
+     donnaTrapRisk          ? "TRAP RISK — WAIT"     :
+     donnaHigherOrder != "" ? donnaHigherOrder        :
+     failedAuctionBull      ? "FAILED AUCTION LONG"  :
+     failedAuctionBear      ? "FAILED AUCTION SHORT" :
+     donnaFullICTLong       ? "FULL ICT LONG"        :
+     donnaFullICTShort      ? "FULL ICT SHORT"       :
+     donnaORBExpansionBull  ? "ORB EXPANSION BULL"   :
+     donnaORBExpansionBear  ? "ORB EXPANSION BEAR"   :
+     donnaLiqReversalLong   ? "LIQ SWEEP LONG"       :
+     donnaLiqReversalShort  ? "LIQ SWEEP SHORT"      :
+     donnaMeanRevLong       ? "MEAN REV LONG"        :
+     donnaMeanRevShort      ? "MEAN REV SHORT"       :
+     donnaChop              ? "CHOP — NO TRADE"      :
+     bullBOS                ? "BULL STRUCTURE"       :
+     bearBOS                ? "BEAR STRUCTURE"       :
+     orbBullBias            ? "ORB BULL BIAS"        :
+     orbBearBias            ? "ORB BEAR BIAS"        : "READING MARKET"
+
+donnaCommand =
+     donnaTrapRisk                                              ? "WAIT"        :
+     failedAuctionBull and buyScore  >= donnaThreshBuy          ? "BUY"         :
+     failedAuctionBear and sellScore >= donnaThreshSell         ? "SELL"        :
+     donnaTier1Bull                                             ? "BUY"         :
+     donnaTier1Bear                                             ? "SELL"        :
+     eliteICTLong  and buyScore  >= donnaThreshBuy              ? "BUY"         :
+     eliteICTShort and sellScore >= donnaThreshSell             ? "SELL"        :
+     po3Bull       and buyScore  >= donnaThreshBuy              ? "BUY"         :
+     po3Bear       and sellScore >= donnaThreshSell             ? "SELL"        :
+     openDriveBull and buyScore  >= donnaThreshBuy              ? "BUY"         :
+     openDriveBear and sellScore >= donnaThreshSell             ? "SELL"        :
+     donnaFullICTLong      and buyScore  >= donnaThreshBuy      ? "BUY"         :
+     donnaFullICTShort     and sellScore >= donnaThreshSell     ? "SELL"        :
+     donnaORBExpansionBull and buyScore  >= donnaThreshBuy      ? "BUY"         :
+     donnaORBExpansionBear and sellScore >= donnaThreshSell     ? "SELL"        :
+     donnaLiqReversalLong  and buyScore  >= donnaThreshBuy      ? "BUY"         :
+     donnaLiqReversalShort and sellScore >= donnaThreshSell     ? "SELL"        :
+     donnaMeanRevLong      and buyScore  >= donnaThreshBuy      ? "WATCH LONG"  :
+     donnaMeanRevShort     and sellScore >= donnaThreshSell     ? "WATCH SHORT" :
+     donnaChop                                                  ? "WAIT"        :
+     commandText
+
+donnaScenarioBg =
+     donnaTrapRisk         ? color.new(color.orange, 10) :
+     failedAuctionBull     ? color.new(color.lime,    5) :
+     failedAuctionBear     ? color.new(color.red,     5) :
+     donnaFullICTLong      ? color.new(color.lime,    5) :
+     donnaFullICTShort     ? color.new(color.red,     5) :
+     donnaORBExpansionBull ? color.new(color.lime,   15) :
+     donnaORBExpansionBear ? color.new(color.red,    15) :
+     donnaLiqReversalLong  ? color.new(color.lime,   20) :
+     donnaLiqReversalShort ? color.new(color.red,    20) :
+     donnaMeanRevLong      ? color.new(color.lime,   30) :
+     donnaMeanRevShort     ? color.new(color.red,    30) :
+     donnaChop             ? color.new(color.gray,   15) :
+     color.new(color.gray, 25)
+
+//====================================================
+// DASHBOARD
+//====================================================
+smartTargetDisplay = not na(smartTargetPrice) ? str.tostring(math.round(smartTargetPrice, 2)) : targetText
+dashCommandText    = donnaCommand
+dashScoreText      = buySignal ? "BUY " + str.tostring(buyScore) : sellSignal ? "SELL " + str.tostring(sellScore) : "B " + str.tostring(buyScore) + " / S " + str.tostring(sellScore)
+dashSessionText    = sessionStateText
+dashSmtText        = smtText
+dashLiqText        = liqClusterText
+
+panelRowHeader  = color.new(color.black, 0)
+panelRowNeutral = color.new(color.gray,  20)
+
+dashCommandBg =
+     buySignal  ? color.new(color.lime, 10) :
+     sellSignal ? color.new(color.red,  10) : panelRowNeutral
+dashTargetBg =
+     buySignal  ? color.new(color.lime, 84) :
+     sellSignal ? color.new(color.red,  84) : panelRowNeutral
+dashSessionBg =
+     isNYOpen    ? color.new(color.blue,   10) :
+     isPowerHour ? color.new(color.purple, 10) :
+     inNYCash    ? color.new(color.blue,   22) :
+     inLondon    ? color.new(color.teal,   22) :
+     inAsia      ? color.new(color.purple, 22) : panelRowNeutral
+
+// ICT TABLE — all charts, right side
+var table dash2 = table.new(position.top_right, 2, 10, border_width=1)
+// ORB TABLE — ES/MES only, bottom right (11 rows: 0-9 original + CTX row)
+var table orbDash = table.new(position.bottom_right, 2, 11, border_width=1)
+
+// ================ COLOR IDENTITY ================
+orbHdrColor  = color.new(#0a1628, 0)
+orbCellColor = color.new(#0d1f33, 0)
+ictHdrColor  = color.new(#0a1628, 0)
+ictCellColor = color.new(#0d1f33, 0)
+
+colBull      = color.new(#26c6a0, 0)
+colBear      = color.new(#ef5350, 0)
+colWarn      = color.new(#f0b429, 0)
+colMuted     = color.new(#5a7a9a, 0)
+colWhite     = color.new(#e0eaf5, 0)
+// ================ ORB DISPLAY HELPERS ================
+orbBiasText =
+     orbBullThesisDead ? "BEAR DEAD"  :
+     orbBearThesisDead ? "BULL DEAD"  :
+     orbBullBias       ? "BULL"       :
+     orbBearBias       ? "BEAR"       : "NEUTRAL"
+
+orbTypeText =
+     orbLiqRejectBull or orbLiqRejectBear   ? "LIQ REJECT"  :
+     orbMidRejectQualityBull                ? "MID REJECT"  :
+     orbMidRejectQualityBear                ? "MID REJECT"  :
+     orbEdgeRejectQualityBull               ? "EDGE REJECT" :
+     orbEdgeRejectQualityBear               ? "EDGE REJECT" :
+     (orbLive and not na(orbHigh) and close > orbHigh) or (orbLive and not na(orbLow) and close < orbLow) ? "EXPANDING" : "—"
+
+orbRejQualText =
+     orbMidRejectBullCount  >= 2 ? str.tostring(orbMidRejectBullCount)  + " MID BULL"  :
+     orbMidRejectBearCount  >= 2 ? str.tostring(orbMidRejectBearCount)  + " MID BEAR"  :
+     orbEdgeRejectBullCount >= 2 ? str.tostring(orbEdgeRejectBullCount) + " EDGE BULL" :
+     orbEdgeRejectBearCount >= 2 ? str.tostring(orbEdgeRejectBearCount) + " EDGE BEAR" : "BUILDING"
+
+orbLiqIntText =
+     orbHighLiqAligned and orbBearBias ? "EXPANDING INTO LIQ" :
+     orbLowLiqAligned  and orbBullBias ? "EXPANDING INTO LIQ" :
+     orbLiqRejectBull                  ? "LIQ REJECTION BULL" :
+     orbLiqRejectBear                  ? "LIQ REJECTION BEAR" :
+     orbHighLiqAligned                 ? "HIGH = LIQ"         :
+     orbLowLiqAligned                  ? "LOW = LIQ"          : "CLEAR"
+
+orbExpText =
+     (orbLive and not na(orbHigh) and close > orbHigh) ? "BULL EXPANDING" :
+     (orbLive and not na(orbLow)  and close < orbLow)  ? "BEAR EXPANDING" :
+     orbAcceptedBull  ? "BULL ACCEPTED"  :
+     orbAcceptedBear  ? "BEAR ACCEPTED"  : "—"
+
+orbMidText  = not na(orbMid)  ? str.tostring(math.round(orbMid,  2)) : "—"
+orbHighText = not na(orbHigh) ? str.tostring(math.round(orbHigh, 2)) : "—"
+orbLowText  = not na(orbLow)  ? str.tostring(math.round(orbLow,  2)) : "—"
+
+orbMinsLeft = orbKillHour * 60 - (hourNow * 60 + minuteNow)
+orbTimeText = hourNow >= orbKillHour ? "EXPIRED" : str.tostring(math.max(orbMinsLeft, 0)) + " MIN"
+
+// ================ ORB CONTEXTUAL DISPLAY ================
+orbCtxText =
+     orbOwnershipShiftBull                  ? "OWNERSHIP SHIFT ▲"                              :
+     orbOwnershipShiftBear                  ? "OWNERSHIP SHIFT ▼"                              :
+     orbFailedAcceptBull                    ? "FAILED ACCEPT ▲"                                :
+     orbFailedAcceptBear                    ? "FAILED ACCEPT ▼"                                :
+     orbSweepTierBull > 0 and orbReclaimBullBars >= 3 ? "RECLAIM AGG T" + str.tostring(orbSweepTierBull) :
+     orbSweepTierBear > 0 and orbReclaimBearBars >= 3 ? "RECLAIM AGG T" + str.tostring(orbSweepTierBear) :
+     orbSweepTierBull > 0 and orbReclaimBullBars >= 2 ? "RECLAIM CON T" + str.tostring(orbSweepTierBull) :
+     orbSweepTierBear > 0 and orbReclaimBearBars >= 2 ? "RECLAIM CON T" + str.tostring(orbSweepTierBear) :
+     orbAsiaLowSweepNow                     ? "ASIA LOW SWEPT"                                 :
+     orbAsiaHighSweepNow                    ? "ASIA HIGH SWEPT"                                :
+     orbStackedBull                         ? "STACKED LIQ BULL"                               :
+     orbStackedBear                         ? "STACKED LIQ BEAR"                               :
+     orbSweepTierBull > 0                   ? "SWEPT T" + str.tostring(orbSweepTierBull) + " BULL" :
+     orbSweepTierBear > 0                   ? "SWEPT T" + str.tostring(orbSweepTierBear) + " BEAR" : "—"
+
+orbCtxColor =
+     orbOwnershipShiftBull or (orbSweepTierBull > 0 and orbReclaimBullBars >= 2) ? colBull :
+     orbOwnershipShiftBear or (orbSweepTierBear > 0 and orbReclaimBearBars >= 2) ? colBear :
+     orbFailedAcceptBull or orbFailedAcceptBear or orbAsiaLowSweepNow or orbAsiaHighSweepNow ? colWarn :
+     orbStackedBull or orbStackedBear ? colWarn : colMuted
+
+// ================ ICT DISPLAY HELPERS ================
+ictBg =
+     step3LongElite  or step3ShortElite    ? color.new(color.lime,   5)  :
+     step3LongReady  or step3ShortReady    ? color.new(color.lime,   20) :
+     ictEntryZoneLong or ictEntryZoneShort ? color.new(color.orange, 20) :
+     step2BullActive or step2BearActive    ? color.new(color.blue,   20) :
+     sweepLowFresh   or sweepHighFresh     ? color.new(color.yellow, 20) :
+     ictCellColor
+
+bosBg =
+     bullBOS ? color.new(color.lime, 20) :
+     bearBOS ? color.new(color.red,  20) : ictCellColor
+
+obFvgText =
+     atBullFVG and bullFVGActive ? "BULL FVG" :
+     atBearFVG and bearFVGActive ? "BEAR FVG" :
+     atBullOB                    ? "BULL OB"  :
+     atBearOB                    ? "BEAR OB"  : "—"
+
+obFvgBg =
+     atBullFVG or atBullOB ? color.new(color.lime, 20) :
+     atBearFVG or atBearOB ? color.new(color.red,  20) : ictCellColor
+
+// ================ ORB TABLE RENDER (ES/MES ONLY) ================
+if showDashboard and barstate.islast and isESChart
+    table.cell(orbDash, 0, 0, "ORB CONSOLE",  text_color=colWarn,  bgcolor=orbHdrColor, text_size=size.small)
+    table.cell(orbDash, 1, 0, "",              text_color=colWarn,  bgcolor=orbHdrColor, text_size=size.small)
+    table.cell(orbDash, 0, 1, "STATE",         text_color=colMuted, bgcolor=orbHdrColor, text_size=size.small)
+    table.cell(orbDash, 1, 1, orbStateMachine,
+         text_color=
+                 orbStateMachine == "ORB_FAILED"        ? colBear  :
+                 orbStateMachine == "ORB_EXPIRED"       ? colMuted :
+                 orbStateMachine == "ORB_ACCEPTED_BULL" ? colBull  :
+                 orbStateMachine == "ORB_ACCEPTED_BEAR" ? colBear  :
+                 orbStateMachine == "ORB_EXPANDING"     ? colWarn  :
+                 orbStateMachine == "ORB_RETESTING"     ? colWarn  :
+                 orbStateMachine == "ORB_READY"         ? colBull  :
+                 colMuted,
+         bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 2, "BIAS",          text_color=colMuted, bgcolor=orbHdrColor, text_size=size.small)
+    table.cell(orbDash, 1, 2, orbBiasText,
+         text_color=orbBullBias ? colBull : orbBearBias ? colBear : colMuted,
+         bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 3, "TYPE",          text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 3, orbTypeText,      text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 4, "REJ Q",         text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 4, orbRejQualText,   text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 5, "EXPAN",         text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 5, orbExpText,
+         text_color=(orbLive and not na(orbHigh) and close > orbHigh) ? colBull :
+                    (orbLive and not na(orbLow)  and close < orbLow)  ? colBear : colWhite,
+         bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 6, "LIQ",           text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 6, orbLiqIntText,    text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 7, "HIGH",          text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 7, orbHighText,      text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 8, "MID",           text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 8, orbMidText,       text_color=colWarn,  bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 9,  "LOW",      text_color=colMuted,    bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 9,  orbLowText, text_color=colWhite,    bgcolor=orbCellColor, text_size=size.small)
+    table.cell(orbDash, 0, 10, "CTX",      text_color=colMuted,    bgcolor=orbHdrColor,  text_size=size.small)
+    table.cell(orbDash, 1, 10, orbCtxText, text_color=orbCtxColor, bgcolor=orbCellColor, text_size=size.small)
+
+// ================ ICT TABLE RENDER (ALL CHARTS) ================
+if showDashboard and barstate.islast
+    table.cell(dash2, 0, 0, "ICT ENGINE",      text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 0, "",                text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 0, 1, "CMD",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 1, dashCommandText,
+         text_color=buySignal ? colBull : sellSignal ? colBear : colWarn,
+         bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 2, "SCORE",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 2, dashScoreText,      text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 3, "DONNA",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 3, donnaScenario,      text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 4, "ICT",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 4, ictStepText,
+         text_color=step3LongElite or step3ShortElite ? colWarn :
+                    ictLongReady   or ictShortReady   ? colBull :
+                    step2BullActive or step2BearActive ? colBull : colWhite,
+         bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 5, "BOS",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 5, bullBOS ? "BULL BOS" : bearBOS ? "BEAR BOS" : "—",
+         text_color=bullBOS ? colBull : bearBOS ? colBear : colMuted,
+         bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 6, "OB/FVG",          text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 6, obFvgText,
+         text_color=atBullFVG or atBullOB ? colBull :
+                    atBearFVG or atBearOB ? colBear : colMuted,
+         bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 7, "TGT",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 7, smartTargetDisplay, text_color=colWarn,  bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 8, "SESS",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 8, dashSessionText,
+         text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
+         bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 9, "CONF",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 9, donnaConfText,
+         text_color=donnaConfScore >= 65 ? colBull :
+                    donnaConfScore >= 35 ? colWarn : colBear,
+         bgcolor=ictCellColor, text_size=size.small)
+
+//====================================================
+// DONNA INTEGRATION — DATA BRIDGE
+//====================================================
+plot(donnaConfScore,           "DONNA_CONF",    display=display.none)
+plot(buyScore,                 "BUY_SCORE",     display=display.none)
+plot(sellScore,                "SELL_SCORE",    display=display.none)
+plot(float(donnaTier),         "TIER",          display=display.none)
+plot(donnaTrapRisk ? 1 : 0,    "TRAP_RISK",     display=display.none)
+plot(orbBuySignal  ? 1 : 0,    "ORB_BUY",       display=display.none)
+plot(orbSellSignal ? 1 : 0,    "ORB_SELL",      display=display.none)
+plot(ictBuySignal  ? 1 : 0,    "ICT_BUY",       display=display.none)
+plot(ictSellSignal ? 1 : 0,    "ICT_SELL",      display=display.none)
+plot(analytics_score,          "SIGNAL_SCORE",  display=display.none)
+plot(analytics_confidence,     "SIGNAL_CONF",   display=display.none)
