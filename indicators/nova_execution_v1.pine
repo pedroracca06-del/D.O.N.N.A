@@ -1896,64 +1896,36 @@ prosSellSignal = prosContinuationBear and canSmartSell
 
 //================ TASK 2+3 — STRATEGY METADATA ================
 // strategy_family: which framework owns this signal
-strategy_family = if prosBuySignal or prosSellSignal
-    "PROS"
-else if orbBuySignal or orbSellSignal
-    "ORB"
-else if ictBuySignal and (step3LongElite or step3ShortElite)
-    "ICT"
-else if ictBuySignal or ictSellSignal
-    "ICT"
-else if failedAuctionBull or failedAuctionBear
-    "FAILED_AUCTION"
-else if liqLongReady or liqShortReady
-    "REVERSAL"
-else
-    "UNKNOWN"
+strategy_family =
+     prosBuySignal or prosSellSignal                      ? "PROS"          :
+     orbBuySignal or orbSellSignal                        ? "ORB"           :
+     ictBuySignal and (step3LongElite or step3ShortElite) ? "ICT"           :
+     ictBuySignal or ictSellSignal                        ? "ICT"           :
+     failedAuctionBull or failedAuctionBear               ? "FAILED_AUCTION":
+     liqLongReady or liqShortReady                        ? "REVERSAL"      : "UNKNOWN"
 
 // setup_type: specific setup classification
-setup_type = if prosBuySignal or prosSellSignal
-    "PROS_CONTINUATION"
-else if orbBuySignal and orbMidRejectLong
-    "ORB_MIDPOINT_REJECT"
-else if orbSellSignal and orbMidRejectShort
-    "ORB_MIDPOINT_REJECT"
-else if orbBuySignal and orbRetestBull
-    "ORB_RETEST"
-else if orbSellSignal and orbRetestBear
-    "ORB_RETEST"
-else if orbBuySignal and orbValidBreakBull
-    "ORB_BREAKOUT"
-else if orbSellSignal and orbValidBreakBear
-    "ORB_BREAKOUT"
-else if orbBuySignal and orbLiqRejectBull
-    "ORB_LIQ_REJECTION"
-else if orbSellSignal and orbLiqRejectBear
-    "ORB_LIQ_REJECTION"
-else if orbFailBull or orbFailBear
-    "ORB_FAILURE"
-else if ictBuySignal and step3LongElite
-    "ICT_ELITE"
-else if ictSellSignal and step3ShortElite
-    "ICT_ELITE"
-else if ictBuySignal and ictSMTLong
-    "ICT_SMT_CONFIRMATION"
-else if ictSellSignal and ictSMTShort
-    "ICT_SMT_CONFIRMATION"
-else if ictBuySignal and atBullFVG
-    "ICT_OB_FVG_ENTRY"
-else if ictSellSignal and atBearFVG
-    "ICT_OB_FVG_ENTRY"
-else if ictBuySignal and sweepLowFresh
-    "ICT_LIQUIDITY_SWEEP"
-else if ictSellSignal and sweepHighFresh
-    "ICT_LIQUIDITY_SWEEP"
-else if failedAuctionBull or failedAuctionBear
-    "FAILED_AUCTION"
-else if liqLongReady or liqShortReady
-    "MOMENTUM_CONTINUATION"
-else
-    "UNKNOWN"
+setup_type =
+     prosBuySignal or prosSellSignal                       ? "PROS_CONTINUATION"    :
+     orbBuySignal and orbMidRejectLong                     ? "ORB_MIDPOINT_REJECT"  :
+     orbSellSignal and orbMidRejectShort                   ? "ORB_MIDPOINT_REJECT"  :
+     orbBuySignal and orbRetestBull                        ? "ORB_RETEST"           :
+     orbSellSignal and orbRetestBear                       ? "ORB_RETEST"           :
+     orbBuySignal and orbValidBreakBull                    ? "ORB_BREAKOUT"         :
+     orbSellSignal and orbValidBreakBear                   ? "ORB_BREAKOUT"         :
+     orbBuySignal and orbLiqRejectBull                     ? "ORB_LIQ_REJECTION"    :
+     orbSellSignal and orbLiqRejectBear                    ? "ORB_LIQ_REJECTION"    :
+     orbFailBull or orbFailBear                            ? "ORB_FAILURE"          :
+     ictBuySignal and step3LongElite                       ? "ICT_ELITE"            :
+     ictSellSignal and step3ShortElite                     ? "ICT_ELITE"            :
+     ictBuySignal and ictSMTLong                           ? "ICT_SMT_CONFIRMATION" :
+     ictSellSignal and ictSMTShort                         ? "ICT_SMT_CONFIRMATION" :
+     ictBuySignal and atBullFVG                            ? "ICT_OB_FVG_ENTRY"     :
+     ictSellSignal and atBearFVG                           ? "ICT_OB_FVG_ENTRY"     :
+     ictBuySignal and sweepLowFresh                        ? "ICT_LIQUIDITY_SWEEP"  :
+     ictSellSignal and sweepHighFresh                      ? "ICT_LIQUIDITY_SWEEP"  :
+     failedAuctionBull or failedAuctionBear                ? "FAILED_AUCTION"       :
+     liqLongReady or liqShortReady                         ? "MOMENTUM_CONTINUATION": "UNKNOWN"
 
 //================ TASK 6 — FRAMEWORK ANALYTICS PREP ================
 analytics_regime    = regimeText
