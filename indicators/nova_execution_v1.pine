@@ -2381,6 +2381,25 @@ colBear      = color.new(#ef5350, 0)
 colWarn      = color.new(#f0b429, 0)
 colMuted     = color.new(#5a7a9a, 0)
 colWhite     = color.new(#e0eaf5, 0)
+
+// Semantic hierarchy palette
+colTeal      = color.new(#00bcd4, 0)   // PROS continuation
+colCyan      = color.new(#4dd0e1, 0)   // CONT step active
+colIndigo    = color.new(#7986cb, 0)   // Structure/BOS
+colDim       = color.new(#3a5068, 0)   // context/secondary text
+
+// Row group backgrounds
+novLabelBg   = color.new(#060e1a, 0)   // label column — darker for contrast
+novExecBg    = buySignal  ? color.new(color.lime, 5) :
+               sellSignal ? color.new(color.red,  5) : color.new(#0f1c2b, 0)
+novProsBg    = prosContinuationBull or prosContinuationBear ? color.new(#002f3f, 0) :
+               prosRejectionBull    or prosRejectionBear    ? color.new(#2a2000, 0) :
+               prosLegValidBull     or prosLegValidBear     ? color.new(#001a28, 0) : color.new(#0a1628, 0)
+novContBg    = step3LongElite  or step3ShortElite           ? color.new(#1e1e00, 0) :
+               ictLongReady    or ictShortReady             ? color.new(#002535, 0) :
+               step3LongReady  or step3ShortReady           ? color.new(#001820, 0) : color.new(#0a1628, 0)
+novBosBg     = bullBOS ? color.new(#001f10, 0) : bearBOS ? color.new(#1f0010, 0) : color.new(#0a1628, 0)
+novObBg      = atBullFVG or atBullOB ? color.new(#001508, 0) : atBearFVG or atBearOB ? color.new(#150005, 0) : color.new(#0a1628, 0)
 // ================ ORB DISPLAY HELPERS ================
 orbBiasText =
      orbBullThesisDead ? "BEAR DEAD"  :
@@ -2535,44 +2554,55 @@ if showDashboard and barstate.islast and isESChart
 
 // ================ NOVA TABLE RENDER (ALL CHARTS) ================
 if showDashboard and barstate.islast
-    table.cell(dash2, 0, 0, "NOVA ENGINE",     text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 0, "",                text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 0, 1, "CMD",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    // ── HEADER ──────────────────────────────────────
+    table.cell(dash2, 0, 0, "NOVA ENGINE",      text_color=colWarn,  bgcolor=novLabelBg,  text_size=size.small)
+    table.cell(dash2, 1, 0, "",                 text_color=colWarn,  bgcolor=novLabelBg,  text_size=size.small)
+
+    // ── EXECUTION GROUP — dominant ───────────────────
+    table.cell(dash2, 0, 1, "CMD",              text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
     table.cell(dash2, 1, 1, dashCommandText,
          text_color=buySignal ? colBull : sellSignal ? colBear : colWarn,
-         bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 2, "SCORE",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 2, dashScoreText,      text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 3, "DONNA",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 3, donnaScenario,      text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 4, "PROS",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 4, prosStateText,      text_color=prosTextColor, bgcolor=prosBg,  text_size=size.small)
-    table.cell(dash2, 0, 5, "CONT",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+         bgcolor=novExecBg, text_size=size.normal)
+    table.cell(dash2, 0, 2, "SCORE",            text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(dash2, 1, 2, dashScoreText,       text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 3, "STATE",            text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(dash2, 1, 3, donnaScenario,       text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
+
+    // ── CONTINUATION GROUP — teal semantic ───────────
+    table.cell(dash2, 0, 4, "PROS",             text_color=colTeal,  bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(dash2, 1, 4, prosStateText,
+         text_color=prosTextColor, bgcolor=novProsBg, text_size=size.small)
+    table.cell(dash2, 0, 5, "CONT",             text_color=colCyan,  bgcolor=novLabelBg,  text_size=size.tiny)
     table.cell(dash2, 1, 5, ictStepText,
-         text_color=step3LongElite or step3ShortElite ? colWarn :
-                    ictLongReady   or ictShortReady   ? colBull :
-                    step2BullActive or step2BearActive ? colBull : colWhite,
-         bgcolor=ictBg, text_size=size.small)
-    table.cell(dash2, 0, 6, "BOS",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+         text_color=step3LongElite or step3ShortElite ? colWarn  :
+                    ictLongReady   or ictShortReady   ? colCyan  :
+                    step3LongReady or step3ShortReady ? colTeal  :
+                    step2BullActive or step2BearActive? colIndigo : colDim,
+         bgcolor=novContBg, text_size=size.small)
+
+    // ── STRUCTURE GROUP — indigo semantic ────────────
+    table.cell(dash2, 0, 6, "BOS",              text_color=colIndigo, bgcolor=novLabelBg, text_size=size.tiny)
     table.cell(dash2, 1, 6, bullBOS ? "BULL BOS" : bearBOS ? "BEAR BOS" : "—",
-         text_color=bullBOS ? colBull : bearBOS ? colBear : colMuted,
-         bgcolor=bosBg, text_size=size.small)
-    table.cell(dash2, 0, 7, "OB/FVG",          text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+         text_color=bullBOS ? colBull : bearBOS ? colBear : colDim,
+         bgcolor=novBosBg, text_size=size.small)
+    table.cell(dash2, 0, 7, "OB/FVG",           text_color=colIndigo, bgcolor=novLabelBg, text_size=size.tiny)
     table.cell(dash2, 1, 7, obFvgText,
          text_color=atBullFVG or atBullOB ? colBull :
-                    atBearFVG or atBearOB ? colBear : colMuted,
-         bgcolor=obFvgBg, text_size=size.small)
-    table.cell(dash2, 0, 8, "TGT",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 8, smartTargetDisplay, text_color=colWarn,  bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 9, "SESS",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 9, dashSessionText,
+                    atBearFVG or atBearOB ? colBear : colDim,
+         bgcolor=novObBg, text_size=size.small)
+
+    // ── CONTEXT GROUP — recessive ────────────────────
+    table.cell(dash2, 0, 8,  "TGT",             text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
+    table.cell(dash2, 1, 8,  smartTargetDisplay, text_color=colWarn, bgcolor=ictCellColor, text_size=size.tiny)
+    table.cell(dash2, 0, 9,  "SESS",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
+    table.cell(dash2, 1, 9,  dashSessionText,
          text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
-         bgcolor=dashSessionBg, text_size=size.small)
-    table.cell(dash2, 0, 10, "CONF",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+         bgcolor=dashSessionBg, text_size=size.tiny)
+    table.cell(dash2, 0, 10, "CONF",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
     table.cell(dash2, 1, 10, donnaConfText,
          text_color=donnaConfScore >= 65 ? colBull :
                     donnaConfScore >= 35 ? colWarn : colBear,
-         bgcolor=ictCellColor, text_size=size.small)
+         bgcolor=ictCellColor, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE
