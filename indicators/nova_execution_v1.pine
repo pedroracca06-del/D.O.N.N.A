@@ -349,8 +349,8 @@ if showORB and orbVisible and not na(orbStartBar)
         line.set_y2(orbMidLine,  orbMid)
 
 if barstate.islast and showHistORB
-    for i = 0 to array.size(histORBMidLines) - 1
-        line.delete(array.get(histORBMidLines, i))
+    for line_obj in histORBMidLines
+        line.delete(line_obj)
     array.clear(histORBMidLines)
     _nMids = math.min(array.size(histORBBoxes), array.size(histORBMids))
     if _nMids > 0
