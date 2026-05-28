@@ -1047,6 +1047,62 @@ if prosRejectionBear
     prosZoneTouchedBear := false
 
 //====================================================
+// PROS CONTINUATION CONFIRMATION — PHASE A4
+// Anchors a reference level to the rejection bar and fires once
+// when a subsequent close breaks above/below it.
+// prosConRefHigh/Low: high/low of the rejection candle (reference).
+// prosConBarBull/Bear: bar index when the reference was set.
+// prosContinuationBull/Bear: single-fire, reference consumed on fire.
+// No existing logic is modified here.
+//====================================================
+
+var float prosConRefHigh = na
+var float prosConRefLow  = na
+var int   prosConBarBull = na
+var int   prosConBarBear = na
+
+if newDay
+    prosConRefHigh := na
+    prosConRefLow  := na
+    prosConBarBull := na
+    prosConBarBear := na
+
+// Clear if the leg is no longer valid
+if not prosLegValidBull
+    prosConRefHigh := na
+    prosConBarBull := na
+if not prosLegValidBear
+    prosConRefLow  := na
+    prosConBarBear := na
+
+// Anchor to the rejection bar; overwrite if a new rejection fires
+if prosRejectionBull
+    prosConRefHigh := high
+    prosConBarBull := bar_index
+if prosRejectionBear
+    prosConRefLow  := low
+    prosConBarBear := bar_index
+
+// Freshness — reference expires after 20 bars
+prosConFreshBull = not na(prosConBarBull) and (bar_index - prosConBarBull) <= 20
+prosConFreshBear = not na(prosConBarBear) and (bar_index - prosConBarBear) <= 20
+
+// Continuation: close breaks above/below the rejection bar reference level
+prosContinuationBull = prosLegValidBull and prosConFreshBull and not na(prosConRefHigh) and
+                       close > prosConRefHigh
+
+prosContinuationBear = prosLegValidBear and prosConFreshBear and not na(prosConRefLow) and
+                       close < prosConRefLow
+
+// Consume the reference — one continuation signal per rejection setup
+if prosContinuationBull
+    prosConRefHigh := na
+    prosConBarBull := na
+if prosContinuationBear
+    prosConRefLow  := na
+    prosConBarBear := na
+
+//====================================================
 // PART 3 = SESSION BOXES + SIGNAL ENGINE + SCORE
 //====================================================
 
