@@ -897,8 +897,10 @@ obBody     = math.abs(close - open)
 obAvgBody  = ta.sma(math.abs(close - open), 20)
 obAvgRange = ta.sma(high - low, 20)
 
-bullDisplacement = close > open and obBody > obAvgBody * 1.20 and (high - low) > obAvgRange * 1.10 and close > ta.highest(high[1], 3)
-bearDisplacement = close < open and obBody > obAvgBody * 1.20 and (high - low) > obAvgRange * 1.10 and close < ta.lowest(low[1],  3)
+obHighest3 = ta.highest(high[1], 3)
+obLowest3  = ta.lowest(low[1],  3)
+bullDisplacement = close > open and obBody > obAvgBody * 1.20 and (high - low) > obAvgRange * 1.10 and close > obHighest3
+bearDisplacement = close < open and obBody > obAvgBody * 1.20 and (high - low) > obAvgRange * 1.10 and close < obLowest3
 
 bullOBValid = bullDisplacement and close[1] < open[1] and (high - low) > obAvgRange * 0.50
 bearOBValid = bearDisplacement and close[1] > open[1] and (high - low) > obAvgRange * 0.50
@@ -944,15 +946,18 @@ if newDay
     prosLegBarBull  := na
     prosLegBarBear  := na
 
+prosLowest10  = ta.lowest(low[1],  10)
+prosHighest10 = ta.highest(high[1], 10)
+
 // Bull leg: origin = lowest low of 10 bars before displacement; end = displacement candle high
 if bullDisplacement
-    prosLegLowBull  := ta.lowest(low[1], 10)
+    prosLegLowBull  := prosLowest10
     prosLegHighBull := high
     prosLegBarBull  := bar_index
 
 // Bear leg: origin = highest high of 10 bars before displacement; end = displacement candle low
 if bearDisplacement
-    prosLegHighBear := ta.highest(high[1], 10)
+    prosLegHighBear := prosHighest10
     prosLegLowBear  := low
     prosLegBarBear  := bar_index
 
@@ -994,11 +999,8 @@ prosFib705Bear = prosLegValidBear ? prosLegLowBear + (prosLegHighBear - prosLegL
 prosFib786Bear = prosLegValidBear ? prosLegLowBear + (prosLegHighBear - prosLegLowBear) * 0.786 : na
 
 // Close is within the retracement zone (50% to 78.6%)
-atProsFibBull = prosLegValidBull and not na(prosFib50Bull)  and not na(prosFib786Bull) and
-                close >= prosFib786Bull and close <= prosFib50Bull
-
-atProsFibBear = prosLegValidBear and not na(prosFib50Bear)  and not na(prosFib786Bear) and
-                close <= prosFib786Bear and close >= prosFib50Bear
+atProsFibBull = prosLegValidBull and not na(prosFib50Bull) and not na(prosFib786Bull) and close >= prosFib786Bull and close <= prosFib50Bull
+atProsFibBear = prosLegValidBear and not na(prosFib50Bear) and not na(prosFib786Bear) and close <= prosFib786Bear and close >= prosFib50Bear
 
 // Wick tagged 61.8% or deeper — used by rejection detection in Phase A3
 prosTaggedFibBull = prosLegValidBull and not na(prosFib618Bull) and low  <= prosFib618Bull
