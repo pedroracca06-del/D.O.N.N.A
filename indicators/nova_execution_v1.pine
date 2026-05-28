@@ -226,8 +226,9 @@ orbLostMidBull = orbLive and not na(orbMid) and close < orbMid and close < open
 orbLostMidBear = orbLive and not na(orbMid) and close > orbMid and close > open
 
 // TRUE ORB FAILURE — auction ownership transfer logic
-// Failure = midpoint accepted by opposite side AND opposite expansion confirms
-// This is permanent. No recovery allowed.
+// Failure = midpoint accepted by opposite side (3 bars) AND ATR-confirmed expansion beyond ORB edge
+// Recoverable: 3-bar midpoint defense + close back beyond ORB edge reverses the failure state
+orbAtr = ta.atr(14)
 
 var bool orbMidAcceptedBull = false
 var bool orbMidAcceptedBear = false
@@ -240,32 +241,27 @@ if newDay
     orbBullThesisDead  := false
     orbBearThesisDead  := false
 
-// Step 1 — track midpoint acceptance (2 consecutive closes on same side)
+// Step 1 — track midpoint acceptance (3 consecutive closes on same side)
 if orbLive and not na(orbMid)
-    if close > orbMid and close > open and close[1] > orbMid
+    if close > orbMid and close > open and close[1] > orbMid and close[2] > orbMid
         orbMidAcceptedBull := true
         orbMidAcceptedBear := false
-    if close < orbMid and close < open and close[1] < orbMid
+    if close < orbMid and close < open and close[1] < orbMid and close[2] < orbMid
         orbMidAcceptedBear := true
         orbMidAcceptedBull := false
 
-// Step 2 — opposite expansion confirmation
-// Bull expansion: closed above ORB high with momentum
+// Step 2 — opposite expansion confirmation (ATR-adaptive, ES-contextual)
+// Bull expansion: closed above ORB high with committed momentum (0.5 ATR beyond edge)
 orbOppExpansionBull =
      not na(orbHigh) and
      close > orbHigh and close > open and
-     (isNQChart ? (close - orbHigh) >= 15 : (close - orbHigh) >= 5)
+     (close - orbHigh) >= orbAtr * 0.5
 
-// Bear expansion: closed below ORB low with momentum
+// Bear expansion: closed below ORB low with committed momentum (0.5 ATR beyond edge)
 orbOppExpansionBear =
      not na(orbLow) and
      close < orbLow and close < open and
-     (isNQChart ? (orbLow - close) >= 15 : (orbLow - close) >= 5)
-
-// Step 3 — permanent thesis death (requires prior breakout in the direction that died)
-// orbFailBull/Bear are now thesis-death flags — permanent
-orbFailBull = orbBullThesisDead
-orbFailBear = orbBearThesisDead
+     (orbLow - close) >= orbAtr * 0.5
 
 // STATE MACHINE VARS
 var int orbBullBreakBar = na
@@ -278,14 +274,25 @@ if orbLive and not na(orbHigh) and close > orbHigh and close > open and close > 
 if orbLive and not na(orbLow) and close < orbLow and close < open and close < low[1]
     orbBearBreakBar := bar_index
 
-// Bear thesis dies: bear broke out first, then bulls fully reclaimed mid AND confirmed expansion
-// Requires: prior bear breakout + mid accepted by bulls + full bull expansion above box
+// Step 3 — thesis death (requires prior breakout in the direction that died)
+// Bear thesis dies: bear broke out first, then bulls reclaimed mid (3 bars) + expanded above box
 if orbLive and orbMidAcceptedBull and orbOppExpansionBull and not na(orbBearBreakBar)
     orbBearThesisDead := true
-// Bull thesis dies: bull broke out first, then bears fully reclaimed mid AND confirmed expansion
-// Requires: prior bull breakout + mid accepted by bears + full bear expansion below box
+// Bull thesis dies: bull broke out first, then bears reclaimed mid (3 bars) + expanded below box
 if orbLive and orbMidAcceptedBear and orbOppExpansionBear and not na(orbBullBreakBar)
     orbBullThesisDead := true
+
+// Step 4 — reclaim recovery: auction ownership recaptured after thesis death
+// Bulls: 3 consecutive mid defends + sustained close back above ORB high
+if orbBullThesisDead and orbMidRejectBullCount >= 3 and close > orbHigh and close > open
+    orbBullThesisDead := false
+// Bears: 3 consecutive mid defends + sustained close back below ORB low
+if orbBearThesisDead and orbMidRejectBearCount >= 3 and close < orbLow and close < open
+    orbBearThesisDead := false
+
+// Derive fail flags after full recovery resolution (reads final thesis state for this bar)
+orbFailBull = orbBullThesisDead
+orbFailBear = orbBearThesisDead
     
 orbAcceptedBull = not na(orbBullBreakBar) and (bar_index - orbBullBreakBar >= 2) and close > orbHigh and not orbFailBull
 orbAcceptedBear = not na(orbBearBreakBar) and (bar_index - orbBearBreakBar >= 2) and close < orbLow  and not orbFailBear
@@ -2467,6 +2474,8 @@ orbLiqIntText =
      orbLowLiqAligned                  ? "LOW = LIQ"          : "CLEAR"
 
 orbExpText =
+     orbBullThesisDead and (orbLive and not na(orbHigh) and close > orbHigh) ? "RECLAIMING ▲" :
+     orbBearThesisDead and (orbLive and not na(orbLow)  and close < orbLow)  ? "RECLAIMING ▼" :
      (orbLive and not na(orbHigh) and close > orbHigh) ? "BULL EXPANDING" :
      (orbLive and not na(orbLow)  and close < orbLow)  ? "BEAR EXPANDING" :
      orbAcceptedBull  ? "BULL ACCEPTED"  :
