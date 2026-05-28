@@ -12,17 +12,19 @@ from donna_engines import (
     build_session_significance, build_market_driver_engine, build_morning_edge,
 )
 
-# Known HARVEY V4 setup types (used for routing and labelling)
+# Known setup types (used for routing and labelling)
 _ELITE_SETUPS = {'ICT_ELITE', 'ICT_ELITE_SHORT', 'ICT_ELITE_LONG'}
 _ICT_SETUPS   = {'ICT_BUY', 'ICT_SELL', 'HARVEY_BUY', 'HARVEY_SELL'}
-_ORB_SETUPS   = {'ORB_LONG', 'ORB_SHORT'}
+_ORB_SETUPS   = {'ORB_MID_REJECT', 'ORB_LIQ_REJECT', 'ORB_EDGE_REJECT', 'ORB_LONG', 'ORB_SHORT'}
+_PROS_SETUPS  = {'PROS_CONTINUATION'}
 
 
 def normalize_payload(payload: dict) -> dict:
     setup_type = str(payload.get('setup_type', 'unknown')).upper()
     strategy_family = (
-        'ORB'            if setup_type.startswith('ORB') else
-        'ICT'            if setup_type.startswith('ICT') else
+        'ORB'            if setup_type.startswith('ORB')  else
+        'PROS'           if setup_type.startswith('PROS') else
+        'ICT'            if setup_type.startswith('ICT')  else
         'FAILED_AUCTION' if setup_type == 'FAILED_AUCTION' else
         'MOMENTUM'       if setup_type == 'MOMENTUM_CONTINUATION' else
         'UNKNOWN'
@@ -257,8 +259,14 @@ def _generate_signal_summary(data: dict, risk: dict, sig: dict, driver: dict) ->
                 f'ICT structure confirmed in {session_name} session.')
 
     elif setup_type in _ORB_SETUPS:
-        body = (f'ORB signal on {instrument}. Structure: {setup_type}. '
+        entry_type = setup_type.replace('ORB_', '').replace('_', ' ')
+        body = (f'ORB {entry_type} on {instrument}. '
                 f'Respect event timing if macro risk is active.')
+
+    elif setup_type in _PROS_SETUPS:
+        direction = 'long' if signal in ('LONG', 'BUY') else 'short'
+        body = (f'PROS continuation {direction} on {instrument}. '
+                f'Displacement → retracement → continuation confirmed. {regime} regime.')
 
     else:
         # ── fallback: directional + macro ─────────────────────

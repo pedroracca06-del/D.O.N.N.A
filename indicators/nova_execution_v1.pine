@@ -2146,14 +2146,10 @@ if not na(sellLabel) and bar_index - label.get_x(sellLabel) > labelExpiry
     sellLabel := na
 
 //================ ALERTS ================
-alertcondition(buySignal,      "HARVEY BUY",       "HARVEY BUY signal")
-alertcondition(sellSignal,     "HARVEY SELL",      "HARVEY SELL signal")
-alertcondition(prosBuySignal,  "PROS LONG",        "PROS continuation long")
-alertcondition(prosSellSignal, "PROS SHORT",       "PROS continuation short")
-alertcondition(step3LongElite, "CONT ELITE LONG",  "NOVA Continuation Elite Long")
-alertcondition(step3ShortElite,"CONT ELITE SHORT", "NOVA Continuation Elite Short")
-alertcondition(orbLongSignal, "ORB LONG",  "HARVEY ORB long signal")
-alertcondition(orbShortSignal, "ORB SHORT", "HARVEY ORB short signal")
+alertcondition(orbBuySignal,   "ORB BUY",   "ORB buy signal")
+alertcondition(orbSellSignal,  "ORB SELL",  "ORB sell signal")
+alertcondition(prosBuySignal,  "PROS BUY",  "PROS continuation long")
+alertcondition(prosSellSignal, "PROS SELL", "PROS continuation short")
 //================ LIQUIDITY MARKERS ================
 var line pshLine = na
 var line pslLine = na
@@ -2461,8 +2457,8 @@ dashSessionBg =
      inLondon    ? color.new(color.teal,   22) :
      inAsia      ? color.new(color.purple, 22) : panelRowNeutral
 
-// NOVA TABLE — all charts, right side
-var table dash2 = table.new(position.top_right, 2, 11, border_width=1)
+// NOVA TABLE — all charts, right side (8 rows: execution + PROS + context)
+var table dash2 = table.new(position.top_right, 2, 8, border_width=1)
 // ORB TABLE — ES/MES only, bottom right
 var table orbDash = table.new(position.bottom_right, 2, 11, border_width=1)
 // PROS TABLE — dedicated continuation intelligence, bottom left
@@ -2769,38 +2765,20 @@ if showDashboard and barstate.islast
     table.cell(dash2, 0, 3, "STATE",            text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
     table.cell(dash2, 1, 3, donnaScenario,       text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
 
-    // ── CONTINUATION GROUP — teal semantic ───────────
+    // ── PROS SUMMARY — links to dedicated PROS dashboard ──────
     table.cell(dash2, 0, 4, "PROS",             text_color=colTeal,  bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(dash2, 1, 4, prosStateText,
-         text_color=prosTextColor, bgcolor=novProsBg, text_size=size.small)
-    table.cell(dash2, 0, 5, "CONT",             text_color=colCyan,  bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(dash2, 1, 5, ictStepText,
-         text_color=step3LongElite or step3ShortElite ? colWarn  :
-                    ictLongReady   or ictShortReady   ? colCyan  :
-                    step3LongReady or step3ShortReady ? colTeal  :
-                    step2BullActive or step2BearActive? colIndigo : colDim,
-         bgcolor=novContBg, text_size=size.small)
-
-    // ── STRUCTURE GROUP — indigo semantic ────────────
-    table.cell(dash2, 0, 6, "BOS",              text_color=colIndigo, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(dash2, 1, 6, bullBOS ? "BULL BOS" : bearBOS ? "BEAR BOS" : "—",
-         text_color=bullBOS ? colBull : bearBOS ? colBear : colDim,
-         bgcolor=novBosBg, text_size=size.small)
-    table.cell(dash2, 0, 7, "OB/FVG",           text_color=colIndigo, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(dash2, 1, 7, obFvgText,
-         text_color=atBullFVG or atBullOB ? colBull :
-                    atBearFVG or atBearOB ? colBear : colDim,
-         bgcolor=novObBg, text_size=size.small)
+    table.cell(dash2, 1, 4, prosEngineState,
+         text_color=prosEngineCol, bgcolor=novProsBg, text_size=size.small)
 
     // ── CONTEXT GROUP — recessive ────────────────────
-    table.cell(dash2, 0, 8,  "TGT",             text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
-    table.cell(dash2, 1, 8,  smartTargetDisplay, text_color=colWarn, bgcolor=ictCellColor, text_size=size.tiny)
-    table.cell(dash2, 0, 9,  "SESS",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
-    table.cell(dash2, 1, 9,  dashSessionText,
+    table.cell(dash2, 0, 5, "TGT",             text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
+    table.cell(dash2, 1, 5, smartTargetDisplay, text_color=colWarn, bgcolor=ictCellColor, text_size=size.tiny)
+    table.cell(dash2, 0, 6, "SESS",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
+    table.cell(dash2, 1, 6, dashSessionText,
          text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
          bgcolor=dashSessionBg, text_size=size.tiny)
-    table.cell(dash2, 0, 10, "CONF",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
-    table.cell(dash2, 1, 10, donnaConfText,
+    table.cell(dash2, 0, 7, "CONF",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
+    table.cell(dash2, 1, 7, donnaConfText,
          text_color=donnaConfScore >= 65 ? colBull :
                     donnaConfScore >= 35 ? colWarn : colBear,
          bgcolor=ictCellColor, text_size=size.tiny)
