@@ -1778,6 +1778,14 @@ sellScore += bearOBResistance?  8 : 0
 buyScore  += atBullFVG and bullFVGActive ? 8 : 0
 sellScore += atBearFVG and bearFVGActive ? 8 : 0
 
+// PROS MODIFIERS — fib zone position + rejection + continuation
+buyScore  += atProsFibBull        ?  8 : 0
+sellScore += atProsFibBear        ?  8 : 0
+buyScore  += prosRejectionBull    ? 15 : 0
+sellScore += prosRejectionBear    ? 15 : 0
+buyScore  += prosContinuationBull ? 20 : 0
+sellScore += prosContinuationBear ? 20 : 0
+
 // KILL ZONE + DEALING RANGE + PREV DAY BIAS
 buyScore  += isKillZone          ?  8 : 0
 sellScore += isKillZone          ?  8 : 0
@@ -1824,8 +1832,8 @@ minGap          = 8
 scoreGap        = math.abs(buyScore - sellScore)
 mixedConditions = scoreGap <= 8
 
-freshLongSetup  = ictLongReady  or orbLongReady or liqLongReady
-freshShortSetup = ictShortReady or orbShortReady or liqShortReady
+freshLongSetup  = ictLongReady  or orbLongReady or liqLongReady or prosContinuationBull
+freshShortSetup = ictShortReady or orbShortReady or liqShortReady or prosContinuationBear
 
 //================ ORB VALIDATION ================
 
@@ -1885,10 +1893,13 @@ orbBuySignal  = orbBuyPass  and canSmartBuy
 orbSellSignal = orbSellPass and canSmartSell
 ictBuySignal  = ictLongReady  and canSmartBuy
 ictSellSignal = ictShortReady and canSmartSell
+prosBuySignal  = prosContinuationBull and canSmartBuy
+prosSellSignal = prosContinuationBear and canSmartSell
 
 //================ TASK 2+3 — STRATEGY METADATA ================
 // strategy_family: which framework owns this signal
 strategy_family =
+     prosBuySignal or prosSellSignal                      ? "PROS"          :
      orbBuySignal or orbSellSignal                        ? "ORB"           :
      ictBuySignal  and (step3LongElite or step3ShortElite) ? "ICT"           :
      ictBuySignal  or ictSellSignal                       ? "ICT"           :
@@ -1897,6 +1908,8 @@ strategy_family =
 
 // setup_type: specific setup classification
 setup_type =
+     prosBuySignal                         ? "PROS_CONTINUATION"    :
+     prosSellSignal                        ? "PROS_CONTINUATION"    :
      orbBuySignal  and orbMidRejectLong    ? "ORB_MIDPOINT_REJECT"  :
      orbSellSignal and orbMidRejectShort   ? "ORB_MIDPOINT_REJECT"  :
      orbBuySignal  and orbRetestBull       ? "ORB_RETEST"           :
@@ -1923,8 +1936,8 @@ analytics_session   = sessionStateText
 analytics_score     = buySignal ? buyScore : sellSignal ? sellScore : 0
 analytics_confidence = 0
 //================ SIGNAL ASSIGNMENT ================
-buySignal  := orbBuySignal  or ictBuySignal
-sellSignal := orbSellSignal or ictSellSignal
+buySignal  := orbBuySignal  or ictBuySignal  or prosBuySignal
+sellSignal := orbSellSignal or ictSellSignal or prosSellSignal
 
 if buySignal
     lastSmartBuyBar   := bar_index
@@ -1964,6 +1977,8 @@ commandText :=
      sellScore >= 58 and sellScore > buyScore  ? "WATCH SHORT" : "WAIT"
 
 signalReason :=
+     prosBuySignal                         ? "PROS CONTINUATION LONG"  :
+     prosSellSignal                        ? "PROS CONTINUATION SHORT" :
      orbBuySignal  and orbValidBreakBull   ? "ORB BREAKOUT LONG" :
      orbSellSignal and orbValidBreakBear   ? "ORB BREAKOUT SHORT" :
      orbBuySignal  and orbMidRejectLong    ? "ORB MIDPOINT REJECT LONG" :
@@ -2031,6 +2046,8 @@ if not na(sellLabel) and bar_index - label.get_x(sellLabel) > labelExpiry
 //================ ALERTS ================
 alertcondition(buySignal,      "HARVEY BUY",       "HARVEY BUY signal")
 alertcondition(sellSignal,     "HARVEY SELL",      "HARVEY SELL signal")
+alertcondition(prosBuySignal,  "PROS LONG",        "PROS continuation long")
+alertcondition(prosSellSignal, "PROS SHORT",       "PROS continuation short")
 alertcondition(step3LongElite, "ICT ELITE LONG",   "HARVEY ICT Elite Long")
 alertcondition(step3ShortElite,"ICT ELITE SHORT",  "HARVEY ICT Elite Short")
 alertcondition(orbLongSignal, "ORB LONG",  "HARVEY ORB long signal")
