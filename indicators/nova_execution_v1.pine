@@ -1007,6 +1007,46 @@ prosTaggedFibBull = prosLegValidBull and not na(prosFib618Bull) and low  <= pros
 prosTaggedFibBear = prosLegValidBear and not na(prosFib618Bear) and high >= prosFib618Bear
 
 //====================================================
+// PROS REJECTION DETECTION — PHASE A3
+// Detects zone entry then rejection close through the 50% level.
+// prosZoneTouchedBull/Bear: sticky flag — set when close is in the
+//   retracement zone OR a wick reaches 61.8% or deeper.
+// prosRejectionBull/Bear:   single-fire per zone entry — fires when
+//   zone was touched and close reclaims through the 50% level.
+//   Flag is consumed on fire to prevent repeated signals.
+// No existing logic is modified here.
+//====================================================
+
+var bool prosZoneTouchedBull = false
+var bool prosZoneTouchedBear = false
+
+if newDay
+    prosZoneTouchedBull := false
+    prosZoneTouchedBear := false
+
+// Clear if the leg expired or was invalidated this bar
+if not prosLegValidBull
+    prosZoneTouchedBull := false
+if not prosLegValidBear
+    prosZoneTouchedBear := false
+
+// Set on zone contact: close inside zone or wick tagged 61.8%+
+if prosLegValidBull and (atProsFibBull or prosTaggedFibBull)
+    prosZoneTouchedBull := true
+if prosLegValidBear and (atProsFibBear or prosTaggedFibBear)
+    prosZoneTouchedBear := true
+
+// Rejection: zone was touched and close reclaims through the 50% level
+prosRejectionBull = prosLegValidBull and prosZoneTouchedBull and close > prosFib50Bull
+prosRejectionBear = prosLegValidBear and prosZoneTouchedBear and close < prosFib50Bear
+
+// Consume touch flag — one rejection signal per zone entry
+if prosRejectionBull
+    prosZoneTouchedBull := false
+if prosRejectionBear
+    prosZoneTouchedBear := false
+
+//====================================================
 // PART 3 = SESSION BOXES + SIGNAL ENGINE + SCORE
 //====================================================
 
