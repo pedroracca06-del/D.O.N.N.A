@@ -1579,12 +1579,12 @@ ictShortReady =
      localBearBias and
      not nearLiquidityLow
 
-//================ ICT STEP STATE TEXT ================
+//================ CONTINUATION STEP STATE TEXT ================
 ictStepText =
      step3LongElite    ? "S3 ELITE LONG"     :
      step3ShortElite   ? "S3 ELITE SHORT"    :
-     ictLongReady      ? "ICT LONG READY"    :
-     ictShortReady     ? "ICT SHORT READY"   :
+     ictLongReady      ? "CONT LONG READY"   :
+     ictShortReady     ? "CONT SHORT READY"  :
      step3LongReady    ? "S3 LONG"           :
      step3ShortReady   ? "S3 SHORT"          :
      ictEntryZoneLong  ? "S2b ENTRY LONG"    :
@@ -1709,10 +1709,10 @@ eliteICTShort = step3ShortElite and brainBearAgree
 donnaTier = donnaTier1Bull or donnaTier1Bear ? 1 : donnaTier2Bull or donnaTier2Bear ? 2 : donnaTier3Bull or donnaTier3Bear ? 3 : 0
 
 donnaHigherOrder =
-     eliteICTLong          ? "ELITE ICT LONG"      :
-     eliteICTShort         ? "ELITE ICT SHORT"     :
-     donnaTier1Bull        ? "T1 FULL ICT LONG"    :
-     donnaTier1Bear        ? "T1 FULL ICT SHORT"   :
+     eliteICTLong          ? "ELITE CONT LONG"     :
+     eliteICTShort         ? "ELITE CONT SHORT"    :
+     donnaTier1Bull        ? "T1 CONT LONG"        :
+     donnaTier1Bear        ? "T1 CONT SHORT"       :
      po3Bull               ? "PO3 BULL"            :
      po3Bear               ? "PO3 BEAR"            :
      londonSweepNYCont     ? "LONDON → NY LONG"    :
@@ -1987,13 +1987,13 @@ else if orbBuySignal and orbMidRejectLong
 else if orbSellSignal and orbMidRejectShort
     signalReason := "ORB MIDPOINT REJECT SHORT"
 else if ictBuySignal and step3LongElite
-    signalReason := "ICT ELITE LONG"
+    signalReason := "CONT ELITE LONG"
 else if ictSellSignal and step3ShortElite
-    signalReason := "ICT ELITE SHORT"
+    signalReason := "CONT ELITE SHORT"
 else if ictBuySignal and ictLongReady
-    signalReason := "ICT LONG"
+    signalReason := "CONT LONG"
 else if ictSellSignal and ictShortReady
-    signalReason := "ICT SHORT"
+    signalReason := "CONT SHORT"
 else
     signalReason := "NO SIGNAL"
 targetText := buySignal  ? longTargetLabel  :
@@ -2017,18 +2017,18 @@ buyLabelText =
      orbBuySignal and orbRetestBull     ? "ORB RETEST LONG"       :
      orbBuySignal and orbValidBreakBull ? "ORB BREAKOUT LONG"     :
      orbBuySignal                       ? "ORB BUY"               :
-     ictBuySignal and step3LongElite    ? "ICT ELITE LONG"        :
-     ictBuySignal and ictSMTLong       ? "ICT SMT LONG"          :
-     ictBuySignal                       ? "ICT LONG"              : "BUY"
+     ictBuySignal and step3LongElite    ? "CONT ELITE LONG"       :
+     ictBuySignal and ictSMTLong        ? "CONT SMT LONG"         :
+     ictBuySignal                       ? "CONT LONG"             : "BUY"
 
 sellLabelText =
      orbSellSignal and orbMidRejectShort  ? "ORB MID REJECT SHORT" :
      orbSellSignal and orbRetestBear      ? "ORB RETEST SHORT"      :
      orbSellSignal and orbValidBreakBear  ? "ORB BREAKOUT SHORT"    :
      orbSellSignal                        ? "ORB SELL"              :
-     ictSellSignal and step3ShortElite    ? "ICT ELITE SHORT"       :
-     ictSellSignal and ictSMTShort       ? "ICT SMT SHORT"         :
-     ictSellSignal                        ? "ICT SHORT"             : "SELL"
+     ictSellSignal and step3ShortElite    ? "CONT ELITE SHORT"      :
+     ictSellSignal and ictSMTShort        ? "CONT SMT SHORT"        :
+     ictSellSignal                        ? "CONT SHORT"            : "SELL"
 
 if buySignal and not buySignal[1]
     if not na(buyLabel)
@@ -2054,8 +2054,8 @@ alertcondition(buySignal,      "HARVEY BUY",       "HARVEY BUY signal")
 alertcondition(sellSignal,     "HARVEY SELL",      "HARVEY SELL signal")
 alertcondition(prosBuySignal,  "PROS LONG",        "PROS continuation long")
 alertcondition(prosSellSignal, "PROS SHORT",       "PROS continuation short")
-alertcondition(step3LongElite, "ICT ELITE LONG",   "HARVEY ICT Elite Long")
-alertcondition(step3ShortElite,"ICT ELITE SHORT",  "HARVEY ICT Elite Short")
+alertcondition(step3LongElite, "CONT ELITE LONG",  "NOVA Continuation Elite Long")
+alertcondition(step3ShortElite,"CONT ELITE SHORT", "NOVA Continuation Elite Short")
 alertcondition(orbLongSignal, "ORB LONG",  "HARVEY ORB long signal")
 alertcondition(orbShortSignal, "ORB SHORT", "HARVEY ORB short signal")
 //================ LIQUIDITY MARKERS ================
@@ -2365,8 +2365,8 @@ dashSessionBg =
      inLondon    ? color.new(color.teal,   22) :
      inAsia      ? color.new(color.purple, 22) : panelRowNeutral
 
-// ICT TABLE — all charts, right side
-var table dash2 = table.new(position.top_right, 2, 10, border_width=1)
+// NOVA TABLE — all charts, right side
+var table dash2 = table.new(position.top_right, 2, 11, border_width=1)
 // ORB TABLE — ES/MES only, bottom right (11 rows: 0-9 original + CTX row)
 var table orbDash = table.new(position.bottom_right, 2, 11, border_width=1)
 
@@ -2446,7 +2446,31 @@ orbCtxColor =
      orbFailedAcceptBull or orbFailedAcceptBear or orbAsiaLowSweepNow or orbAsiaHighSweepNow ? colWarn :
      orbStackedBull or orbStackedBear ? colWarn : colMuted
 
-// ================ ICT DISPLAY HELPERS ================
+// ================ PROS DISPLAY HELPERS ================
+prosStateText =
+     prosContinuationBull ? "CONT ▲"        :
+     prosContinuationBear ? "CONT ▼"        :
+     prosRejectionBull    ? "REJECTION ▲"   :
+     prosRejectionBear    ? "REJECTION ▼"   :
+     prosZoneTouchedBull  ? "ZONE TOUCH ▲"  :
+     prosZoneTouchedBear  ? "ZONE TOUCH ▼"  :
+     prosLegValidBull     ? "LEG ACTIVE ▲"  :
+     prosLegValidBear     ? "LEG ACTIVE ▼"  : "—"
+
+prosBg =
+     prosContinuationBull ? color.new(color.lime,   5) :
+     prosContinuationBear ? color.new(color.red,    5) :
+     prosRejectionBull    ? color.new(color.lime,  20) :
+     prosRejectionBear    ? color.new(color.red,   20) :
+     prosLegValidBull or prosLegValidBear ? color.new(color.blue, 25) :
+     color.new(#0d1f33, 0)
+
+prosTextColor =
+     prosContinuationBull or prosRejectionBull ? colBull :
+     prosContinuationBear or prosRejectionBear ? colBear :
+     prosLegValidBull or prosLegValidBear       ? colWarn : colMuted
+
+// ================ CONT DISPLAY HELPERS ================
 ictBg =
      step3LongElite  or step3ShortElite    ? color.new(color.lime,   5)  :
      step3LongReady  or step3ShortReady    ? color.new(color.lime,   20) :
@@ -2509,9 +2533,9 @@ if showDashboard and barstate.islast and isESChart
     table.cell(orbDash, 0, 10, "CTX",      text_color=colMuted,    bgcolor=orbHdrColor,  text_size=size.small)
     table.cell(orbDash, 1, 10, orbCtxText, text_color=orbCtxColor, bgcolor=orbCellColor, text_size=size.small)
 
-// ================ ICT TABLE RENDER (ALL CHARTS) ================
+// ================ NOVA TABLE RENDER (ALL CHARTS) ================
 if showDashboard and barstate.islast
-    table.cell(dash2, 0, 0, "ICT ENGINE",      text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 0, 0, "NOVA ENGINE",     text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
     table.cell(dash2, 1, 0, "",                text_color=colBull,  bgcolor=ictHdrColor,  text_size=size.small)
     table.cell(dash2, 0, 1, "CMD",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
     table.cell(dash2, 1, 1, dashCommandText,
@@ -2521,29 +2545,31 @@ if showDashboard and barstate.islast
     table.cell(dash2, 1, 2, dashScoreText,      text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
     table.cell(dash2, 0, 3, "DONNA",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
     table.cell(dash2, 1, 3, donnaScenario,      text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 4, "ICT",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 4, ictStepText,
+    table.cell(dash2, 0, 4, "PROS",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 4, prosStateText,      text_color=prosTextColor, bgcolor=prosBg,  text_size=size.small)
+    table.cell(dash2, 0, 5, "CONT",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 5, ictStepText,
          text_color=step3LongElite or step3ShortElite ? colWarn :
                     ictLongReady   or ictShortReady   ? colBull :
                     step2BullActive or step2BearActive ? colBull : colWhite,
-         bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 5, "BOS",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 5, bullBOS ? "BULL BOS" : bearBOS ? "BEAR BOS" : "—",
+         bgcolor=ictBg, text_size=size.small)
+    table.cell(dash2, 0, 6, "BOS",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 6, bullBOS ? "BULL BOS" : bearBOS ? "BEAR BOS" : "—",
          text_color=bullBOS ? colBull : bearBOS ? colBear : colMuted,
-         bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 6, "OB/FVG",          text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 6, obFvgText,
+         bgcolor=bosBg, text_size=size.small)
+    table.cell(dash2, 0, 7, "OB/FVG",          text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 7, obFvgText,
          text_color=atBullFVG or atBullOB ? colBull :
                     atBearFVG or atBearOB ? colBear : colMuted,
-         bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 7, "TGT",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 7, smartTargetDisplay, text_color=colWarn,  bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 8, "SESS",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 8, dashSessionText,
+         bgcolor=obFvgBg, text_size=size.small)
+    table.cell(dash2, 0, 8, "TGT",             text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 8, smartTargetDisplay, text_color=colWarn,  bgcolor=ictCellColor, text_size=size.small)
+    table.cell(dash2, 0, 9, "SESS",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 9, dashSessionText,
          text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
-         bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 9, "CONF",            text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
-    table.cell(dash2, 1, 9, donnaConfText,
+         bgcolor=dashSessionBg, text_size=size.small)
+    table.cell(dash2, 0, 10, "CONF",           text_color=colMuted, bgcolor=ictHdrColor,  text_size=size.small)
+    table.cell(dash2, 1, 10, donnaConfText,
          text_color=donnaConfScore >= 65 ? colBull :
                     donnaConfScore >= 35 ? colWarn : colBear,
          bgcolor=ictCellColor, text_size=size.small)
