@@ -624,8 +624,7 @@ if newDay
 // Capture bull sweep event (update if equal/higher tier than current)
 if orbExtLiqTierBull > 0 and orbExtLiqTierBull >= orbSweepTierBull
     orbSweepTierBull  := orbExtLiqTierBull
-    orbSweepLevelBull :=
-         orbAsiaLowSweepNow                                                   ? asiaLow       :
+    orbSweepLevelBull := orbAsiaLowSweepNow                                                   ? asiaLow       :
          orbExtLiqTierBull == 3 and not na(prevWeekLow)                       ? prevWeekLow   :
          orbExtLiqTierBull == 2 and not na(prevDayLow)                        ? prevDayLow    :
          not na(prevSessionLow)                                               ? prevSessionLow : na
@@ -642,8 +641,7 @@ else if orbSweepTierBull > 0 and not na(orbSweepLevelBull)
 // Capture bear sweep event
 if orbExtLiqTierBear > 0 and orbExtLiqTierBear >= orbSweepTierBear
     orbSweepTierBear  := orbExtLiqTierBear
-    orbSweepLevelBear :=
-         orbAsiaHighSweepNow                                                  ? asiaHigh      :
+    orbSweepLevelBear := orbAsiaHighSweepNow                                                  ? asiaHigh      :
          orbExtLiqTierBear == 3 and not na(prevWeekHigh)                      ? prevWeekHigh  :
          orbExtLiqTierBear == 2 and not na(prevDayHigh)                       ? prevDayHigh   :
          not na(prevSessionHigh)                                              ? prevSessionHigh : na
@@ -1898,8 +1896,7 @@ prosSellSignal = prosContinuationBear and canSmartSell
 
 //================ TASK 2+3 — STRATEGY METADATA ================
 // strategy_family: which framework owns this signal
-strategy_family =
-    if prosBuySignal or prosSellSignal
+strategy_family = if prosBuySignal or prosSellSignal
         "PROS"
     else if orbBuySignal or orbSellSignal
         "ORB"
@@ -1915,8 +1912,7 @@ strategy_family =
         "UNKNOWN"
 
 // setup_type: specific setup classification
-setup_type =
-    if prosBuySignal or prosSellSignal
+setup_type = if prosBuySignal or prosSellSignal
         "PROS_CONTINUATION"
     else if orbBuySignal and orbMidRejectLong
         "ORB_MIDPOINT_REJECT"
@@ -1999,8 +1995,7 @@ if buyScore  > sellScore
 if sellScore > buyScore
     activeGrade := sellGrade
 
-commandText :=
-     buySignal  ? "BUY"  :
+commandText := buySignal  ? "BUY"  :
      sellSignal ? "SELL" :
      buyScore  >= 58 and buyScore  > sellScore ? "WATCH LONG"  :
      sellScore >= 58 and sellScore > buyScore  ? "WATCH SHORT" : "WAIT"
@@ -2027,14 +2022,12 @@ else if ictSellSignal and ictShortReady
     signalReason := "ICT SHORT"
 else
     signalReason := "NO SIGNAL"
-targetText :=
-     buySignal  ? longTargetLabel  :
+targetText := buySignal  ? longTargetLabel  :
      sellSignal ? shortTargetLabel :
      buyScore  > sellScore ? longTargetLabel  :
      sellScore > buyScore  ? shortTargetLabel : "NONE"
 
-riskText :=
-     orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
+riskText := orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
      nearLiquidityHigh and buySignal  ? "OVERHEAD LIQUIDITY" :
      nearLiquidityLow  and sellSignal ? "BELOW LIQUIDITY"    :
      isLunch                          ? "LUNCH CONDITIONS"   :
