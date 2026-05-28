@@ -262,10 +262,7 @@ orbOppExpansionBear =
      close < orbLow and close < open and
      (isNQChart ? (orbLow - close) >= 15 : (orbLow - close) >= 5)
 
-// Step 3 — permanent thesis death
-// Bearish thesis dies: bull mid acceptance + bull expansion confirms
-if orbLive and orbMidAcceptedBull and orbOppExpansionBull
-    orbBearThesisDead := true
+// Step 3 — permanent thesis death (requires prior breakout in the direction that died)
 // orbFailBull/Bear are now thesis-death flags — permanent
 orbFailBull = orbBullThesisDead
 orbFailBear = orbBearThesisDead
@@ -281,18 +278,13 @@ if orbLive and not na(orbHigh) and close > orbHigh and close > open and close > 
 if orbLive and not na(orbLow) and close < orbLow and close < open and close < low[1]
     orbBearBreakBar := bar_index
 
-// Thesis death only valid AFTER a confirmed breakout in that direction
-// Bear thesis dies only after bull breakout was confirmed first
-// Bear thesis dies: bear broke out first, then bulls reclaimed mid and expanded
+// Bear thesis dies: bear broke out first, then bulls fully reclaimed mid AND confirmed expansion
+// Requires: prior bear breakout + mid accepted by bulls + full bull expansion above box
 if orbLive and orbMidAcceptedBull and orbOppExpansionBull and not na(orbBearBreakBar)
     orbBearThesisDead := true
-// Bull thesis dies: bull broke out first, then bears reclaimed mid and expanded
+// Bull thesis dies: bull broke out first, then bears fully reclaimed mid AND confirmed expansion
+// Requires: prior bull breakout + mid accepted by bears + full bear expansion below box
 if orbLive and orbMidAcceptedBear and orbOppExpansionBear and not na(orbBullBreakBar)
-    orbBullThesisDead := true
-// ALSO: if mid accepted by opposite side with NO prior breakout — pure mid failure
-if orbLive and orbMidAcceptedBull and not na(orbBearBreakBar) and close > orbHigh
-    orbBearThesisDead := true
-if orbLive and orbMidAcceptedBear and not na(orbBullBreakBar) and close < orbLow
     orbBullThesisDead := true
     
 orbAcceptedBull = not na(orbBullBreakBar) and (bar_index - orbBullBreakBar >= 2) and close > orbHigh and not orbFailBull
@@ -2445,8 +2437,8 @@ novBosBg     = bullBOS ? color.new(#001f10, 0) : bearBOS ? color.new(#1f0010, 0)
 novObBg      = atBullFVG or atBullOB ? color.new(#001508, 0) : atBearFVG or atBearOB ? color.new(#150005, 0) : color.new(#0a1628, 0)
 // ================ ORB DISPLAY HELPERS ================
 orbBiasText =
-     orbBullThesisDead ? "BEAR DEAD"  :
-     orbBearThesisDead ? "BULL DEAD"  :
+     orbBullThesisDead ? "BULL DEAD"  :
+     orbBearThesisDead ? "BEAR DEAD"  :
      orbBullBias       ? "BULL"       :
      orbBearBias       ? "BEAR"       : "NEUTRAL"
 
