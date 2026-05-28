@@ -1899,36 +1899,65 @@ prosSellSignal = prosContinuationBear and canSmartSell
 //================ TASK 2+3 — STRATEGY METADATA ================
 // strategy_family: which framework owns this signal
 strategy_family =
-     prosBuySignal or prosSellSignal                      ? "PROS"          :
-     orbBuySignal or orbSellSignal                        ? "ORB"           :
-     ictBuySignal  and (step3LongElite or step3ShortElite) ? "ICT"           :
-     ictBuySignal  or ictSellSignal                       ? "ICT"           :
-     failedAuctionBull or failedAuctionBear               ? "FAILED_AUCTION":
-     liqLongReady  or liqShortReady                       ? "REVERSAL"      : "UNKNOWN"
+    if prosBuySignal or prosSellSignal
+        "PROS"
+    else if orbBuySignal or orbSellSignal
+        "ORB"
+    else if ictBuySignal and (step3LongElite or step3ShortElite)
+        "ICT"
+    else if ictBuySignal or ictSellSignal
+        "ICT"
+    else if failedAuctionBull or failedAuctionBear
+        "FAILED_AUCTION"
+    else if liqLongReady or liqShortReady
+        "REVERSAL"
+    else
+        "UNKNOWN"
 
 // setup_type: specific setup classification
 setup_type =
-     prosBuySignal                         ? "PROS_CONTINUATION"    :
-     prosSellSignal                        ? "PROS_CONTINUATION"    :
-     orbBuySignal  and orbMidRejectLong    ? "ORB_MIDPOINT_REJECT"  :
-     orbSellSignal and orbMidRejectShort   ? "ORB_MIDPOINT_REJECT"  :
-     orbBuySignal  and orbRetestBull       ? "ORB_RETEST"           :
-     orbSellSignal and orbRetestBear       ? "ORB_RETEST"           :
-     orbBuySignal  and orbValidBreakBull   ? "ORB_BREAKOUT"         :
-     orbSellSignal and orbValidBreakBear   ? "ORB_BREAKOUT"         :
-     orbBuySignal  and orbLiqRejectBull    ? "ORB_LIQ_REJECTION"    :
-     orbSellSignal and orbLiqRejectBear    ? "ORB_LIQ_REJECTION"    :
-     orbFailBull   or orbFailBear          ? "ORB_FAILURE"          :
-     ictBuySignal  and step3LongElite      ? "ICT_ELITE"            :
-     ictSellSignal and step3ShortElite     ? "ICT_ELITE"            :
-     ictBuySignal  and ictSMTLong          ? "ICT_SMT_CONFIRMATION" :
-     ictSellSignal and ictSMTShort         ? "ICT_SMT_CONFIRMATION" :
-     ictBuySignal  and atBullFVG           ? "ICT_OB_FVG_ENTRY"     :
-     ictSellSignal and atBearFVG           ? "ICT_OB_FVG_ENTRY"     :
-     ictBuySignal  and sweepLowFresh       ? "ICT_LIQUIDITY_SWEEP"  :
-     ictSellSignal and sweepHighFresh      ? "ICT_LIQUIDITY_SWEEP"  :
-     failedAuctionBull or failedAuctionBear ? "FAILED_AUCTION"      :
-     liqLongReady  or liqShortReady        ? "MOMENTUM_CONTINUATION": "UNKNOWN"
+    if prosBuySignal or prosSellSignal
+        "PROS_CONTINUATION"
+    else if orbBuySignal and orbMidRejectLong
+        "ORB_MIDPOINT_REJECT"
+    else if orbSellSignal and orbMidRejectShort
+        "ORB_MIDPOINT_REJECT"
+    else if orbBuySignal and orbRetestBull
+        "ORB_RETEST"
+    else if orbSellSignal and orbRetestBear
+        "ORB_RETEST"
+    else if orbBuySignal and orbValidBreakBull
+        "ORB_BREAKOUT"
+    else if orbSellSignal and orbValidBreakBear
+        "ORB_BREAKOUT"
+    else if orbBuySignal and orbLiqRejectBull
+        "ORB_LIQ_REJECTION"
+    else if orbSellSignal and orbLiqRejectBear
+        "ORB_LIQ_REJECTION"
+    else if orbFailBull or orbFailBear
+        "ORB_FAILURE"
+    else if ictBuySignal and step3LongElite
+        "ICT_ELITE"
+    else if ictSellSignal and step3ShortElite
+        "ICT_ELITE"
+    else if ictBuySignal and ictSMTLong
+        "ICT_SMT_CONFIRMATION"
+    else if ictSellSignal and ictSMTShort
+        "ICT_SMT_CONFIRMATION"
+    else if ictBuySignal and atBullFVG
+        "ICT_OB_FVG_ENTRY"
+    else if ictSellSignal and atBearFVG
+        "ICT_OB_FVG_ENTRY"
+    else if ictBuySignal and sweepLowFresh
+        "ICT_LIQUIDITY_SWEEP"
+    else if ictSellSignal and sweepHighFresh
+        "ICT_LIQUIDITY_SWEEP"
+    else if failedAuctionBull or failedAuctionBear
+        "FAILED_AUCTION"
+    else if liqLongReady or liqShortReady
+        "MOMENTUM_CONTINUATION"
+    else
+        "UNKNOWN"
 
 //================ TASK 6 — FRAMEWORK ANALYTICS PREP ================
 analytics_regime    = regimeText
@@ -1976,18 +2005,28 @@ commandText :=
      buyScore  >= 58 and buyScore  > sellScore ? "WATCH LONG"  :
      sellScore >= 58 and sellScore > buyScore  ? "WATCH SHORT" : "WAIT"
 
-signalReason :=
-     prosBuySignal                         ? "PROS CONTINUATION LONG"  :
-     prosSellSignal                        ? "PROS CONTINUATION SHORT" :
-     orbBuySignal  and orbValidBreakBull   ? "ORB BREAKOUT LONG" :
-     orbSellSignal and orbValidBreakBear   ? "ORB BREAKOUT SHORT" :
-     orbBuySignal  and orbMidRejectLong    ? "ORB MIDPOINT REJECT LONG" :
-     orbSellSignal and orbMidRejectShort   ? "ORB MIDPOINT REJECT SHORT" :
-     ictBuySignal  and step3LongElite      ? "ICT ELITE LONG" :
-     ictSellSignal and step3ShortElite     ? "ICT ELITE SHORT" :
-     ictBuySignal  and ictLongReady        ? "ICT LONG" :
-     ictSellSignal and ictShortReady       ? "ICT SHORT" :
-     "NO SIGNAL"
+if prosBuySignal
+    signalReason := "PROS CONTINUATION LONG"
+else if prosSellSignal
+    signalReason := "PROS CONTINUATION SHORT"
+else if orbBuySignal and orbValidBreakBull
+    signalReason := "ORB BREAKOUT LONG"
+else if orbSellSignal and orbValidBreakBear
+    signalReason := "ORB BREAKOUT SHORT"
+else if orbBuySignal and orbMidRejectLong
+    signalReason := "ORB MIDPOINT REJECT LONG"
+else if orbSellSignal and orbMidRejectShort
+    signalReason := "ORB MIDPOINT REJECT SHORT"
+else if ictBuySignal and step3LongElite
+    signalReason := "ICT ELITE LONG"
+else if ictSellSignal and step3ShortElite
+    signalReason := "ICT ELITE SHORT"
+else if ictBuySignal and ictLongReady
+    signalReason := "ICT LONG"
+else if ictSellSignal and ictShortReady
+    signalReason := "ICT SHORT"
+else
+    signalReason := "NO SIGNAL"
 targetText :=
      buySignal  ? longTargetLabel  :
      sellSignal ? shortTargetLabel :
@@ -2468,7 +2507,7 @@ if showDashboard and barstate.islast and isESChart
     table.cell(orbDash, 0, 0, "ORB CONSOLE",  text_color=colWarn,  bgcolor=orbHdrColor, text_size=size.small)
     table.cell(orbDash, 1, 0, "",              text_color=colWarn,  bgcolor=orbHdrColor, text_size=size.small)
     table.cell(orbDash, 0, 1, "STATE",         text_color=colMuted, bgcolor=orbHdrColor, text_size=size.small)
-    table.cell(orbDash, 1, 1, orbStateMachine,
+    table.cell(orbDash, 1, 1, orbStateMachine,11
          text_color=
                  orbStateMachine == "ORB_FAILED"        ? colBear  :
                  orbStateMachine == "ORB_EXPIRED"       ? colMuted :
