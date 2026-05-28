@@ -532,15 +532,16 @@ nearestLiqLow =
 orbBullBreakIntoLiq = orbBullBreak and orbHighLiqAligned and not na(nearestLiqHigh)
 orbBearBreakIntoLiq = orbBearBreak and orbLowLiqAligned  and not na(nearestLiqLow)
 
-// Type 3: liquidity rejection — auction expands into liq, fails acceptance
+// Type 3: liquidity rejection — single-bar per-bar detector (used for bias/ctx display)
+// Typed execution gate (orbPassLiqReject) applies tier + reclaim requirements
 orbLiqRejectBull =
-     orbLive and orbLowLiqAligned and
+     orbLive and orbIsActive and orbLowLiqAligned and
      low <= orbLow and close > orbLow and close > open and
      lowerWick > body * 0.8 and
      not orbMidAcceptedBear
 
 orbLiqRejectBear =
-     orbLive and orbHighLiqAligned and
+     orbLive and orbIsActive and orbHighLiqAligned and
      high >= orbHigh and close < orbHigh and close < open and
      upperWick > body * 0.8 and
      not orbMidAcceptedBull
@@ -711,15 +712,15 @@ orbMidHeldBear = orbLive and not na(orbMid) and close < orbMid and close < open 
 orbBullBias =
      orbIsActive and not orbFailBull and
      (orbBullBreak or orbRetestBull or orbMidRejectBull or orbMidHeldBull or
-      orbMidBreachBull or orbBullBreakIntoLiq or orbLowLiqReject or orbOwnershipShiftBull)
+      orbMidBreachBull or orbLowLiqReject or orbOwnershipShiftBull)
 
 orbBearBias =
      orbIsActive and not orbFailBear and
      (orbBearBreak or orbRetestBear or orbMidRejectBear or orbMidHeldBear or
-      orbMidBreachBear or orbBearBreakIntoLiq or orbHighLiqReject or orbOwnershipShiftBear)
-// Scenario 1 — Mid rejection
-orbMidRejectLong  = orbLive and orbIsActive and not na(orbMid) and low <= orbMid and close > orbMid and close > open and lowerWick > body * 0.8
-orbMidRejectShort = orbLive and orbIsActive and not na(orbMid) and high >= orbMid and close < orbMid and close < open and upperWick > body * 0.8
+      orbMidBreachBear or orbHighLiqReject or orbOwnershipShiftBear)
+// Scenario 1 — Mid rejection (requires prior confirmed breakout + re-entry into box)
+orbMidRejectLong  = orbLive and orbIsActive and not na(orbMid) and not na(orbBullBreakBar) and close <= orbHigh and low <= orbMid and close > orbMid and close > open and lowerWick > body * 0.8
+orbMidRejectShort = orbLive and orbIsActive and not na(orbMid) and not na(orbBearBreakBar) and close >= orbLow  and high >= orbMid and close < orbMid and close < open and upperWick > body * 0.8
 
 // Scenario 2 — Edge rejection (tap top or bottom of box and reject)
 orbTopRejectShort =
@@ -1762,9 +1763,7 @@ sellScore += liqShortReady   ? liqWeight  : 0
 // ORB LIQUIDITY BONUSES — contextual when sweep data exists, flat fallback otherwise
 // orbCtxBullBonus/BearBonus carries: sweep tier + stacked liq + reclaim quality + ownership shift
 buyScore  += orbCtxBullBonus > 0 ? orbCtxBullBonus : (orbLowLiqReject  ? 12 : 0)
-buyScore  += orbBullBreakIntoLiq ? 10 : 0
 sellScore += orbCtxBearBonus > 0 ? orbCtxBearBonus : (orbHighLiqReject ? 12 : 0)
-sellScore += orbBearBreakIntoLiq ? 10 : 0
 buyScore  += orbMidRejectBull    ?  8 : 0
 buyScore  += orbMidBreachBull    ?  6 : 0
 sellScore += orbMidRejectBear    ?  8 : 0
@@ -1835,59 +1834,104 @@ mixedConditions = scoreGap <= 8
 freshLongSetup  = ictLongReady  or orbLongReady or liqLongReady or prosContinuationBull
 freshShortSetup = ictShortReady or orbShortReady or liqShortReady or prosContinuationBear
 
-//================ ORB VALIDATION ================
+//================ ORB TYPED ENTRY GATES ================
 
-// Valid ORB expansion range
-validOrbBullExpansion =
-     not na(orbHigh) and
-     high > orbHigh and
-     (high - orbHigh) >= 5 and
-     (high - orbHigh) <= 20
+// ATR-adaptive expansion reference (metadata only — not used as execution gate)
+validOrbBullExpansion = not na(orbHigh) and not na(atrValue) and (close - orbHigh) >= atrValue * 0.08 and (close - orbHigh) <= atrValue * 0.9
+validOrbBearExpansion = not na(orbLow)  and not na(atrValue) and (orbLow - close)  >= atrValue * 0.08 and (orbLow - close)  <= atrValue * 0.9
 
-validOrbBearExpansion =
-     not na(orbLow) and
-     low < orbLow and
-     (orbLow - low) >= 5 and
-     (orbLow - low) <= 20
-
-// ORB valid trading window — ES/MES only, requires NY open gate + not expired/failed
+// ORB valid trading window
 orbTradingWindow =
      orbLive and
      orbIsActive and
      isESChart and
      not orbDead
 
-// REJECTION CONFIRMATION — requires quality (2+ candle sequence) or liquidity rejection
-// Type 1: midpoint rejection with quality
-// Type 2: edge rejection with quality
-// Type 3: liquidity rejection
-orbBullRejectionConfirmed =
-     (orbMidRejectLong    and orbMidRejectQualityBull)  or
-     (orbBottomRejectLong and orbEdgeRejectQualityBull) or
-     orbLiqRejectBull
+// ── ENTRY 1: MIDPOINT REJECTION ──────────────────────────────────────────────
+// Structure: broke out → re-entered box → mid tapped → mid rejected → quality sequence
+orbPassMidRejectBull =
+     orbTradingWindow and not orbFailBull and not orbBullTrap and
+     not na(orbBullBreakBar) and                                    // confirmed prior bull breakout
+     close <= orbHigh and close >= orbLow and                       // price re-entered box
+     low <= orbMid and close > orbMid and close > open and          // mid rejection candle
+     lowerWick > body * 0.8 and                                     // strong rejection wick
+     orbMidRejectQualityBull                                        // >= 2 candle sequence required
 
-orbBearRejectionConfirmed =
-     (orbMidRejectShort   and orbMidRejectQualityBear)  or
-     (orbTopRejectShort   and orbEdgeRejectQualityBear) or
-     orbLiqRejectBear
-//================ PURE ORB EXECUTION ================
-// Ownership shift provides an alternative execution path that bypasses the
-// expansion range check — the auction is reversing from a swept level, not
-// breaking out of the ORB box in the traditional sense.
+orbPassMidRejectBear =
+     orbTradingWindow and not orbFailBear and not orbBearTrap and
+     not na(orbBearBreakBar) and
+     close >= orbLow and close <= orbHigh and
+     high >= orbMid and close < orbMid and close < open and
+     upperWick > body * 0.8 and
+     orbMidRejectQualityBear
 
-orbBuyPass =
-     isESChart and
-     orbTradingWindow and
-     not orbFailBull and
-     not orbBullTrap and
-     ((validOrbBullExpansion and orbBullRejectionConfirmed) or orbOwnershipShiftBull)
+// ── ENTRY 2: UNTAPPED LIQUIDITY REJECTION ────────────────────────────────────
+// Structure: expanded into external level → confirmed reclaim → return to balance
+// Target = ORB midpoint | Stop = beyond swept level | Wider tolerance acceptable
+orbPassLiqRejectBull =
+     orbTradingWindow and not orbFailBull and not orbBullTrap and
+     orbSweepTierBull >= 1 and                                      // external level swept (tier 1–4)
+     orbReclaimBullBars >= 2 and                                    // confirmed reclaim (2+ bars)
+     close > nz(orbLow, close - 1) and                             // price holding above ORB low
+     not orbMidAcceptedBear                                         // mid not captured by bears
 
-orbSellPass =
-     isESChart and
-     orbTradingWindow and
-     not orbFailBear and
-     not orbBearTrap and
-     ((validOrbBearExpansion and orbBearRejectionConfirmed) or orbOwnershipShiftBear)
+orbPassLiqRejectBear =
+     orbTradingWindow and not orbFailBear and not orbBearTrap and
+     orbSweepTierBear >= 1 and
+     orbReclaimBearBars >= 2 and
+     close < nz(orbHigh, close + 1) and
+     not orbMidAcceptedBull
+
+// ── ENTRY 3: EDGE REJECTION ──────────────────────────────────────────────────
+// Structure: repeated defended reactions at ORB top/bottom — auction refuses entry
+// Does NOT require prior breakout — edge defense can occur without external expansion
+orbPassEdgeRejectBull =
+     orbTradingWindow and not orbFailBull and not orbBullTrap and
+     orbEdgeRejectQualityBull and                                   // >= 2 defended reactions
+     low <= orbLow and close > orbLow and close > open and          // edge tap + close inside
+     lowerWick > body * 0.8                                         // wick rejection at edge
+
+orbPassEdgeRejectBear =
+     orbTradingWindow and not orbFailBear and not orbBearTrap and
+     orbEdgeRejectQualityBear and
+     high >= orbHigh and close < orbHigh and close < open and
+     upperWick > body * 0.8
+
+// ── ENTRY TYPE CLASSIFICATION ─────────────────────────────────────────────────
+orbEntryType =
+     orbPassMidRejectBull or orbPassMidRejectBear   ? "MID_REJECT"  :
+     orbPassLiqRejectBull or orbPassLiqRejectBear   ? "LIQ_REJECT"  :
+     orbPassEdgeRejectBull or orbPassEdgeRejectBear ? "EDGE_REJECT" : ""
+
+// ── ENTRY QUALITY GRADING — WEAK / GOOD / STRONG / ELITE ─────────────────────
+// Uses existing infrastructure: reclaim counts, rejection counts, tiers, stacked liq, failed acceptance
+orbEntryQualityLiq =
+     (orbSweepTierBull == 4 or orbSweepTierBear == 4) and (orbStackedBull or orbStackedBear) and (orbFailedAcceptBull or orbFailedAcceptBear) ? "ELITE"  :
+     (orbSweepTierBull == 4 or orbSweepTierBear == 4) and (orbReclaimBullBars >= 3 or orbReclaimBearBars >= 3)                               ? "ELITE"  :
+     (orbSweepTierBull >= 3 or orbSweepTierBear >= 3) and (orbReclaimBullBars >= 2 or orbReclaimBearBars >= 2)                               ? "STRONG" :
+     (orbSweepTierBull >= 2 or orbSweepTierBear >= 2) and (orbReclaimBullBars >= 2 or orbReclaimBearBars >= 2)                               ? "GOOD"   : "WEAK"
+
+orbEntryQualityMid =
+     (orbMidRejectBullCount >= 3 or orbMidRejectBearCount >= 3) and (orbSweepTierBull > 0 or orbSweepTierBear > 0) ? "ELITE"  :
+     (orbMidRejectBullCount >= 3 or orbMidRejectBearCount >= 3)                                                    ? "STRONG" :
+     (orbOwnershipShiftBull or orbOwnershipShiftBear)                                                               ? "STRONG" : "GOOD"
+
+orbEntryQualityEdge =
+     (orbEdgeRejectBullCount >= 3 or orbEdgeRejectBearCount >= 3) and (orbSweepTierBull > 0 or orbSweepTierBear > 0) ? "ELITE"  :
+     (orbEdgeRejectBullCount >= 3 or orbEdgeRejectBearCount >= 3)                                                     ? "STRONG" :
+     (orbHighLiqAligned or orbLowLiqAligned)                                                                           ? "GOOD"   : "WEAK"
+
+orbEntryQuality =
+     orbEntryType == "LIQ_REJECT"  ? orbEntryQualityLiq  :
+     orbEntryType == "MID_REJECT"  ? orbEntryQualityMid  :
+     orbEntryType == "EDGE_REJECT" ? orbEntryQualityEdge : ""
+
+// LIQ_REJECT target = return to ORB midpoint (distinct from 2:1/3:1 rejection targets)
+orbLiqTarget = (orbPassLiqRejectBull or orbPassLiqRejectBear) and not na(orbMid) ? orbMid : na
+
+// ── EXECUTION GATES ───────────────────────────────────────────────────────────
+orbBuyPass  = isESChart and (orbPassMidRejectBull or orbPassLiqRejectBull or orbPassEdgeRejectBull)
+orbSellPass = isESChart and (orbPassMidRejectBear or orbPassLiqRejectBear or orbPassEdgeRejectBear)
 //================ STRATEGY OWNERSHIP ================
 orbBuySignal  = orbBuyPass  and canSmartBuy
 orbSellSignal = orbSellPass and canSmartSell
@@ -1909,14 +1953,9 @@ strategy_family =
 // setup_type: specific setup classification
 setup_type =
      prosBuySignal or prosSellSignal                       ? "PROS_CONTINUATION"    :
-     orbBuySignal and orbMidRejectLong                     ? "ORB_MIDPOINT_REJECT"  :
-     orbSellSignal and orbMidRejectShort                   ? "ORB_MIDPOINT_REJECT"  :
-     orbBuySignal and orbRetestBull                        ? "ORB_RETEST"           :
-     orbSellSignal and orbRetestBear                       ? "ORB_RETEST"           :
-     orbBuySignal and orbValidBreakBull                    ? "ORB_BREAKOUT"         :
-     orbSellSignal and orbValidBreakBear                   ? "ORB_BREAKOUT"         :
-     orbBuySignal and orbLiqRejectBull                     ? "ORB_LIQ_REJECTION"    :
-     orbSellSignal and orbLiqRejectBear                    ? "ORB_LIQ_REJECTION"    :
+     (orbBuySignal or orbSellSignal) and orbEntryType == "MID_REJECT"  ? "ORB_MID_REJECT"  :
+     (orbBuySignal or orbSellSignal) and orbEntryType == "LIQ_REJECT"  ? "ORB_LIQ_REJECT"  :
+     (orbBuySignal or orbSellSignal) and orbEntryType == "EDGE_REJECT" ? "ORB_EDGE_REJECT" :
      orbFailBull or orbFailBear                            ? "ORB_FAILURE"          :
      ictBuySignal and step3LongElite                       ? "ICT_ELITE"            :
      ictSellSignal and step3ShortElite                     ? "ICT_ELITE"            :
@@ -1978,14 +2017,18 @@ if prosBuySignal
     signalReason := "PROS CONTINUATION LONG"
 else if prosSellSignal
     signalReason := "PROS CONTINUATION SHORT"
-else if orbBuySignal and orbValidBreakBull
-    signalReason := "ORB BREAKOUT LONG"
-else if orbSellSignal and orbValidBreakBear
-    signalReason := "ORB BREAKOUT SHORT"
-else if orbBuySignal and orbMidRejectLong
-    signalReason := "ORB MIDPOINT REJECT LONG"
-else if orbSellSignal and orbMidRejectShort
-    signalReason := "ORB MIDPOINT REJECT SHORT"
+else if orbBuySignal and orbEntryType == "MID_REJECT"
+    signalReason := "ORB MID REJECT LONG"
+else if orbSellSignal and orbEntryType == "MID_REJECT"
+    signalReason := "ORB MID REJECT SHORT"
+else if orbBuySignal and orbEntryType == "LIQ_REJECT"
+    signalReason := "ORB LIQ REJECT LONG"
+else if orbSellSignal and orbEntryType == "LIQ_REJECT"
+    signalReason := "ORB LIQ REJECT SHORT"
+else if orbBuySignal and orbEntryType == "EDGE_REJECT"
+    signalReason := "ORB EDGE REJECT LONG"
+else if orbSellSignal and orbEntryType == "EDGE_REJECT"
+    signalReason := "ORB EDGE REJECT SHORT"
 else if ictBuySignal and step3LongElite
     signalReason := "CONT ELITE LONG"
 else if ictSellSignal and step3ShortElite
@@ -2408,18 +2451,20 @@ orbBiasText =
      orbBearBias       ? "BEAR"       : "NEUTRAL"
 
 orbTypeText =
-     orbLiqRejectBull or orbLiqRejectBear   ? "LIQ REJECT"  :
-     orbMidRejectQualityBull                ? "MID REJECT"  :
-     orbMidRejectQualityBear                ? "MID REJECT"  :
-     orbEdgeRejectQualityBull               ? "EDGE REJECT" :
-     orbEdgeRejectQualityBear               ? "EDGE REJECT" :
+     orbEntryType != ""                     ? orbEntryType  :
+     orbLiqRejectBull or orbLiqRejectBear   ? "LIQ DETECT"  :
+     orbMidRejectQualityBull                ? "MID DEFEND ▲":
+     orbMidRejectQualityBear                ? "MID DEFEND ▼":
+     orbEdgeRejectQualityBull               ? "EDGE DFND ▲" :
+     orbEdgeRejectQualityBear               ? "EDGE DFND ▼" :
      (orbLive and not na(orbHigh) and close > orbHigh) or (orbLive and not na(orbLow) and close < orbLow) ? "EXPANDING" : "—"
 
 orbRejQualText =
-     orbMidRejectBullCount  >= 2 ? str.tostring(orbMidRejectBullCount)  + " MID BULL"  :
-     orbMidRejectBearCount  >= 2 ? str.tostring(orbMidRejectBearCount)  + " MID BEAR"  :
-     orbEdgeRejectBullCount >= 2 ? str.tostring(orbEdgeRejectBullCount) + " EDGE BULL" :
-     orbEdgeRejectBearCount >= 2 ? str.tostring(orbEdgeRejectBearCount) + " EDGE BEAR" : "BUILDING"
+     orbEntryQuality != "" ? orbEntryQuality :
+     orbMidRejectBullCount  >= 2 ? str.tostring(orbMidRejectBullCount)  + " MID ▲"   :
+     orbMidRejectBearCount  >= 2 ? str.tostring(orbMidRejectBearCount)  + " MID ▼"   :
+     orbEdgeRejectBullCount >= 2 ? str.tostring(orbEdgeRejectBullCount) + " EDGE ▲"  :
+     orbEdgeRejectBearCount >= 2 ? str.tostring(orbEdgeRejectBearCount) + " EDGE ▼"  : "BUILDING"
 
 orbLiqIntText =
      orbHighLiqAligned and orbBearBias ? "EXPANDING INTO LIQ" :
