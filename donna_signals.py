@@ -414,6 +414,20 @@ def process_signal(payload: dict) -> dict:
 
     add_alert_to_history(data, parsed)
 
+    # ── execution trace: VERDICT stage ────────────────────────
+    try:
+        import donna_execution_trace as _trace
+        _trace.log_execution_event('VERDICT', data, {
+            'verdict':    verdict,
+            'confidence': confidence,
+            'macro_risk': macro,
+            'session':    session,
+            'trap_risk':  data.get('trap_risk', 'false'),
+            'tier':       data.get('tier', ''),
+        })
+    except Exception:
+        pass
+
     if should_send_trade_to_telegram(parsed):
         header_lines = [
             f'Instrument: {instrument}' if instrument else '',

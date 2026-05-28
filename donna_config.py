@@ -27,6 +27,7 @@ MACRO_EVENTS_FILE  = BASE_DIR / 'donna_macro_events.json'
 MORNING_BRIEF_FILE = BASE_DIR / 'donna_morning_brief_state.json'
 JOURNAL_FILE       = BASE_DIR / 'donna_journal.json'
 REJECTIONS_FILE    = BASE_DIR / 'donna_rejections.json'
+TRACE_FILE         = BASE_DIR / 'donna_execution_trace.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()

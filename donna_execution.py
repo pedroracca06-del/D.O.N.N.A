@@ -15,6 +15,7 @@ from donna_state import (
     load_journal, save_journal,
 )
 from donna_state_engine import state as _state
+import donna_execution_trace as _trace
 
 # ── Broker mode ────────────────────────────────────────────────
 # Change this one variable to switch execution backends.
@@ -189,35 +190,61 @@ def _rejection_context(
     )
 
     return {
-        'timestamp':         utc_now_iso(),
-        'timestamp_et':      now_ny().strftime('%Y-%m-%d %H:%M:%S ET'),
-        'ticker':            data.get('ticker', '') or '',
-        'direction':         _dir,
-        'routed_etf':        routed_etf,
-        'setup_type':        data.get('setup_type', '') or '',
-        'confidence':        str(parsed.get('confidence', '') or ''),
-        'session':           session or session_label(),
-        'rejection_code':    code,
-        'rejection_reason':  reason,
-        'tier':              data.get('tier', '') or '',
-        'active_thesis':     _th.get('active_thesis', 'NEUTRAL'),
-        'thesis_direction':  _th.get('thesis_direction'),
-        'thesis_set_at':     _th.get('thesis_set_at'),
+        'timestamp':            utc_now_iso(),
+        'timestamp_et':         now_ny().strftime('%Y-%m-%d %H:%M:%S ET'),
+        'ticker':               data.get('ticker', '') or '',
+        'instrument':           data.get('instrument', '') or '',
+        'direction':            _dir,
+        'routed_etf':           routed_etf,
+        'strategy_family':      data.get('strategy_family', '') or '',
+        'setup_type':           data.get('setup_type', '') or '',
+        'score':                str(data.get('score', '') or ''),
+        'verdict':              str(parsed.get('verdict', '') or ''),
+        'confidence':           str(parsed.get('confidence', '') or ''),
+        'session':              session or session_label(),
+        'rejection_code':       code,
+        'rejection_reason':     reason,
+        'tier':                 data.get('tier', '') or '',
+        # ── gate snapshot ──────────────────────────────────────
+        'can_execute':          (
+            not _st.get('execution_lock', False)
+            and bool(_st.get('trade_permission', True))
+            and not _st.get('eod_lock', False)
+            and not _st.get('macro_lock', False)
+            and not _st.get('red_folder_lock', False)
+        ),
+        'execution_lock':       bool(_st.get('execution_lock', False)),
+        'trade_permission':     bool(_st.get('trade_permission', True)),
+        'eod_lock':             bool(_st.get('eod_lock', False)),
+        'macro_lock':           bool(_st.get('macro_lock', False)),
+        'red_folder_lock':      bool(_st.get('red_folder_lock', False)),
+        'daily_trade_count':    _st.get('daily_trade_count', 0),
+        'daily_loss_trade_hit': bool(_st.get('daily_loss_trade_hit', False)),
+        'first_trade_outcome':  _st.get('first_trade_outcome'),
+        'lockouts':             [
+            l['reason'] if isinstance(l, dict) else l
+            for l in (_st.get('risk_lockouts') or [])
+        ],
+        # ── thesis + cooldown ──────────────────────────────────
+        'active_thesis':        _th.get('active_thesis', 'NEUTRAL'),
+        'thesis_direction':     _th.get('thesis_direction'),
+        'thesis_set_at':        _th.get('thesis_set_at'),
         'cooldown_state': {
             'spy_cooldown_until': _st.get('spy_cooldown_until'),
             'qqq_cooldown_until': _st.get('qqq_cooldown_until'),
         },
-        'open_positions':    _state.get_open_positions(),
-        'daily_trade_count': _st.get('daily_trade_count', 0),
-        'macro_risk':        macro_snap.get('macro_risk', ''),
-        'headline_risk':     macro_snap.get('headline_risk', ''),
-        'red_folder_active': rf.get('active', False),
-        'red_folder_reason': rf.get('reason', ''),
+        # ── positions + macro ──────────────────────────────────
+        'open_positions':       _state.get_open_positions(),
+        'macro_risk':           macro_snap.get('macro_risk', ''),
+        'headline_risk':        macro_snap.get('headline_risk', ''),
+        'red_folder_active':    rf.get('active', False),
+        'red_folder_reason':    rf.get('reason', ''),
     }
 
 
 def _log_rejection(context: dict) -> None:
-    """Persist rejection record to donna_rejections.json (ring buffer, 200 max)."""
+    """Persist rejection record to donna_rejections.json (ring buffer, 200 max).
+    Also writes a structured entry to the execution trace log."""
     try:
         from donna_state import load_rejections, save_rejections
         history = load_rejections()
@@ -226,12 +253,45 @@ def _log_rejection(context: dict) -> None:
         print(
             f'[rejection_log] {context.get("rejection_code", "?")} | '
             f'{context.get("ticker", "?")} {context.get("direction", "?")} | '
+            f'family={context.get("strategy_family", "?")} | '
             f'session={context.get("session", "?")} | '
+            f'verdict={context.get("verdict", "?")} | '
             f'thesis={context.get("active_thesis", "?")} | '
             f'positions={len(context.get("open_positions") or [])}'
         )
     except Exception as _e:
         print(f'[rejection_log] write error: {_e}')
+
+    # ── also emit to execution trace ───────────────────────────
+    try:
+        _trace_data = {
+            'strategy_family': context.get('strategy_family', ''),
+            'setup_type':      context.get('setup_type', ''),
+            'ticker':          context.get('ticker', ''),
+            'instrument':      context.get('instrument', ''),
+            'signal':          context.get('direction', ''),
+            'session':         context.get('session', ''),
+            'score':           context.get('score', ''),
+        }
+        _trace_parsed = {
+            'verdict':    context.get('verdict', ''),
+            'confidence': context.get('confidence', ''),
+        }
+        _gate_keys = (
+            'can_execute', 'execution_lock', 'trade_permission', 'eod_lock',
+            'macro_lock', 'red_folder_lock', 'red_folder_active', 'red_folder_reason',
+            'daily_trade_count', 'daily_loss_trade_hit', 'first_trade_outcome',
+            'open_positions', 'cooldown_state', 'active_thesis', 'thesis_direction',
+            'thesis_set_at', 'lockouts', 'macro_risk', 'headline_risk',
+        )
+        _gates = {k: context[k] for k in _gate_keys if k in context}
+        _trace.log_trade_rejection(
+            context.get('rejection_code', ''),
+            context.get('rejection_reason', ''),
+            _trace_data, _trace_parsed, _gates,
+        )
+    except Exception as _te:
+        print(f'[rejection_log] trace error: {_te}')
 
 
 def get_rejections(limit: int = 50) -> list:
@@ -1080,6 +1140,26 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
     save_alert_history(alerts)
 
     risk_usd = qty * stop_dist
+
+    # ── execution trace ────────────────────────────────────────
+    try:
+        _trace.log_trade_execution(
+            data, parsed,
+            {
+                'broker_mode':  BROKER_MODE,
+                'etf':          etf,
+                'shares':       qty,
+                'entry_ref':    entry_ref,
+                'stop_price':   stop_px,
+                'target_price': tgt_px,
+                'order_id':     order_id,
+                'risk_usd':     risk_usd,
+                'session':      session,
+            }
+        )
+    except Exception as _te:
+        print(f'[execution] trace error: {_te}')
+
     send_telegram_message(
         f'DONNA EXECUTED\n'
         f'{direction} {qty} shares {etf} @ {entry_ref}\n'

@@ -818,6 +818,36 @@ async def execution_rejections(limit: int = 50):
     }
 
 
+@app.get('/execution/trace')
+async def execution_trace(limit: int = 100):
+    """
+    Full execution pipeline trace — every signal from webhook entry through
+    verdict, gate checks, and broker response.
+
+    Each entry has event_type:
+      SIGNAL_RECEIVED — webhook received a payload
+      VERDICT         — process_signal() completed (verdict + confidence)
+      REJECTED        — signal blocked at a gate (includes full gate snapshot)
+      EXECUTED        — broker order confirmed
+
+    Query: ?limit=N (max 500)
+    """
+    try:
+        from donna_execution_trace import get_trace
+        entries = await asyncio.to_thread(get_trace, min(limit, 500))
+        by_type: dict = {}
+        for e in entries:
+            t = e.get('event_type', 'UNKNOWN')
+            by_type[t] = by_type.get(t, 0) + 1
+        return {
+            'total':    len(entries),
+            'by_type':  by_type,
+            'entries':  entries,
+        }
+    except Exception as e:
+        return {'total': 0, 'entries': [], 'error': str(e)}
+
+
 @app.get('/orchestration-status')
 async def orchestration_status():
     from datetime import datetime, timezone
@@ -1059,6 +1089,28 @@ async def webhook(request: Request):
         payload = json.loads(text)
     except Exception:
         raise HTTPException(status_code=400, detail=f'Webhook body is not valid JSON. Received: {text[:200]}')
+
+    # ── execution trace: SIGNAL_RECEIVED ──────────────────────
+    try:
+        from donna_execution_trace import log_execution_event as _log_ev
+        _log_ev('SIGNAL_RECEIVED', {
+            'strategy_family': str(payload.get('strategy_family', '')).upper(),
+            'setup_type':      str(payload.get('setup_type', '')).upper(),
+            'ticker':          str(payload.get('ticker', '')).upper(),
+            'instrument':      str(payload.get('instrument', '')).upper(),
+            'signal':          str(payload.get('signal', '')).upper(),
+            'session':         str(payload.get('session', '')),
+            'score':           str(payload.get('score', '')),
+        }, {
+            'price':       payload.get('price', ''),
+            'timeframe':   payload.get('timeframe', ''),
+            'tier':        payload.get('tier', ''),
+            'trap_risk':   payload.get('trap_risk', 'false'),
+            'signal_reason': payload.get('signal_reason', ''),
+        })
+    except Exception:
+        pass
+
     result = process_signal(payload)
     if result.get('status') != 'ok':
         raise HTTPException(status_code=500, detail=result.get('error', 'Signal processing failed'))
