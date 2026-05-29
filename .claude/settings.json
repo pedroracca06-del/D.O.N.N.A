@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["/workspaces/D.O.N.N.A/mcp/tradingview/src/server.js"],
+      "env": {
+        "TV_CDP_PORT": "9222"
+      }
+    }
+  }
+}
