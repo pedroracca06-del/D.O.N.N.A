@@ -2150,6 +2150,37 @@ alertcondition(orbBuySignal,   "ORB BUY",   "ORB buy signal")
 alertcondition(orbSellSignal,  "ORB SELL",  "ORB sell signal")
 alertcondition(prosBuySignal,  "PROS BUY",  "PROS continuation long")
 alertcondition(prosSellSignal, "PROS SELL", "PROS continuation short")
+
+//================ WEBHOOK JSON ALERTS ================
+// Structured JSON payloads sent to DONNA /webhook on each signal bar.
+// In TradingView: create ONE alert with condition = "alert() function calls" + your DONNA webhook URL.
+// All signal types share that single alert — no per-signal alert needed.
+
+_j_instrument = isESChart ? "ES" : isNQChart ? "NQ" : syminfo.ticker
+_j_price      = str.tostring(math.round(close, 2))
+_j_tf         = timeframe.period
+_j_score      = str.tostring(analytics_score)
+_j_session    = sessionStateText
+_j_ticker     = syminfo.ticker
+_j_ict_tier   = step3LongElite or step3ShortElite ? "1" : "2"
+
+if prosBuySignal and not prosBuySignal[1]
+    alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"PROS_CONTINUATION","strategy_family":"PROS","instrument":"' + _j_instrument + '","tier":"2","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+
+if prosSellSignal and not prosSellSignal[1]
+    alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"PROS_CONTINUATION","strategy_family":"PROS","instrument":"' + _j_instrument + '","tier":"2","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+
+if orbBuySignal and not orbBuySignal[1]
+    alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ORB","instrument":"ES","tier":"2","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+
+if orbSellSignal and not orbSellSignal[1]
+    alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ORB","instrument":"ES","tier":"2","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+
+if ictBuySignal and not ictBuySignal[1]
+    alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+
+if ictSellSignal and not ictSellSignal[1]
+    alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
 //================ LIQUIDITY MARKERS ================
 var line pshLine = na
 var line pslLine = na
@@ -2654,7 +2685,7 @@ prosStdvText =
      prosStretchMult >= 2.5                            ? "STRETCHED" :
      (prosLegValidBull or prosLegValidBear)            ? "NORMAL"    : "—"
 
-// Background for engine header and CONT row
+// Background for engine header and CONT ro
 prosEngineBg =
      prosContinuationBull                              ? color.new(#002a18, 0) :
      prosContinuationBear                              ? color.new(#280008, 0) :
