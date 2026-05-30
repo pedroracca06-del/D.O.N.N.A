@@ -1,0 +1,32 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Runtime state files (auto-generated, should not be versioned)
+donna_state_engine.json
+donna_alert_history.json
+donna_journal.json
+donna_rejections.json
+donna_settings.json
+donna_alert_state.json
+donna_execution_trace.json
+donna_risk_engine_state.json
+donna_morning_brief_state.json
+
+# Screenshots (auto-captured, large, transient)
+mcp/tradingview/screenshots/
+
+# OS
+.DS_Store
+Thumbs.db

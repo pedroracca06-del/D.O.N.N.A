@@ -41,6 +41,18 @@ from donna_engines import (
 from donna_signals import process_signal
 
 try:
+    from donna_alert_engine import (
+        deliver_alert, AlertData, get_alert_status, start_setup_monitor,
+        HEADS_UP, EXECUTION_READY, INVALIDATION, NO_TRADE,
+    )
+    _ALERT_ENGINE_AVAILABLE = True
+except Exception:
+    _ALERT_ENGINE_AVAILABLE = False
+    def deliver_alert(data, **kw):  return {'delivered': False, 'error': 'alert engine unavailable'}
+    def get_alert_status():         return {}
+    def start_setup_monitor(**kw):  pass
+
+try:
     from donna_execution import (
         execute_signal,
         get_account, get_positions,
@@ -334,6 +346,9 @@ async def startup():
         await asyncio.to_thread(reconcile_positions_from_alpaca)
         asyncio.create_task(position_outcomes_loop())
         asyncio.create_task(eod_close_loop())
+    if _ALERT_ENGINE_AVAILABLE:
+        await asyncio.to_thread(start_setup_monitor, 60)
+        print('[startup] NOVA alert monitor started (60s polling interval)')
 
 
 # ── Health / meta ──────────────────────────────────────────────
@@ -1075,6 +1090,75 @@ async def system_check():
 @app.get('/send-morning-brief')
 async def manual_morning_brief():
     return await asyncio.to_thread(send_morning_brief)
+
+
+# ── Alert engine ────────────────────────────────────────────────
+
+@app.post('/nova-alert')
+async def nova_alert(request: Request):
+    """Deliver a NOVA intelligence alert to Discord and Telegram.
+
+    Body (JSON):
+      alert_type   : HEADS_UP | EXECUTION_READY | INVALIDATION | NO_TRADE
+      symbol       : "ES" | "MES"
+      setup_type   : "PROS_LONG" | "ORB_E1_SHORT" | etc.
+      direction    : "LONG" | "SHORT" | "N/A"
+      priority     : "critical" | "high" | "standard"  (optional)
+      session_quality, ib_draw, daily_bias, htf_4h_bias, grade (optional)
+      entry_zone, stop, tp1, rr  (optional — execution alerts)
+      timeframe, time_to_close, watch_time  (optional — heads-up)
+      reason, action, notes  (optional)
+      screenshot   : true | false  (optional, default true)
+    """
+    if not _ALERT_ENGINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail='Alert engine not available')
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid JSON body')
+
+    with_screenshot = body.pop('screenshot', True)
+    try:
+        data = AlertData(**{k: v for k, v in body.items() if k in AlertData.__dataclass_fields__})
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f'Invalid alert data: {e}')
+
+    result = await asyncio.to_thread(deliver_alert, data, with_screenshot)
+    return result
+
+
+@app.get('/alert-status')
+async def alert_status():
+    """Return current alert governance state."""
+    if not _ALERT_ENGINE_AVAILABLE:
+        return {'available': False}
+    return get_alert_status()
+
+
+@app.post('/nova-alert/test')
+async def nova_alert_test():
+    """Send a test heads-up alert to verify delivery pipeline."""
+    if not _ALERT_ENGINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail='Alert engine not available')
+    data = AlertData(
+        alert_type=HEADS_UP,
+        symbol='ES',
+        setup_type='PROS_LONG',
+        direction='LONG',
+        priority='standard',
+        session='NY_OPEN',
+        session_quality='A',
+        ib_draw='IB HIGH',
+        daily_bias='BULLISH',
+        htf_4h_bias='BULLISH',
+        grade='A',
+        timeframe='30M PROS',
+        time_to_close='3 min to close',
+        watch_time='Watch for confirmation at 10:00 AM ET',
+        notes='TEST ALERT — delivery pipeline verification',
+    )
+    result = await asyncio.to_thread(deliver_alert, data, False)
+    return result
 
 
 # ── Webhook / SSE ──────────────────────────────────────────────

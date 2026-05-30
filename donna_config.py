@@ -33,9 +33,29 @@ TRACE_FILE         = BASE_DIR / 'donna_execution_trace.json'
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()
 ANTHROPIC_MODEL         = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001').strip()
 ANTHROPIC_ASSISTANT_MODEL = os.getenv('ANTHROPIC_ASSISTANT_MODEL', 'claude-sonnet-4-6').strip()
-TELEGRAM_BOT_TOKEN      = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
-TELEGRAM_CHAT_ID        = os.getenv('TELEGRAM_CHAT_ID', '').strip()
-TELEGRAM_ALERT_MODE     = os.getenv('TELEGRAM_ALERT_MODE', 'critical').strip().lower()
+TELEGRAM_BOT_TOKEN       = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+TELEGRAM_CHAT_ID         = os.getenv('TELEGRAM_CHAT_ID', '').strip()
+TELEGRAM_ALERT_MODE      = os.getenv('TELEGRAM_ALERT_MODE', 'critical').strip().lower()
+
+# ── Discord (bot token + channel IDs) ────────────────────────
+# One token, all channels. Add channel IDs as channels are created.
+# All alerts fall back to DISCORD_CHANNEL_LIVE if specific channel not set.
+DISCORD_BOT_TOKEN              = os.getenv('DISCORD_BOT_TOKEN', '').strip()
+DISCORD_CHANNEL_LIVE           = os.getenv('DISCORD_CHANNEL_LIVE', '').strip()           # #nova-live  (primary, all alerts initially)
+DISCORD_CHANNEL_HEADS_UP       = os.getenv('DISCORD_CHANNEL_HEADS_UP', '').strip()       # #heads-up
+DISCORD_CHANNEL_MORNING_BRIEF  = os.getenv('DISCORD_CHANNEL_MORNING_BRIEF', '').strip()  # #morning-brief
+DISCORD_CHANNEL_EXECUTION      = os.getenv('DISCORD_CHANNEL_EXECUTION', '').strip()      # #execution
+DISCORD_CHANNEL_INVALIDATION   = os.getenv('DISCORD_CHANNEL_INVALIDATION', '').strip()   # #live-alerts (invalidations)
+DISCORD_CHANNEL_NO_TRADE       = os.getenv('DISCORD_CHANNEL_NO_TRADE', '').strip()       # #macro-risk
+DISCORD_CHANNEL_LOGS           = os.getenv('DISCORD_CHANNEL_LOGS', '').strip()           # #logs
+DISCORD_CHANNEL_SYSTEM_HEALTH  = os.getenv('DISCORD_CHANNEL_SYSTEM_HEALTH', '').strip()  # #system-health
+
+# ── Alert engine ──────────────────────────────────────────────
+ALERT_SCREENSHOT       = os.getenv('ALERT_SCREENSHOT', 'true').strip().lower() == 'true'
+ALERT_COOLDOWN_MINUTES = int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
+ALERT_DAILY_MAX        = int(os.getenv('ALERT_DAILY_MAX', '20'))
+ALERT_STATE_FILE       = BASE_DIR / 'donna_alert_state.json'
+
 FINNHUB_API_KEY         = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY             = os.getenv('FMP_API_KEY', '').strip()
 ALPHA_VANTAGE_API_KEY   = os.getenv('ALPHA_VANTAGE_API_KEY', '').strip()
