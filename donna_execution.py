@@ -1336,7 +1336,6 @@ def execute_signal(signal_result: dict) -> dict:
         return {'status': 'skipped', 'reason': 'position_already_open', 'code': 'POSITION_ALREADY_OPEN'}
 
     # ── ORCHESTRATION LAYER ──────────────────────────────────────
-    from donna_state_engine import state as _state
     signal_type = str(data.get('signal', '')).upper()
 
     # 1. Cooldown check
