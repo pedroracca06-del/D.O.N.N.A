@@ -1,9 +1,89 @@
 {
   "macro_risk": "low",
   "headline_risk": "low",
+  "market_news_risk": "medium",
   "active_warnings": [],
   "next_event": "",
   "minutes_to_event": null,
   "last_headline": "",
-  "last_updated": ""
+  "last_market_headline": "Semis and mega-cap tech continue to control index direction.",
+  "headline_guidance": "Respect event timing and avoid treating a major NY session expansion like noise.",
+  "headline_severity": "MEDIUM",
+  "last_market_guidance": "Leadership names are doing most of the lifting. Watch NVDA, MSFT, AMZN, AMD.",
+  "last_market_severity": "HIGH",
+  "event_phase": "APPROACHING",
+  "market_snapshot": {
+    "SPX": {
+      "last": 7022.95,
+      "chg": 55.57,
+      "pct": 0.8
+    },
+    "NASDAQ": {
+      "last": 24016.01,
+      "chg": 376.93,
+      "pct": 1.6
+    },
+    "DJIA": {
+      "last": 48463.72,
+      "chg": -72.27,
+      "pct": -0.15
+    },
+    "VIX": {
+      "last": 18.17,
+      "chg": -0.19,
+      "pct": -1.03
+    },
+    "US10Y": {
+      "last": 4.281,
+      "chg": 0.025,
+      "pct": 0.59
+    },
+    "DXY": {
+      "last": 103.84,
+      "chg": -0.14,
+      "pct": -0.13
+    },
+    "NQ": {
+      "last": 0,
+      "chg": 0,
+      "pct": 0
+    },
+    "ES": {
+      "last": 0,
+      "chg": 0,
+      "pct": 0
+    },
+    "OIL": {
+      "last": 0,
+      "chg": 0,
+      "pct": 0
+    },
+    "GOLD": {
+      "last": 0,
+      "chg": 0,
+      "pct": 0
+    },
+    "SILVER": {
+      "last": 0,
+      "chg": 0,
+      "pct": 0
+    },
+    "NQ_SESSION_POINTS": 393.0,
+    "ES_SESSION_POINTS": 49.5
+  },
+  "last_updated": "2026-05-31T04:53:35.341313+00:00",
+  "donna_time_utc": "2026-05-31T04:53:35.341275+00:00",
+  "donna_time_ny": "2026-05-31T00:53:35.341285-04:00",
+  "donna_day": "Sunday",
+  "donna_session": "ASIA",
+  "event_time_ny": "2026-05-31T00:00:00-04:00",
+  "daily_trades_date": "2026-05-31",
+  "daily_trades_taken": 0,
+  "daily_loss_limit_hit": false,
+  "cumulative_risk_today": 0.0,
+  "first_trade_outcome": "",
+  "size_reduction_active": false,
+  "daily_loss_trade_hit": false,
+  "asia_session_anchor": "2026-05-30",
+  "asia_trade_taken": false
 }

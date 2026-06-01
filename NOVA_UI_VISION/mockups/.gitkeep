@@ -1,0 +1,12 @@
+Place approved mockup PNG files here.
+
+Expected files:
+  nova_dark_mode_dashboard.png
+  nova_light_mode_dashboard.png
+  nova_mobile_dashboard.png
+  nova_mobile_ai.png
+  nova_mobile_journal.png
+  nova_mobile_bot.png
+
+These become the visual source-of-truth for Phase 2I development.
+See NAVIGATION_ARCHITECTURE.md for screen specifications.

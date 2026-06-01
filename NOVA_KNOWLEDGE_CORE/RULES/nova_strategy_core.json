@@ -1,0 +1,205 @@
+{
+  "version": "0.1.0",
+  "identity": "NOVA Strategy Core — AI-native execution intelligence layer",
+  "last_updated": "2026-05-29",
+  "status": "foundation",
+
+  "session_context": {
+    "primary_sessions": ["NY_OPEN", "NY_AM", "LONDON_CLOSE"],
+    "ny_open_window": { "start": "09:30", "end": "11:00", "timezone": "America/New_York" },
+    "ny_am_window": { "start": "09:30", "end": "12:00", "timezone": "America/New_York" },
+    "london_close_window": { "start": "10:00", "end": "11:30", "timezone": "America/New_York" },
+    "dead_zones": ["12:00-14:00 ET", "pre-09:30 ET"],
+    "high_risk_times": ["FOMC", "CPI", "NFP", "GDP", "major macro release within 30min"]
+  },
+
+  "watchlist": {
+    "primary": ["MES1!", "ES1!", "MNQ1!", "NQ1!"],
+    "preferred_instrument": "MES1!",
+    "preferred_timeframes": ["1", "3", "5", "15"],
+    "chart_reference_timeframe": "15",
+    "execution_timeframe": "1"
+  },
+
+  "pros_rules": {
+    "description": "PROS = directional continuation execution. Expansion → displacement → fib retracement → rejection confirmation → continuation.",
+    "phase_sequence": [
+      "expansion",
+      "displacement",
+      "fib_retracement",
+      "rejection_confirmation",
+      "continuation_entry"
+    ],
+    "core_concepts": {
+      "expansion": "Impulsive directional move establishing intent and range",
+      "displacement": "Aggressive break through a level, leaving order blocks / FVG behind. NOT the retracement destination.",
+      "fib_retracement": "Price pulls back INTO the fib zone (0.382–0.618 of expansion). This is the entry area.",
+      "rejection_confirmation": "Price taps fib zone, shows rejection signal (pin bar, engulf, momentum shift). Not just touch.",
+      "order_blocks": "Form of displacement evidence — area of significant supply/demand left by displacement candle. Acts as confluence, not entry trigger.",
+      "defended_pullback": "Key PROS confirmation: pullback into fib is absorbed cleanly, price defends level and resumes direction."
+    },
+    "long_setup": {
+      "bias_required": "bullish expansion above key level",
+      "retracement_target": "fib 0.382–0.618 of expansion leg",
+      "entry_signal": "rejection candle or momentum reversal at fib",
+      "target": "expansion high or next liquidity above",
+      "stop": "below fib zone / below displacement base"
+    },
+    "short_setup": {
+      "bias_required": "bearish expansion below key level",
+      "retracement_target": "fib 0.382–0.618 of expansion leg",
+      "entry_signal": "rejection candle or momentum reversal at fib",
+      "target": "expansion low or next liquidity below",
+      "stop": "above fib zone / above displacement high"
+    },
+    "invalidation": [
+      "Price closes beyond displacement base (expansion origin violated)",
+      "Retracement exceeds 0.786 fib without clear structural reason",
+      "Multiple failed rejections at fib zone",
+      "Opposing expansion forms during retracement",
+      "Setup forms inside dead zone (12:00–14:00 ET)"
+    ],
+    "quality_grade": {
+      "A": "Clean expansion + displacement + fib tap + strong rejection + session timing confirmed",
+      "B": "Most criteria met but one element unclear or weak",
+      "C": "Marginal setup — at least two criteria weak or ambiguous",
+      "D": "Do not trade"
+    }
+  },
+
+  "orb_rules": {
+    "description": "ORB = auction/rejection execution. Opening range defines the balance zone. Entries based on ownership shifts and liquidity sweeps.",
+    "orb_definition": {
+      "range_candles": "First 2 candles of NY open (09:30–09:32 on 1m, or first full 5m candle)",
+      "orb_high": "High of opening range",
+      "orb_low": "Low of opening range",
+      "orb_mid": "Midpoint of opening range — critical level"
+    },
+    "entry_1_midpoint_rejection": {
+      "name": "Midpoint Rejection",
+      "sequence": [
+        "Price breaks out of ORB (above high or below low)",
+        "Price re-enters the ORB box",
+        "Price taps ORB midpoint",
+        "Rejection at midpoint confirmed",
+        "Entry: continuation of original breakout direction"
+      ],
+      "target": "Opposite side of ORB box, then extension",
+      "stop": "Beyond midpoint rejection candle"
+    },
+    "entry_2_liquidity_rejection": {
+      "name": "Untapped Liquidity Rejection",
+      "sequence": [
+        "Price breaks out of ORB",
+        "Price taps external liquidity beyond ORB (stops above prior high or below prior low)",
+        "Rejection forms at external liquidity",
+        "Entry: back toward ORB midpoint as first target"
+      ],
+      "target": "ORB midpoint, then opposite ORB extreme",
+      "stop": "Beyond external liquidity sweep candle"
+    },
+    "invalidation": [
+      "Price reclaims ORB from wrong side with conviction (full candle body close beyond mid)",
+      "Multiple ORB violations in both directions (balance breakdown)",
+      "Setup forms after 11:00 ET (ORB context loses relevance)",
+      "News event within 30min of setup trigger",
+      "ORB range excessively wide (>15pts MES) — reduced reliability"
+    ],
+    "quality_grade": {
+      "A": "Clean ORB definition + clear breakout + clean re-entry + sharp midpoint rejection + within 09:30–10:30 ET",
+      "B": "Criteria met but one element late, slow, or slightly sloppy",
+      "C": "Marginal — two or more elements weak",
+      "D": "Do not trade"
+    }
+  },
+
+  "no_trade_conditions": [
+    "Major macro event within 30 minutes (FOMC, CPI, NFP, GDP)",
+    "Spread > 2pts on MES during entry",
+    "Session outside primary windows (dead zone or post-12:00 ET)",
+    "Daily risk limit reached",
+    "Prior stop-out on same setup in same session — mandatory pause",
+    "Setup quality grade C or below",
+    "Conflicting signals: PROS setup in ORB context without resolution of ORB",
+    "Choppy/overlapping price action — no clear expansion present",
+    "Already in a position (single-position architecture — no stacking)"
+  ],
+
+  "execution_quality": {
+    "grading_criteria": [
+      "Setup grade (A/B/C/D)",
+      "Entry timing relative to rejection candle (immediate vs. chased)",
+      "Stop placement discipline (rule-based vs. discretionary widening)",
+      "Target adherence (hit TP or moved early)",
+      "Session timing score (inside primary window = full credit)",
+      "No-trade condition check (all clear = full credit)"
+    ],
+    "score_weights": {
+      "setup_grade": 0.35,
+      "entry_timing": 0.20,
+      "stop_discipline": 0.20,
+      "target_adherence": 0.15,
+      "session_timing": 0.10
+    }
+  },
+
+  "alert_timing": {
+    "pre_session_check": "09:15 ET — macro scan, bias check, watchlist prep",
+    "orb_definition_window": "09:30–09:32 ET — ORB range locked",
+    "primary_alert_window": "09:30–11:00 ET",
+    "secondary_alert_window": "10:00–11:30 ET (London close overlap)",
+    "cutoff": "11:00 ET — no new entries after unless explicit condition met",
+    "alert_expiry": "Alerts expire after 15 minutes if not triggered"
+  },
+
+  "pine_role": {
+    "description": "Pine Script is the visual helper and chart annotation layer. It is NOT the decision brain.",
+    "pine_responsibilities": [
+      "Visual overlay of fib levels",
+      "ORB box rendering",
+      "Alert trigger dispatch (webhook → DONNA)",
+      "Chart annotation: expansion labels, entry zone highlights",
+      "Optional signal support"
+    ],
+    "nova_responsibilities": [
+      "Strategy interpretation",
+      "Setup recognition",
+      "Execution quality grading",
+      "Orchestration and routing",
+      "Session context awareness",
+      "Trade decision logic"
+    ]
+  },
+
+  "claude_interaction_protocol": {
+    "on_connect": [
+      "Call chart_get_state to read current symbol, timeframe, indicator list",
+      "Load nova_strategy_core.json as context",
+      "Identify active session window",
+      "Scan for active PROS or ORB setup conditions"
+    ],
+    "chart_analysis_sequence": [
+      "1. Get chart state (symbol, TF)",
+      "2. Get recent OHLCV data (data_get_ohlcv)",
+      "3. Identify expansion leg if present",
+      "4. Check ORB range (if NY open within last 90 min)",
+      "5. Apply PROS rules to current price action",
+      "6. Apply ORB rules if applicable",
+      "7. Grade setup if one exists",
+      "8. Report: setup type, grade, entry zone, target, stop, session status"
+    ],
+    "output_format": {
+      "setup_found": {
+        "type": "PROS | ORB_E1 | ORB_E2 | NONE",
+        "grade": "A | B | C | D",
+        "direction": "LONG | SHORT",
+        "entry_zone": "price range",
+        "target": "price level",
+        "stop": "price level",
+        "session": "NY_OPEN | NY_AM | LONDON_CLOSE | DEAD_ZONE",
+        "no_trade_flags": [],
+        "notes": "brief rationale"
+      }
+    }
+  }
+}
