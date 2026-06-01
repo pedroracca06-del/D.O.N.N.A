@@ -11,8 +11,15 @@ Keep this terminal open while trading. Ctrl+C to stop.
 """
 from __future__ import annotations
 
+import io
 import logging
+import sys
 import time
+
+# Force UTF-8 output on Windows to handle arrow/symbol chars from NOVA tables
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
