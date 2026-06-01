@@ -27,6 +27,25 @@ donna_morning_brief_state.json
 # Screenshots (auto-captured, large, transient)
 mcp/tradingview/screenshots/
 
+# Node.js (MCP server)
+mcp/tradingview/node_modules/
+mcp/tradingview/.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cache files (auto-generated market data)
+donna_grok_intelligence.json
+donna_btc_vix_cache.json
+donna_sp500_heatmap.json
+donna_nq_heatmap.json
+donna_macro_events.json
+
+# IDE
+.vscode/settings.json
+.idea/
+
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
