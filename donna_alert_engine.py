@@ -417,7 +417,7 @@ def capture_screenshot() -> Optional[Path]:
         if result.returncode == 0:
             try:
                 data     = json.loads(result.stdout.strip())
-                path_str = data.get('path') or data.get('file') or data.get('screenshot')
+                path_str = data.get('file_path') or data.get('path') or data.get('file') or data.get('screenshot')
                 if path_str:
                     p = Path(path_str)
                     if not p.is_absolute():
@@ -597,9 +597,15 @@ def _read_ohlcv(count: int = 30) -> Optional[dict]:
 
 def check_forming_setups() -> list[AlertData]:
     """
-    Poll chart, apply NOVA rules, return AlertData for any forming setups.
-    Stub — wired with full NOVA rule application in Phase 2C.
+    Poll chart via NOVA reasoning engine. Returns AlertData for any forming setups.
+    Delegates to donna_nova_reasoning.run_reasoning_cycle() for full Claude evaluation.
     """
+    try:
+        from donna_nova_reasoning import run_reasoning_cycle
+        return run_reasoning_cycle()
+    except Exception:
+        pass
+    # Fallback: basic MCP check without Claude
     if not _in_trading_window():
         return []
     chart = _read_chart_state()

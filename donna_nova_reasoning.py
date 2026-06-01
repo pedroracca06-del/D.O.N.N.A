@@ -130,8 +130,10 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     """
     Parse NOVA indicator table rows into structured dicts.
 
-    Table 1 (main engine):  CMD, SCORE, STATE, PROS, OTE, CONT, QUALITY, STDV, SESS
-    Table 2 (PROS engine):  DISPL, RETRACE, OTE, CONT, QUALITY, STDV, SESS
+    ES/MES has 3 tables: NOVA ENGINE, ORB CONSOLE, PROS ENGINE.
+    NQ/other has 2 tables: NOVA ENGINE, PROS ENGINE.
+    Tables are identified by header key, not index — index-based fails on ES/MES
+    because raw_tables[1] is ORB CONSOLE, not PROS ENGINE.
     """
     parsed = {}
 
@@ -143,9 +145,21 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
                 result[key.strip()] = val.strip()
         return result
 
-    if len(raw_tables) >= 1:
+    for table_rows in raw_tables:
+        if not table_rows:
+            continue
+        d = _parse_rows(table_rows)
+        if 'NOVA ENGINE' in d:
+            parsed['main'] = d
+        elif 'PROS ENGINE' in d:
+            parsed['pros'] = d
+        elif 'ORB CONSOLE' in d:
+            parsed['orb'] = d
+
+    # Fallback to index order if header detection found nothing
+    if 'main' not in parsed and len(raw_tables) >= 1:
         parsed['main'] = _parse_rows(raw_tables[0])
-    if len(raw_tables) >= 2:
+    if 'pros' not in parsed and len(raw_tables) >= 2:
         parsed['pros'] = _parse_rows(raw_tables[1])
 
     return parsed

@@ -134,6 +134,18 @@ except Exception:
         return None
 
 try:
+    from donna_macro_discord import (
+        run_macro_calendar_check,
+        run_macro_morning_brief,
+        run_vix_volatility_check,
+        run_breaking_news_check,
+    )
+    _MACRO_DISCORD_AVAILABLE = True
+except Exception as _mde:
+    print(f'[main] donna_macro_discord unavailable: {_mde}')
+    _MACRO_DISCORD_AVAILABLE = False
+
+try:
     from donna_state_engine import state as _donna_state
     _STATE_ENGINE_AVAILABLE = True
 except Exception as _se_err:
@@ -320,6 +332,30 @@ async def grok_loop():
         await asyncio.sleep(300 if in_market else 1800)
 
 
+async def macro_discord_loop():
+    """
+    Every 5 min: check macro calendar phases, VIX, and breaking news.
+    Delivers high-signal events exclusively to #macro-risk.
+    Morning brief fires once per day at 09:00–09:20 ET.
+    """
+    if not _MACRO_DISCORD_AVAILABLE:
+        return
+    while True:
+        try:
+            ny = now_ny()
+            # Morning brief window: 09:00–09:20 ET, weekdays only
+            if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 20:
+                await asyncio.to_thread(run_macro_morning_brief)
+            # Core checks — all active during market hours
+            if ny.weekday() < 5:
+                await asyncio.to_thread(run_macro_calendar_check)
+                await asyncio.to_thread(run_vix_volatility_check)
+                await asyncio.to_thread(run_breaking_news_check)
+        except Exception as e:
+            print(f'[macro_discord_loop] error: {e}')
+        await asyncio.sleep(300)
+
+
 # ── Startup ────────────────────────────────────────────────────
 
 @app.on_event('startup')
@@ -342,6 +378,7 @@ async def startup():
     asyncio.create_task(finnhub_loop())
     asyncio.create_task(grok_loop())
     asyncio.create_task(morning_brief_loop())
+    asyncio.create_task(macro_discord_loop())
     if _EXECUTION_AVAILABLE:
         await asyncio.to_thread(reconcile_positions_from_alpaca)
         asyncio.create_task(position_outcomes_loop())
@@ -377,6 +414,8 @@ async def check_env():
         'assistant_file_exists':       ASSISTANT_FILE.exists(),
         'settings_file_exists':        SETTINGS_FILE.exists(),
         'macro_events_file_exists':    MACRO_EVENTS_FILE.exists(),
+        'discord_macro_channel_set':   bool(os.getenv('DISCORD_CHANNEL_MACRO', '')),
+        'macro_discord_available':     _MACRO_DISCORD_AVAILABLE,
         'telegram_alert_mode':         TELEGRAM_ALERT_MODE,
         'chat_model':                  ANTHROPIC_ASSISTANT_MODEL,
         'fast_model':                  ANTHROPIC_MODEL,
@@ -1133,6 +1172,15 @@ async def alert_status():
     if not _ALERT_ENGINE_AVAILABLE:
         return {'available': False}
     return get_alert_status()
+
+
+@app.get('/macro-status')
+async def macro_status():
+    """Return macro Discord feed state — delivered events, VIX, phase, channel health."""
+    if not _MACRO_DISCORD_AVAILABLE:
+        return {'available': False}
+    from donna_macro_discord import get_macro_discord_status
+    return get_macro_discord_status()
 
 
 @app.post('/nova-alert/test')

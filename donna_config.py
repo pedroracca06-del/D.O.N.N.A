@@ -47,6 +47,7 @@ DISCORD_CHANNEL_MORNING_BRIEF  = os.getenv('DISCORD_CHANNEL_MORNING_BRIEF', '').
 DISCORD_CHANNEL_EXECUTION      = os.getenv('DISCORD_CHANNEL_EXECUTION', '').strip()      # #execution
 DISCORD_CHANNEL_INVALIDATION   = os.getenv('DISCORD_CHANNEL_INVALIDATION', '').strip()   # #live-alerts (invalidations)
 DISCORD_CHANNEL_NO_TRADE       = os.getenv('DISCORD_CHANNEL_NO_TRADE', '').strip()       # #macro-risk
+DISCORD_CHANNEL_MACRO          = os.getenv('DISCORD_CHANNEL_MACRO', '').strip()          # #macro-risk
 DISCORD_CHANNEL_LOGS           = os.getenv('DISCORD_CHANNEL_LOGS', '').strip()           # #logs
 DISCORD_CHANNEL_SYSTEM_HEALTH  = os.getenv('DISCORD_CHANNEL_SYSTEM_HEALTH', '').strip()  # #system-health
 
