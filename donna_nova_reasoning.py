@@ -71,7 +71,7 @@ def _run_mcp(*args: str) -> Optional[dict]:
 
 def read_chart_context() -> dict:
     """
-    Collect all chart data from TradingView MCP.
+    Collect all chart data from the currently active TradingView tab.
     Only reads NOVA indicator data — ignores third-party studies.
     Returns {'connected': False} if TradingView is not reachable.
     """
@@ -122,6 +122,56 @@ def read_chart_context() -> dict:
             ctx['nova_tables'] = [t.get('rows', []) for t in raw_tables]
 
     return ctx
+
+
+def _collect_all_contexts() -> list[dict]:
+    """
+    Read chart context from every open TradingView tab.
+
+    Primary tab (index 0) is read without switching — always first in the list.
+    Secondary tabs (NQ/MNQ etc.) are read by switching to them and back.
+    The switch is sub-second and transparent to the trader.
+
+    Returns list of chart contexts. Empty if TradingView is unreachable.
+    """
+    import time
+
+    tabs_result = _run_mcp('tab', 'list')
+    tabs = (tabs_result or {}).get('tabs', [])
+
+    if len(tabs) <= 1:
+        ctx = read_chart_context()
+        return [ctx] if ctx.get('connected') else []
+
+    contexts: list[dict] = []
+    primary_index = tabs[0].get('index', 0)
+
+    # Primary tab — read without switching
+    primary_ctx = read_chart_context()
+    if primary_ctx.get('connected'):
+        primary_ctx['tab_index'] = primary_index
+        primary_ctx['is_primary'] = True
+        contexts.append(primary_ctx)
+
+    # Secondary tabs — switch, read, switch back
+    for tab in tabs[1:]:
+        idx = tab.get('index', -1)
+        if idx < 0:
+            continue
+        switched = _run_mcp('tab', 'switch', str(idx))
+        if not switched or not switched.get('success'):
+            continue
+        time.sleep(0.8)          # wait for chart to render after tab switch
+        sec_ctx = read_chart_context()
+        if sec_ctx.get('connected'):
+            sec_ctx['tab_index'] = idx
+            sec_ctx['is_primary'] = False
+            contexts.append(sec_ctx)
+
+    # Always restore primary tab
+    _run_mcp('tab', 'switch', str(primary_index))
+
+    return contexts
 
 
 # ── NOVA table parsing ─────────────────────────────────────────────────────────
@@ -864,56 +914,37 @@ def decision_to_alert(decision: dict, symbol: str) -> Optional[AlertData]:
     )
 
 
-# ── Top-level reasoning cycle ──────────────────────────────────────────────────
+# ── Per-chart evaluation ───────────────────────────────────────────────────────
 
-def run_reasoning_cycle() -> list:
+def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     """
-    Full reasoning cycle. Called by the setup monitor every 60 seconds.
-
-    1. Read live chart context from TradingView MCP
-    2. Evaluate session state (fast, deterministic)
-    3. Parse NOVA indicator tables
-    4. Run deterministic evaluators — PROS, ORB, IB, invalidation
-    5. Classify signal type (pre-filter, no API call)
-    6. Skip Claude entirely if no signal or obvious block
-    7. Call Claude with full context + pre-assessment
-    8. Return list of AlertData to deliver
+    Run the full evaluation pipeline for one chart context.
+    Returns list of AlertData (0 or 1 items).
     """
-    # Step 1: Chart
-    chart_ctx = read_chart_context()
-    if not chart_ctx.get('connected'):
-        return []
+    symbol = chart_ctx.get('symbol', 'ES').replace('CME_MINI:', '').replace('1!', '')
 
-    # Step 2: Session
-    session_ctx = evaluate_session_context()
-
-    # Step 3: Parse NOVA tables
     raw_tables = chart_ctx.get('nova_tables', [])
     nova_state = parse_nova_tables(raw_tables)
     main_state = nova_state.get('main', {})
     pros_state_data = nova_state.get('pros', {})
 
-    # Step 4: Deterministic evaluators
     pros_eval = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval  = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
     ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx)
     inv_eval  = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
 
-    # Step 5: Signal classification
     signal_type, setup_type, rationale = _classify_signal(
         pros_eval, orb_eval, ib_eval, inv_eval, session_ctx
     )
 
-    # Step 6: Pre-filter
     if signal_type is None:
-        print(f'[nova-reasoning] {session_ctx["time_et"]} | no signal | {rationale}')
+        print(f'[nova-reasoning] {session_ctx["time_et"]} | {symbol} | no signal | {rationale}')
         return []
 
-    # Hard NO_TRADE — emit directly, no Claude needed
     if signal_type == NO_TRADE and session_ctx.get('daily_loss_hit') and AlertData:
         return [AlertData(
             alert_type  = NO_TRADE,
-            symbol      = chart_ctx.get('symbol', 'ES').replace('CME_MINI:', '').replace('1!', ''),
+            symbol      = symbol,
             setup_type  = 'N/A',
             direction   = 'N/A',
             priority    = 'high',
@@ -922,7 +953,6 @@ def run_reasoning_cycle() -> list:
             action      = 'Session closed. No further entries.',
         )]
 
-    # Step 7: Claude evaluation
     pre_assess = {
         'pros_eval':  pros_eval,
         'orb_eval':   orb_eval,
@@ -939,14 +969,36 @@ def run_reasoning_cycle() -> list:
     alert_required = decision.get('alert_required', False)
     log_reason = decision.get('no_alert_reason', '') if not alert_required else decision.get('alert_type', '')
     print(
-        f'[nova-reasoning] {session_ctx["time_et"]} | '
+        f'[nova-reasoning] {session_ctx["time_et"]} | {symbol} | '
         f'pre={signal_type} | alert={alert_required} | grade={decision.get("grade", "?")} | {log_reason}'
     )
 
-    # Step 8: Build AlertData
-    symbol = chart_ctx.get('symbol', 'ES').replace('CME_MINI:', '').replace('1!', '')
-    alert  = decision_to_alert(decision, symbol)
+    alert = decision_to_alert(decision, symbol)
     return [alert] if alert else []
+
+
+# ── Top-level reasoning cycle ──────────────────────────────────────────────────
+
+def run_reasoning_cycle() -> list:
+    """
+    Full reasoning cycle. Called by the setup monitor every 60 seconds.
+
+    Reads every open TradingView tab (primary first, secondaries via tab switch).
+    Runs the full PROS/ORB/IB/Claude pipeline for each chart independently.
+    Returns all alerts across all symbols — MES, NQ, MNQ, whatever is open.
+    """
+    session_ctx = evaluate_session_context()
+
+    all_contexts = _collect_all_contexts()
+    if not all_contexts:
+        return []
+
+    all_alerts: list = []
+    for chart_ctx in all_contexts:
+        alerts = _evaluate_single_chart(chart_ctx, session_ctx)
+        all_alerts.extend(alerts)
+
+    return all_alerts
 
 
 # ── Manual trigger (on-demand analysis + debugging) ───────────────────────────
