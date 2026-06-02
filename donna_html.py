@@ -2994,7 +2994,7 @@ function renderEconCalendar(events) {
     return { label: `IN ${h}h${m ? ` ${m}m` : ''}`, cls: 'future' };
   }
 
-  function evCard(ev, isToday) {
+  function evCard(ev, isToday, isPast) {
     const imp      = (ev.importance || 'low').toLowerCase();
     const isHigh   = imp === 'high';
     const isMedium = imp === 'medium';
@@ -3004,6 +3004,8 @@ function renderEconCalendar(events) {
     const cd       = _countdown(evMin, hasActual, isToday);
     const isLive   = cd && cd.cls === 'live';
     const isRel    = cd && cd.cls === 'released';
+    // Past-day events are always displayed as released (dimmed, no governance bar)
+    const displayRel = isRel || (isPast === true);
 
     // Data values row
     const valParts = [];
@@ -3017,7 +3019,7 @@ function renderEconCalendar(events) {
 
     // LOW — compact inline row
     if (!isHigh && !isMedium) {
-      return `<div class="macro-radar-event impact-low${isRel?' released':''}">
+      return `<div class="macro-radar-event impact-low${displayRel?' released':''}">
   <div class="mre-compact">
     <span class="mre-compact-dot"></span>
     <span class="mre-time">${ev.time_et || '?'}</span>
@@ -3028,11 +3030,11 @@ function renderEconCalendar(events) {
 </div>`;
     }
 
-    // MEDIUM / HIGH — full card
-    const govBar = isHigh && !isRel
+    // MEDIUM / HIGH — full card; govBar only for today's non-released events
+    const govBar = isHigh && isToday && !displayRel
       ? `<div class="mre-gov-bar">⚠ RED FOLDER WINDOW · EXECUTION MAY LOCK DURING THIS EVENT</div>`
       : '';
-    const cardCls = `macro-radar-event impact-${imp}${isLive ? ' live' : ''}${isRel ? ' released' : ''}`;
+    const cardCls = `macro-radar-event impact-${imp}${isLive ? ' live' : ''}${displayRel ? ' released' : ''}`;
 
     return `<div class="${cardCls}">
   <div class="mre-header impact-${imp}">
@@ -3056,11 +3058,12 @@ function renderEconCalendar(events) {
   for (const ds of weekDays) {
     const dayEvts = (byDate[ds] || []).sort((a, b) => (a.time_et || '').localeCompare(b.time_et || ''));
     const isToday = ds === todayStr;
+    const isPast  = ds < todayStr;
     if (!isToday && !dayEvts.length) continue;
     const todayLabel = `▶ TODAY · ${dayLabel(ds)}`;
     html += `<div class="mre-day-sep ${isToday ? 'today' : 'other'}">${isToday ? todayLabel : dayLabel(ds)}</div>`;
     if (dayEvts.length) {
-      html += dayEvts.map(ev => evCard(ev, isToday)).join('');
+      html += dayEvts.map(ev => evCard(ev, isToday, isPast)).join('');
     } else {
       html += '<div class="econ-no-events">No scheduled events</div>';
     }

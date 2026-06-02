@@ -31,6 +31,22 @@ _RED_FOLDER_NAMES = {
     'unemployment rate', 'core cpi', 'core pce',
 }
 
+# ── Event lifecycle governance ─────────────────────────────────
+_EVENT_PRE_MINS  = 60   # macro_risk=high up to 60 min before event
+_EVENT_POST_MINS = 45   # macro_risk=high up to 45 min after event
+
+
+def _in_governance_window(event: dict, now_et: datetime) -> bool:
+    """True only if this event's pre/post governance window is currently active."""
+    try:
+        h, m     = [int(x) for x in event['time_et'].split(':')]
+        ev_mins  = h * 60 + m
+        now_mins = now_et.hour * 60 + now_et.minute
+        delta    = now_mins - ev_mins   # positive = event is in the past
+        return -_EVENT_PRE_MINS <= delta <= _EVENT_POST_MINS
+    except Exception:
+        return False
+
 
 # ── utilities ─────────────────────────────────────────────────
 def _now_ny() -> datetime:
@@ -71,8 +87,10 @@ def _week_bounds() -> tuple[str, str]:
 def _phase_from_mins(mins: int | None) -> str:
     if mins is None:
         return 'NONE'
+    if mins < -_EVENT_POST_MINS:
+        return 'EXPIRED'
     if mins < 0:
-        return 'PASSED'
+        return 'POST_COOLDOWN'
     if mins <= 5:
         return 'LIVE'
     if mins <= 15:
@@ -279,7 +297,7 @@ def _compute_next_event(events: list[dict]) -> tuple[str, int | None]:
             h, m = [int(x) for x in ev['time_et'].split(':')]
             target = now.replace(hour=h, minute=m, second=0, microsecond=0)
             mins   = int((target - now).total_seconds() // 60)
-            if mins >= -10 and (best_mins is None or mins < best_mins):
+            if mins >= -_EVENT_POST_MINS and (best_mins is None or mins < best_mins):
                 best_mins  = mins
                 best_title = ev['title']
         except Exception:
@@ -438,15 +456,19 @@ def check_todays_events():
     risk['minutes_to_event'] = mins
     risk['event_phase']      = phase
 
-    # Actively clear macro_risk when no HIGH events are scheduled today
-    risk['macro_risk'] = 'high' if today_high else 'low'
+    # macro_risk=high only while an event is inside its governance window (PRE or POST)
+    # Expired events do not elevate risk; prevents stale blocks after events pass
+    now_et = _now_ny()
+    governing_high = [e for e in today_high if _in_governance_window(e, now_et)]
+    risk['macro_risk'] = 'high' if governing_high else 'low'
 
     risk['last_updated'] = _utc_iso()
     with open(RISK_STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(risk, f, indent=2)
 
     print(f'[donna_headlines] check_todays_events — {len(today_all)} events today '
-          f'({len(today_high)} HIGH). Next: "{next_event}" in {mins}min, phase: {phase}')
+          f'({len(today_high)} HIGH, {len(governing_high)} governing). '
+          f'Next: "{next_event}" in {mins}min, phase: {phase}')
 
 
 # ── main cycle (every 15 min) ─────────────────────────────────
@@ -518,8 +540,10 @@ def process_headlines_cycle():
     risk['morning_brief_lead']  = morning_brief_lead
     risk['red_folder_week']     = is_red
 
-    # Actively clear macro_risk when no HIGH events are scheduled today
-    risk['macro_risk'] = 'high' if today_high else 'low'
+    # macro_risk=high only while an event is inside its governance window (PRE or POST)
+    # Expired events do not elevate risk; prevents stale blocks after events pass
+    governing_high = [e for e in today_high if _in_governance_window(e, _now_ny())]
+    risk['macro_risk'] = 'high' if governing_high else 'low'
 
     try:
         if today_all:

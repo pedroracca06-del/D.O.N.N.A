@@ -1063,7 +1063,12 @@ def build_session_playbook(risk=None):
     }
     session_type = session_map.get(session, session.replace('_', ' '))
     dominant     = driver.get('dominant_driver', 'Balanced')
-    today_events = [f"{e.get('time_et', '?')} ET — {e.get('title', '')}" for e in (events_data.get('events') or [])[:3]]
+    _today_str   = now_ny().strftime('%Y-%m-%d')
+    today_events = [
+        f"{e.get('time_et', '?')} ET — {e.get('title', '')}"
+        for e in (events_data.get('events') or [])
+        if e.get('date') == _today_str
+    ][:3]
 
     event_phase = str(state.get('event_phase', '')).upper()
     if macro == 'high' and event_phase in ('LIVE', 'IMMINENT', 'APPROACHING'):
@@ -1110,9 +1115,11 @@ def build_scenario_engine(force: bool = False) -> dict:
         r = pulse_map.get(sym, {})
         return f"{sym}: {r.get('last', '-')} ({r.get('pct', '-')})"
 
+    _scenario_today = now_ny().strftime('%Y-%m-%d')
     events_text = '\n'.join(
         f"  {e.get('time_et', '?')} ET — {e.get('title', '')} [{e.get('importance', '').upper()}]"
         for e in macro_events.get('events', [])
+        if e.get('date') == _scenario_today
     ) or '  None scheduled'
 
     nq_last = snap.get('NQ', {}).get('last', 0)

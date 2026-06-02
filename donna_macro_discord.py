@@ -233,14 +233,25 @@ def _classify_vix(vix: float, vix_pct: float) -> str:
 # ── Phase computation ──────────────────────────────────────────────────────────
 
 def _compute_phase_and_mins(time_et: str) -> tuple[str, Optional[int]]:
-    """Compute event phase relative to now."""
+    """
+    Compute event lifecycle phase relative to now.
+
+    UPCOMING      > 45 min away    — informational only
+    APPROACHING   10–45 min away   — governance active, prepare
+    IMMINENT      0–10 min away    — governance active, stand aside
+    LIVE          0–15 min past    — governance active, stand aside
+    POST_COOLDOWN 15–45 min past   — governance active, cooldown
+    EXPIRED       > 45 min past    — informational only, no governance
+    """
     try:
         now = now_ny()
         h, m = [int(x) for x in time_et.split(':')]
         target = now.replace(hour=h, minute=m, second=0, microsecond=0)
         mins = int((target - now).total_seconds() // 60)
+        if mins < -45:
+            return 'EXPIRED', mins
         if mins < -15:
-            return 'PASSED', mins
+            return 'POST_COOLDOWN', mins
         if mins < 0:
             return 'LIVE', mins
         if mins <= 10:
@@ -250,6 +261,12 @@ def _compute_phase_and_mins(time_et: str) -> tuple[str, Optional[int]]:
         return 'SCHEDULED', mins
     except Exception:
         return 'UNKNOWN', None
+
+
+# Phases that influence live governance (session quality, ORB, execution actions)
+_GOVERNANCE_PHASES = {'APPROACHING', 'IMMINENT', 'LIVE', 'POST_COOLDOWN'}
+# Phases that count toward session quality grade (includes far-future today events)
+_SESSION_QUALITY_PHASES = {'SCHEDULED', 'APPROACHING', 'IMMINENT', 'LIVE', 'POST_COOLDOWN'}
 
 
 # ── Operational state model ────────────────────────────────────────────────────
@@ -273,13 +290,19 @@ def compute_macro_state() -> dict:
     )
     high_events = [e for e in today_events if e.get('importance') == 'high']
 
-    # Next actionable event
+    # Session-quality-active high events: scheduled or in governance window (not expired)
+    sq_high_events = [
+        e for e in high_events
+        if _compute_phase_and_mins(e.get('time_et', ''))[0] in _SESSION_QUALITY_PHASES
+    ]
+
+    # Next event in active governance window (includes post-event cooldown)
     next_event      = None
     active_phase    = 'CLEAR'
     minutes_to_next = None
     for ev in today_events:
         phase, mins = _compute_phase_and_mins(ev.get('time_et', ''))
-        if phase in ('APPROACHING', 'IMMINENT', 'LIVE'):
+        if phase in _GOVERNANCE_PHASES:
             next_event, active_phase, minutes_to_next = ev, phase, mins
             break
 
@@ -295,22 +318,27 @@ def compute_macro_state() -> dict:
     regime   = risk_state.get('market_regime', 'UNKNOWN')
     us10y    = float((snap.get('US10Y') or {}).get('last') or 0)
 
-    # Session quality
-    if len(high_events) >= 2 or vix >= 25:
-        sq, sq_reason = 'C', (f'{len(high_events)} HIGH events today' if len(high_events) >= 2 else f'VIX {vix:.0f}')
-    elif len(high_events) == 1:
-        sq, sq_reason = 'B', f'{high_events[0]["title"]} at {high_events[0]["time_et"]} ET'
+    # Session quality — uses lifecycle-aware events only (expired events don't count)
+    if len(sq_high_events) >= 2 or vix >= 25:
+        sq, sq_reason = 'C', (f'{len(sq_high_events)} HIGH events active' if len(sq_high_events) >= 2 else f'VIX {vix:.0f}')
+    elif len(sq_high_events) == 1:
+        sq, sq_reason = 'B', f'{sq_high_events[0]["title"]} at {sq_high_events[0]["time_et"]} ET'
     elif risk_state.get('red_folder_week') or vix >= 20:
         sq, sq_reason = 'B', ('Red folder week' if risk_state.get('red_folder_week') else f'VIX {vix:.0f}')
     else:
         sq, sq_reason = 'A', 'Clean macro environment'
 
-    # ORB reliability
-    pre_event    = active_phase in ('IMMINENT', 'LIVE') or (minutes_to_next is not None and minutes_to_next <= 15)
+    # ORB reliability — degraded during any governance-active window
+    pre_event    = active_phase in _GOVERNANCE_PHASES or (
+        minutes_to_next is not None and 0 <= minutes_to_next <= 15
+    )
     orb_reliable = sq == 'A' and not pre_event and vix < 20
 
     # Recommended action — single operational line
-    if active_phase in ('LIVE',) or (minutes_to_next is not None and minutes_to_next <= 0):
+    if active_phase == 'POST_COOLDOWN':
+        mins_ago = abs(minutes_to_next) if minutes_to_next is not None else 0
+        action = f'Post-event cooldown — {next_event["title"]} released {mins_ago}min ago. Allow market to settle.'
+    elif active_phase == 'LIVE' or (minutes_to_next is not None and minutes_to_next <= 0):
         action = f'Stand aside — {next_event["title"]} is live.'
     elif active_phase == 'IMMINENT':
         action = f'Stand aside — {next_event["title"]} in {minutes_to_next} min.'
@@ -705,8 +733,8 @@ def run_macro_calendar_check() -> list[dict]:
 
     for ev in today_events:
         phase, mins = _compute_phase_and_mins(ev.get('time_et', ''))
-        if phase in ('PASSED', 'LIVE', 'SCHEDULED', 'UNKNOWN'):
-            continue  # Not actionable at this phase
+        if phase not in ('APPROACHING', 'IMMINENT'):
+            continue  # Discord alerts only fire pre-event (not post-event or expired)
 
         severity, category = _classify_event(ev)
 
