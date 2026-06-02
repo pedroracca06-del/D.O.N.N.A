@@ -1,6 +1,6 @@
 # start_trading_session.ps1
-# Starts TradingView (CDP mode) + NOVA local monitor in a dedicated window.
-# Run this once before the session opens.
+# Starts TradingView (CDP mode) + NOVA feed server + NOVA local monitor.
+# Triggered automatically by Task Scheduler at 09:15 ET Mon-Fri.
 
 $DONNA_DIR = Split-Path $PSScriptRoot -Parent
 $PYTHON    = (Get-Command python -ErrorAction SilentlyContinue).Source
@@ -12,7 +12,7 @@ if (-not $PYTHON) {
 }
 
 # 1. TradingView (CDP mode)
-Write-Host "[1/2] Starting TradingView with CDP..." -ForegroundColor Cyan
+Write-Host "[1/3] Starting TradingView with CDP..." -ForegroundColor Cyan
 
 $tvPkg = Get-AppxPackage -Name "*TradingView*" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($tvPkg) {
@@ -31,17 +31,25 @@ if (-not $tvExe -or -not (Test-Path $tvExe)) {
     Start-Sleep -Seconds 5
 }
 
-# 2. NOVA monitor in its own persistent terminal window
-Write-Host "[2/2] Starting NOVA monitor..." -ForegroundColor Cyan
+# 2. Feed server (uvicorn) — market data + headline loops
+Write-Host "[2/3] Starting NOVA feed server (uvicorn)..." -ForegroundColor Cyan
+
+$feedCmd = "cd `"$DONNA_DIR`"; python -m uvicorn main:app --host 0.0.0.0 --port 8000"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $feedCmd -WindowStyle Normal
+Start-Sleep -Seconds 3
+
+Write-Host "      Feed server launched (port 8000)" -ForegroundColor Green
+
+# 3. NOVA reasoning monitor
+Write-Host "[3/3] Starting NOVA reasoning monitor..." -ForegroundColor Cyan
 
 $monitorScript = Join-Path $DONNA_DIR "donna_local_monitor.py"
-$cmd = "cd `"$DONNA_DIR`"; python `"$monitorScript`""
-
-Start-Process powershell -ArgumentList "-NoExit", "-Command", $cmd -WindowStyle Normal
+$monitorCmd = "cd `"$DONNA_DIR`"; python `"$monitorScript`""
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $monitorCmd -WindowStyle Normal
 
 Write-Host ""
 Write-Host "Session ready." -ForegroundColor Green
-Write-Host "  TradingView : CDP on port 9222"
-Write-Host "  NOVA monitor: running in separate window (09:30-11:00 ET)"
+Write-Host "  TradingView  : CDP on port 9222"
+Write-Host "  Feed server  : uvicorn on port 8000 (finnhub + headlines every 5-15 min)"
+Write-Host "  NOVA monitor : reasoning cycle every 60s, Discord alerts active"
 Write-Host ""
-Write-Host "Close the NOVA window to stop the monitor."
