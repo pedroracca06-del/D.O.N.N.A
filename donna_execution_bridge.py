@@ -19,7 +19,16 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+# Ensure .env is loaded before donna_execution reads its module-level API keys.
+# override=True so .env values take precedence over any stale env vars.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(Path(__file__).parent / '.env', override=True)
+except Exception:
+    pass
 
 if TYPE_CHECKING:
     from donna_alert_engine import AlertData
