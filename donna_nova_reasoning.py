@@ -217,6 +217,52 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
 
 # ── Session context evaluator (fast, deterministic) ────────────────────────────
 
+def _session_info(mins: int, weekday: int) -> dict:
+    """
+    Classify the current time into a trading session.
+
+    Sessions (ET):
+      ASIA       20:00-00:00  quality C  — PROS only, no ORB
+      DEAD_ZONE  00:00-03:00  quality dead
+      LONDON     03:00-08:30  quality B  — PROS only, no ORB
+      PRE_MARKET 08:30-09:30  quality dead
+      NY_OPEN    09:30-11:00  quality A  — PROS + ORB (highest priority)
+      NY_AM      11:00-12:30  quality B  — PROS continuation
+      LUNCH      12:30-13:30  quality dead
+      NY_PM      13:30-16:00  quality C  — PROS only
+      POST_CLOSE 16:00-18:00  quality dead
+      WEEKEND    Saturday / Sunday before 18:00  — dead
+
+    Sunday 18:00+ is treated as ASIA (CME Globex reopens 18:00 ET Sunday).
+    """
+    # Saturday: fully dead
+    if weekday == 5:
+        return {'name': 'WEEKEND', 'quality': 'dead', 'active': False, 'poll_interval': 300}
+    # Sunday before CME reopen
+    if weekday == 6 and mins < 18 * 60:
+        return {'name': 'WEEKEND', 'quality': 'dead', 'active': False, 'poll_interval': 300}
+
+    if 9 * 60 + 30 <= mins <= 11 * 60:
+        return {'name': 'NY_OPEN',    'quality': 'A',    'active': True,  'poll_interval': 60}
+    if 11 * 60 < mins <= 12 * 60 + 30:
+        return {'name': 'NY_AM',      'quality': 'B',    'active': True,  'poll_interval': 60}
+    if 12 * 60 + 30 < mins < 13 * 60 + 30:
+        return {'name': 'LUNCH',      'quality': 'dead', 'active': False, 'poll_interval': 300}
+    if 13 * 60 + 30 <= mins <= 16 * 60:
+        return {'name': 'NY_PM',      'quality': 'C',    'active': True,  'poll_interval': 60}
+    if 16 * 60 < mins < 18 * 60:
+        return {'name': 'POST_CLOSE', 'quality': 'dead', 'active': False, 'poll_interval': 300}
+    if mins >= 18 * 60:
+        return {'name': 'ASIA',       'quality': 'C',    'active': True,  'poll_interval': 60}
+    if mins < 3 * 60:
+        return {'name': 'DEAD_ZONE',  'quality': 'dead', 'active': False, 'poll_interval': 300}
+    if 3 * 60 <= mins < 8 * 60 + 30:
+        return {'name': 'LONDON',     'quality': 'B',    'active': True,  'poll_interval': 60}
+    if 8 * 60 + 30 <= mins < 9 * 60 + 30:
+        return {'name': 'PRE_MARKET', 'quality': 'dead', 'active': False, 'poll_interval': 120}
+    return     {'name': 'UNKNOWN',    'quality': 'dead', 'active': False, 'poll_interval': 300}
+
+
 def evaluate_session_context() -> dict:
     """
     Evaluate current session state without calling Claude.
@@ -224,16 +270,19 @@ def evaluate_session_context() -> dict:
     """
     now  = now_ny()
     mins = now.hour * 60 + now.minute
+    sess = _session_info(mins, now.weekday())
 
     ctx = {
         'time_et':          now.strftime('%H:%M ET'),
         'day':              now.strftime('%A'),
-        'in_window':        9 * 60 + 30 <= mins <= 11 * 60,
-        'window_open':      mins < 9 * 60 + 30,
-        'window_closed':    mins > 11 * 60,
+        'session':          sess['name'],
+        'session_quality':  sess['quality'],
+        'is_active':        sess['active'],
+        'is_dead_zone':     not sess['active'],
+        'poll_interval':    sess['poll_interval'],
         'ib_window_closed': mins >= 10 * 60 + 30,
-        'session':          'NY_OPEN' if 9 * 60 + 30 <= mins <= 11 * 60 else
-                            'PRE_MARKET' if mins < 9 * 60 + 30 else 'OFF_HOURS',
+        # Legacy — True only for NY_OPEN; kept for Claude prompt compatibility
+        'in_window':        sess['name'] == 'NY_OPEN',
         'daily_trades':     0,
         'daily_loss_hit':   False,
         'first_trade_won':  None,
@@ -248,8 +297,8 @@ def evaluate_session_context() -> dict:
         except Exception:
             pass
 
+    # session_blocked = account limits only — quality filtering is handled in _classify_signal
     ctx['session_blocked'] = (
-        not ctx['in_window'] or
         ctx['daily_loss_hit'] or
         ctx['daily_trades'] >= 2 or
         (ctx['daily_trades'] == 1 and ctx['first_trade_won'] is False)
@@ -543,20 +592,24 @@ def _classify_signal(
     Returns (alert_type, setup_type, rationale).
     Claude will confirm, grade, and enrich — this is the pre-filter only.
     """
+    session_name    = session_ctx.get('session', 'UNKNOWN')
+    session_quality = session_ctx.get('session_quality', 'dead')
+
     # Invalidation takes priority over everything
     if inv_eval['invalidated']:
         return INVALIDATION, inv_eval.get('setup_type', 'N/A'), inv_eval['reason']
 
-    # Session hard blocks
-    if not session_ctx['in_window']:
-        return None, 'N/A', 'Outside trading window'
+    # Dead zones — no analysis regardless of chart conditions
+    if session_ctx.get('is_dead_zone'):
+        return None, 'N/A', f'Dead zone ({session_name}) — no analysis'
 
+    # Account-level blocks
     if session_ctx['session_blocked']:
         if session_ctx['daily_loss_hit']:
             return NO_TRADE, 'N/A', 'Daily loss limit hit'
         return None, 'N/A', 'Session blocked (trades/loss threshold)'
 
-    # PROS signals — priority over ORB
+    # PROS signals — valid in all active sessions (ASIA, LONDON, NY_OPEN, NY_AM, NY_PM)
     if pros_eval['has_signal']:
         direction = pros_eval['direction']
         phase     = pros_eval['phase']
@@ -564,14 +617,16 @@ def _classify_signal(
         ib_draw   = ib_eval.get('draw', 'UNCLEAR')
         ib_tight  = ib_eval.get('ib_tight', False)
 
-        # IB context note (Claude will judge alignment more precisely)
         ib_note = ''
         if ib_draw != 'UNCLEAR' and ib_eval.get('aligned') is False:
             ib_note = f'countertrend vs {ib_draw}'
         elif ib_tight:
             ib_note = 'IB range tight — draw less reliable'
 
-        base_rationale = f'PROS {direction} | phase={phase} | OTE={pros_eval["ote_status"]}'
+        base_rationale = (
+            f'PROS {direction} | phase={phase} | OTE={pros_eval["ote_status"]}'
+            f' | session={session_name}({session_quality})'
+        )
         if ib_note:
             base_rationale += f' | IB: {ib_note}'
 
@@ -584,17 +639,15 @@ def _classify_signal(
         elif phase == 'BUILDING':
             return HEADS_UP, setup, base_rationale + ' | displacement building'
 
-    # ORB signals
-    if orb_eval.get('has_signal') and orb_eval.get('in_context'):
+    # ORB signals — NY_OPEN only, before IB window closes (09:30-10:30 ET)
+    orb_session_valid = session_name == 'NY_OPEN' and not session_ctx['ib_window_closed']
+    if orb_eval.get('has_signal') and orb_eval.get('in_context') and orb_session_valid:
         phase     = orb_eval['phase']
         setup     = orb_eval['setup_type']
-        direction = orb_eval['direction']
         orb_wide  = orb_eval.get('orb_wide', False)
 
         wide_note = ' | WIDE ORB — reliability reduced' if orb_wide else ''
         rationale = f'ORB {phase} | range={orb_eval.get("orb_range", "?"):.1f}pts{wide_note}'
-
-        # ORB E1 (midpoint rejection) or E2 (external liquidity rejection) both start as HEADS_UP
         return HEADS_UP, setup, rationale
 
     return None, 'N/A', 'No qualifying signal detected'
@@ -631,11 +684,19 @@ A deterministic pre-assessment has already been run. Your job is to confirm or o
 
 ## OPERATING PRINCIPLES
 - Quality over quantity. Silence is correct when there is no genuine edge.
-- Never alert outside 09:30–11:00 ET. Never alert when session_blocked=true.
+- Never alert when session_blocked=true (daily loss hit or trade limit reached).
 - A missed alert is better than a false positive. Be conservative.
 - HEADS_UP = setup forming BEFORE confirmation. This is the system's key differentiator.
 - EXECUTION_READY = setup confirmed and actionable RIGHT NOW.
 - Grade C or D setups → no alert. Downgrade rather than silence if context is partly bullish.
+
+## SESSION QUALITY THRESHOLDS
+The session context includes session_quality (A/B/C) and session name. Apply stricter grading in lower-quality sessions:
+- NY_OPEN (A): grade A or B → alert. Highest liquidity, ORB + PROS both valid.
+- NY_AM (B) / LONDON (B): grade A or B → alert. PROS only — ORB window closed.
+- NY_PM (C) / ASIA (C): grade A only → alert. Liquidity reduced, require near-perfect setup.
+- ORB is only valid during NY_OPEN session (09:30–10:30 ET). Never alert ORB outside that window.
+- In ASIA / LONDON sessions: apply extra caution on displacement size and continuation quality.
 
 ## ALERT TYPES
 HEADS_UP:        Setup forming — displacement in progress, OTE approaching, ORB reclaim developing,
@@ -797,9 +858,8 @@ def _build_evaluation_prompt(
 Symbol:        {symbol}
 Price:         {price}
 Time:          {session_ctx['time_et']}  ({session_ctx['day']})
-Session:       {session_ctx['session']}
-In window:     {session_ctx['in_window']} (09:30–11:00 ET)
-IB locked:     {session_ctx['ib_window_closed']} (locks at 10:30)
+Session:       {session_ctx['session']} (quality={session_ctx.get('session_quality','?')})
+IB locked:     {session_ctx['ib_window_closed']} (locks at 10:30 ET)
 Blocked:       {session_ctx['session_blocked']}
 Trades today:  {session_ctx['daily_trades']} / 2
 Daily loss:    {session_ctx['daily_loss_hit']}
