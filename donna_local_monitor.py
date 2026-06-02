@@ -63,11 +63,17 @@ def _time_et() -> str:
 
 
 def main() -> None:
+    import os
     from donna_nova_reasoning import run_reasoning_cycle
     from donna_alert_engine import deliver_alert
+    from donna_execution_bridge import route_to_execution
+
+    _auto_execute = os.getenv('NOVA_AUTO_EXECUTE', 'false').strip().lower() == 'true'
+    _exec_label   = 'ENABLED (paper only)' if _auto_execute else 'DISABLED — set NOVA_AUTO_EXECUTE=true to enable'
 
     log.info('NOVA monitor started')
     log.info('Active: ASIA 20:00-00:00 | LONDON 03:00-08:30 | NY_OPEN 09:30-11:00 | NY_AM 11:00-12:30 | NY_PM 13:30-16:00')
+    log.info(f'Auto-execute: {_exec_label}')
     log.info('Ctrl+C to stop\n')
 
     while True:
@@ -87,6 +93,25 @@ def main() -> None:
                             f'| {alert.direction} | grade={grade}'
                         )
                         deliver_alert(alert)
+
+                        # Route EXECUTION_READY grade A/B alerts to the execution bot.
+                        # Bridge enforces paper-mode check and all pre-conditions.
+                        # execute_signal() runs all governance rules — bridge never bypasses.
+                        if getattr(alert, 'alert_type', '') == 'EXECUTION_READY':
+                            try:
+                                bridge_result = route_to_execution(alert)
+                                b_status = bridge_result.get('status', '?')
+                                b_detail = (
+                                    bridge_result.get('result', {}).get('status', '')
+                                    or bridge_result.get('reason', '')
+                                    or bridge_result.get('code', '')
+                                )
+                                log.info(
+                                    f'BRIDGE [{name}] {alert.symbol} {alert.direction} '
+                                    f'grade={grade} → {b_status} {b_detail}'
+                                )
+                            except Exception as be:
+                                log.error(f'Bridge error: {be}')
                 else:
                     log.info(f'{_time_et()} [{name} Q:{quality}] — no signal')
 

@@ -1368,7 +1368,7 @@ def execute_signal(signal_result: dict) -> dict:
             'UNKNOWN_INSTRUMENT', f'Unknown instrument: {instrument}', data, parsed))
         return {'status': 'skipped', 'reason': f'Unknown instrument: {instrument}', 'code': 'UNKNOWN_INSTRUMENT'}
 
-    print(f'[execute_signal] Signal routed: {instrument} → {routed_etf}')
+    print(f'[execute_signal] Signal routed: {instrument} -> {routed_etf}')
 
     # Generate or use provided signal_id; check and store for dedup
     signal_id      = data.get('signal_id') or f"{ticker}_{now_ny().strftime('%Y%m%d_%H%M%S')}"
