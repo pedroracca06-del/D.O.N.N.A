@@ -542,14 +542,19 @@ def process_headlines_cycle():
         print(f'[state_engine] Updated — macro_risk (calendar): {cal_macro_risk}')
         try:
             from donna_execution import set_red_folder_lock
-            # red_folder_lock only triggers for HIGH events — MEDIUM events never block execution
+            # Persistent red_folder_lock is now reserved for IMMINENT/LIVE only (≤15 min).
+            # The dynamic _red_folder_status() in donna_execution handles pre/post-event
+            # lifecycle and post-event normalisation automatically.
+            # APPROACHING (15-45 min) no longer sets a persistent lock — the dynamic
+            # check fires at the right time without stale state leaking post-event.
             _, high_phase_mins = _compute_next_event(today_high) if today_high else (None, None)
             high_phase = _phase_from_mins(high_phase_mins)
-            if today_high and high_phase in ('LIVE', 'IMMINENT', 'APPROACHING'):
+            if today_high and high_phase in ('LIVE', 'IMMINENT'):
                 next_high_name = today_high[0]['title'] if today_high else next_event
                 set_red_folder_lock(True, next_high_name)
                 print(f'[state_engine] red_folder_lock SET — {next_high_name} ({high_phase})')
             else:
+                # Clear persistent lock — dynamic _red_folder_status() governs from here
                 set_red_folder_lock(False)
         except Exception as _re:
             print(f'[state_engine] set_red_folder_lock failed: {_re}')

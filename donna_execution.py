@@ -327,13 +327,87 @@ def _get_daily_state() -> dict:
 
 # ── RULE 1: RED FOLDER ─────────────────────────────────────────
 
+def _assess_post_event_conditions() -> dict:
+    """
+    Evaluate live market conditions to determine if post-event chaos warrants
+    continued restriction, or if the market has normalised.
+
+    Reads from donna_risk_state.json (populated by macro/news loops).
+    Returns: {'disordered': bool, 'extreme': bool, 'reason': str}
+
+    Extreme thresholds (justify EOD degraded posture):
+      - NQ session move > 2.5%  (≈ 75–80 pts at current levels)
+      - VIX proxy (VIXY) up > 15% on the day
+    Disordered thresholds (justify temporary extension):
+      - NQ session move > 1.2%
+      - VIX proxy up > 7%
+      - macro_risk == 'high'
+    """
+    try:
+        from donna_state import load_risk_state
+        risk     = load_risk_state()
+        snapshot = risk.get('market_snapshot', {})
+
+        macro_risk = str(risk.get('macro_risk', 'low')).lower()
+
+        nq  = snapshot.get('NQ',   {})
+        nq_pct  = abs(float(nq.get('pct',  0) or 0))
+
+        vixy = snapshot.get('VIXY', {})
+        vix_pct = abs(float(vixy.get('pct', 0) or 0))
+
+        reasons: list[str] = []
+        disordered = False
+        extreme    = False
+
+        if nq_pct > 2.5:
+            extreme    = True
+            disordered = True
+            reasons.append(f'NQ {nq_pct:.1f}% session move (extreme)')
+        elif nq_pct > 1.2:
+            disordered = True
+            reasons.append(f'NQ {nq_pct:.1f}% session move')
+
+        if vix_pct > 15:
+            extreme    = True
+            disordered = True
+            reasons.append(f'VIX proxy +{vix_pct:.1f}% (extreme)')
+        elif vix_pct > 7:
+            disordered = True
+            reasons.append(f'VIX proxy +{vix_pct:.1f}%')
+
+        if macro_risk == 'high':
+            disordered = True
+            reasons.append('macro_risk=high')
+
+        return {
+            'disordered': disordered,
+            'extreme':    extreme,
+            'reason':     ', '.join(reasons) if reasons else 'conditions normal',
+        }
+    except Exception:
+        return {'disordered': False, 'extreme': False, 'reason': 'assessment unavailable'}
+
+
 def _red_folder_status() -> dict:
     """
-    Read donna_macro_events.json, find HIGH-importance events, check ±30-min
-    blackout window around each.  Also locate the next upcoming HIGH event.
+    Three-phase red-folder governance lifecycle.
+
+    Phase 1 — PRE_EVENT  (T-30 to T):      hard lock, no trading
+    Phase 2 — POST_EVENT (T to T+30):      hard lock, immediate cooldown
+    Phase 3 — NORMALIZING (T+30 to T+60): evaluate market conditions
+        - conditions normal  → active=False, trading resumes
+        - conditions disordered → active=True (temporary extension)
+        - conditions extreme    → active=True (extended posture, noted)
+    Beyond T+60: active=False unless extreme flag persists
+
+    Full-day lockout is reserved for genuinely extreme reactions
+    (massive candle, severe VIX spike, structural disorder).
+    Routine macro noise auto-clears at T+30 if conditions normalise.
     """
     result: dict = {
         'active':             False,
+        'phase':              '',
         'reason':             '',
         'next_event_name':    '',
         'next_event_time_et': '',
@@ -343,7 +417,7 @@ def _red_folder_status() -> dict:
     try:
         events = load_macro_events().get('events', [])
     except Exception:
-        return result  # fail open — don't block on unreadable calendar
+        return result  # fail open — never block on unreadable calendar
 
     now_et      = now_ny()
     today_str   = now_et.strftime('%Y-%m-%d')
@@ -353,8 +427,6 @@ def _red_folder_status() -> dict:
     for event in events:
         if str(event.get('importance', '')).lower() != 'high':
             continue
-        # Only evaluate events scheduled for today — prevents stale/off-date events from
-        # triggering the blackout window
         if event.get('date') and event.get('date') != today_str:
             continue
         time_str = str(event.get('time_et', '')).strip()
@@ -366,17 +438,61 @@ def _red_folder_status() -> dict:
         except Exception:
             continue
 
-        window_start = ev_mins - _RED_FOLDER_MINS
-        window_end   = ev_mins + _RED_FOLDER_MINS
-        title        = event.get('title', f'HIGH event at {time_str} ET')
+        title      = event.get('title', f'HIGH event at {time_str} ET')
+        pre_start  = ev_mins - _RED_FOLDER_MINS          # T-30: pre-event lock begins
+        post_end   = ev_mins + _RED_FOLDER_MINS          # T+30: hard cooldown ends
+        norm_end   = ev_mins + _RED_FOLDER_MINS * 2      # T+60: normalisation window ends
 
-        if window_start <= now_et_mins <= window_end:
-            result['active'] = True
-            result['reason'] = (
-                f'RED_FOLDER_WINDOW — {title} at {time_str} ET, '
-                f'within ±{_RED_FOLDER_MINS}min blackout'
-            )
+        if pre_start <= now_et_mins < ev_mins:
+            # Phase 1: Pre-event blackout
+            mins_to = ev_mins - now_et_mins
+            result.update({
+                'active': True,
+                'phase':  'PRE_EVENT',
+                'reason': f'RED_FOLDER PRE-EVENT — {title} in {mins_to}min',
+            })
 
+        elif ev_mins <= now_et_mins <= post_end:
+            # Phase 2: Immediate post-event cooldown — always locked
+            mins_since = now_et_mins - ev_mins
+            result.update({
+                'active': True,
+                'phase':  'POST_EVENT',
+                'reason': f'RED_FOLDER POST-EVENT — {title}, {mins_since}min since release',
+            })
+
+        elif post_end < now_et_mins <= norm_end:
+            # Phase 3: Normalisation window — conditions decide
+            disorder   = _assess_post_event_conditions()
+            mins_since = now_et_mins - ev_mins
+            if disorder['extreme']:
+                result.update({
+                    'active': True,
+                    'phase':  'EXTREME',
+                    'reason': (
+                        f'RED_FOLDER EXTREME — {title}, {mins_since}min post, '
+                        f'{disorder["reason"]} — degraded posture maintained'
+                    ),
+                })
+            elif disorder['disordered']:
+                result.update({
+                    'active': True,
+                    'phase':  'NORMALIZING',
+                    'reason': (
+                        f'RED_FOLDER NORMALIZING — {title}, {mins_since}min post, '
+                        f'{disorder["reason"]}'
+                    ),
+                })
+            else:
+                # Conditions normal — trading resumes
+                result.update({
+                    'active': False,
+                    'phase':  'CLEARED',
+                    'reason': f'RED_FOLDER CLEARED — {title}, conditions normalised at {mins_since}min post',
+                })
+            print(f'[red_folder] phase=3 | {result["phase"]} | {disorder["reason"]}')
+
+        # Track next upcoming event
         if ev_mins > now_et_mins:
             upcoming.append((ev_mins, title))
 
