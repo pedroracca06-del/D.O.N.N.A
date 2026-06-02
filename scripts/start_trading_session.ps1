@@ -31,6 +31,10 @@ if (-not $tvExe -or -not (Test-Path $tvExe)) {
     Start-Sleep -Seconds 5
 }
 
+# Enable auto-execution bridge (paper mode only — bridge enforces this internally)
+$env:NOVA_AUTO_EXECUTE = 'true'
+Write-Host "      NOVA_AUTO_EXECUTE=true (paper mode)" -ForegroundColor DarkCyan
+
 # 2. Feed server (uvicorn) — market data + headline loops
 Write-Host "[2/3] Starting NOVA feed server (uvicorn)..." -ForegroundColor Cyan
 
