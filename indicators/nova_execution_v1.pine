@@ -404,15 +404,17 @@ if barstate.islast and showHistORB
 // Labels expose "IB HIGH" / "IB LOW" text for DONNA MCP level extraction.
 ibLineColor = color.new(#40C4FF, 0)    // bright sky blue — visible against dark background
 ibLabelColor = color.new(#40C4FF, 0)
-ibVisible   = not na(ibHigh) and not na(ibLow) and hourNow < 17 and
-              (hourNow > 10 or (hourNow == 10 and minuteNow >= 30))
+// IB visible from 10:30 through end of NY AM (12:30) only
+ibVisible   = not na(ibHigh) and not na(ibLow) and
+              (hourNow > 10 or (hourNow == 10 and minuteNow >= 30)) and
+              (hourNow < 12 or (hourNow == 12 and minuteNow <= 30))
 
 if ibVisible and barstate.islast
     _ibStart = na(ibLockBar) ? bar_index - 50 : ibLockBar
 
     if na(ibHighLine)
         ibHighLine := line.new(_ibStart, ibHigh, bar_index, ibHigh,
-             color=ibLineColor, width=2, style=line.style_solid, extend=extend.right)
+             color=ibLineColor, width=2, style=line.style_solid, extend=extend.none)
     else
         line.set_color(ibHighLine, ibLineColor)
         line.set_y1(ibHighLine, ibHigh)
@@ -422,7 +424,7 @@ if ibVisible and barstate.islast
 
     if na(ibLowLine)
         ibLowLine := line.new(_ibStart, ibLow, bar_index, ibLow,
-             color=ibLineColor, width=2, style=line.style_solid, extend=extend.right)
+             color=ibLineColor, width=2, style=line.style_solid, extend=extend.none)
     else
         line.set_color(ibLowLine, ibLineColor)
         line.set_y1(ibLowLine, ibLow)
