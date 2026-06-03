@@ -1053,8 +1053,136 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         f'pre={signal_type} | alert={alert_required} | grade={decision.get("grade", "?")} | {log_reason}'
     )
 
+    # ── Operational intelligence log — capture every evaluated signal ──────────
+    try:
+        from donna_signal_log import log_cycle
+        from donna_state import load_risk_state
+
+        # Screenshot only when Claude graded a real signal
+        _screenshot = ''
+        if alert_required or signal_type in ('EXECUTION_READY', 'HEADS_UP'):
+            try:
+                from donna_alert_engine import capture_screenshot
+                _ss = capture_screenshot()
+                _screenshot = str(_ss) if _ss else ''
+            except Exception:
+                pass
+
+        # Macro context from risk state
+        try:
+            _risk = load_risk_state()
+            _snap = _risk.get('market_snapshot', {})
+            _vix  = float((_snap.get('VIX') or {}).get('last') or 0) or None
+            _nq_p = float((_snap.get('NQ')  or {}).get('pct')  or 0) or None
+            _es_p = float((_snap.get('ES')  or {}).get('pct')  or 0) or None
+            _macro_risk = _risk.get('macro_risk', '')
+            _regime     = _risk.get('market_regime', '')
+        except Exception:
+            _vix = _nq_p = _es_p = None
+            _macro_risk = _regime = ''
+
+        ohlcv      = chart_ctx.get('ohlcv', {})
+        orb_parsed = nova_state.get('orb', {})
+
+        log_cycle(
+            # Instrument
+            symbol       = symbol,
+            price        = chart_ctx.get('price'),
+            high_30      = ohlcv.get('high_30'),
+            low_30       = ohlcv.get('low_30'),
+            range_30     = ohlcv.get('range_30'),
+            change_pct   = str(ohlcv.get('change_pct', '')),
+            levels       = chart_ctx.get('nova_levels', []),
+
+            # Session
+            session         = session_ctx.get('session', ''),
+            session_quality = session_ctx.get('session_quality', ''),
+
+            # NOVA indicator
+            nova_cmd      = main_state.get('CMD', ''),
+            nova_state_val= main_state.get('STATE', ''),
+            nova_score    = main_state.get('SCORE', ''),
+            nova_conf     = main_state.get('CONF', ''),
+
+            # PROS
+            pros_phase    = pros_eval.get('phase', ''),
+            pros_direction= pros_eval.get('direction', ''),
+            pros_signal   = bool(pros_eval.get('has_signal')),
+            pros_strength = pros_eval.get('signal_strength', ''),
+            pros_ote      = pros_eval.get('ote_status', ''),
+            pros_displ    = pros_state_data.get('DISPL', ''),
+            pros_retrace  = pros_state_data.get('RETRACE', ''),
+            pros_cont     = pros_state_data.get('CONT', ''),
+            pros_quality  = pros_state_data.get('QUALITY', ''),
+            pros_stdv     = pros_state_data.get('STDV', ''),
+
+            # ORB
+            orb_state  = orb_parsed.get('STATE', ''),
+            orb_bias   = orb_parsed.get('BIAS', ''),
+            orb_high   = _safe_float(orb_parsed.get('HIGH')),
+            orb_mid    = _safe_float(orb_parsed.get('MID')),
+            orb_low    = _safe_float(orb_parsed.get('LOW')),
+            orb_signal = bool(orb_eval.get('has_signal')),
+            orb_phase  = orb_eval.get('phase', ''),
+            orb_range  = orb_eval.get('orb_range'),
+
+            # IB
+            ib_high    = ib_eval.get('ib_high'),
+            ib_low     = ib_eval.get('ib_low'),
+            ib_draw    = ib_eval.get('draw', ''),
+            ib_aligned = ib_eval.get('aligned'),
+            ib_tight   = bool(ib_eval.get('ib_tight')),
+
+            # Invalidation
+            invalidated = bool(inv_eval.get('invalidated')),
+            inv_reason  = inv_eval.get('reason', ''),
+
+            # Pre-classification
+            pre_signal   = signal_type or '',
+            pre_setup    = setup_type or '',
+            pre_rationale= rationale or '',
+
+            # Claude decision
+            claude_called  = True,
+            alert_required = bool(alert_required),
+            alert_type     = decision.get('alert_type', '') or '',
+            grade          = decision.get('grade', '') or '',
+            setup_type     = decision.get('setup_type', '') or '',
+            direction      = decision.get('direction', '') or '',
+            entry_zone     = decision.get('entry_zone', '') or '',
+            stop           = decision.get('stop', '') or '',
+            tp1            = decision.get('tp1', '') or '',
+            rr             = decision.get('rr', '') or '',
+            ib_draw_claude = decision.get('ib_draw', '') or '',
+            daily_bias     = decision.get('daily_bias', '') or '',
+            htf_4h_bias    = decision.get('htf_4h_bias', '') or '',
+            action         = decision.get('action', '') or '',
+            notes          = decision.get('notes', '') or '',
+            no_alert_reason= decision.get('no_alert_reason', '') or '',
+
+            # Macro
+            macro_risk = _macro_risk,
+            vix        = _vix,
+            regime     = _regime,
+            nq_pct     = _nq_p,
+            es_pct     = _es_p,
+
+            # Screenshot
+            screenshot = _screenshot,
+        )
+    except Exception as _sle:
+        print(f'[signal_log] log error: {_sle}')
+
     alert = decision_to_alert(decision, symbol)
     return [alert] if alert else []
+
+
+def _safe_float(val) -> Optional[float]:
+    """Parse a float from a string or number, return None on failure."""
+    try:
+        return float(val) if val not in (None, '', '—') else None
+    except (TypeError, ValueError):
+        return None
 
 
 # ── Top-level reasoning cycle ──────────────────────────────────────────────────
