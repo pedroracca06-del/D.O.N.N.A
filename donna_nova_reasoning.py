@@ -50,7 +50,7 @@ except Exception:
 
 # ── MCP data collection ────────────────────────────────────────────────────────
 
-def _run_mcp(*args: str) -> Optional[dict]:
+def _run_mcp(*args: str, timeout: int = 10) -> Optional[dict]:
     """Run a TradingView MCP CLI command. Returns parsed JSON or None."""
     try:
         result = subprocess.run(
@@ -58,7 +58,7 @@ def _run_mcp(*args: str) -> Optional[dict]:
             cwd=str(_MCP_DIR),
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
         )
         if result.returncode == 0 and result.stdout.strip():
             data = json.loads(result.stdout.strip())
@@ -124,52 +124,72 @@ def read_chart_context() -> dict:
     return ctx
 
 
+# Instruments the scanner evaluates every cycle.
+# Scanner is instrument-native — execution routing (ETF proxy vs direct futures)
+# is handled downstream by the bridge and broker layer, not here.
+_SCAN_SYMBOLS = [
+    'CME_MINI:MES1!',   # Micro E-mini S&P 500
+    'CME_MINI:MNQ1!',   # Micro E-mini Nasdaq-100
+]
+
+# Extra wait after symbol switch (CLI already calls waitForChartReady internally)
+_SYMBOL_SWITCH_WAIT = 0.3
+
+
 def _collect_all_contexts() -> list[dict]:
     """
-    Read chart context from every open TradingView tab.
+    Read chart context for every instrument in _SCAN_SYMBOLS.
 
-    Primary tab (index 0) is read without switching — always first in the list.
-    Secondary tabs (NQ/MNQ etc.) are read by switching to them and back.
-    The switch is sub-second and transparent to the trader.
+    Uses symbol switching on the single active chart — reliable across all
+    TradingView configurations (desktop tabs share chart_id; symbol switching
+    does not have this limitation).
 
-    Returns list of chart contexts. Empty if TradingView is unreachable.
+    Flow per symbol:
+      1. Switch chart to target symbol
+      2. Wait for chart to render
+      3. Read full NOVA context (tables, levels, labels, OHLCV)
+      4. Tag context with symbol metadata
+
+    After all symbols are read, restores the chart to its original symbol.
+    The total scan adds ~2-3 seconds per cycle — negligible at 60s polling.
+
+    Returns list of chart contexts (one per symbol). Empty if TradingView
+    is unreachable.
     """
     import time
 
-    tabs_result = _run_mcp('tab', 'list')
-    tabs = (tabs_result or {}).get('tabs', [])
-
-    if len(tabs) <= 1:
+    # Verify connection and record current symbol to restore later
+    current = _run_mcp('symbol')
+    if not current or not current.get('success'):
         ctx = read_chart_context()
         return [ctx] if ctx.get('connected') else []
 
+    original_symbol = current.get('symbol', '')
     contexts: list[dict] = []
-    primary_index = tabs[0].get('index', 0)
 
-    # Primary tab — read without switching
-    primary_ctx = read_chart_context()
-    if primary_ctx.get('connected'):
-        primary_ctx['tab_index'] = primary_index
-        primary_ctx['is_primary'] = True
-        contexts.append(primary_ctx)
-
-    # Secondary tabs — switch, read, switch back
-    for tab in tabs[1:]:
-        idx = tab.get('index', -1)
-        if idx < 0:
-            continue
-        switched = _run_mcp('tab', 'switch', str(idx))
+    for symbol in _SCAN_SYMBOLS:
+        # Switch to target symbol — use extended timeout (CLI waits up to 10s for chart_ready)
+        switched = _run_mcp('symbol', symbol, timeout=20)
         if not switched or not switched.get('success'):
+            print(f'[nova-scan] symbol switch failed: {symbol}')
             continue
-        time.sleep(0.8)          # wait for chart to render after tab switch
-        sec_ctx = read_chart_context()
-        if sec_ctx.get('connected'):
-            sec_ctx['tab_index'] = idx
-            sec_ctx['is_primary'] = False
-            contexts.append(sec_ctx)
 
-    # Always restore primary tab
-    _run_mcp('tab', 'switch', str(primary_index))
+        time.sleep(_SYMBOL_SWITCH_WAIT)
+
+        ctx = read_chart_context()
+        if ctx.get('connected'):
+            ctx['scanned_symbol'] = symbol
+            ctx['is_primary']     = (symbol == _SCAN_SYMBOLS[0])
+            contexts.append(ctx)
+            sym_short = symbol.replace('CME_MINI:', '').replace('1!', '')
+            print(f'[nova-scan] {sym_short}  price={ctx.get("price")}  '
+                  f'tables={len(ctx.get("nova_tables", []))}')
+        else:
+            print(f'[nova-scan] no context for {symbol}')
+
+    # Restore original symbol — trader's chart returns to where it was
+    if original_symbol:
+        _run_mcp('symbol', original_symbol, timeout=20)
 
     return contexts
 
