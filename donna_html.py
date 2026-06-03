@@ -1890,17 +1890,44 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
       <!-- ANALYTICS PANEL -->
       <div id="jPanel-analytics" style="display:none">
 
+        <!-- KEY METRICS -->
         <div style="margin-bottom:20px">
           <div class="kicker">Performance Summary</div>
-          <div class="j-analytics-grid" id="jAnalyticsGrid">
+          <div class="j-analytics-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+            <div class="j-stat-card" style="border-color:rgba(184,134,11,.2)">
+              <div class="jsc-lab">Expectancy</div>
+              <div class="jsc-val" id="jaExpectancy" style="font-size:22px">—</div>
+              <div class="jsc-sub">Per trade avg $</div>
+            </div>
             <div class="j-stat-card"><div class="jsc-lab">Total Trades</div><div class="jsc-val" id="jaTotalTrades">0</div><div class="jsc-sub">All logged</div></div>
             <div class="j-stat-card"><div class="jsc-lab">Win Rate</div><div class="jsc-val" id="jaWinRate">—</div><div class="jsc-sub" id="jaWRSub">—</div></div>
             <div class="j-stat-card"><div class="jsc-lab">Profit Factor</div><div class="jsc-val" id="jaPF">—</div><div class="jsc-sub" id="jaAvgWL">—</div></div>
-            <div class="j-stat-card"><div class="jsc-lab">Best Regime</div><div class="jsc-val" id="jaBestRegime" style="font-size:16px;line-height:1.2">—</div><div class="jsc-sub" id="jaWorstRegime">—</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Avg Win</div><div class="jsc-val" id="jaAvgWin" style="color:var(--green)">—</div><div class="jsc-sub" id="jaAvgLoss">Avg L: —</div></div>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+        <!-- BREAKDOWN GRID -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start">
+
+          <!-- Setup Type -->
+          <div class="panel">
+            <div class="kicker">By Setup Type</div>
+            <div class="section-title" style="margin-bottom:12px">Setup Performance</div>
+            <div class="regime-breakdown-grid" id="setupTypeGrid">
+              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
+            </div>
+          </div>
+
+          <!-- Session -->
+          <div class="panel">
+            <div class="kicker">By Session</div>
+            <div class="section-title" style="margin-bottom:12px">Session Performance</div>
+            <div class="regime-breakdown-grid" id="sessionBreakdownGrid">
+              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
+            </div>
+          </div>
+
+          <!-- Regime -->
           <div class="panel">
             <div class="kicker">By Market Regime</div>
             <div class="section-title" style="margin-bottom:12px">Regime Performance</div>
@@ -1908,12 +1935,25 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
               <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
             </div>
           </div>
+
+          <!-- Behavioral -->
           <div class="panel">
-            <div class="kicker">By Session</div>
-            <div class="section-title" style="margin-bottom:12px">Session Performance</div>
-            <div class="regime-breakdown-grid" id="sessionBreakdownGrid">
-              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
+            <div class="kicker">Behavioral Patterns</div>
+            <div class="section-title" style="margin-bottom:12px">Error Frequency</div>
+            <div id="behavioralAnalyticsGrid">
+              <div style="font-size:12px;color:var(--muted2);padding:12px 0">No behavioral flags recorded yet.</div>
             </div>
+          </div>
+
+        </div>
+
+        <!-- EMOTIONAL STATE PERFORMANCE -->
+        <div class="panel">
+          <div class="kicker">Emotional Intelligence</div>
+          <div class="section-title" style="margin-bottom:6px">State vs Performance</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Correlation between reported emotional state and trade outcome.</div>
+          <div id="emotionalAnalyticsGrid">
+            <div style="font-size:12px;color:var(--muted2);padding:8px 0">No emotional state data yet. Tag your trades to build this profile.</div>
           </div>
         </div>
 
@@ -3845,7 +3885,7 @@ function renderJournal(data) {
   // Trade count badge
   setText('jTabCount-trades', trades.length);
 
-  // Analytics stats
+  // ── Analytics stats ──────────────────────────────────────────
   setText('jaTotalTrades', stats.total || 0);
   const jaWR = document.getElementById('jaWinRate');
   if (jaWR) { jaWR.textContent = wr !== null ? wr + '%' : '—'; jaWR.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)'; }
@@ -3855,6 +3895,91 @@ function renderJournal(data) {
   setText('jaBestRegime', stats.best_regime || '—');
   setText('jaWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
   setText('jAvgWinLoss', `Avg W: ${stats.avg_win ? '$'+stats.avg_win : '—'} / Avg L: ${stats.avg_loss ? '$'+stats.avg_loss : '—'}`);
+
+  // Expectancy
+  const exp = stats.expectancy;
+  const expEl = document.getElementById('jaExpectancy');
+  if (expEl && exp !== undefined) {
+    expEl.textContent = (exp >= 0 ? '+$' : '-$') + Math.abs(exp).toFixed(2);
+    expEl.style.color = exp > 0 ? 'var(--green)' : exp < 0 ? 'var(--red)' : 'var(--muted2)';
+  }
+  const avgWinEl = document.getElementById('jaAvgWin');
+  if (avgWinEl) { avgWinEl.textContent = stats.avg_win ? '+$'+stats.avg_win : '—'; }
+  const avgLossEl = document.getElementById('jaAvgLoss');
+  if (avgLossEl) { avgLossEl.textContent = 'Avg L: ' + (stats.avg_loss ? '-$'+stats.avg_loss : '—'); }
+
+  // Helper: render a breakdown grid
+  function renderBreakdownGrid(elId, data, colorMap) {
+    const entries = Object.entries(data || {}).sort((a,b) => b[1].win_rate - a[1].win_rate);
+    if (!entries.length) { setHtml(elId, '<div class="regime-card"><div class="rc-sub">No data yet.</div></div>'); return; }
+    setHtml(elId, entries.map(([key, v]) => {
+      const wrc = v.win_rate >= 55 ? 'var(--green)' : v.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)';
+      const borderC = (colorMap && colorMap[key]) || 'var(--line)';
+      const total = (v.wins||0) + (v.losses||0) + (v.breakevens||0);
+      const pnlStr = v.pnl !== undefined ? ` · ${v.pnl >= 0 ? '+$'+v.pnl.toFixed(2) : '-$'+Math.abs(v.pnl).toFixed(2)}` : '';
+      return `<div class="regime-card" style="border-color:${borderC}44">
+        <div class="rc-name" style="color:${borderC};font-size:13px">${key.replace(/_/g,' ')}</div>
+        <div class="rc-wr" style="color:${wrc}">${v.win_rate}%</div>
+        <div class="rc-sub">${v.wins}W · ${v.losses}L · ${total} trades${pnlStr}</div>
+      </div>`;
+    }).join(''));
+  }
+
+  const regimeColorMap = {TRENDING:'var(--green)',RANGING:'var(--blue)',EVENT_DRIVEN:'var(--yellow)',RISK_OFF:'var(--red)',CONSOLIDATING:'var(--muted2)'};
+  renderBreakdownGrid('regimeBreakdownGrid', stats.by_regime, regimeColorMap);
+  renderBreakdownGrid('sessionBreakdownGrid', stats.by_session, null);
+  renderBreakdownGrid('setupTypeGrid', stats.by_setup_type, null);
+
+  // Behavioral error frequency
+  const bfreq = stats.behavioral_frequency || {};
+  const berr  = stats.behavioral_error_count || 0;
+  const bEntries = Object.entries(bfreq);
+  const bEl = document.getElementById('behavioralAnalyticsGrid');
+  if (bEl) {
+    if (!bEntries.length) {
+      bEl.innerHTML = '<div style="font-size:12px;color:var(--muted2);padding:12px 0">No behavioral flags recorded yet.</div>';
+    } else {
+      const maxCount = Math.max(...bEntries.map(([,c]) => c));
+      bEl.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${berr} trade${berr!==1?'s':''} had at least one flag</div>`
+        + bEntries.map(([flag, count]) => {
+          const pct = Math.round(count / maxCount * 100);
+          return `<div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+              <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--text)">${flag.replace(/_/g,' ')}</span>
+              <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)">${count}×</span>
+            </div>
+            <div style="height:4px;background:var(--line);border-radius:2px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:var(--red);border-radius:2px;transition:width .4s"></div>
+            </div>
+          </div>`;
+        }).join('');
+    }
+  }
+
+  // Emotional state performance
+  const byEmotion = stats.by_emotional_state || {};
+  const eEntries  = Object.entries(byEmotion).sort((a,b) => b[1].win_rate - a[1].win_rate);
+  const eEl = document.getElementById('emotionalAnalyticsGrid');
+  if (eEl) {
+    if (!eEntries.length) {
+      eEl.innerHTML = '<div style="font-size:12px;color:var(--muted2);padding:8px 0">No emotional state data yet. Tag your trades to build this profile.</div>';
+    } else {
+      const stateColor = {CALM:'var(--green)',CONFIDENT:'var(--green)',ANXIOUS:'var(--yellow)',HESITANT:'var(--yellow)',IMPULSIVE:'var(--red)',FRUSTRATED:'var(--red)'};
+      eEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">`
+        + eEntries.map(([state, v]) => {
+          const wrc = v.win_rate >= 55 ? 'var(--green)' : v.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)';
+          const sc  = stateColor[state] || 'var(--muted2)';
+          const total = (v.wins||0) + (v.losses||0) + (v.breakevens||0);
+          const pnlStr = v.pnl !== undefined ? (v.pnl >= 0 ? '+$'+v.pnl.toFixed(2) : '-$'+Math.abs(v.pnl).toFixed(2)) : '—';
+          return `<div class="regime-card" style="border-color:${sc}33">
+            <div class="rc-name" style="color:${sc};font-size:13px">${state}</div>
+            <div class="rc-wr" style="color:${wrc}">${v.win_rate}%</div>
+            <div class="rc-sub">${v.wins}W · ${v.losses}L · ${total} trades</div>
+            <div class="rc-sub" style="margin-top:4px">${pnlStr}</div>
+          </div>`;
+        }).join('') + '</div>';
+    }
+  }
 
   // Filter bar
   const filterLabels = {all:'All Time', week:'This Week', month:'This Month'};

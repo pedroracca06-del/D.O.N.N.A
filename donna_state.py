@@ -157,16 +157,29 @@ def compute_journal_stats(trades: list) -> dict:
 
     wins, losses, breakevens = 0, 0, 0
     win_pnl, loss_pnl = [], []
-    regime_buckets: dict = {}
-    session_buckets: dict = {}
+    regime_buckets: dict       = {}
+    session_buckets: dict      = {}
+    setup_type_buckets: dict   = {}
     strategy_family_buckets: dict = {}
+    behavioral_freq: dict      = {}
+    emotional_buckets: dict    = {}
+    behavioral_error_count     = 0
     daily_today = daily_yesterday = daily_week = 0.0
+
+    def _bucket_outcome(bucket, key, outcome):
+        if key not in bucket:
+            bucket[key] = {'wins': 0, 'losses': 0, 'breakevens': 0, 'pnl': 0.0}
+        if outcome == 'WIN':
+            bucket[key]['wins'] += 1
+        elif outcome == 'LOSS':
+            bucket[key]['losses'] += 1
+        else:
+            bucket[key]['breakevens'] += 1
 
     for t in trades:
         outcome   = str(t.get('outcome', '')).upper()
         direction = str(t.get('direction', 'LONG')).upper()
 
-        # P&L priority: realized_pnl if present, else calculate from entry/exit/size
         realized = t.get('realized_pnl')
         if realized is not None:
             try:
@@ -199,48 +212,74 @@ def compute_journal_stats(trades: list) -> dict:
         if trade_date >= week_start:
             daily_week += pnl
 
+        # Standard breakdowns
         regime          = str(t.get('active_regime', 'UNKNOWN'))
         session         = str(t.get('session', 'UNKNOWN'))
+        setup_type      = str(t.get('setup_type', '')) or 'Untagged'
         strategy_family = str(t.get('strategy_family', 'UNKNOWN'))
 
-        for bucket, key in [
-            (regime_buckets, regime),
-            (session_buckets, session),
-            (strategy_family_buckets, strategy_family),
-        ]:
-            if key not in bucket:
-                bucket[key] = {'wins': 0, 'losses': 0, 'breakevens': 0}
-            if outcome == 'WIN':
-                bucket[key]['wins'] += 1
-            elif outcome == 'LOSS':
-                bucket[key]['losses'] += 1
-            else:
-                bucket[key]['breakevens'] += 1
+        _bucket_outcome(regime_buckets, regime, outcome)
+        regime_buckets[regime]['pnl'] += pnl
+        _bucket_outcome(session_buckets, session, outcome)
+        session_buckets[session]['pnl'] += pnl
+        _bucket_outcome(setup_type_buckets, setup_type, outcome)
+        setup_type_buckets[setup_type]['pnl'] += pnl
+        _bucket_outcome(strategy_family_buckets, strategy_family, outcome)
 
-    total         = len(trades)
-    win_rate      = round(wins / total * 100, 1) if total else 0.0
-    avg_win       = round(sum(win_pnl) / len(win_pnl), 2) if win_pnl else 0.0
-    avg_loss      = round(sum(loss_pnl) / len(loss_pnl), 2) if loss_pnl else 0.0
+        # Behavioral tracking
+        flags = t.get('behavioral_flags', []) or []
+        if flags:
+            behavioral_error_count += 1
+            for flag in flags:
+                behavioral_freq[flag] = behavioral_freq.get(flag, 0) + 1
+
+        # Emotional state correlation
+        estate = str(t.get('emotional_state', '') or '').strip().upper()
+        if estate:
+            _bucket_outcome(emotional_buckets, estate, outcome)
+            emotional_buckets[estate]['pnl'] = emotional_buckets[estate].get('pnl', 0.0) + pnl
+
+    total          = len(trades)
+    win_rate       = round(wins / total * 100, 1) if total else 0.0
+    avg_win        = round(sum(win_pnl) / len(win_pnl), 2) if win_pnl else 0.0
+    avg_loss       = round(sum(loss_pnl) / len(loss_pnl), 2) if loss_pnl else 0.0
     total_win_pnl  = sum(win_pnl)
     total_loss_pnl = sum(loss_pnl)
     profit_factor  = round(total_win_pnl / total_loss_pnl, 2) if total_loss_pnl else 0.0
+    loss_rate      = round(losses / total * 100, 1) if total else 0.0
+    expectancy     = round((win_rate / 100 * avg_win) - (loss_rate / 100 * avg_loss), 2)
 
-    def regime_wr(b):
-        t_ = b['wins'] + b['losses'] + b['breakevens']
-        return round(b['wins'] / t_ * 100, 1) if t_ else 0.0
+    def _enrich(bucket):
+        return {
+            k: {**v, 'win_rate': round(v['wins'] / (v['wins'] + v['losses'] + v['breakevens']) * 100, 1)
+                if (v['wins'] + v['losses'] + v['breakevens']) else 0.0,
+                'pnl': round(v.get('pnl', 0.0), 2)}
+            for k, v in bucket.items()
+        }
 
-    by_regime           = {k: {**v, 'win_rate': regime_wr(v)} for k, v in regime_buckets.items()}
-    by_session          = {k: {**v, 'win_rate': regime_wr(v)} for k, v in session_buckets.items()}
-    by_strategy_family  = {k: {**v, 'win_rate': regime_wr(v)} for k, v in strategy_family_buckets.items()}
+    by_regime          = _enrich(regime_buckets)
+    by_session         = _enrich(session_buckets)
+    by_setup_type      = _enrich(setup_type_buckets)
+    by_strategy_family = _enrich(strategy_family_buckets)
+    by_emotional_state = _enrich(emotional_buckets)
 
-    best_regime  = max(by_regime,  key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
-    worst_regime = min(by_regime,  key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
+    best_regime  = max(by_regime, key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
+    worst_regime = min(by_regime, key=lambda k: by_regime[k]['win_rate'],  default='—') if by_regime  else '—'
+
+    # Behavioral frequency sorted by frequency desc
+    behavioral_sorted = sorted(behavioral_freq.items(), key=lambda x: x[1], reverse=True)
 
     return {
         'total': total, 'wins': wins, 'losses': losses, 'breakevens': breakevens,
         'win_rate': win_rate, 'avg_win': avg_win, 'avg_loss': avg_loss,
-        'profit_factor': profit_factor, 'best_regime': best_regime, 'worst_regime': worst_regime,
-        'by_regime': by_regime, 'by_session': by_session, 'by_strategy_family': by_strategy_family,
+        'profit_factor': profit_factor, 'expectancy': expectancy,
+        'best_regime': best_regime, 'worst_regime': worst_regime,
+        'by_regime': by_regime, 'by_session': by_session,
+        'by_setup_type': by_setup_type,
+        'by_strategy_family': by_strategy_family,
+        'by_emotional_state': by_emotional_state,
+        'behavioral_error_count': behavioral_error_count,
+        'behavioral_frequency': dict(behavioral_sorted),
         'daily_pnl': {
             'today':     round(daily_today, 2),
             'yesterday': round(daily_yesterday, 2),
