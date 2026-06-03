@@ -132,64 +132,57 @@ _SCAN_SYMBOLS = [
     'CME_MINI:MNQ1!',   # Micro E-mini Nasdaq-100
 ]
 
-# Extra wait after symbol switch (CLI already calls waitForChartReady internally)
-_SYMBOL_SWITCH_WAIT = 0.3
+_HOME_SYMBOL      = 'CME_MINI:MNQ1!'  # chart always returns here after scan
+_SYMBOL_DWELL_SEC = 90                # seconds to display each symbol before reading
 
 
 def _collect_all_contexts() -> list[dict]:
     """
     Read chart context for every instrument in _SCAN_SYMBOLS.
 
-    Uses symbol switching on the single active chart — reliable across all
-    TradingView configurations (desktop tabs share chart_id; symbol switching
-    does not have this limitation).
-
     Flow per symbol:
       1. Switch chart to target symbol
-      2. Wait for chart to render
+      2. Dwell for _SYMBOL_DWELL_SEC so the trader can watch the chart
       3. Read full NOVA context (tables, levels, labels, OHLCV)
-      4. Tag context with symbol metadata
 
-    After all symbols are read, restores the chart to its original symbol.
-    The total scan adds ~2-3 seconds per cycle — negligible at 60s polling.
+    After all symbols are read, restores to _HOME_SYMBOL (MNQ).
+    Total cycle time: _SYMBOL_DWELL_SEC × len(_SCAN_SYMBOLS) ≈ 3 min.
+    The monitor should NOT sleep after this call — dwell time is the cadence.
 
     Returns list of chart contexts (one per symbol). Empty if TradingView
     is unreachable.
     """
     import time
 
-    # Verify connection and record current symbol to restore later
     current = _run_mcp('symbol')
     if not current or not current.get('success'):
         ctx = read_chart_context()
         return [ctx] if ctx.get('connected') else []
 
-    original_symbol = current.get('symbol', '')
     contexts: list[dict] = []
 
     for symbol in _SCAN_SYMBOLS:
-        # Switch to target symbol — use extended timeout (CLI waits up to 10s for chart_ready)
         switched = _run_mcp('symbol', symbol, timeout=20)
         if not switched or not switched.get('success'):
             print(f'[nova-scan] symbol switch failed: {symbol}')
             continue
 
-        time.sleep(_SYMBOL_SWITCH_WAIT)
+        sym_short = symbol.replace('CME_MINI:', '').replace('1!', '')
+        print(f'[nova-scan] watching {sym_short} for {_SYMBOL_DWELL_SEC}s...')
+        time.sleep(_SYMBOL_DWELL_SEC)
 
         ctx = read_chart_context()
         if ctx.get('connected'):
             ctx['scanned_symbol'] = symbol
             ctx['is_primary']     = (symbol == _SCAN_SYMBOLS[0])
             contexts.append(ctx)
-            sym_short = symbol.replace('CME_MINI:', '').replace('1!', '')
             print(f'[nova-scan] {sym_short}  price={ctx.get("price")}  '
                   f'tables={len(ctx.get("nova_tables", []))}')
         else:
             print(f'[nova-scan] no context for {symbol}')
 
-    # Restore original symbol — trader's chart returns to where it was
-    if original_symbol:
-        _run_mcp('symbol', original_symbol, timeout=20)
+    # Always return to home symbol
+    _run_mcp('symbol', _HOME_SYMBOL, timeout=20)
 
     return contexts
 

@@ -143,6 +143,7 @@ def main() -> None:
                     _mcp_fail_count = 0
 
                     # ── Normal reasoning cycle ────────────────────────────
+                    # _collect_all_contexts() dwells on each symbol — no extra sleep needed
                     alerts = run_reasoning_cycle()
                     if alerts:
                         for alert in alerts:
@@ -170,6 +171,7 @@ def main() -> None:
                                     log.error(f'Bridge error: {be}')
                     else:
                         log.info(f'{_time_et()} [{name} Q:{quality}] — no signal')
+                    sess['poll_interval'] = 0  # dwell time in scan is the cadence
 
             else:
                 name = sess['name']
