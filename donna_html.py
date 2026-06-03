@@ -916,6 +916,29 @@ tr:last-child td{border-bottom:none}
 .j-filter-btn.active{background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.3);color:var(--gold)}
 @media(max-width:600px){.j-overview{gap:16px}.itc-exec{gap:12px}.sf-chips{gap:6px}}
 
+/* ── NOVA REVIEW PANEL ── */
+.itc-review{margin-top:10px;border:1px solid rgba(184,134,11,.15);border-radius:10px;overflow:hidden}
+.itc-review-hdr{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;background:rgba(184,134,11,.04);transition:background .15s}
+.itc-review-hdr:hover{background:rgba(184,134,11,.08)}
+.itc-review-hdr-label{font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase}
+.itc-review-hdr-ts{font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted2)}
+.itc-review-body{padding:12px 14px;font-size:12px;color:var(--muted);line-height:1.65;display:none;white-space:pre-wrap}
+.itc-review-body.open{display:block}
+.nova-gen-btn{font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:1px;padding:5px 14px;border-radius:7px;border:1px solid rgba(184,134,11,.3);background:rgba(184,134,11,.06);color:var(--gold);cursor:pointer;transition:all .15s;text-transform:uppercase;margin-top:8px}
+.nova-gen-btn:hover{background:rgba(184,134,11,.12);border-color:rgba(184,134,11,.5)}
+.nova-gen-btn:disabled{opacity:.5;cursor:not-allowed}
+/* behavioral */
+.itc-behavioral{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.itc-beh-label{font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px}
+.beh-flags{display:flex;gap:6px;flex-wrap:wrap}
+.beh-flag{font-family:\'Space Mono\',monospace;font-size:8px;padding:2px 8px;border-radius:5px;background:rgba(192,57,43,.08);color:var(--red);border:1px solid rgba(192,57,43,.2)}
+.beh-state{font-family:\'Space Mono\',monospace;font-size:8px;padding:2px 8px;border-radius:5px;background:rgba(96,165,250,.08);color:var(--blue);border:1px solid rgba(96,165,250,.2);display:inline-block;margin-bottom:5px}
+.beh-reflection{font-size:11px;color:var(--muted);font-style:italic;margin-top:5px}
+/* checkbox flags */
+.flag-checks{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.flag-check{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);cursor:pointer}
+.flag-check input{width:14px;height:14px;cursor:pointer;accent-color:var(--gold)}
+
 /* ── TRADE CARDS ── */
 .j-date-group{margin-bottom:20px}
 .j-date-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;font-weight:700;padding:6px 0;border-bottom:1px solid rgba(240,180,41,.15);margin-bottom:10px}
@@ -1951,6 +1974,33 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           </select>
         </div>
         <div><label class="trade-label">Notes</label><input class="trade-input" id="jNotes" type="text" placeholder="What happened…" /></div>
+        <div>
+          <label class="trade-label">Emotional State</label>
+          <select class="trade-input trade-select" id="jEmotionalState">
+            <option value="">— Not reported —</option>
+            <option value="CALM">Calm</option>
+            <option value="CONFIDENT">Confident</option>
+            <option value="ANXIOUS">Anxious</option>
+            <option value="HESITANT">Hesitant</option>
+            <option value="IMPULSIVE">Impulsive</option>
+            <option value="FRUSTRATED">Frustrated</option>
+          </select>
+        </div>
+        <div>
+          <label class="trade-label">Behavioral Flags</label>
+          <div class="flag-checks">
+            <label class="flag-check"><input type="checkbox" id="jFlagEarlyExit" value="EARLY_EXIT" /> Early Exit</label>
+            <label class="flag-check"><input type="checkbox" id="jFlagLateEntry" value="LATE_ENTRY" /> Late Entry</label>
+            <label class="flag-check"><input type="checkbox" id="jFlagHesitation" value="HESITATION" /> Hesitation</label>
+            <label class="flag-check"><input type="checkbox" id="jFlagOversized" value="OVERSIZED" /> Oversized</label>
+            <label class="flag-check"><input type="checkbox" id="jFlagFomo" value="FOMO" /> FOMO</label>
+            <label class="flag-check"><input type="checkbox" id="jFlagRevenge" value="REVENGE" /> Revenge</label>
+          </div>
+        </div>
+        <div>
+          <label class="trade-label">Post-Trade Reflection</label>
+          <textarea class="trade-input" id="jReflection" rows="2" placeholder="What would you do differently? What did you learn?" style="resize:vertical;min-height:60px;font-size:12px;line-height:1.5"></textarea>
+        </div>
         <button class="submit-trade-btn" id="jSubmitBtn">LOG TRADE</button>
         <div id="jFormMsg" style="text-align:center;font-size:12px;display:none"></div>
       </div>
@@ -3887,11 +3937,39 @@ function renderJournal(data) {
         if (t.rr)     execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">R:R</div><div class="itc-exec-val">${t.rr}</div></div>`;
         if (t.size)   execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Size</div><div class="itc-exec-val">${t.size}</div></div>`;
 
-        // NOVA intelligence block
+        // NOVA intelligence block (from signal log notes)
         let novaBlock = '';
         if (t.notes || t.action) {
           const novaText = t.action || t.notes || '';
           novaBlock = `<div class="itc-nova"><div class="itc-nova-label">NOVA Assessment</div>${escHtml(novaText.substring(0,280))}${novaText.length>280?'…':''}</div>`;
+        }
+
+        // Behavioral tracking block
+        let behavioralBlock = '';
+        const bflags = t.behavioral_flags || [];
+        const estate = t.emotional_state || '';
+        const reflect = t.reflection || '';
+        if (estate || bflags.length || reflect) {
+          let bContent = '';
+          if (estate) bContent += `<div class="beh-state">${estate}</div>`;
+          if (bflags.length) bContent += `<div class="beh-flags">${bflags.map(f => `<span class="beh-flag">${f.replace(/_/g,' ')}</span>`).join('')}</div>`;
+          if (reflect) bContent += `<div class="beh-reflection">"${escHtml(reflect)}"</div>`;
+          behavioralBlock = `<div class="itc-behavioral"><div class="itc-beh-label">Behavioral</div>${bContent}</div>`;
+        }
+
+        // NOVA Review panel (AI analysis)
+        let reviewBlock = '';
+        if (t.nova_review) {
+          const ts = t.nova_review_ts ? fmtTimeET(t.nova_review_ts) : '';
+          reviewBlock = `<div class="itc-review">
+  <div class="itc-review-hdr" id="nova-hdr-${origIdx}" onclick="toggleReview(${origIdx})">
+    <span class="itc-review-hdr-label">NOVA Review</span>
+    <span class="itc-review-hdr-ts">${ts} ▾</span>
+  </div>
+  <div class="itc-review-body" id="nova-body-${origIdx}">${escHtml(t.nova_review)}</div>
+</div>`;
+        } else {
+          reviewBlock = `<button class="nova-gen-btn" id="nova-gen-${origIdx}" onclick="generateAnalysis(${origIdx})">Generate NOVA Review</button>`;
         }
 
         // Context row
@@ -3912,6 +3990,8 @@ function renderJournal(data) {
   ${execItems ? `<div class="itc-exec">${execItems}</div>` : ''}
   ${novaBlock}
   ${ctxItems ? `<div class="itc-ctx">${ctxItems}</div>` : ''}
+  ${behavioralBlock}
+  ${reviewBlock}
   <div class="itc-footer">
     <span class="itc-outcome-badge ${outcome}">${outcome}</span>
     <button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button>
@@ -4018,6 +4098,32 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+async function generateAnalysis(idx) {
+  const btn = document.getElementById(`nova-gen-${idx}`);
+  const body = document.getElementById(`nova-body-${idx}`);
+  if (btn) { btn.disabled = true; btn.textContent = \'GENERATING...\'; }
+  try {
+    const res  = await fetch(\'/journal/analyze\', {method:\'POST\', headers:{\'Content-Type\':\'application/json\'}, body: JSON.stringify({index: idx})});
+    const data = await res.json();
+    if (data.status === \'ok\') {
+      if (body) { body.textContent = data.analysis; body.classList.add(\'open\'); }
+      const hdr = document.getElementById(`nova-hdr-${idx}`);
+      if (hdr) hdr.querySelector(\'.itc-review-hdr-ts\').textContent = \'Just now\';
+      if (btn) btn.style.display = \'none\';
+      refreshJournal();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = \'GENERATE NOVA REVIEW\'; }
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = \'GENERATE NOVA REVIEW\'; }
+  }
+}
+
+function toggleReview(idx) {
+  const body = document.getElementById(`nova-body-${idx}`);
+  if (body) body.classList.toggle(\'open\');
+}
+
 async function refreshJournal() {
   try {
     const res = await fetch('/journal/data');
@@ -4076,18 +4182,29 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   msgEl.style.display = 'none';
 
   try {
+    const emotional_state  = document.getElementById('jEmotionalState').value;
+    const behavioral_flags = ['jFlagEarlyExit','jFlagLateEntry','jFlagHesitation','jFlagOversized','jFlagFomo','jFlagRevenge']
+      .filter(id => document.getElementById(id).checked)
+      .map(id => document.getElementById(id).value);
+    const reflection = (document.getElementById('jReflection').value || '').trim();
+
     const payload = {ticker, direction, outcome, size, setup_type, session, notes, trade_date};
     if (realized_pnl !== null) payload.realized_pnl = realized_pnl;
     if (entry_price  !== null) payload.entry_price   = entry_price;
     if (exit_price   !== null) payload.exit_price    = exit_price;
     if (stop !== null) payload.stop = stop;
     if (tp1  !== null) payload.tp1  = tp1;
+    if (emotional_state)         payload.emotional_state  = emotional_state;
+    if (behavioral_flags.length) payload.behavioral_flags = behavioral_flags;
+    if (reflection)              payload.reflection        = reflection;
     const res  = await fetch('/journal/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     const data = await res.json();
     if (data.status === 'ok') {
-      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes','jReflection'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
       document.getElementById('jDate').value = todayDateStr();
       document.getElementById('jSession').value = '';
+      document.getElementById('jEmotionalState').value = '';
+      ['jFlagEarlyExit','jFlagLateEntry','jFlagHesitation','jFlagOversized','jFlagFomo','jFlagRevenge'].forEach(id => { const el = document.getElementById(id); if(el) el.checked = false; });
       setDir('LONG'); setOutcome('WIN');
       showMsg('Trade logged.', 'var(--green)');
       setTimeout(() => { msgEl.style.display='none'; closeJModal(); }, 1200);

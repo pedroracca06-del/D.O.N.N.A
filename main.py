@@ -1554,25 +1554,46 @@ async def journal_add(request: Request):
     trade_date_raw = str(body.get('trade_date', '')).strip()
     trade_date     = trade_date_raw if (trade_date_raw and len(trade_date_raw) == 10) else datetime.now(NY_TZ).strftime('%Y-%m-%d')
 
+    # Optional numeric fields
+    stop_raw = body.get('stop')
+    tp1_raw  = body.get('tp1')
+    stop_val = float(stop_raw) if stop_raw not in (None, '', 0) else None
+    tp1_val  = float(tp1_raw)  if tp1_raw  not in (None, '', 0) else None
+
+    # Behavioral fields
+    emotional_state   = str(body.get('emotional_state', '')).strip()
+    behavioral_flags  = body.get('behavioral_flags', [])
+    if not isinstance(behavioral_flags, list):
+        behavioral_flags = []
+    reflection        = str(body.get('reflection', '')).strip()
+
+    # Session: use provided value if given, else auto-detect
+    session_val = str(body.get('session', '')).strip() or session_label()
+
     trade = {
-        'ticker':         str(body.get('ticker', '')).upper(),
-        'direction':      direction,
-        'entry_price':    entry,
-        'exit_price':     exit_,
-        'size':           size,
-        'realized_pnl':   pnl,   # always store computed signed value so stats reads it correctly
-        'setup_type':     str(body.get('setup_type', '')),
-        'notes':          str(body.get('notes', '')),
-        'outcome':        outcome,
-        'pnl':            pnl,
-        'trade_date':     trade_date,
-        'timestamp':      utc_now_iso(),
-        'active_regime':  harvey.get('regime', {}).get('regime', state.get('market_regime', 'UNKNOWN')),
-        'session':        session_label(),
-        'macro_risk':     state.get('macro_risk', 'medium'),
-        'bias_score':     harvey.get('bias_score', 50),
-        'harvey_verdict': harvey.get('verdict', 'WAIT'),
-        'nq_points':      nq_pts,
+        'ticker':           str(body.get('ticker', '')).upper(),
+        'direction':        direction,
+        'entry_price':      entry,
+        'exit_price':       exit_,
+        'size':             size,
+        'stop':             stop_val,
+        'tp1':              tp1_val,
+        'realized_pnl':     pnl,
+        'setup_type':       str(body.get('setup_type', '')),
+        'notes':            str(body.get('notes', '')),
+        'outcome':          outcome,
+        'pnl':              pnl,
+        'trade_date':       trade_date,
+        'timestamp':        utc_now_iso(),
+        'active_regime':    harvey.get('regime', {}).get('regime', state.get('market_regime', 'UNKNOWN')),
+        'session':          session_val,
+        'macro_risk':       state.get('macro_risk', 'medium'),
+        'bias_score':       harvey.get('bias_score', 50),
+        'harvey_verdict':   harvey.get('verdict', 'WAIT'),
+        'nq_points':        nq_pts,
+        'emotional_state':  emotional_state,
+        'behavioral_flags': behavioral_flags,
+        'reflection':       reflection,
     }
 
     trades = load_journal()
@@ -1580,6 +1601,101 @@ async def journal_add(request: Request):
     save_journal(trades)
     stats = compute_journal_stats(trades)
     return {'status': 'ok', 'trade': trade, 'stats': stats}
+
+
+@app.post('/journal/analyze')
+async def journal_analyze(request: Request):
+    """Generate a NOVA AI review for a journal trade entry. Stores result back to the trade."""
+    import json as _json
+    from pathlib import Path
+    from donna_config import client as _claude, ANTHROPIC_ASSISTANT_MODEL
+
+    body      = await request.json()
+    trade_idx = int(body.get('index', -1))
+    trades    = load_journal()
+
+    if trade_idx < 0 or trade_idx >= len(trades):
+        raise HTTPException(status_code=400, detail='Invalid trade index')
+
+    trade = trades[trade_idx]
+
+    # Load nearby signal log entries for context
+    sig_file = Path(__file__).parent / 'donna_signal_log.json'
+    try:
+        all_sigs = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
+    except Exception:
+        all_sigs = []
+
+    # Filter signals: same symbol (MNQ or MES), most recent 8 entries
+    ticker = (trade.get('ticker') or '').upper().replace('1!', '')
+    nearby = [s for s in all_sigs if ticker in (s.get('symbol') or '').upper()][:8]
+
+    # Build signal context block
+    sig_lines = []
+    for s in nearby:
+        sig_lines.append(
+            f"  {s.get('timestamp_et','?')} | {s.get('nova_cmd','?')} | "
+            f"Grade {s.get('grade','?')} | Conf {s.get('nova_conf','?')} | "
+            f"PROS {s.get('pros_phase','?')} {s.get('pros_direction','?')} | "
+            f"OTE {s.get('pros_ote','?')} | IB {s.get('ib_draw','?')} | "
+            f"Session Q{s.get('session_quality','?')}"
+        )
+    sig_context = '\n'.join(sig_lines) if sig_lines else '  No signal log entries found for this instrument.'
+
+    prompt = f"""TRADE RECORD:
+Instrument: {trade.get('ticker')} {trade.get('direction')}
+Setup: {trade.get('setup_type') or 'unspecified'}
+Entry: {trade.get('entry_price') or '—'} | Exit: {trade.get('exit_price') or '—'} | Stop: {trade.get('stop') or '—'} | TP1: {trade.get('tp1') or '—'}
+Size: {trade.get('size',1)} | R:R: {trade.get('rr') or '—'}
+P&L: {trade.get('realized_pnl')} | Outcome: {trade.get('outcome')}
+Session: {trade.get('session') or '—'} | Macro risk: {trade.get('macro_risk') or '—'}
+Trader notes: {trade.get('notes') or 'none'}
+Emotional state: {trade.get('emotional_state') or 'not reported'}
+Behavioral flags: {', '.join(trade.get('behavioral_flags') or []) or 'none'}
+Reflection: {trade.get('reflection') or 'none'}
+
+NOVA EVALUATION LOG (closest entries for {ticker}):
+{sig_context}
+
+Provide a structured post-trade analysis with these exact sections. Keep each section to 2-4 sentences max. Tactical, operational language only.
+
+QUALIFICATION
+Why this setup did or did not meet execution standards. Reference PROS phase, OTE, IB draw, session quality, confidence score.
+
+EXECUTION
+Entry timing, stop placement, exit management. Execution score: X/100.
+
+OUTCOME ASSESSMENT
+Was the outcome correct given the setup quality? Explain the result.
+
+WHAT SHOULD HAVE HAPPENED
+Validate correct trades. Identify the error on incorrect ones. State the right path.
+
+BEHAVIORAL NOTE
+One sentence on any behavioral pattern if trader notes or flags suggest it. If none, state "No behavioral flags."
+"""
+
+    system = "You are NOVA, an AI trading intelligence system for MES and MNQ micro futures. You give precise, institutional-grade trade reviews. No hedging, no generic advice. Speak directly about this specific trade."
+
+    if not _claude:
+        return {'status': 'error', 'detail': 'Claude API not configured'}
+
+    try:
+        resp = _claude.messages.create(
+            model=ANTHROPIC_ASSISTANT_MODEL,
+            system=system,
+            messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=800,
+        )
+        analysis = resp.content[0].text.strip() if resp.content else ''
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Claude API error: {str(e)[:100]}')
+
+    trades[trade_idx]['nova_review']    = analysis
+    trades[trade_idx]['nova_review_ts'] = utc_now_iso()
+    save_journal(trades)
+
+    return {'status': 'ok', 'analysis': analysis, 'index': trade_idx}
 
 
 @app.post('/journal/delete')
