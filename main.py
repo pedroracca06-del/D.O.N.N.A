@@ -1491,6 +1491,20 @@ async def journal_data():
     return {'status': 'ok', 'trades': trades, 'stats': stats}
 
 
+@app.get('/journal/signals')
+async def journal_signals():
+    """Return recent signal log entries for the Journal intelligence feed."""
+    import json as _json
+    from pathlib import Path
+    sig_file = Path(__file__).parent / 'donna_signal_log.json'
+    try:
+        entries = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
+    except Exception:
+        entries = []
+    # Return last 150 entries (newest first — file is already newest-first)
+    return {'status': 'ok', 'signals': entries[:150], 'total': len(entries)}
+
+
 @app.post('/journal/add')
 async def journal_add(request: Request):
     body      = await request.json()

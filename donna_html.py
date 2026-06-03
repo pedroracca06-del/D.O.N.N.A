@@ -822,51 +822,99 @@ tr:last-child td{border-bottom:none}
 @media(max-width:900px){.scenario-grid{grid-template-columns:1fr}}
 
 /* ── JOURNAL TAB ── */
-.journal-btn {
-  background:var(--panel) !important;
-  border-color:rgba(184,134,11,.3) !important;
-  color:var(--gold) !important;
-}
-.journal-btn.active {
-  background:var(--text) !important;
-  border-color:var(--text) !important;color:var(--panel) !important;
-}
-.journal-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.journal-stat{text-align:center;padding:18px 14px}
-.journal-stat .js-lab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px}
-.journal-stat .js-val{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;letter-spacing:1px;line-height:1}
-.journal-stat .js-sub{margin-top:6px;font-size:11px;color:var(--muted2)}
-.trade-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;display:block}
-.trade-input,.trade-select{
-  width:100%;padding:10px 12px;border-radius:10px;
-  border:1px solid var(--line);background:var(--panel2);
-  color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:13px;
-  outline:none;transition:border-color .15s;
-}
-.trade-input:focus,.trade-select:focus{border-color:var(--muted2)}
-.trade-select option{background:var(--panel);color:var(--text)}
-.submit-trade-btn{
-  width:100%;padding:13px;border-radius:10px;border:1px solid var(--text);cursor:pointer;
-  background:var(--text);
-  color:var(--panel);font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;
-  letter-spacing:1px;transition:opacity .15s;margin-top:4px;
-}
-.submit-trade-btn:hover{opacity:.82}
-.submit-trade-btn:disabled{opacity:.4;cursor:not-allowed}
-.outcome-WIN{color:var(--green)}.outcome-LOSS{color:var(--red)}.outcome-BREAKEVEN{color:var(--yellow)}
-.j-date-header{background:rgba(240,180,41,.06);border-bottom:1px solid rgba(240,180,41,.12)}
-.j-date-header td{padding:7px 14px;font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;font-weight:700}
-.j-filter-bar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
-.j-filter-btn{padding:5px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
-.j-filter-btn:hover{border-color:rgba(184,134,11,.3);color:var(--gold)}
-.j-filter-btn.active{background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.3);color:var(--gold)}
+.journal-btn{background:var(--panel) !important;border-color:rgba(184,134,11,.3) !important;color:var(--gold) !important}
+.journal-btn.active{background:var(--text) !important;border-color:var(--text) !important;color:var(--panel) !important}
+/* sub-nav */
+.j-subnav{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px;padding-bottom:0}
+.j-subnav-btn{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;padding:9px 18px;border:none;background:none;color:var(--muted2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.j-subnav-btn:hover{color:var(--text)}
+.j-subnav-btn.active{color:var(--gold);border-bottom-color:var(--gold)}
+.j-subnav-count{display:inline-block;background:rgba(184,134,11,.12);color:var(--gold);border-radius:10px;padding:1px 7px;font-size:8px;margin-left:6px;vertical-align:middle}
+/* overview header */
+.j-overview{display:flex;gap:28px;align-items:center;flex-wrap:wrap;padding:14px 20px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);margin-bottom:16px}
+.j-ov-item{display:flex;flex-direction:column;gap:3px}
+.j-ov-lab{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase}
+.j-ov-val{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;line-height:1}
+.j-ov-div{width:1px;background:var(--line);align-self:stretch}
+/* intelligence trade card */
+.itc{border:1px solid var(--line);border-radius:14px;background:var(--panel2);padding:16px 18px;margin-bottom:12px;border-left:3px solid transparent;transition:border-color .15s}
+.itc:hover{border-color:rgba(184,134,11,.25)}
+.itc.outcome-WIN{border-left-color:var(--green)}
+.itc.outcome-LOSS{border-left-color:var(--red)}
+.itc.outcome-BREAKEVEN{border-left-color:var(--yellow)}
+.itc.outcome-OPEN{border-left-color:var(--muted2)}
+.itc-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.itc-badges{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.itc-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);color:var(--muted);text-transform:uppercase;background:var(--panel)}
+.itc-badge.b-grade-a{border-color:rgba(74,222,128,.4);color:var(--green);background:rgba(74,222,128,.06)}
+.itc-badge.b-grade-b{border-color:rgba(251,191,36,.4);color:var(--yellow);background:rgba(251,191,36,.06)}
+.itc-badge.b-grade-c{border-color:var(--line);color:var(--muted2)}
+.itc-badge.b-nova{border-color:rgba(96,165,250,.4);color:var(--blue);background:rgba(96,165,250,.06)}
+.itc-badge.b-session-a{border-color:rgba(74,222,128,.3);color:var(--green)}
+.itc-pnl{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;line-height:1;text-align:right}
+.itc-time{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);margin-top:2px;text-align:right}
+.itc-exec{font-family:'Space Mono',monospace;font-size:11px;color:var(--text);padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:8px 0;display:flex;gap:20px;flex-wrap:wrap}
+.itc-exec-item{display:flex;flex-direction:column;gap:2px}
+.itc-exec-lab{font-size:8px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase}
+.itc-exec-val{font-size:12px;font-weight:700;color:var(--text)}
+.itc-nova{background:rgba(184,134,11,.04);border:1px solid rgba(184,134,11,.12);border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;color:var(--muted);font-style:italic;line-height:1.5}
+.itc-nova-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;margin-bottom:5px;font-style:normal}
+.itc-ctx{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
+.itc-ctx-item{display:flex;flex-direction:column;gap:2px}
+.itc-ctx-lab{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase}
+.itc-ctx-val{font-size:11px;font-weight:600;color:var(--text)}
+.itc-footer{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.itc-outcome-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1.5px;padding:3px 10px;border-radius:6px;text-transform:uppercase;font-weight:700}
+.itc-outcome-badge.WIN{background:rgba(74,222,128,.1);color:var(--green);border:1px solid rgba(74,222,128,.3)}
+.itc-outcome-badge.LOSS{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.3)}
+.itc-outcome-badge.BREAKEVEN{background:rgba(251,191,36,.1);color:var(--yellow);border:1px solid rgba(251,191,36,.3)}
+.itc-outcome-badge.OPEN{background:rgba(160,160,160,.1);color:var(--muted);border:1px solid var(--line)}
+/* signal feed */
+.sf-card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:12px 16px;margin-bottom:8px;transition:border-color .15s}
+.sf-card:hover{border-color:rgba(184,134,11,.2)}
+.sf-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.sf-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.sf-time{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)}
+.sf-symbol{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;color:var(--text)}
+.sf-cmd{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;padding:2px 8px;border-radius:5px;text-transform:uppercase}
+.sf-cmd.WAIT{color:var(--muted2);background:rgba(160,160,160,.08);border:1px solid var(--line)}
+.sf-cmd.WATCH{color:var(--yellow);background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2)}
+.sf-cmd.BUY,.sf-cmd.LONG{color:var(--green);background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.2)}
+.sf-cmd.SELL,.sf-cmd.SHORT{color:var(--red);background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.2)}
+.sf-grade{font-family:'Space Mono',monospace;font-size:9px;font-weight:700}
+.sf-grade.A{color:var(--green)}.sf-grade.B{color:var(--yellow)}.sf-grade.C,.sf-grade.D{color:var(--muted2)}
+.sf-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px}
+.sf-chip{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);letter-spacing:.5px}
+.sf-chip strong{color:var(--text)}
+.sf-notes{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* analytics */
+.j-analytics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.j-stat-card{padding:16px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);text-align:center}
+.j-stat-card .jsc-lab{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:8px}
+.j-stat-card .jsc-val{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1}
+.j-stat-card .jsc-sub{font-size:10px;color:var(--muted2);margin-top:4px}
 .regime-breakdown-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:12px}
 .regime-card{padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel2)}
 .regime-card .rc-name{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px}
 .regime-card .rc-wr{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1}
 .regime-card .rc-sub{font-size:11px;color:var(--muted2);margin-top:4px}
-@media(max-width:900px){.journal-stats-grid{grid-template-columns:1fr 1fr}}
-@media(max-width:540px){.journal-stats-grid{grid-template-columns:1fr}}
+/* log trade modal */
+.j-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.j-modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto}
+.j-modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.j-modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);padding:4px 8px;border-radius:6px}
+.j-modal-close:hover{color:var(--text)}
+.trade-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px;display:block}
+.trade-input,.trade-select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:13px;outline:none;transition:border-color .15s}
+.trade-input:focus,.trade-select:focus{border-color:var(--muted2)}
+.submit-trade-btn{width:100%;padding:13px;border-radius:10px;border:1px solid var(--text);cursor:pointer;background:var(--text);color:var(--panel);font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;letter-spacing:1px;transition:opacity .15s;margin-top:4px}
+.submit-trade-btn:hover{opacity:.82}
+.submit-trade-btn:disabled{opacity:.4;cursor:not-allowed}
+.j-filter-bar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.j-filter-btn{padding:5px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.j-filter-btn:hover{border-color:rgba(184,134,11,.3);color:var(--gold)}
+.j-filter-btn.active{background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.3);color:var(--gold)}
+@media(max-width:600px){.j-overview{gap:16px}.itc-exec{gap:12px}.sf-chips{gap:6px}}
 
 /* ── TRADE CARDS ── */
 .j-date-group{margin-bottom:20px}
@@ -1748,149 +1796,164 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   <div class="page" id="page-journal">
     <div class="vstack">
 
-      <!-- HERO -->
-      <div class="hero-banner" style="padding:20px 28px">
-        <div class="hero-eyebrow">Edge Database</div>
-        <div class="hero-title" style="font-size:28px;color:var(--gold)">Trade Journal</div>
-        <div class="hero-sub" style="font-size:13px">Every trade logged builds DONNA\'s understanding of when you perform best. Tag, review, learn.</div>
+      <!-- HEADER -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:4px">
+        <div>
+          <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Operational Intelligence</div>
+          <div style="font-family:\'Rajdhani\',sans-serif;font-size:30px;font-weight:700;letter-spacing:2px;color:var(--text)">JOURNAL</div>
+        </div>
+        <button class="submit-trade-btn" id="jOpenModal" style="width:auto;padding:10px 22px;margin-top:0;font-size:13px;letter-spacing:1.5px">+ LOG TRADE</button>
       </div>
 
-      <!-- DAILY P&L SUMMARY -->
-      <div class="card" style="padding:14px 24px;display:flex;align-items:center;gap:28px;flex-wrap:wrap">
-        <span style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;white-space:nowrap">Daily P&amp;L</span>
-        <div style="display:flex;gap:36px;flex:1;flex-wrap:wrap">
-          <div>
-            <div style="font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">Today</div>
-            <div id="jPnlToday" style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:700;line-height:1">—</div>
-          </div>
-          <div>
-            <div style="font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">Yesterday</div>
-            <div id="jPnlYesterday" style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:700;line-height:1">—</div>
-          </div>
-          <div>
-            <div style="font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">This Week</div>
-            <div id="jPnlWeek" style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:700;line-height:1">—</div>
-          </div>
+      <!-- OVERVIEW STRIP -->
+      <div class="j-overview" id="jOverviewStrip">
+        <div class="j-ov-item">
+          <div class="j-ov-lab">Today\'s Trades</div>
+          <div class="j-ov-val" id="jOvTrades" style="color:var(--text)">—</div>
         </div>
-      </div>
-
-      <!-- STATS ROW -->
-      <div class="journal-stats-grid">
-        <div class="card journal-stat">
-          <div class="js-lab">Total Trades</div>
-          <div class="js-val" id="jTotalTrades">0</div>
-          <div class="js-sub">All logged entries</div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item">
+          <div class="j-ov-lab">Today\'s P&amp;L</div>
+          <div class="j-ov-val" id="jOvPnl" style="color:var(--muted2)">—</div>
         </div>
-        <div class="card journal-stat">
-          <div class="js-lab">Win Rate</div>
-          <div class="js-val" id="jWinRate">0%</div>
-          <div class="js-sub" id="jWinRateSub">0W / 0L / 0BE</div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item">
+          <div class="j-ov-lab">NOVA Evaluations</div>
+          <div class="j-ov-val" id="jOvEvals" style="color:var(--text)">—</div>
         </div>
-        <div class="card journal-stat">
-          <div class="js-lab">Profit Factor</div>
-          <div class="js-val" id="jProfitFactor">0.00</div>
-          <div class="js-sub" id="jAvgWinLoss">Avg W: — / Avg L: —</div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item">
+          <div class="j-ov-lab">Win Rate</div>
+          <div class="j-ov-val" id="jOvWinRate" style="color:var(--muted2)">—</div>
         </div>
-        <div class="card journal-stat">
-          <div class="js-lab">Best Regime</div>
-          <div class="js-val" id="jBestRegime" style="font-size:17px;line-height:1.2">—</div>
-          <div class="js-sub" id="jWorstRegime">Worst: —</div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item">
+          <div class="j-ov-lab">Profit Factor</div>
+          <div class="j-ov-val" id="jOvPF" style="color:var(--muted2)">—</div>
+        </div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item">
+          <div class="j-ov-lab">This Week</div>
+          <div class="j-ov-val" id="jOvWeek" style="color:var(--muted2)">—</div>
         </div>
       </div>
 
-      <!-- MAIN LAYOUT: history + form -->
-      <div style="display:grid;grid-template-columns:1.5fr .5fr;gap:16px;align-items:start">
+      <!-- SUB NAVIGATION -->
+      <div class="j-subnav">
+        <button class="j-subnav-btn active" id="jTab-trades" onclick="switchJTab(\'trades\')">Trades<span class="j-subnav-count" id="jTabCount-trades">0</span></button>
+        <button class="j-subnav-btn" id="jTab-signals" onclick="switchJTab(\'signals\')">Signal Feed<span class="j-subnav-count" id="jTabCount-signals">0</span></button>
+        <button class="j-subnav-btn" id="jTab-analytics" onclick="switchJTab(\'analytics\')">Analytics</button>
+      </div>
 
-        <!-- TRADE HISTORY -->
-        <div class="panel">
-          <div class="kicker">History</div>
-          <div class="section-title" style="margin-bottom:12px">Trade Log</div>
-          <div class="j-filter-bar" id="jFilterBar"></div>
-          <div id="journalCardList">
-            <div style="text-align:center;padding:24px;color:var(--muted2);font-size:13px">No trades logged yet.</div>
+      <!-- TRADES PANEL -->
+      <div id="jPanel-trades">
+        <div class="j-filter-bar" id="jFilterBar"></div>
+        <div id="journalCardList">
+          <div style="text-align:center;padding:40px;color:var(--muted2);font-size:13px">No trades logged yet.</div>
+        </div>
+      </div>
+
+      <!-- SIGNAL FEED PANEL -->
+      <div id="jPanel-signals" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;color:var(--muted)">NOVA\'s per-cycle evaluation log — every assessment, grade, and reasoning entry.</div>
+          <div class="j-filter-bar" id="jSigFilterBar" style="margin-bottom:0"></div>
+        </div>
+        <div id="jSignalFeedList">
+          <div style="text-align:center;padding:40px;color:var(--muted2);font-size:13px">Loading signal feed...</div>
+        </div>
+      </div>
+
+      <!-- ANALYTICS PANEL -->
+      <div id="jPanel-analytics" style="display:none">
+
+        <div style="margin-bottom:20px">
+          <div class="kicker">Performance Summary</div>
+          <div class="j-analytics-grid" id="jAnalyticsGrid">
+            <div class="j-stat-card"><div class="jsc-lab">Total Trades</div><div class="jsc-val" id="jaTotalTrades">0</div><div class="jsc-sub">All logged</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Win Rate</div><div class="jsc-val" id="jaWinRate">—</div><div class="jsc-sub" id="jaWRSub">—</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Profit Factor</div><div class="jsc-val" id="jaPF">—</div><div class="jsc-sub" id="jaAvgWL">—</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Best Regime</div><div class="jsc-val" id="jaBestRegime" style="font-size:16px;line-height:1.2">—</div><div class="jsc-sub" id="jaWorstRegime">—</div></div>
           </div>
         </div>
 
-        <!-- QUICK ADD FORM -->
-        <div class="panel">
-          <div class="kicker">Log Trade</div>
-          <div class="section-title" style="margin-bottom:14px">Quick Add</div>
-          <div class="vstack" style="gap:10px">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <div>
-                <label class="trade-label">Ticker</label>
-                <input class="trade-input" id="jTicker" type="text" placeholder="MNQ, SPY…" />
-              </div>
-              <div>
-                <label class="trade-label">Date</label>
-                <input class="trade-input" id="jDate" type="date" />
-              </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+          <div class="panel">
+            <div class="kicker">By Market Regime</div>
+            <div class="section-title" style="margin-bottom:12px">Regime Performance</div>
+            <div class="regime-breakdown-grid" id="regimeBreakdownGrid">
+              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
             </div>
-            <div>
-              <label class="trade-label">Direction</label>
-              <div class="toggle-group">
-                <button type="button" class="toggle-btn active-long" id="jDirLong" onclick="setDir(\'LONG\')">▲ LONG</button>
-                <button type="button" class="toggle-btn" id="jDirShort" onclick="setDir(\'SHORT\')">▼ SHORT</button>
-              </div>
+          </div>
+          <div class="panel">
+            <div class="kicker">By Session</div>
+            <div class="section-title" style="margin-bottom:12px">Session Performance</div>
+            <div class="regime-breakdown-grid" id="sessionBreakdownGrid">
+              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
             </div>
-            <div>
-              <label class="trade-label">Outcome</label>
-              <div class="toggle-group">
-                <button type="button" class="toggle-btn active-win" id="jOutWin" onclick="setOutcome(\'WIN\')">WIN</button>
-                <button type="button" class="toggle-btn" id="jOutLoss" onclick="setOutcome(\'LOSS\')">LOSS</button>
-                <button type="button" class="toggle-btn" id="jOutBE" onclick="setOutcome(\'BREAKEVEN\')">BE</button>
-              </div>
-            </div>
-            <div>
-              <label class="trade-label">Realized P&amp;L ($) <span style="color:var(--muted2);font-size:9px;font-weight:400">— type actual dollar amount, e.g. 468.85 or -120</span></label>
-              <input class="trade-input" id="jRealizedPnl" type="number" step="any" placeholder="e.g. 468.85 or -120" style="font-size:16px;font-weight:700;letter-spacing:.5px" />
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-              <div>
-                <label class="trade-label">Entry <span style="color:var(--muted2);font-size:9px">opt</span></label>
-                <input class="trade-input" id="jEntry" type="number" step="any" placeholder="0.00" />
-              </div>
-              <div>
-                <label class="trade-label">Exit <span style="color:var(--muted2);font-size:9px">opt</span></label>
-                <input class="trade-input" id="jExit" type="number" step="any" placeholder="0.00" />
-              </div>
-              <div>
-                <label class="trade-label">Size</label>
-                <input class="trade-input" id="jSize" type="number" step="any" placeholder="1" />
-              </div>
-            </div>
-            <div>
-              <label class="trade-label">Setup</label>
-              <input class="trade-input" id="jSetup" type="text" placeholder="ORB, VWAP, Breakout…" />
-            </div>
-            <input class="trade-input" id="jNotes" type="text" placeholder="Notes (optional)" style="font-size:12px;color:var(--muted)" />
-            <button class="submit-trade-btn" id="jSubmitBtn">LOG TRADE</button>
-            <div id="jFormMsg" style="text-align:center;font-size:12px;display:none"></div>
           </div>
         </div>
 
       </div>
 
-      <!-- REGIME BREAKDOWN -->
-      <div class="panel">
-        <div class="kicker">Edge Analysis</div>
-        <div class="section-title" style="margin-bottom:6px">Performance by Regime</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Which market regime do you trade best in? Auto-tagged at time of logging.</div>
-        <div class="regime-breakdown-grid" id="regimeBreakdownGrid">
-          <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
-        </div>
-      </div>
+    </div>
+  </div>
 
-      <!-- SESSION BREAKDOWN -->
-      <div class="panel">
-        <div class="kicker">Edge Analysis</div>
-        <div class="section-title" style="margin-bottom:6px">Performance by Session</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Asia, London, NY Cash — which session gives you the cleanest edge?</div>
-        <div class="regime-breakdown-grid" id="sessionBreakdownGrid">
-          <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
-        </div>
+  <!-- LOG TRADE MODAL -->
+  <div class="j-modal-backdrop" id="jModalBackdrop" style="display:none" onclick="if(event.target===this)closeJModal()">
+    <div class="j-modal">
+      <div class="j-modal-header">
+        <div style="font-family:\'Rajdhani\',sans-serif;font-size:20px;font-weight:700;letter-spacing:1px">LOG TRADE</div>
+        <button class="j-modal-close" onclick="closeJModal()">✕</button>
       </div>
-
+      <div class="vstack" style="gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="trade-label">Ticker</label><input class="trade-input" id="jTicker" type="text" placeholder="MNQ, MES…" /></div>
+          <div><label class="trade-label">Date</label><input class="trade-input" id="jDate" type="date" /></div>
+        </div>
+        <div>
+          <label class="trade-label">Direction</label>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn active-long" id="jDirLong" onclick="setDir(\'LONG\')">▲ LONG</button>
+            <button type="button" class="toggle-btn" id="jDirShort" onclick="setDir(\'SHORT\')">▼ SHORT</button>
+          </div>
+        </div>
+        <div>
+          <label class="trade-label">Outcome</label>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn active-win" id="jOutWin" onclick="setOutcome(\'WIN\')">WIN</button>
+            <button type="button" class="toggle-btn" id="jOutLoss" onclick="setOutcome(\'LOSS\')">LOSS</button>
+            <button type="button" class="toggle-btn" id="jOutBE" onclick="setOutcome(\'BREAKEVEN\')">BE</button>
+          </div>
+        </div>
+        <div>
+          <label class="trade-label">Realized P&amp;L ($)</label>
+          <input class="trade-input" id="jRealizedPnl" type="number" step="any" placeholder="e.g. 120.00 or -60" style="font-size:16px;font-weight:700" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div><label class="trade-label">Entry <span style="color:var(--muted2);font-size:8px">opt</span></label><input class="trade-input" id="jEntry" type="number" step="any" placeholder="0.00" /></div>
+          <div><label class="trade-label">Exit <span style="color:var(--muted2);font-size:8px">opt</span></label><input class="trade-input" id="jExit" type="number" step="any" placeholder="0.00" /></div>
+          <div><label class="trade-label">Size</label><input class="trade-input" id="jSize" type="number" step="any" placeholder="1" /></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="trade-label">Stop</label><input class="trade-input" id="jStop" type="number" step="any" placeholder="0.00" /></div>
+          <div><label class="trade-label">TP1</label><input class="trade-input" id="jTp1" type="number" step="any" placeholder="0.00" /></div>
+        </div>
+        <div><label class="trade-label">Setup Type</label><input class="trade-input" id="jSetup" type="text" placeholder="PROS_LONG, ORB_E1…" /></div>
+        <div><label class="trade-label">Session</label>
+          <select class="trade-input trade-select" id="jSession">
+            <option value="">— Select session —</option>
+            <option value="NY_OPEN">NY_OPEN</option>
+            <option value="NY_AM">NY_AM</option>
+            <option value="NY_PM">NY_PM</option>
+            <option value="LONDON">LONDON</option>
+            <option value="ASIA">ASIA</option>
+          </select>
+        </div>
+        <div><label class="trade-label">Notes</label><input class="trade-input" id="jNotes" type="text" placeholder="What happened…" /></div>
+        <button class="submit-trade-btn" id="jSubmitBtn">LOG TRADE</button>
+        <div id="jFormMsg" style="text-align:center;font-size:12px;display:none"></div>
+      </div>
     </div>
   </div>
 
@@ -3628,10 +3691,16 @@ async function refreshScenarios(force = false) {
 document.getElementById('scenarioGenBtn')?.addEventListener('click', () => refreshScenarios(true));
 
 // ════════ JOURNAL ════════
-let journalFilter = 'all';
-let _journalData  = null;
-let _jDirection   = 'LONG';
-let _jOutcome     = 'WIN';
+// ══════════════════════════════════════════════════════
+// JOURNAL — Intelligence System
+// ══════════════════════════════════════════════════════
+let journalFilter   = 'all';
+let _journalData    = null;
+let _signalData     = null;
+let _jDirection     = 'LONG';
+let _jOutcome       = 'WIN';
+let _jActiveTab     = 'trades';
+let _sigFilter      = 'all';
 
 function setDir(d) {
   _jDirection = d;
@@ -3645,6 +3714,19 @@ function setOutcome(o) {
   document.getElementById('jOutBE').className   = 'toggle-btn' + (o === 'BREAKEVEN' ? ' active-be'   : '');
 }
 
+function openJModal()  { document.getElementById('jModalBackdrop').style.display = 'flex'; }
+function closeJModal() { document.getElementById('jModalBackdrop').style.display = 'none'; }
+document.getElementById('jOpenModal').addEventListener('click', openJModal);
+
+function switchJTab(tab) {
+  _jActiveTab = tab;
+  ['trades','signals','analytics'].forEach(t => {
+    document.getElementById('jPanel-' + t).style.display = t === tab ? '' : 'none';
+    document.getElementById('jTab-' + t).classList.toggle('active', t === tab);
+  });
+  if (tab === 'signals' && !_signalData) refreshSignals();
+}
+
 function fmtTimeET(isoStr) {
   if (!isoStr) return '—';
   try {
@@ -3652,7 +3734,6 @@ function fmtTimeET(isoStr) {
     return d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'America/New_York'}) + ' ET';
   } catch(e) { return '—'; }
 }
-
 function fmtDateHeader(dateStr) {
   try {
     const [y,m,d] = dateStr.split('-').map(Number);
@@ -3665,57 +3746,74 @@ function setJournalFilter(f) {
   if (_journalData) renderJournal(_journalData);
 }
 
+function setSigFilter(f) {
+  _sigFilter = f;
+  if (_signalData) renderSignalFeed(_signalData);
+}
+
+// ── Trade card renderer ──────────────────────────────────────
 function renderJournal(data) {
   _journalData = data;
   const stats  = data.stats  || {};
   const trades = data.trades || [];
+  const todayStr = new Date().toISOString().slice(0, 10);
 
-  // Daily P&L banner
-  const dp = stats.daily_pnl || {};
-  function applyDailyPnl(elId, val) {
-    const el = document.getElementById(elId);
-    if (!el) return;
-    const n = parseFloat(val) || 0;
-    el.textContent = (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
-    el.style.color  = n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--muted)';
+  // Overview strip
+  const todayTrades = trades.filter(t => t.trade_date === todayStr);
+  const todayPnl = todayTrades
+    .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS')
+    .reduce((s, t) => s + (parseFloat(t.realized_pnl ?? t.pnl ?? 0) || 0), 0);
+  const closed = trades.filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS');
+  const wins   = closed.filter(t => t.outcome === 'WIN').length;
+  const wr     = closed.length > 0 ? (wins / closed.length * 100).toFixed(1) : null;
+  const pf     = stats.profit_factor || 0;
+  const weekPnl = (stats.daily_pnl || {}).this_week || 0;
+
+  setText('jOvTrades', todayTrades.length);
+  const pnlEl = document.getElementById('jOvPnl');
+  if (pnlEl) {
+    pnlEl.textContent = todayPnl >= 0 ? '+$' + todayPnl.toFixed(2) : '-$' + Math.abs(todayPnl).toFixed(2);
+    pnlEl.style.color = todayPnl > 0 ? 'var(--green)' : todayPnl < 0 ? 'var(--red)' : 'var(--muted2)';
+  }
+  const wrEl = document.getElementById('jOvWinRate');
+  if (wrEl) {
+    wrEl.textContent = wr !== null ? wr + '%' : '—';
+    wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)';
+  }
+  const pfEl = document.getElementById('jOvPF');
+  if (pfEl) {
+    pfEl.textContent = pf > 0 ? pf.toFixed(2) : '—';
+    pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : pf > 0 ? 'var(--red)' : 'var(--muted2)';
+  }
+  const wkEl = document.getElementById('jOvWeek');
+  if (wkEl) {
+    const w = parseFloat(weekPnl) || 0;
+    wkEl.textContent = w >= 0 ? '+$' + w.toFixed(2) : '-$' + Math.abs(w).toFixed(2);
+    wkEl.style.color = w > 0 ? 'var(--green)' : w < 0 ? 'var(--red)' : 'var(--muted2)';
   }
 
-  // Bug 6: today P&L — recalculate from raw trades; only WIN + LOSS, skip OPEN and null
-  const todayStrJ = new Date().toISOString().slice(0, 10);
-  const todayPnlJ = trades
-    .filter(t => t.trade_date === todayStrJ && (t.outcome === 'WIN' || t.outcome === 'LOSS'))
-    .reduce((sum, t) => {
-      const v = parseFloat(t.realized_pnl ?? t.pnl ?? 'x');
-      return sum + (isNaN(v) ? 0 : v);
-    }, 0);
-  applyDailyPnl('jPnlToday',     todayPnlJ);
-  applyDailyPnl('jPnlYesterday', dp.yesterday);
-  applyDailyPnl('jPnlWeek',      dp.this_week);
+  // Trade count badge
+  setText('jTabCount-trades', trades.length);
 
-  // Stats row
-  setText('jTotalTrades', stats.total || 0);
-  // Bug 7: win rate — only WIN + LOSS in denominator (exclude OPEN, BREAKEVEN)
-  const jClosedCount = trades.filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS').length;
-  const jWinCount    = trades.filter(t => t.outcome === 'WIN').length;
-  const wr = jClosedCount > 0 ? Math.round(jWinCount / jClosedCount * 1000) / 10 : 0;
-  const wrEl = document.getElementById('jWinRate');
-  if (wrEl) { wrEl.textContent = wr + '%'; wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : 'var(--red)'; }
-  setText('jWinRateSub', `${stats.wins||0}W / ${stats.losses||0}L / ${stats.breakevens||0}BE`);
-  const pf = stats.profit_factor || 0;
-  const pfEl = document.getElementById('jProfitFactor');
-  if (pfEl) { pfEl.textContent = pf.toFixed(2); pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : 'var(--red)'; }
+  // Analytics stats
+  setText('jaTotalTrades', stats.total || 0);
+  const jaWR = document.getElementById('jaWinRate');
+  if (jaWR) { jaWR.textContent = wr !== null ? wr + '%' : '—'; jaWR.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)'; }
+  setText('jaWRSub', `${stats.wins||0}W · ${stats.losses||0}L · ${stats.breakevens||0}BE`);
+  const jaPF = document.getElementById('jaPF');
+  if (jaPF) { jaPF.textContent = pf > 0 ? pf.toFixed(2) : '—'; jaPF.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : pf > 0 ? 'var(--red)' : 'var(--muted2)'; }
+  setText('jaBestRegime', stats.best_regime || '—');
+  setText('jaWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
   setText('jAvgWinLoss', `Avg W: ${stats.avg_win ? '$'+stats.avg_win : '—'} / Avg L: ${stats.avg_loss ? '$'+stats.avg_loss : '—'}`);
-  setText('jBestRegime', stats.best_regime || '—');
-  setText('jWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
 
   // Filter bar
   const filterLabels = {all:'All Time', week:'This Week', month:'This Month'};
-  setHtml('jFilterBar', '<span style="font-size:9px;color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase">Filter:</span>'
+  setHtml('jFilterBar', '<span style="font-size:9px;color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase;font-family:Space Mono,monospace">Filter:</span>'
     + Object.entries(filterLabels).map(([f,label]) =>
         `<button class="j-filter-btn${journalFilter===f?' active':''}" onclick="setJournalFilter('${f}')">${label}</button>`
       ).join(''));
 
-  // Annotate original indices then filter by selected period
+  // Filter trades by period
   const now = new Date();
   const indexed = trades.map((t, i) => ({t, origIdx: i}));
   const filtered = indexed.filter(({t}) => {
@@ -3724,18 +3822,14 @@ function renderJournal(data) {
     if (!ds) return true;
     const d = new Date(ds + 'T12:00:00');
     if (journalFilter === 'week') {
-      const mon = new Date(now);
-      mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
-      mon.setHours(0,0,0,0);
+      const mon = new Date(now); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7)); mon.setHours(0,0,0,0);
       return d >= mon;
     }
-    if (journalFilter === 'month') {
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    }
+    if (journalFilter === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     return true;
   });
 
-  // Group by date, newest date first, newest trade first within each date
+  // Group by date
   const grouped = {};
   filtered.forEach(({t, origIdx}) => {
     const dk = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : 'Unknown');
@@ -3746,12 +3840,17 @@ function renderJournal(data) {
 
   let cards = '';
   if (sortedDates.length === 0) {
-    cards = `<div style="text-align:center;padding:24px;color:var(--muted2);font-size:13px">${trades.length ? 'No trades in this period.' : 'No trades logged yet. Log your first trade using the form →'}</div>`;
+    cards = `<div style="text-align:center;padding:48px;color:var(--muted2);font-size:13px">${trades.length ? 'No trades in this period.' : 'No trades logged yet. Click <strong>+ LOG TRADE</strong> to add your first entry.'}</div>`;
   } else {
     sortedDates.forEach(dk => {
       const dayItems = grouped[dk].slice().reverse();
       const count = dayItems.length;
-      cards += `<div class="j-date-group"><div class="j-date-label">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span></div>`;
+      const dayPnl = dayItems.reduce((s, {t}) => {
+        const v = parseFloat(t.realized_pnl ?? t.pnl ?? 0) || 0;
+        return (t.outcome === 'WIN' || t.outcome === 'LOSS') ? s + v : s;
+      }, 0);
+      const dayPnlStr = dayPnl !== 0 ? `<span style="color:${dayPnl>0?'var(--green)':'var(--red)'};margin-left:10px;font-weight:400">${dayPnl>0?'+$':'-$'}${Math.abs(dayPnl).toFixed(2)}</span>` : '';
+      cards += `<div class="j-date-group"><div class="j-date-label">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span>${dayPnlStr}</div>`;
       dayItems.forEach(({t, origIdx}) => {
         const outcome    = (t.outcome || 'OPEN').toUpperCase();
         const dir        = (t.direction || '').toUpperCase();
@@ -3762,58 +3861,59 @@ function renderJournal(data) {
         const pnlStr     = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
         const pnlColor   = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
         const timeStr    = fmtTimeET(t.timestamp);
-        const srcLabel   = t.source === 'DONNA_AUTO' ? 'DONNA AUTO' : 'MANUAL';
-        const isAuto     = t.source === 'DONNA_AUTO';
-        const tierLabel  = t.tier ? String(t.tier).toUpperCase() : '';
+        const grade      = (t.grade || t.tier || '').toUpperCase();
+        const gradeClass = grade === 'A' ? 'b-grade-a' : grade === 'B' ? 'b-grade-b' : 'b-grade-c';
         const sessLabel  = (t.session || '').replace(/_/g, ' ');
         const setupLabel = t.setup_type || '';
+        const isAuto     = t.source === 'DONNA_AUTO';
 
         // Badges
-        let badges = `<span class="tc-badge${isAuto?' b-auto':''}">${srcLabel}</span>`;
-        if (setupLabel) badges += `<span class="tc-badge">${setupLabel}</span>`;
-        if (tierLabel)  badges += `<span class="tc-badge b-tier">${tierLabel}</span>`;
-        if (sessLabel)  badges += `<span class="tc-badge">${sessLabel}</span>`;
+        let badges = '';
+        if (t.ticker) badges += `<span class="itc-badge b-nova">${t.ticker}</span>`;
+        if (dir) badges += `<span class="itc-badge" style="color:${dir==='LONG'?'var(--green)':'var(--red)'}">${dirIcon} ${dir}</span>`;
+        if (setupLabel) badges += `<span class="itc-badge">${setupLabel.replace(/_/g,' ')}</span>`;
+        if (sessLabel) badges += `<span class="itc-badge b-session-a">${sessLabel}</span>`;
+        if (grade) badges += `<span class="itc-badge ${gradeClass}">Grade ${grade}</span>`;
+        if (isAuto) badges += `<span class="itc-badge b-nova">AUTO</span>`;
 
-        // Execution detail: entry → exit
-        const hasEntry = t.entry_price !== null && t.entry_price !== undefined;
-        const hasExit  = t.exit_price  !== null && t.exit_price  !== undefined;
-        let execHtml = '';
-        if (hasEntry && hasExit) {
-          execHtml = `${formatPrice(t.entry_price,2)} <span style="color:var(--muted2);margin:0 5px">→</span> ${formatPrice(t.exit_price,2)}<span style="color:var(--muted2);margin-left:8px">× ${t.size||1}</span>`;
-        } else if (hasEntry) {
-          execHtml = `Entry ${formatPrice(t.entry_price,2)}<span style="color:var(--muted2);margin-left:8px">× ${t.size||1}</span><span style="color:var(--muted2);margin-left:8px;font-style:italic">exit pending</span>`;
-        } else if (t.size) {
-          execHtml = `<span style="color:var(--muted2)">Size</span> ${t.size}`;
+        // Execution row
+        const hasEntry = t.entry_price != null;
+        const hasExit  = t.exit_price  != null;
+        let execItems = '';
+        if (hasEntry) execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Entry</div><div class="itc-exec-val">${parseFloat(t.entry_price).toLocaleString()}</div></div>`;
+        if (hasExit)  execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Exit</div><div class="itc-exec-val">${parseFloat(t.exit_price).toLocaleString()}</div></div>`;
+        if (t.stop)   execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Stop</div><div class="itc-exec-val" style="color:var(--red)">${parseFloat(t.stop).toLocaleString()}</div></div>`;
+        if (t.tp1)    execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">TP1</div><div class="itc-exec-val" style="color:var(--green)">${parseFloat(t.tp1).toLocaleString()}</div></div>`;
+        if (t.rr)     execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">R:R</div><div class="itc-exec-val">${t.rr}</div></div>`;
+        if (t.size)   execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Size</div><div class="itc-exec-val">${t.size}</div></div>`;
+
+        // NOVA intelligence block
+        let novaBlock = '';
+        if (t.notes || t.action) {
+          const novaText = t.action || t.notes || '';
+          novaBlock = `<div class="itc-nova"><div class="itc-nova-label">NOVA Assessment</div>${escHtml(novaText.substring(0,280))}${novaText.length>280?'…':''}</div>`;
         }
 
-        // Context chips
-        const ctxParts = [];
-        if (t.active_regime) ctxParts.push(`<span><span style="color:var(--muted2)">Regime</span> <strong>${t.active_regime}</strong></span>`);
-        if (t.confidence)    ctxParts.push(`<span><span style="color:var(--muted2)">Conf</span> <strong>${t.confidence}</strong></span>`);
-        if (t.bias_score)    ctxParts.push(`<span><span style="color:var(--muted2)">Bias</span> <strong>${t.bias_score}</strong></span>`);
-        if (t.broker_mode)   ctxParts.push(`<span><span style="color:var(--muted2)">Mode</span> <strong>${t.broker_mode}</strong></span>`);
-        if (t.harvey_verdict) {
-          const vc = t.harvey_verdict==='BUY'?'var(--green)':t.harvey_verdict==='SELL'?'var(--red)':'var(--yellow)';
-          ctxParts.push(`<span><span style="color:var(--muted2)">Verdict</span> <strong style="color:${vc}">${t.harvey_verdict}</strong></span>`);
-        }
-        if (t.notes) ctxParts.push(`<span style="font-style:italic;color:var(--muted)">"${t.notes}"</span>`);
+        // Context row
+        let ctxItems = '';
+        if (t.macro_risk || t.active_regime) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Macro</div><div class="itc-ctx-val">${(t.macro_risk||'—').toUpperCase()}</div></div>`;
+        if (t.vix)  ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">VIX</div><div class="itc-ctx-val">${parseFloat(t.vix).toFixed(1)}</div></div>`;
+        if (t.regime || t.active_regime) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Regime</div><div class="itc-ctx-val">${(t.regime||t.active_regime||'—').replace(/_/g,' ')}</div></div>`;
+        if (t.pros_phase) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">PROS</div><div class="itc-ctx-val">${t.pros_phase.replace(/_/g,' ')}</div></div>`;
+        if (t.ib_draw) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">IB Draw</div><div class="itc-ctx-val">${t.ib_draw}</div></div>`;
+        if (t.nova_conf) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Confidence</div><div class="itc-ctx-val">${t.nova_conf}</div></div>`;
+        if (t.session_quality) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Session Q</div><div class="itc-ctx-val" style="color:${t.session_quality==='A'?'var(--green)':'var(--yellow)'}">Grade ${t.session_quality}</div></div>`;
 
-        cards += `<div class="trade-card outcome-${outcome}">
-  <div class="tc-badges">${badges}</div>
-  <div class="tc-main">
-    <div style="display:flex;align-items:baseline;gap:4px">
-      <span class="tc-ticker">${t.ticker||'—'}</span>
-      <span class="tc-dir ${dirClass}">${dirIcon} ${dir}</span>
-    </div>
-    <div style="text-align:right">
-      <div class="tc-pnl" style="color:${pnlColor}">${pnlStr}</div>
-      <div class="tc-time">${timeStr}</div>
-    </div>
+        cards += `<div class="itc outcome-${outcome}">
+  <div class="itc-header">
+    <div class="itc-badges">${badges}</div>
+    <div><div class="itc-pnl" style="color:${pnlColor}">${pnlStr}</div><div class="itc-time">${timeStr}</div></div>
   </div>
-  ${execHtml ? `<div class="tc-exec">${execHtml}</div>` : ''}
-  ${ctxParts.length ? `<div class="tc-ctx">${ctxParts.join('')}</div>` : ''}
-  <div class="tc-footer">
-    <span class="tc-outcome-badge ${outcome}">${outcome}</span>
+  ${execItems ? `<div class="itc-exec">${execItems}</div>` : ''}
+  ${novaBlock}
+  ${ctxItems ? `<div class="itc-ctx">${ctxItems}</div>` : ''}
+  <div class="itc-footer">
+    <span class="itc-outcome-badge ${outcome}">${outcome}</span>
     <button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button>
   </div>
 </div>`;
@@ -3823,35 +3923,99 @@ function renderJournal(data) {
   }
   setHtml('journalCardList', cards);
 
-  // Regime breakdown
+  // Regime breakdown (analytics tab)
   const byRegime = stats.by_regime || {};
   const regimeColorMap = {TRENDING:'var(--green)',RANGING:'var(--blue)',EVENT_DRIVEN:'var(--yellow)',RISK_OFF:'var(--red)',CONSOLIDATING:'var(--muted2)'};
   const regimeCards = Object.entries(byRegime).sort((a,b) => b[1].win_rate - a[1].win_rate);
   setHtml('regimeBreakdownGrid', regimeCards.length ? regimeCards.map(([regime, rb]) => {
-    const rwr = rb.win_rate || 0;
-    const rc = rwr >= 55 ? 'var(--green)' : rwr >= 45 ? 'var(--yellow)' : 'var(--red)';
+    const rwr = rb.win_rate || 0; const rc = rwr >= 55 ? 'var(--green)' : rwr >= 45 ? 'var(--yellow)' : 'var(--red)';
     const rtotal = (rb.wins||0) + (rb.losses||0) + (rb.breakevens||0);
     const borderC = regimeColorMap[regime] || 'var(--line)';
-    return `<div class="regime-card" style="border-color:${borderC}44">
-      <div class="rc-name" style="color:${borderC}">${regime}</div>
-      <div class="rc-wr" style="color:${rc}">${rwr}%</div>
-      <div class="rc-sub">${rb.wins}W · ${rb.losses}L · ${rtotal} trades</div>
-    </div>`;
+    return `<div class="regime-card" style="border-color:${borderC}44"><div class="rc-name" style="color:${borderC}">${regime}</div><div class="rc-wr" style="color:${rc}">${rwr}%</div><div class="rc-sub">${rb.wins}W · ${rb.losses}L · ${rtotal} trades</div></div>`;
   }).join('') : '<div class="regime-card"><div class="rc-sub">No trades yet.</div></div>');
 
-  // Session breakdown
   const bySession = stats.by_session || {};
   const sessionCards = Object.entries(bySession).sort((a,b) => b[1].win_rate - a[1].win_rate);
   setHtml('sessionBreakdownGrid', sessionCards.length ? sessionCards.map(([sess, sb]) => {
-    const swr = sb.win_rate || 0;
-    const sc = swr >= 55 ? 'var(--green)' : swr >= 45 ? 'var(--yellow)' : 'var(--red)';
+    const swr = sb.win_rate || 0; const sc = swr >= 55 ? 'var(--green)' : swr >= 45 ? 'var(--yellow)' : 'var(--red)';
     const stotal = (sb.wins||0) + (sb.losses||0) + (sb.breakevens||0);
-    return `<div class="regime-card">
-      <div class="rc-name">${sess.replace(/_/g,' ')}</div>
-      <div class="rc-wr" style="color:${sc}">${swr}%</div>
-      <div class="rc-sub">${sb.wins}W · ${sb.losses}L · ${stotal} trades</div>
-    </div>`;
+    return `<div class="regime-card"><div class="rc-name">${sess.replace(/_/g,' ')}</div><div class="rc-wr" style="color:${sc}">${swr}%</div><div class="rc-sub">${sb.wins}W · ${sb.losses}L · ${stotal} trades</div></div>`;
   }).join('') : '<div class="regime-card"><div class="rc-sub">No trades yet.</div></div>');
+}
+
+// ── Signal feed renderer ──────────────────────────────────────
+function renderSignalFeed(data) {
+  _signalData = data;
+  const signals = data.signals || [];
+  const total   = data.total || 0;
+
+  // Update count badge
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayCount = signals.filter(s => (s.date || s.timestamp || '').startsWith(todayStr)).length;
+  setText('jTabCount-signals', todayCount);
+  setText('jOvEvals', total);
+
+  // Sig filter bar
+  const sigFilterLabels = {all:'All', today:'Today', mnq:'MNQ', mes:'MES'};
+  setHtml('jSigFilterBar', Object.entries(sigFilterLabels).map(([f, label]) =>
+    `<button class="j-filter-btn${_sigFilter===f?' active':''}" onclick="setSigFilter('${f}')">${label}</button>`
+  ).join(''));
+
+  // Filter
+  const filtered = signals.filter(s => {
+    if (_sigFilter === 'today') return (s.date || '').startsWith(todayStr) || (s.timestamp || '').startsWith(todayStr);
+    if (_sigFilter === 'mnq')   return (s.symbol || '').toUpperCase().includes('MNQ');
+    if (_sigFilter === 'mes')   return (s.symbol || '').toUpperCase().includes('MES');
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    setHtml('jSignalFeedList', '<div style="text-align:center;padding:48px;color:var(--muted2);font-size:13px">No signal entries found.</div>');
+    return;
+  }
+
+  let html = '';
+  filtered.forEach(s => {
+    const sym     = (s.symbol || '').replace('CME_MINI:','').replace('1!','');
+    const cmd     = (s.nova_cmd || 'WAIT').replace(/\\s+/g,'-').toUpperCase();
+    const cmdKey  = cmd.includes('WATCH') ? 'WATCH' : cmd.includes('BUY') || cmd.includes('LONG') ? 'BUY' : cmd.includes('SELL') || cmd.includes('SHORT') ? 'SELL' : 'WAIT';
+    const grade   = (s.grade || '—').toUpperCase();
+    const sessQ   = s.session_quality || '';
+    const conf    = s.nova_conf || '';
+    const phase   = (s.pros_phase || '').replace(/_/g,' ');
+    const ote     = s.pros_ote || '';
+    const ibd     = s.ib_draw || '';
+    const notes   = s.notes || s.action || '';
+    const timeStr = s.timestamp_et || '';
+    const dir     = (s.pros_direction || s.direction || '').toUpperCase();
+    const dirIcon = dir === 'LONG' ? '▲' : dir === 'SHORT' ? '▼' : '';
+
+    html += `<div class="sf-card">
+  <div class="sf-header">
+    <div class="sf-meta">
+      <span class="sf-time">${timeStr}</span>
+      <span class="sf-symbol">${sym}</span>
+      <span class="sf-cmd ${cmdKey}">${s.nova_cmd || 'WAIT'}</span>
+      ${dir ? `<span style="font-family:'Space Mono',monospace;font-size:9px;color:${dir==='LONG'?'var(--green)':'var(--red)'}">${dirIcon} ${dir}</span>` : ''}
+    </div>
+    <span class="sf-grade ${grade}">Grade ${grade}${sessQ ? ` · Q${sessQ}` : ''}</span>
+  </div>
+  <div class="sf-chips">
+    ${phase ? `<span class="sf-chip">PROS <strong>${phase}</strong></span>` : ''}
+    ${ote   ? `<span class="sf-chip">OTE <strong>${ote}</strong></span>` : ''}
+    ${ibd   ? `<span class="sf-chip">IB <strong>${ibd}</strong></span>` : ''}
+    ${conf  ? `<span class="sf-chip">Conf <strong>${conf}</strong></span>` : ''}
+    ${s.macro_risk ? `<span class="sf-chip">Macro <strong>${(s.macro_risk||'').toUpperCase()}</strong></span>` : ''}
+    ${s.vix ? `<span class="sf-chip">VIX <strong>${parseFloat(s.vix).toFixed(1)}</strong></span>` : ''}
+  </div>
+  ${notes ? `<div class="sf-notes">${escHtml(notes.substring(0,220))}${notes.length>220?'…':''}</div>` : ''}
+</div>`;
+  });
+  setHtml('jSignalFeedList', html);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function refreshJournal() {
@@ -3863,44 +4027,48 @@ async function refreshJournal() {
   } catch(e) { console.error('Journal refresh error:', e); }
 }
 
+async function refreshSignals() {
+  try {
+    const res = await fetch('/journal/signals');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderSignalFeed(data);
+  } catch(e) { console.error('Signal feed error:', e); }
+}
+
 async function deleteTrade(index) {
   if (!confirm('Delete this trade entry?')) return;
   try {
-    const res = await fetch('/journal/delete', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({index})
-    });
+    const res = await fetch('/journal/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({index})});
     const data = await res.json();
     if (data.status === 'ok') refreshJournal();
   } catch(e) { console.error(e); }
 }
 
 document.getElementById('jSubmitBtn').addEventListener('click', async () => {
-  const ticker        = (document.getElementById('jTicker').value || '').trim().toUpperCase();
-  const direction     = _jDirection;
-  const outcome       = _jOutcome;
-  const realizedRaw   = document.getElementById('jRealizedPnl').value;
-  const realized_pnl  = realizedRaw !== '' ? parseFloat(realizedRaw) : null;
-  const entryRaw      = document.getElementById('jEntry').value;
-  const exitRaw       = document.getElementById('jExit').value;
-  const entry_price   = entryRaw !== '' ? parseFloat(entryRaw) : null;
-  const exit_price    = exitRaw  !== '' ? parseFloat(exitRaw)  : null;
-  const size          = parseFloat(document.getElementById('jSize').value) || 1;
-  const setup_type    = (document.getElementById('jSetup').value || '').trim();
-  const notes         = (document.getElementById('jNotes').value || '').trim();
-  const trade_date    = document.getElementById('jDate').value || '';
+  const ticker       = (document.getElementById('jTicker').value || '').trim().toUpperCase();
+  const direction    = _jDirection;
+  const outcome      = _jOutcome;
+  const realizedRaw  = document.getElementById('jRealizedPnl').value;
+  const realized_pnl = realizedRaw !== '' ? parseFloat(realizedRaw) : null;
+  const entryRaw     = document.getElementById('jEntry').value;
+  const exitRaw      = document.getElementById('jExit').value;
+  const entry_price  = entryRaw !== '' ? parseFloat(entryRaw) : null;
+  const exit_price   = exitRaw  !== '' ? parseFloat(exitRaw)  : null;
+  const size         = parseFloat(document.getElementById('jSize').value) || 1;
+  const stop         = document.getElementById('jStop').value !== '' ? parseFloat(document.getElementById('jStop').value) : null;
+  const tp1          = document.getElementById('jTp1').value  !== '' ? parseFloat(document.getElementById('jTp1').value)  : null;
+  const setup_type   = (document.getElementById('jSetup').value || '').trim();
+  const session      = document.getElementById('jSession').value;
+  const notes        = (document.getElementById('jNotes').value || '').trim();
+  const trade_date   = document.getElementById('jDate').value || '';
 
   const msgEl = document.getElementById('jFormMsg');
-  function showMsg(text, color) {
-    msgEl.style.display = 'block';
-    msgEl.style.color = color;
-    msgEl.textContent = text;
-  }
+  function showMsg(text, color) { msgEl.style.display='block'; msgEl.style.color=color; msgEl.textContent=text; }
 
   if (!ticker) { showMsg('Ticker is required.', 'var(--red)'); return; }
   if (realized_pnl === null && (entry_price === null || exit_price === null)) {
-    showMsg('Enter Realized P&L or both Entry and Exit prices.', 'var(--red)');
-    return;
+    showMsg('Enter Realized P&L or both Entry and Exit.', 'var(--red)'); return;
   }
 
   const btn = document.getElementById('jSubmitBtn');
@@ -3908,36 +4076,36 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   msgEl.style.display = 'none';
 
   try {
-    const payload = {ticker, direction, outcome, size, setup_type, notes, trade_date};
+    const payload = {ticker, direction, outcome, size, setup_type, session, notes, trade_date};
     if (realized_pnl !== null) payload.realized_pnl = realized_pnl;
     if (entry_price  !== null) payload.entry_price   = entry_price;
     if (exit_price   !== null) payload.exit_price    = exit_price;
-    const res = await fetch('/journal/add', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
+    if (stop !== null) payload.stop = stop;
+    if (tp1  !== null) payload.tp1  = tp1;
+    const res  = await fetch('/journal/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     const data = await res.json();
     if (data.status === 'ok') {
-      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => { document.getElementById(id).value = ''; });
+      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
       document.getElementById('jDate').value = todayDateStr();
+      document.getElementById('jSession').value = '';
       setDir('LONG'); setOutcome('WIN');
       showMsg('Trade logged.', 'var(--green)');
-      setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
+      setTimeout(() => { msgEl.style.display='none'; closeJModal(); }, 1200);
       refreshJournal();
     } else {
-      showMsg('Error: ' + (data.detail || 'Unknown error'), 'var(--red)');
+      showMsg('Error: ' + (data.detail || 'Unknown'), 'var(--red)');
     }
-  } catch(e) {
-    showMsg('Connection error.', 'var(--red)');
-  }
+  } catch(e) { showMsg('Connection error.', 'var(--red)'); }
   btn.disabled = false; btn.textContent = 'LOG TRADE';
 });
 
-['jTicker','jRealizedPnl','jEntry','jExit','jSize','jSetup','jNotes'].forEach(id => {
-  document.getElementById(id).addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('jSubmitBtn').click();
-  });
+['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('jSubmitBtn').click(); });
 });
+
+// refresh signals when switching to signals tab
+document.getElementById('jTab-signals').addEventListener('click', () => refreshSignals());
 
 // ════════ BOOT ════════
 function todayDateStr() {
