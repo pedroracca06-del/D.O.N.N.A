@@ -939,6 +939,45 @@ tr:last-child td{border-bottom:none}
 .flag-check{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);cursor:pointer}
 .flag-check input{width:14px;height:14px;cursor:pointer;accent-color:var(--gold)}
 
+/* ── TRADE DETAIL MODAL ── */
+.jtd-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1100;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto}
+.jtd-modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:900px;min-height:400px;margin:auto}
+.jtd-header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid var(--line);gap:12px;flex-wrap:wrap}
+.jtd-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.jtd-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);padding:4px 10px;border-radius:6px}
+.jtd-close:hover{color:var(--text)}
+.jtd-body{padding:20px 24px;display:grid;gap:16px}
+.jtd-screenshot{width:100%;border-radius:10px;border:1px solid var(--line);overflow:hidden;background:var(--panel2)}
+.jtd-screenshot img{width:100%;display:block;border-radius:9px}
+.jtd-section-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px}
+.jtd-two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.jtd-kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.jtd-kv{display:flex;flex-direction:column;gap:3px}
+.jtd-kv-lab{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase}
+.jtd-kv-val{font-size:13px;font-weight:600;color:var(--text)}
+.jtd-gate{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--line2)}
+.jtd-gate:last-child{border-bottom:none}
+.jtd-gate-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.jtd-gate-name{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;flex:1}
+.jtd-gate-val{font-family:'Space Mono',monospace;font-size:9px;font-weight:700}
+/* reasoning timeline */
+.jtd-timeline{display:flex;flex-direction:column;gap:0}
+.jtd-tl-item{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line2)}
+.jtd-tl-item:last-child{border-bottom:none}
+.jtd-tl-dot-col{display:flex;flex-direction:column;align-items:center;padding-top:3px;flex-shrink:0}
+.jtd-tl-dot{width:9px;height:9px;border-radius:50%;border:2px solid var(--line);background:var(--panel2);flex-shrink:0}
+.jtd-tl-dot.active{background:var(--gold);border-color:var(--gold)}
+.jtd-tl-line{width:1px;flex:1;background:var(--line2);min-height:12px;margin-top:3px}
+.jtd-tl-content{flex:1;min-width:0}
+.jtd-tl-time{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2);margin-bottom:3px}
+.jtd-tl-cmd{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;color:var(--text)}
+.jtd-tl-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
+.jtd-tl-chip{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted2)}
+.jtd-tl-chip strong{color:var(--text)}
+.jtd-tl-note{font-size:10px;color:var(--muted);font-style:italic;margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.jtd-review{background:rgba(184,134,11,.04);border:1px solid rgba(184,134,11,.12);border-radius:10px;padding:14px 16px;font-size:12px;color:var(--muted);white-space:pre-wrap;line-height:1.65}
+@media(max-width:640px){.jtd-two-col{grid-template-columns:1fr}.jtd-kv-grid{grid-template-columns:1fr}}
+
 /* ── TRADE CARDS ── */
 .j-date-group{margin-bottom:20px}
 .j-date-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;font-weight:700;padding:6px 0;border-bottom:1px solid rgba(240,180,41,.15);margin-bottom:10px}
@@ -1959,6 +1998,19 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
       </div>
 
+    </div>
+  </div>
+
+  <!-- TRADE DETAIL MODAL -->
+  <div class="jtd-backdrop" id="jtdBackdrop" style="display:none" onclick="if(event.target===this)closeTradeDetail()">
+    <div class="jtd-modal">
+      <div class="jtd-header">
+        <div class="jtd-title" id="jtdTitle">—</div>
+        <button class="jtd-close" onclick="closeTradeDetail()">✕</button>
+      </div>
+      <div class="jtd-body" id="jtdBody">
+        <div style="text-align:center;padding:40px;color:var(--muted2)">Loading...</div>
+      </div>
     </div>
   </div>
 
@@ -4119,7 +4171,10 @@ function renderJournal(data) {
   ${reviewBlock}
   <div class="itc-footer">
     <span class="itc-outcome-badge ${outcome}">${outcome}</span>
-    <button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button style="font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:1px;padding:4px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;text-transform:uppercase" onclick="openTradeDetail(${origIdx})">Review</button>
+      <button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button>
+    </div>
   </div>
 </div>`;
       });
@@ -4221,6 +4276,157 @@ function renderSignalFeed(data) {
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Trade Detail (Phase 4 — Replay / Review) ───────────────────
+async function openTradeDetail(idx) {
+  document.getElementById(\'jtdBackdrop\').style.display = \'flex\';
+  document.getElementById(\'jtdTitle\').innerHTML = \'<span style="color:var(--muted2);font-size:12px">Loading…</span>\';
+  document.getElementById(\'jtdBody\').innerHTML = \'<div style="text-align:center;padding:40px;color:var(--muted2)">Loading trade detail…</div>\';
+  try {
+    const res  = await fetch(\'/journal/trade-detail\', {method:\'POST\', headers:{\'Content-Type\':\'application/json\'}, body: JSON.stringify({index: idx})});
+    const data = await res.json();
+    if (data.status === \'ok\') renderTradeDetail(data, idx);
+  } catch(e) {
+    document.getElementById(\'jtdBody\').innerHTML = \'<div style="text-align:center;padding:40px;color:var(--red)">Error loading detail.</div>\';
+  }
+}
+
+function closeTradeDetail() {
+  document.getElementById(\'jtdBackdrop\').style.display = \'none\';
+}
+
+function renderTradeDetail(data, idx) {
+  const t   = data.trade || {};
+  const tl  = data.reasoning_timeline || [];
+  const tr  = data.execution_trace;
+
+  const outcome  = (t.outcome || \'OPEN\').toUpperCase();
+  const dir      = (t.direction || \'\').toUpperCase();
+  const dirIcon  = dir === \'LONG\' ? \'▲\' : \'▼\';
+  const dirColor = dir === \'LONG\' ? \'var(--green)\' : \'var(--red)\';
+  const pnl      = parseFloat(t.realized_pnl || t.pnl || 0);
+  const pnlStr   = (pnl >= 0 ? \'+$\' : \'-$\') + Math.abs(pnl).toFixed(2);
+  const pnlColor = pnl > 0 ? \'var(--green)\' : pnl < 0 ? \'var(--red)\' : \'var(--muted)\';
+  const grade    = (t.grade || \'\').toUpperCase();
+
+  // Header
+  document.getElementById(\'jtdTitle\').innerHTML =
+    `<span style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:700">${t.ticker||\'—\'}</span>` +
+    `<span style="color:${dirColor};font-weight:700">${dirIcon} ${dir}</span>` +
+    (t.setup_type ? `<span style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2)">${t.setup_type.replace(/_/g,\' \')}</span>` : \'\') +
+    (grade ? `<span style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--gold)">Grade ${grade}</span>` : \'\') +
+    `<span style="font-family:\'Space Mono\',monospace;font-size:9px;color:${pnlColor};font-weight:700">${pnlStr}</span>`;
+
+  let html = \'\';
+
+  // Screenshot (first timeline entry that has one)
+  const withShot = tl.find(s => s.screenshot);
+  if (withShot && withShot.screenshot) {
+    const fname = withShot.screenshot.split(/[\\\\/]/).pop();
+    html += `<div class="jtd-screenshot"><img src="/journal/screenshot?file=${encodeURIComponent(fname)}" alt="Chart screenshot" loading="lazy" onerror="this.parentElement.style.display=\'none\'" /></div>`;
+  }
+
+  // Execution + Governance two-col
+  let execHtml = \'<div class="jtd-section-label">Execution</div><div class="jtd-kv-grid">\';
+  const execFields = [
+    [\'Entry\', t.entry_price != null ? parseFloat(t.entry_price).toLocaleString() : \'—\'],
+    [\'Exit\',  t.exit_price  != null ? parseFloat(t.exit_price).toLocaleString()  : \'—\'],
+    [\'Stop\',  t.stop  ? parseFloat(t.stop).toLocaleString()  : \'—\'],
+    [\'TP1\',   t.tp1   ? parseFloat(t.tp1).toLocaleString()   : \'—\'],
+    [\'R:R\',   t.rr    || \'—\'],
+    [\'Size\',  t.size  || 1],
+    [\'Session\', (t.session||\'—\').replace(/_/g,\' \')],
+    [\'Macro\',   (t.macro_risk||\'—\').toUpperCase()],
+  ];
+  execFields.forEach(([lab, val]) => {
+    execHtml += `<div class="jtd-kv"><div class="jtd-kv-lab">${lab}</div><div class="jtd-kv-val">${val}</div></div>`;
+  });
+  execHtml += \'</div>\';
+
+  // Governance gates from execution trace
+  let govHtml = \'<div class="jtd-section-label">Governance at Execution</div>\';
+  if (tr && tr.gates) {
+    const gates = tr.gates;
+    const gateItems = [
+      [\'Trade Permission\', gates.trade_permission !== false],
+      [\'Macro Lock\',       !gates.macro_lock],
+      [\'Red Folder\',       !gates.red_folder_active],
+      [\'EOD Lock\',         !gates.eod_lock],
+      [\'Daily Trades\',     true, gates.daily_trade_count + \' taken\'],
+    ];
+    gateItems.forEach(([name, pass, extra]) => {
+      const color = pass ? \'var(--green)\' : \'var(--red)\';
+      const label = extra || (pass ? \'CLEAR\' : \'BLOCKED\');
+      govHtml += `<div class="jtd-gate"><div class="jtd-gate-dot" style="background:${color}"></div><span class="jtd-gate-name">${name}</span><span class="jtd-gate-val" style="color:${color}">${label}</span></div>`;
+    });
+    if (tr.rejection_reason) {
+      govHtml += `<div style="margin-top:8px;font-size:11px;color:var(--red);font-style:italic">${tr.rejection_reason}</div>`;
+    }
+  } else {
+    govHtml += \'<div style="font-size:12px;color:var(--muted2);padding:8px 0">Manual trade — no execution trace.</div>\';
+  }
+
+  html += `<div class="jtd-two-col"><div class="panel" style="padding:14px 16px">${execHtml}</div><div class="panel" style="padding:14px 16px">${govHtml}</div></div>`;
+
+  // Reasoning timeline
+  if (tl.length) {
+    let tlHtml = \'<div class="jtd-section-label">Reasoning Timeline</div><div class="jtd-timeline">\';
+    tl.forEach((s, i) => {
+      const isLast   = i === tl.length - 1;
+      const cmd      = (s.nova_cmd || \'WAIT\').toUpperCase();
+      const isActive = cmd.includes(\'EXECUTION\') || cmd.includes(\'BUY\') || cmd.includes(\'SELL\');
+      const grade    = (s.grade || \'\').toUpperCase();
+      const gradeColor = grade === \'A\' ? \'var(--green)\' : grade === \'B\' ? \'var(--yellow)\' : \'var(--muted2)\';
+      const shotFname = s.screenshot ? s.screenshot.split(/[\\\\/]/).pop() : null;
+      tlHtml += `<div class="jtd-tl-item">
+        <div class="jtd-tl-dot-col">
+          <div class="jtd-tl-dot${isActive?\' active\':\'\'}"></div>
+          ${!isLast ? \'<div class="jtd-tl-line"></div>\' : \'\'}
+        </div>
+        <div class="jtd-tl-content">
+          <div class="jtd-tl-time">${s.timestamp_et||\'\'}</div>
+          <div class="jtd-tl-cmd">${s.nova_cmd||\'WAIT\'}${grade ? ` <span style="color:${gradeColor};font-size:8px">Grade ${grade}</span>` : \'\'}</div>
+          <div class="jtd-tl-chips">
+            ${s.pros_phase ? `<span class="jtd-tl-chip">PROS <strong>${(s.pros_phase||'').replace(/_/g,' ')}</strong></span>` : \'\'}
+            ${s.pros_ote   ? `<span class="jtd-tl-chip">OTE <strong>${s.pros_ote}</strong></span>` : \'\'}
+            ${s.nova_conf  ? `<span class="jtd-tl-chip">Conf <strong>${s.nova_conf}</strong></span>` : \'\'}
+            ${s.ib_draw    ? `<span class="jtd-tl-chip">IB <strong>${s.ib_draw}</strong></span>` : \'\'}
+          </div>
+          ${s.action ? `<div class="jtd-tl-note">${escHtml((s.action||'').substring(0,120))}</div>` : \'\'}
+          ${shotFname ? `<div style="margin-top:6px"><img src="/journal/screenshot?file=${encodeURIComponent(shotFname)}" style="width:100%;max-width:320px;border-radius:6px;border:1px solid var(--line)" loading="lazy" onerror="this.style.display=\'none\'" /></div>` : \'\'}
+        </div>
+      </div>` ;
+    });
+    tlHtml += \'</div>\';
+    html += `<div class="panel" style="padding:14px 16px">${tlHtml}</div>`;
+  }
+
+  // NOVA Review
+  if (t.nova_review) {
+    html += `<div class="panel" style="padding:14px 16px">
+      <div class="jtd-section-label">NOVA Review</div>
+      <div class="jtd-review">${escHtml(t.nova_review)}</div>
+    </div>`;
+  } else {
+    html += `<div style="text-align:center;padding:8px 0">
+      <button class="nova-gen-btn" id="nova-gen-${idx}" onclick="generateAnalysis(${idx}).then(()=>openTradeDetail(${idx}))">Generate NOVA Review</button>
+    </div>`;
+  }
+
+  // Behavioral
+  const flags   = t.behavioral_flags || [];
+  const estate  = t.emotional_state  || \'\';
+  const reflect = t.reflection       || \'\';
+  if (estate || flags.length || reflect) {
+    let bHtml = \'<div class="jtd-section-label">Behavioral</div>\';
+    if (estate) bHtml += `<div class="beh-state" style="margin-bottom:8px">${estate}</div>`;
+    if (flags.length) bHtml += `<div class="beh-flags" style="margin-bottom:8px">${flags.map(f=>`<span class="beh-flag">${f.replace(/_/g,\' \')}</span>`).join(\'\')}</div>`;
+    if (reflect) bHtml += `<div class="beh-reflection">"${escHtml(reflect)}"</div>`;
+    html += `<div class="panel" style="padding:14px 16px">${bHtml}</div>`;
+  }
+
+  document.getElementById(\'jtdBody\').innerHTML = html;
 }
 
 async function generateAnalysis(idx) {

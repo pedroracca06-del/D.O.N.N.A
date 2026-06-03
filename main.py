@@ -1603,6 +1603,59 @@ async def journal_add(request: Request):
     return {'status': 'ok', 'trade': trade, 'stats': stats}
 
 
+@app.get('/journal/screenshot')
+async def journal_screenshot(file: str):
+    """Serve a chart screenshot by filename. Only files inside the screenshots directory."""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    screenshots_dir = Path(__file__).parent / 'mcp' / 'tradingview' / 'screenshots'
+    if '/' in file or '\\' in file or '..' in file:
+        raise HTTPException(status_code=400, detail='Invalid filename')
+    target = screenshots_dir / file
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail='Screenshot not found')
+    return FileResponse(str(target), media_type='image/png')
+
+
+@app.post('/journal/trade-detail')
+async def journal_trade_detail(request: Request):
+    """Return enriched trade data: record + reasoning timeline + execution trace."""
+    import json as _json
+    from pathlib import Path
+    body      = await request.json()
+    trade_idx = int(body.get('index', -1))
+    trades    = load_journal()
+    if trade_idx < 0 or trade_idx >= len(trades):
+        raise HTTPException(status_code=400, detail='Invalid trade index')
+    trade = trades[trade_idx]
+    ticker = (trade.get('ticker') or '').upper().replace('1!', '')
+
+    sig_file = Path(__file__).parent / 'donna_signal_log.json'
+    try:
+        all_sigs = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
+    except Exception:
+        all_sigs = []
+    nearby = [s for s in all_sigs if ticker in (s.get('symbol') or '').upper()][:10]
+
+    trace_file = Path(__file__).parent / 'donna_execution_trace.json'
+    try:
+        all_trace = _json.loads(trace_file.read_text(encoding='utf-8')) if trace_file.exists() else []
+    except Exception:
+        all_trace = []
+    trace_record = next(
+        (tr for tr in all_trace if ticker.upper() in (tr.get('instrument') or tr.get('ticker') or '').upper()),
+        None,
+    )
+
+    return {
+        'status': 'ok',
+        'trade': trade,
+        'index': trade_idx,
+        'reasoning_timeline': nearby,
+        'execution_trace': trace_record,
+    }
+
+
 @app.post('/journal/analyze')
 async def journal_analyze(request: Request):
     """Generate a NOVA AI review for a journal trade entry. Stores result back to the trade."""
