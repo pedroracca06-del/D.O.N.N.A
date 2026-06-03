@@ -137,7 +137,6 @@ try:
     from donna_macro_discord import (
         run_macro_calendar_check,
         run_macro_morning_brief,
-        run_vix_volatility_check,
         run_breaking_news_check,
     )
     _MACRO_DISCORD_AVAILABLE = True
@@ -349,7 +348,6 @@ async def macro_discord_loop():
             # Core checks — all active during market hours
             if ny.weekday() < 5:
                 await asyncio.to_thread(run_macro_calendar_check)
-                await asyncio.to_thread(run_vix_volatility_check)
                 await asyncio.to_thread(run_breaking_news_check)
         except Exception as e:
             print(f'[macro_discord_loop] error: {e}')
