@@ -4182,25 +4182,6 @@ function renderJournal(data) {
     });
   }
   setHtml('journalCardList', cards);
-
-  // Regime breakdown (analytics tab)
-  const byRegime = stats.by_regime || {};
-  const regimeColorMap = {TRENDING:'var(--green)',RANGING:'var(--blue)',EVENT_DRIVEN:'var(--yellow)',RISK_OFF:'var(--red)',CONSOLIDATING:'var(--muted2)'};
-  const regimeCards = Object.entries(byRegime).sort((a,b) => b[1].win_rate - a[1].win_rate);
-  setHtml('regimeBreakdownGrid', regimeCards.length ? regimeCards.map(([regime, rb]) => {
-    const rwr = rb.win_rate || 0; const rc = rwr >= 55 ? 'var(--green)' : rwr >= 45 ? 'var(--yellow)' : 'var(--red)';
-    const rtotal = (rb.wins||0) + (rb.losses||0) + (rb.breakevens||0);
-    const borderC = regimeColorMap[regime] || 'var(--line)';
-    return `<div class="regime-card" style="border-color:${borderC}44"><div class="rc-name" style="color:${borderC}">${regime}</div><div class="rc-wr" style="color:${rc}">${rwr}%</div><div class="rc-sub">${rb.wins}W · ${rb.losses}L · ${rtotal} trades</div></div>`;
-  }).join('') : '<div class="regime-card"><div class="rc-sub">No trades yet.</div></div>');
-
-  const bySession = stats.by_session || {};
-  const sessionCards = Object.entries(bySession).sort((a,b) => b[1].win_rate - a[1].win_rate);
-  setHtml('sessionBreakdownGrid', sessionCards.length ? sessionCards.map(([sess, sb]) => {
-    const swr = sb.win_rate || 0; const sc = swr >= 55 ? 'var(--green)' : swr >= 45 ? 'var(--yellow)' : 'var(--red)';
-    const stotal = (sb.wins||0) + (sb.losses||0) + (sb.breakevens||0);
-    return `<div class="regime-card"><div class="rc-name">${sess.replace(/_/g,' ')}</div><div class="rc-wr" style="color:${sc}">${swr}%</div><div class="rc-sub">${sb.wins}W · ${sb.losses}L · ${stotal} trades</div></div>`;
-  }).join('') : '<div class="regime-card"><div class="rc-sub">No trades yet.</div></div>');
 }
 
 // ── Signal feed renderer ──────────────────────────────────────
