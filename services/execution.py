@@ -1108,6 +1108,44 @@ def execute_rithmic(signal_data: dict) -> dict:
     return {'status': 'skipped', 'reason': 'Rithmic not connected yet'}
 
 
+# ── Risk tier helpers ──────────────────────────────────────────
+
+def _load_risk_settings() -> tuple[str, float]:
+    """Return (tier_name, max_daily_risk_pct) from donna_settings.json."""
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        settings = _json.loads(
+            (_Path(__file__).parent.parent / 'data' / 'donna_settings.json')
+            .read_text(encoding='utf-8')
+        )
+        test_cfg = settings.get('autonomous_test_mode', {})
+        tier_name = str(test_cfg.get('risk_tier', 'standard_test'))
+        tiers = settings.get('risk_tiers', {})
+        pct = float((tiers.get(tier_name) or {}).get('max_daily_risk_pct', 2.0))
+        return tier_name, pct
+    except Exception:
+        return 'standard_test', 2.0
+
+
+def _get_active_risk_tier() -> str:
+    return _load_risk_settings()[0]
+
+
+def _get_daily_risk_cap_usd() -> float:
+    """Compute the dollar daily risk cap: account_equity × risk_pct / 100."""
+    _, pct = _load_risk_settings()
+    try:
+        acct = get_account()
+        equity = float(acct.get('equity', 0))
+        if equity > 0:
+            return round(equity * pct / 100, 2)
+    except Exception:
+        pass
+    # Fallback: conservative $500 if account unreachable
+    return 500.0
+
+
 # ── ALPACA_ETF execution ───────────────────────────────────────
 
 def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, routed_etf: str, apply_size_reduction: bool = False) -> dict:
@@ -1138,11 +1176,13 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
     if apply_size_reduction:
         qty = max(1, qty // 2)
 
-    # Block if cumulative risk would exceed $1,000 daily cap
+    # Block if cumulative risk would exceed the configured daily risk cap
     new_trade_risk = qty * stop_dist
-    if cumulative_risk + new_trade_risk > 1000.0:
+    daily_risk_cap = _get_daily_risk_cap_usd()
+    if cumulative_risk + new_trade_risk > daily_risk_cap:
         _risk_cap_reason = (
-            f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new >= $1,000 limit'
+            f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new '
+            f'>= ${daily_risk_cap:.0f} limit ({_get_active_risk_tier()})'
         )
         _log_rejection(_rejection_context(
             'DAILY_RISK_LIMIT', _risk_cap_reason,

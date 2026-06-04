@@ -180,6 +180,39 @@ def log_trade_execution(
         print(f'[trace] log_trade_execution error: {e}')
 
 
+def log_bridge_rejection(
+    code: str,
+    reason: str,
+    symbol: str,
+    direction: str,
+    setup_type: str,
+    grade: str,
+    session: str,
+    governance_snapshot: dict | None = None,
+) -> None:
+    """
+    Log a pre-execution bridge-level rejection with full governance snapshot.
+    Called for test-mode gate failures before execute_signal() is reached.
+    """
+    try:
+        entry: dict = {
+            'id':                 _new_id(),
+            'event_type':         'BRIDGE_REJECTED',
+            'timestamp_et':       _ts_et(),
+            'rejection_code':     code,
+            'rejection_reason':   reason,
+            'symbol':             symbol,
+            'direction':          direction,
+            'setup_type':         setup_type,
+            'grade':              grade,
+            'session':            session,
+            'governance_snapshot': governance_snapshot or {},
+        }
+        _append(entry)
+    except Exception as e:
+        print(f'[trace] log_bridge_rejection error: {e}')
+
+
 def get_trace(limit: int = 100) -> list:
     """Return the most recent trace entries (for /execution-trace API endpoint)."""
     try:
