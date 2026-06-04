@@ -19,8 +19,11 @@ NY_TZ  = ZoneInfo('America/New_York')
 UTC_TZ = ZoneInfo('UTC')
 
 # ── File paths ────────────────────────────────────────────────
-DATA_DIR           = BASE_DIR / 'data'
-DATA_DIR.mkdir(exist_ok=True)
+# DONNA_DATA_DIR lets Render's persistent disk override the default path.
+# Set DONNA_DATA_DIR=/data in Render env vars and mount the disk at /data.
+# Locally: falls back to repo/data/ as before.
+DATA_DIR           = Path(os.getenv('DONNA_DATA_DIR', str(BASE_DIR / 'data')))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 RISK_STATE_FILE    = DATA_DIR / 'donna_risk_state.json'
 ALERTS_FILE        = DATA_DIR / 'donna_alert_history.json'
