@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import time
 
-from donna_config import (
+from core.config import (
     TELEGRAM_ALERT_MODE, safe_float, utc_now_iso, now_ny, session_label,
     send_telegram_message,
 )
-from donna_state import load_risk_state, load_alert_history, save_alert_history
-from donna_engines import (
+from core.state import load_risk_state, load_alert_history, save_alert_history
+from engines.engines import (
     build_session_significance, build_market_driver_engine, build_morning_edge,
 )
 
@@ -416,7 +416,7 @@ def process_signal(payload: dict) -> dict:
 
     # ── execution trace: VERDICT stage ────────────────────────
     try:
-        import donna_execution_trace as _trace
+        import services.execution_trace as _trace
         _trace.log_execution_event('VERDICT', data, {
             'verdict':    verdict,
             'confidence': confidence,

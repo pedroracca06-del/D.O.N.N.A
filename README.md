@@ -30,15 +30,15 @@ TradingView Desktop
 mcp/tradingview/               Custom Node.js MCP server
       │ subprocess
       ▼
-donna_nova_reasoning.py        Deterministic evaluators + Claude grading
+engines/reasoning.py        Deterministic evaluators + Claude grading
       │ AlertData
-      ├──────────────────────► donna_alert_engine.py   Discord/Telegram delivery
+      ├──────────────────────► delivery/alert_engine.py   Discord/Telegram delivery
       │
       ▼
 main.py  (FastAPI / Render)    Webhooks · Dashboard · Journal · Market data
       │
       ▼
-donna_execution.py             Multi-gate risk engine → Alpaca broker
+services/execution.py             Multi-gate risk engine → Alpaca broker
 ```
 
 **Two-environment split:**
@@ -70,26 +70,26 @@ D.O.N.N.A/
 ├── main.py                         # FastAPI app — all routes and background loops
 ├── requirements.txt
 │
-├── donna_nova_reasoning.py         # Core intelligence: chart reading, evaluation, Claude
-├── donna_alert_engine.py           # Alert governance and Discord/Telegram delivery
-├── donna_local_monitor.py          # Session monitor — 60s polling loop + MCP health
-├── donna_execution.py              # Alpaca broker integration and risk gates
-├── donna_execution_bridge.py       # Routes EXECUTION_READY alerts to execution layer
-├── donna_config.py                 # Constants, env vars, API clients, file paths
-├── donna_state.py                  # State persistence helpers, journal stats
-├── donna_engines.py                # Dashboard payload builders (Harvey, scenarios)
-├── donna_signals.py                # TradingView webhook signal parser
-├── donna_signal_log.py             # Per-cycle NOVA evaluation log
-├── donna_state_engine.py           # Session state — trades taken, locks, daily P&L
-├── donna_risk_engine.py            # Position sizing, drawdown, R:R calculation
-├── donna_macro_discord.py          # Macro intelligence Discord delivery
-├── donna_headlines.py              # Economic calendar ingestion, red-folder governance
-├── donna_news.py                   # News risk scoring — headlines → risk_state
-├── donna_finnhub.py                # Live market data — quotes → risk_state
-├── donna_health.py                 # System health checks across all subsystems
-├── donna_assistant.py              # Claude conversational assistant
-├── donna_analytics.py              # Performance analytics helpers
-├── donna_html.py                   # Dashboard HTML/CSS/JS (~4,200 lines)
+├── engines/reasoning.py         # Core intelligence: chart reading, evaluation, Claude
+├── delivery/alert_engine.py           # Alert governance and Discord/Telegram delivery
+├── monitor.py          # Session monitor — 60s polling loop + MCP health
+├── services/execution.py              # Alpaca broker integration and risk gates
+├── services/execution_bridge.py       # Routes EXECUTION_READY alerts to execution layer
+├── core/config.py                 # Constants, env vars, API clients, file paths
+├── core/state.py                  # State persistence helpers, journal stats
+├── engines/engines.py                # Dashboard payload builders (Harvey, scenarios)
+├── engines/signals.py                # TradingView webhook signal parser
+├── delivery/signal_log.py             # Per-cycle NOVA evaluation log
+├── core/state_engine.py           # Session state — trades taken, locks, daily P&L
+├── engines/risk_engine.py            # Position sizing, drawdown, R:R calculation
+├── delivery/macro_discord.py          # Macro intelligence Discord delivery
+├── services/headlines.py              # Economic calendar ingestion, red-folder governance
+├── services/news.py                   # News risk scoring — headlines → risk_state
+├── services/finnhub.py                # Live market data — quotes → risk_state
+├── health/health.py                 # System health checks across all subsystems
+├── services/assistant.py              # Claude conversational assistant
+├── engines/analytics.py              # Performance analytics helpers
+├── ui/html.py                   # Dashboard HTML/CSS/JS (~4,200 lines)
 │
 ├── data/                           # Runtime state (gitignored, auto-generated)
 │   ├── donna_risk_state.json       # Live market snapshot, VIX, macro risk
@@ -141,7 +141,7 @@ uvicorn main:app --reload --port 8000
 powershell -ExecutionPolicy Bypass -File scripts/start_trading_session.ps1
 
 # Or manually
-python donna_local_monitor.py
+python monitor.py
 ```
 
 ---

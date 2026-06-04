@@ -5,17 +5,17 @@ import math
 import os
 from datetime import timedelta
 
-from donna_config import (
+from core.config import (
     now_ny, utc_now_iso, safe_float, send_telegram_message, session_label,
 )
-from donna_state import (
+from core.state import (
     load_risk_state, save_risk_state,
     load_alert_history, save_alert_history,
     load_macro_events,
     load_journal, save_journal,
 )
-from donna_state_engine import state as _state
-import donna_execution_trace as _trace
+from core.state_engine import state as _state
+import services.execution_trace as _trace
 
 # ── Broker mode ────────────────────────────────────────────────
 # Change this one variable to switch execution backends.
@@ -246,7 +246,7 @@ def _log_rejection(context: dict) -> None:
     """Persist rejection record to donna_rejections.json (ring buffer, 200 max).
     Also writes a structured entry to the execution trace log."""
     try:
-        from donna_state import load_rejections, save_rejections
+        from core.state import load_rejections, save_rejections
         history = load_rejections()
         history.insert(0, context)
         save_rejections(history[:200])
@@ -297,7 +297,7 @@ def _log_rejection(context: dict) -> None:
 def get_rejections(limit: int = 50) -> list:
     """Return recent rejection records for API/dashboard consumption."""
     try:
-        from donna_state import load_rejections
+        from core.state import load_rejections
         return load_rejections()[:limit]
     except Exception:
         return []
@@ -344,7 +344,7 @@ def _assess_post_event_conditions() -> dict:
       - macro_risk == 'high'
     """
     try:
-        from donna_state import load_risk_state
+        from core.state import load_risk_state
         risk     = load_risk_state()
         snapshot = risk.get('market_snapshot', {})
 

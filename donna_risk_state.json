@@ -1,0 +1,88 @@
+{
+  "market_snapshot": {
+    "NQ": {
+      "last": 30426.75,
+      "chg": -280.5,
+      "pct": -0.91
+    },
+    "ES": {
+      "last": 7537.25,
+      "chg": -86.25,
+      "pct": -1.13
+    },
+    "MNQ": {
+      "last": 30426.75,
+      "chg": -280.5,
+      "pct": -0.91
+    },
+    "MES": {
+      "last": 7537.25,
+      "chg": -86.25,
+      "pct": -1.13
+    },
+    "SPX": {
+      "last": 7553.68,
+      "chg": -56.1,
+      "pct": -0.74
+    },
+    "NASDAQ": {
+      "last": 26853.98,
+      "chg": -239.92,
+      "pct": -0.89
+    },
+    "DJIA": {
+      "last": 50687.07,
+      "chg": -620.72,
+      "pct": -1.21
+    },
+    "VIX": {
+      "last": 16.06,
+      "chg": 0.28,
+      "pct": 1.77
+    },
+    "DXY": {
+      "last": 99.44,
+      "chg": 0.19,
+      "pct": 0.19
+    },
+    "US10Y": {
+      "last": 4.49,
+      "chg": 0.04,
+      "pct": 0.9
+    },
+    "GOLD": {
+      "last": 4486.1,
+      "chg": -25.9,
+      "pct": -0.57
+    },
+    "SILVER": {
+      "last": 73.3,
+      "chg": -2.13,
+      "pct": -2.82
+    },
+    "OIL": {
+      "last": 95.0,
+      "chg": 0.28,
+      "pct": 0.3
+    },
+    "BTC": {
+      "last": 62459.07,
+      "chg": -1580.93,
+      "pct": -2.47
+    },
+    "ETH": {
+      "last": 1747.68,
+      "chg": -62.9,
+      "pct": -3.47
+    },
+    "NQ_SESSION_POINTS": 276.88,
+    "ES_SESSION_POINTS": 85.17,
+    "_updated_at": "2026-06-04T02:19:54.911589+00:00"
+  },
+  "market_regime": "TRENDING_DOWN",
+  "donna_session": "ASIA",
+  "donna_time_ny": "2026-06-03T22:19:54.911618-04:00",
+  "donna_time_utc": "2026-06-04T02:19:54.911635+00:00",
+  "donna_day": "Wednesday",
+  "last_updated": "2026-06-04T02:19:54.911673+00:00"
+}

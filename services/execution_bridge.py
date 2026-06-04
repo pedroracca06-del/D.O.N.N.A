@@ -31,7 +31,7 @@ except Exception:
     pass
 
 if TYPE_CHECKING:
-    from donna_alert_engine import AlertData
+    from delivery.alert_engine import AlertData
 
 # ── Config ───────────────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ def _log(msg: str) -> None:
 def _is_paper() -> bool:
     """True only when Alpaca is pointed at paper-api.alpaca.markets."""
     try:
-        from donna_execution import _PAPER
+        from services.execution import _PAPER
         return bool(_PAPER)
     except Exception:
         return False
@@ -92,8 +92,8 @@ def _notify_discord(alert: 'AlertData', result: dict, paper: bool) -> None:
     """Post a compact execution result embed to #execution channel."""
     try:
         import requests
-        from donna_config import DISCORD_BOT_TOKEN
-        from donna_alert_engine import _DISCORD_API, _resolve_channel, DISCORD_CHANNEL_LIVE
+        from core.config import DISCORD_BOT_TOKEN
+        from delivery.alert_engine import _DISCORD_API, _resolve_channel, DISCORD_CHANNEL_LIVE
 
         # Route to #execution if configured, else fall back to #live-alerts
         channel = _resolve_channel('EXECUTION_READY') or DISCORD_CHANNEL_LIVE
@@ -241,7 +241,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
 
     # ── Route — all governance enforced inside execute_signal(), not here
     try:
-        from donna_execution import execute_signal
+        from services.execution import execute_signal
         result = execute_signal(signal_result)
     except Exception as exc:
         _log(f'execute_signal() raised: {exc}')
@@ -270,7 +270,7 @@ def _run_smoke_test() -> None:
 
     # Import AlertData
     try:
-        from donna_alert_engine import AlertData
+        from delivery.alert_engine import AlertData
     except ImportError:
         print('[smoke] FAIL — cannot import AlertData')
         sys.exit(1)

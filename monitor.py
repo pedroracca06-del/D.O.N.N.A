@@ -57,7 +57,7 @@ _MCP_FAIL_THRESHOLD = 3  # consecutive failures before Discord alert
 
 def _get_session() -> dict:
     """Return current session info from the reasoning engine's classifier."""
-    from donna_nova_reasoning import _session_info
+    from engines.reasoning import _session_info
     now  = datetime.now(NY_TZ)
     mins = now.hour * 60 + now.minute
     return _session_info(mins, now.weekday())
@@ -91,9 +91,9 @@ def _send_health_alert(title: str, description: str, color: int) -> None:
 
 
 def main() -> None:
-    from donna_nova_reasoning import run_reasoning_cycle, _run_mcp
-    from donna_alert_engine import deliver_alert
-    from donna_execution_bridge import route_to_execution
+    from engines.reasoning import run_reasoning_cycle, _run_mcp
+    from delivery.alert_engine import deliver_alert
+    from services.execution_bridge import route_to_execution
 
     _auto_execute = os.getenv('NOVA_AUTO_EXECUTE', 'false').strip().lower() == 'true'
     _exec_label   = 'ENABLED (paper only)' if _auto_execute else 'DISABLED — set NOVA_AUTO_EXECUTE=true to enable'

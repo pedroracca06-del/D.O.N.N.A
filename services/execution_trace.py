@@ -17,7 +17,7 @@ import threading
 import time
 from pathlib import Path
 
-BASE_DIR   = Path(__file__).parent
+BASE_DIR   = Path(__file__).parent.parent
 TRACE_FILE = BASE_DIR / 'data' / 'donna_execution_trace.json'
 MAX_TRACE  = 500
 
@@ -28,7 +28,7 @@ _lock = threading.Lock()
 
 def _ts_et() -> str:
     try:
-        from donna_config import now_ny
+        from core.config import now_ny
         return now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
     except Exception:
         return ''

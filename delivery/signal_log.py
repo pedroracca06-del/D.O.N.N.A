@@ -32,7 +32,7 @@ from typing import Optional
 
 # ── Config ───────────────────────────────────────────────────────────────────────
 
-_BASE_DIR   = Path(__file__).parent
+_BASE_DIR   = Path(__file__).parent.parent
 _LOG_FILE   = _BASE_DIR / 'data' / 'donna_signal_log.json'
 _MAX_ENTRIES = 10_000
 

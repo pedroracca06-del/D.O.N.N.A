@@ -8,7 +8,7 @@ Usage:
   python donna_health.py --json     # machine-readable JSON output
 
 API:
-  from donna_health import run_health_check
+  from health.health import run_health_check
   result = run_health_check()
   result['safe_to_trade']  # True / False
   result['sections']       # per-section PASS/WARNING/FAIL breakdown
@@ -30,7 +30,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / '.env')
+load_dotenv(Path(__file__).parent.parent / '.env')
 
 # Force UTF-8 stdout so box/arrow chars render on Windows terminals
 if hasattr(sys.stdout, 'reconfigure'):
@@ -38,7 +38,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-BASE_DIR  = Path(__file__).parent
+BASE_DIR  = Path(__file__).parent.parent
 MCP_DIR   = BASE_DIR / 'mcp' / 'tradingview'
 SS_DIR    = MCP_DIR / 'screenshots'
 
@@ -327,7 +327,7 @@ def _check_intelligence() -> list[dict]:
 
     # compute_macro_state()
     try:
-        from donna_macro_discord import compute_macro_state
+        from delivery.macro_discord import compute_macro_state
         state = compute_macro_state()
         sq    = state.get('session_quality', '?')
         phase = state.get('active_phase', '?')
@@ -341,7 +341,7 @@ def _check_intelligence() -> list[dict]:
 
     # Session context evaluator
     try:
-        from donna_nova_reasoning import evaluate_session_context
+        from engines.reasoning import evaluate_session_context
         sc = evaluate_session_context()
         blocked = sc.get('session_blocked', '?')
         trades  = sc.get('daily_trades', '?')
@@ -352,7 +352,7 @@ def _check_intelligence() -> list[dict]:
 
     # Reasoning engine imports
     try:
-        from donna_nova_reasoning import (
+        from engines.reasoning import (
             _evaluate_pros_phase, _evaluate_orb_phase,
             _evaluate_ib_alignment, _classify_signal,
         )
@@ -370,7 +370,7 @@ def _check_intelligence() -> list[dict]:
 
     # Anti-spam governance
     try:
-        from donna_alert_engine import get_alert_status
+        from delivery.alert_engine import get_alert_status
         gs = get_alert_status()
         total = gs.get('daily_total', 0)
         cap   = gs.get('daily_max', 20)
@@ -547,13 +547,13 @@ def _build_session_readiness() -> dict:
     mins   = now_ny.hour * 60 + now_ny.minute
 
     try:
-        from donna_macro_discord import compute_macro_state
+        from delivery.macro_discord import compute_macro_state
         ms = compute_macro_state()
     except Exception:
         ms = {}
 
     try:
-        from donna_nova_reasoning import evaluate_session_context
+        from engines.reasoning import evaluate_session_context
         sc = evaluate_session_context()
     except Exception:
         sc = {}

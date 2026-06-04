@@ -1,4 +1,4 @@
-from donna_state import load_journal
+from core.state import load_journal
 from datetime import datetime
 
 

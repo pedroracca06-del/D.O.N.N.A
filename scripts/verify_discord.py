@@ -25,7 +25,7 @@ load_dotenv(ROOT / '.env')
 print('\n── NOVA Discord Verification ──────────────────────────\n')
 
 try:
-    from donna_alert_engine import (
+    from delivery.alert_engine import (
         AlertData, deliver_alert, get_alert_status, build_embed,
         send_discord, capture_screenshot,
         HEADS_UP, EXECUTION_READY, INVALIDATION, NO_TRADE,
@@ -36,7 +36,7 @@ except Exception as e:
     sys.exit(1)
 
 # ── Check 2: config ────────────────────────────────────────────
-from donna_config import (
+from core.config import (
     DISCORD_BOT_TOKEN,
     DISCORD_CHANNEL_LIVE,
     ALERT_SCREENSHOT,

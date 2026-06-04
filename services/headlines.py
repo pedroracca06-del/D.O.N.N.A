@@ -15,9 +15,9 @@ import json
 import os
 import requests
 
-from donna_state_engine import state as _state
+from core.state_engine import state as _state
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 MACRO_EVENTS_FILE = BASE_DIR / 'data' / 'donna_macro_events.json'
 RISK_STATE_FILE   = BASE_DIR / 'data' / 'donna_risk_state.json'
 NY_TZ = ZoneInfo('America/New_York')
@@ -565,7 +565,7 @@ def process_headlines_cycle():
         _state.set('macro_risk', cal_macro_risk)
         print(f'[state_engine] Updated — macro_risk (calendar): {cal_macro_risk}')
         try:
-            from donna_execution import set_red_folder_lock
+            from services.execution import set_red_folder_lock
             # Persistent red_folder_lock is now reserved for IMMINENT/LIVE only (≤15 min).
             # The dynamic _red_folder_status() in donna_execution handles pre/post-event
             # lifecycle and post-event normalisation automatically.

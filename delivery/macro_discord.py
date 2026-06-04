@@ -29,7 +29,7 @@ import requests
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-_BASE_DIR          = Path(__file__).parent
+_BASE_DIR          = Path(__file__).parent.parent
 _MACRO_EVENTS_FILE = _BASE_DIR / 'data' / 'donna_macro_events.json'
 _RISK_STATE_FILE   = _BASE_DIR / 'data' / 'donna_risk_state.json'
 _MACRO_DISC_STATE  = _BASE_DIR / 'data' / 'donna_macro_discord_state.json'
@@ -38,7 +38,7 @@ _DISCORD_API       = 'https://discord.com/api/v10'
 # ── Config imports ─────────────────────────────────────────────────────────────
 
 try:
-    from donna_config import (
+    from core.config import (
         DISCORD_BOT_TOKEN,
         DISCORD_CHANNEL_MACRO,
         ANTHROPIC_MODEL,

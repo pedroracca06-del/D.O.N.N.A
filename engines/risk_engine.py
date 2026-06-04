@@ -10,7 +10,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 NY_TZ  = ZoneInfo('America/New_York')
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 
 RISK_ENGINE_FILE = BASE_DIR / 'data' / 'donna_risk_engine_state.json'
 

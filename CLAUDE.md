@@ -13,7 +13,7 @@ uvicorn main:app --reload --port 8000
 # Dashboard → http://localhost:8000/dashboard
 
 # Local session monitor (requires TradingView Desktop open with CDP)
-python donna_local_monitor.py
+python monitor.py
 
 # One-click session launcher (Windows, starts TV + monitor together)
 powershell -ExecutionPolicy Bypass -File scripts/start_trading_session.ps1
@@ -32,7 +32,7 @@ mcp/tradingview/          Node.js MCP server — reads chart state, switches sym
 
         │  subprocess calls
         ▼
-donna_nova_reasoning.py   Core intelligence loop:
+engines/reasoning.py   Core intelligence loop:
                           1. Reads both MES and MNQ charts via MCP
                           2. Parses NOVA EXECUTION V1 indicator tables
                           3. Runs deterministic evaluators (PROS, ORB, IB, invalidation)
@@ -41,7 +41,7 @@ donna_nova_reasoning.py   Core intelligence loop:
 
         │  AlertData
         ▼
-donna_alert_engine.py     Governance + delivery:
+delivery/alert_engine.py     Governance + delivery:
                           - Anti-spam cooldowns, daily caps
                           - Routes by alert type to Discord channels
                           - Attaches chart screenshots to embeds
@@ -56,7 +56,7 @@ main.py (FastAPI)         Web layer:
 
         │
         ▼
-donna_execution.py        Broker layer:
+services/execution.py        Broker layer:
                           - Multi-gate risk engine (session, macro, daily loss, locks)
                           - Routes MES→SPY, MNQ→QQQ orders via Alpaca REST API
                           - Paper mode enforced until live credentials present
@@ -69,27 +69,27 @@ donna_execution.py        Broker layer:
 | Module | Role |
 |---|---|
 | `main.py` | FastAPI entry point — all routes, background loops, market data |
-| `donna_config.py` | Constants, env vars, file paths, Anthropic client, time helpers |
-| `donna_state.py` | JSON read/write helpers, journal stats computation |
-| `donna_nova_reasoning.py` | NOVA intelligence pipeline — chart reading, evaluation, Claude calls |
-| `donna_engines.py` | Dashboard payload builders — Harvey, scenarios, performance memory |
-| `donna_alert_engine.py` | Alert governance, Discord/Telegram delivery, embed builder |
-| `donna_execution.py` | Alpaca broker integration, position sizing, P&L tracking |
-| `donna_execution_bridge.py` | Routes EXECUTION_READY alerts → execution layer |
-| `donna_execution_trace.py` | Ring-buffer audit log of every execution event |
-| `donna_signals.py` | TradingView webhook signal parser and normaliser |
-| `donna_signal_log.py` | Structured log of every NOVA evaluation cycle |
-| `donna_state_engine.py` | Centralised session state — trades taken, locks, risk regime |
-| `donna_risk_engine.py` | Position sizing, drawdown, R:R calculation |
-| `donna_macro_discord.py` | Macro intelligence alerts — calendar, VIX, breaking news |
-| `donna_headlines.py` | Economic calendar ingestion, red-folder governance |
-| `donna_news.py` | News feed risk scoring — Finnhub headlines → risk_state |
-| `donna_finnhub.py` | Live market snapshot — yfinance quotes → risk_state |
-| `donna_health.py` | System health checks — all subsystems, API keys, file state |
-| `donna_assistant.py` | Claude conversational assistant with session context |
-| `donna_analytics.py` | Performance analytics helpers |
-| `donna_local_monitor.py` | Local session monitor — 60s poll loop, MCP health alerts |
-| `donna_html.py` | Dashboard HTML/CSS/JS — server-rendered, ~4200 lines |
+| `core/config.py` | Constants, env vars, file paths, Anthropic client, time helpers |
+| `core/state.py` | JSON read/write helpers, journal stats computation |
+| `engines/reasoning.py` | NOVA intelligence pipeline — chart reading, evaluation, Claude calls |
+| `engines/engines.py` | Dashboard payload builders — Harvey, scenarios, performance memory |
+| `delivery/alert_engine.py` | Alert governance, Discord/Telegram delivery, embed builder |
+| `services/execution.py` | Alpaca broker integration, position sizing, P&L tracking |
+| `services/execution_bridge.py` | Routes EXECUTION_READY alerts → execution layer |
+| `services/execution_trace.py` | Ring-buffer audit log of every execution event |
+| `engines/signals.py` | TradingView webhook signal parser and normaliser |
+| `delivery/signal_log.py` | Structured log of every NOVA evaluation cycle |
+| `core/state_engine.py` | Centralised session state — trades taken, locks, risk regime |
+| `engines/risk_engine.py` | Position sizing, drawdown, R:R calculation |
+| `delivery/macro_discord.py` | Macro intelligence alerts — calendar, VIX, breaking news |
+| `services/headlines.py` | Economic calendar ingestion, red-folder governance |
+| `services/news.py` | News feed risk scoring — Finnhub headlines → risk_state |
+| `services/finnhub.py` | Live market snapshot — yfinance quotes → risk_state |
+| `health/health.py` | System health checks — all subsystems, API keys, file state |
+| `services/assistant.py` | Claude conversational assistant with session context |
+| `engines/analytics.py` | Performance analytics helpers |
+| `monitor.py` | Local session monitor — 60s poll loop, MCP health alerts |
+| `ui/html.py` | Dashboard HTML/CSS/JS — server-rendered, ~4200 lines |
 
 ---
 

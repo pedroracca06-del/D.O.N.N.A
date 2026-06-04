@@ -20,7 +20,7 @@ from typing import Optional
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-_BASE_DIR   = Path(__file__).parent
+_BASE_DIR   = Path(__file__).parent.parent
 _MCP_DIR    = _BASE_DIR / 'mcp' / 'tradingview'
 _RULES_FILE = _BASE_DIR / 'nova_knowledge_core' / 'RULES' / 'nova_strategy_core.json'
 _RULES_ROOT = _BASE_DIR / 'nova_strategy_core.json'
@@ -28,8 +28,8 @@ _RULES_ROOT = _BASE_DIR / 'nova_strategy_core.json'
 # ── Config imports ─────────────────────────────────────────────────────────────
 
 try:
-    from donna_config import client as _anthropic_client, ANTHROPIC_MODEL, now_ny
-    from donna_state_engine import DonnaStateEngine as _DSE
+    from core.config import client as _anthropic_client, ANTHROPIC_MODEL, now_ny
+    from core.state_engine import DonnaStateEngine as _DSE
     _state_engine = _DSE()
 except Exception:
     _anthropic_client = None
@@ -40,7 +40,7 @@ except Exception:
         return datetime.now(ZoneInfo('America/New_York'))
 
 try:
-    from donna_alert_engine import AlertData, HEADS_UP, EXECUTION_READY, INVALIDATION, NO_TRADE
+    from delivery.alert_engine import AlertData, HEADS_UP, EXECUTION_READY, INVALIDATION, NO_TRADE
 except Exception:
     AlertData       = None
     HEADS_UP        = 'HEADS_UP'
@@ -1048,14 +1048,14 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
 
     # ── Operational intelligence log — capture every evaluated signal ──────────
     try:
-        from donna_signal_log import log_cycle
-        from donna_state import load_risk_state
+        from delivery.signal_log import log_cycle
+        from core.state import load_risk_state
 
         # Screenshot only when Claude graded a real signal
         _screenshot = ''
         if alert_required or signal_type in ('EXECUTION_READY', 'HEADS_UP'):
             try:
-                from donna_alert_engine import capture_screenshot
+                from delivery.alert_engine import capture_screenshot
                 _ss = capture_screenshot()
                 _screenshot = str(_ss) if _ss else ''
             except Exception:

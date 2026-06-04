@@ -35,14 +35,14 @@ import requests
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-_BASE_DIR   = Path(__file__).parent
+_BASE_DIR   = Path(__file__).parent.parent
 _MCP_DIR    = _BASE_DIR / 'mcp' / 'tradingview'
 _SS_DIR     = _MCP_DIR / 'screenshots'
 _STATE_FILE = _BASE_DIR / 'data' / 'donna_alert_state.json'
 _DISCORD_API = 'https://discord.com/api/v10'
 
 try:
-    from donna_config import (
+    from core.config import (
         DISCORD_BOT_TOKEN,
         DISCORD_CHANNEL_LIVE,
         DISCORD_CHANNEL_HEADS_UP,
@@ -601,7 +601,7 @@ def check_forming_setups() -> list[AlertData]:
     Delegates to donna_nova_reasoning.run_reasoning_cycle() for full Claude evaluation.
     """
     try:
-        from donna_nova_reasoning import run_reasoning_cycle
+        from engines.reasoning import run_reasoning_cycle
         return run_reasoning_cycle()
     except Exception:
         pass

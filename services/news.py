@@ -17,7 +17,7 @@ import re
 import requests
 
 # ── paths & config ──────────────────────────────────────────
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 RISK_STATE_FILE = BASE_DIR / 'data' / 'donna_risk_state.json'
 NY_TZ = ZoneInfo('America/New_York')
 

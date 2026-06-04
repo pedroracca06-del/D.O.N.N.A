@@ -11,7 +11,7 @@ import requests
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from donna_config import (
+from core.config import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_ASSISTANT_MODEL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_MODE, FOREX_FACTORY_NOTES_URL,
     FINNHUB_API_KEY, FMP_API_KEY, ALPHA_VANTAGE_API_KEY,
@@ -20,7 +20,7 @@ from donna_config import (
     CACHE, now_ny, utc_now_iso, session_label, safe_float,
     send_telegram_message,
 )
-from donna_state import (
+from core.state import (
     ensure_files,
     load_risk_state, save_risk_state,
     load_alert_history, save_alert_history,
@@ -30,7 +30,7 @@ from donna_state import (
     load_journal, save_journal, compute_journal_stats,
     read_json_file, write_json_file,
 )
-from donna_engines import (
+from engines.engines import (
     build_harvey_payload, build_dashboard_payload,
     build_scenario_engine, build_performance_memory,
     build_market_driver_engine, build_morning_edge, build_session_significance,
@@ -38,10 +38,10 @@ from donna_engines import (
     get_live_calendar, get_live_earnings, get_live_news, get_live_futures_macro_pulse,
     send_morning_brief, get_quote_with_fallback,
 )
-from donna_signals import process_signal
+from engines.signals import process_signal
 
 try:
-    from donna_alert_engine import (
+    from delivery.alert_engine import (
         deliver_alert, AlertData, get_alert_status, start_setup_monitor,
         HEADS_UP, EXECUTION_READY, INVALIDATION, NO_TRADE,
     )
@@ -53,7 +53,7 @@ except Exception:
     def start_setup_monitor(**kw):  pass
 
 try:
-    from donna_execution import (
+    from services.execution import (
         execute_signal,
         get_account, get_positions,
         close_position, close_all_positions, close_all_positions_eod,
@@ -86,15 +86,15 @@ except Exception:
     def disable_trade_permission(r=''):     pass
     def enable_trade_permission():          pass
 
-from donna_analytics import compute_analytics, validate_trade
+from engines.analytics import compute_analytics, validate_trade
 
-from donna_assistant import (
+from services.assistant import (
     ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
 )
-from donna_html import DASHBOARD_HTML
+from ui.html import DASHBOARD_HTML
 
 try:
-    from donna_news import process_news_guard_cycle, get_grok_intelligence
+    from services.news import process_news_guard_cycle, get_grok_intelligence
 except Exception:
     def process_news_guard_cycle():
         return None
@@ -102,7 +102,7 @@ except Exception:
         return {}
 
 try:
-    from donna_risk_engine import (
+    from engines.risk_engine import (
         build_risk_engine_payload, reset_stop_trading,
         update_re_settings, load_re_state,
     )
@@ -119,7 +119,7 @@ except Exception:
         return {'account_size': 25000.0, 'risk_pct': 1.0}
 
 try:
-    from donna_headlines import process_headlines_cycle, check_todays_breaking_events
+    from services.headlines import process_headlines_cycle, check_todays_breaking_events
 except Exception:
     def process_headlines_cycle():
         return None
@@ -128,13 +128,13 @@ except Exception:
                 'red_folder': False, 'error': 'donna_headlines not available'}
 
 try:
-    from donna_finnhub import process_finnhub_cycle
+    from services.finnhub import process_finnhub_cycle
 except Exception:
     def process_finnhub_cycle():
         return None
 
 try:
-    from donna_macro_discord import (
+    from delivery.macro_discord import (
         run_macro_calendar_check,
         run_macro_morning_brief,
         run_breaking_news_check,
@@ -145,7 +145,7 @@ except Exception as _mde:
     _MACRO_DISCORD_AVAILABLE = False
 
 try:
-    from donna_state_engine import state as _donna_state
+    from core.state_engine import state as _donna_state
     _STATE_ENGINE_AVAILABLE = True
 except Exception as _se_err:
     print(f'[main] donna_state_engine unavailable: {_se_err}')
@@ -251,14 +251,14 @@ async def eod_close_loop():
             # No new trades after 3:30 PM — guard runs once (only while permission is still on)
             if is_weekday and now.hour == 15 and now.minute >= 30:
                 if _EXECUTION_AVAILABLE:
-                    from donna_state_engine import state as _st
+                    from core.state_engine import state as _st
                     if not _st.get('eod_lock') and _st.get('trade_permission'):
                         disable_trade_permission('EOD_NO_NEW_ENTRIES_AFTER_1530')
                         print(f'[EOD] {now.strftime("%H:%M ET")} — no new entries after 3:30 PM')
             # Force close all at 3:45 PM — retry every 60s until flat
             if is_weekday and now.hour == 15 and now.minute >= 45 and not closed_today:
                 if _EXECUTION_AVAILABLE:
-                    from donna_state_engine import state as _st
+                    from core.state_engine import state as _st
                     positions = get_positions()
                     if positions:
                         print(f'[EOD] {now.strftime("%H:%M ET")} — closing {len(positions)} positions')
@@ -885,7 +885,7 @@ async def execution_trace(limit: int = 100):
     Query: ?limit=N (max 500)
     """
     try:
-        from donna_execution_trace import get_trace
+        from services.execution_trace import get_trace
         entries = await asyncio.to_thread(get_trace, min(limit, 500))
         by_type: dict = {}
         for e in entries:
@@ -963,7 +963,7 @@ async def analytics_summary():
 @app.get('/analytics/validate')
 async def analytics_validate():
     """Re-derive outcome and pnl for every closed trade. Returns integrity report."""
-    from donna_state import load_journal
+    from core.state import load_journal
     def _run():
         closed  = [t for t in load_journal() if t.get('outcome') in ('WIN', 'LOSS', 'BREAKEVEN')]
         results = []
@@ -1054,8 +1054,8 @@ async def close_all_eod_manual():
 @app.get('/system-check')
 async def system_check():
     """Return connection and daily-state status for all DONNA subsystems."""
-    from donna_config import TELEGRAM_BOT_TOKEN, FINNHUB_API_KEY
-    from donna_state import load_macro_events
+    from core.config import TELEGRAM_BOT_TOKEN, FINNHUB_API_KEY
+    from core.state import load_macro_events
 
     # Alpaca
     alpaca_connected = False
@@ -1104,7 +1104,7 @@ async def system_check():
     m  = ny.hour * 60 + ny.minute
     eod_close_window = ny.weekday() < 5 and m >= 15 * 60 + 45 and m < 16 * 60 + 30
 
-    from donna_execution import BROKER_MODE as _BROKER_MODE
+    from services.execution import BROKER_MODE as _BROKER_MODE
     return {
         'alpaca_connected':      alpaca_connected,
         'grok_connected':        grok_connected,
@@ -1177,7 +1177,7 @@ async def macro_status():
     """Return macro Discord feed state — delivered events, VIX, phase, channel health."""
     if not _MACRO_DISCORD_AVAILABLE:
         return {'available': False}
-    from donna_macro_discord import get_macro_discord_status
+    from delivery.macro_discord import get_macro_discord_status
     return get_macro_discord_status()
 
 
@@ -1222,7 +1222,7 @@ async def webhook(request: Request):
 
     # ── execution trace: SIGNAL_RECEIVED ──────────────────────
     try:
-        from donna_execution_trace import log_execution_event as _log_ev
+        from services.execution_trace import log_execution_event as _log_ev
         _log_ev('SIGNAL_RECEIVED', {
             'strategy_family': str(payload.get('strategy_family', '')).upper(),
             'setup_type':      str(payload.get('setup_type', '')).upper(),
@@ -1438,7 +1438,7 @@ async def assistant_chat(request: Request):
     if not message:
         raise HTTPException(status_code=400, detail='message is required')
 
-    from donna_config import client
+    from core.config import client
     if not client:
         risk    = load_risk_state()
         driver  = build_market_driver_engine(risk)
@@ -1661,7 +1661,7 @@ async def journal_analyze(request: Request):
     """Generate a NOVA AI review for a journal trade entry. Stores result back to the trade."""
     import json as _json
     from pathlib import Path
-    from donna_config import client as _claude, ANTHROPIC_ASSISTANT_MODEL
+    from core.config import client as _claude, ANTHROPIC_ASSISTANT_MODEL
 
     body      = await request.json()
     trade_idx = int(body.get('index', -1))

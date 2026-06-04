@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from donna_config import (
+from core.config import (
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE,
     MACRO_EVENTS_FILE, JOURNAL_FILE, REJECTIONS_FILE,
     DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS,

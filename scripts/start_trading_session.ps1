@@ -47,7 +47,7 @@ Write-Host "      Feed server launched (port 8000)" -ForegroundColor Green
 # 3. NOVA reasoning monitor
 Write-Host "[3/3] Starting NOVA reasoning monitor..." -ForegroundColor Cyan
 
-$monitorScript = Join-Path $DONNA_DIR "donna_local_monitor.py"
+$monitorScript = Join-Path $DONNA_DIR "monitor.py"
 $monitorCmd = "cd `"$DONNA_DIR`"; python `"$monitorScript`""
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $monitorCmd -WindowStyle Normal
 
