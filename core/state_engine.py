@@ -82,6 +82,9 @@ _DAILY_RESET_FIELDS: dict = {
     'red_folder_lock':       False,
     'asia_trade_taken':      False,
     'risk_lockouts':         [],
+    # EOD disables this at 3:30 PM — must restore at the start of each new day
+    # so yesterday's EOD lock never bleeds into the next trading session.
+    'trade_permission':      True,
 }
 
 
