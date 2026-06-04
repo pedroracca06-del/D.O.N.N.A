@@ -425,7 +425,20 @@ def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) ->
     else:
         cont_quality = 'UNKNOWN'
 
-    has_signal = phase in ('SETUP_READY', 'OTE_TAGGED', 'OTE_APPROACHING', 'BUILDING')
+    # ACCEPTED_CONTINUATION: Pine's CONT=CONFIRMED signals that buyers have accepted
+    # the continuation regime — stair-step defense, persistent bid at OTE.
+    # The single-fire prosContinuationBull may have already consumed its reference,
+    # leaving the engine in BUILDING/ACTIVE. That reference consumption is not a
+    # failure; it means the sequence completed and price is now in accepted regime.
+    # Promote to ACCEPTED_CONTINUATION so Claude can grade it — all risk gates intact.
+    if cont_quality == 'STRONG' and phase in ('BUILDING', 'OTE_APPROACHING', 'OTE_TAGGED'):
+        phase           = 'ACCEPTED_CONTINUATION'
+        signal_strength = 'high'
+
+    has_signal = phase in (
+        'SETUP_READY', 'OTE_TAGGED', 'OTE_APPROACHING',
+        'BUILDING', 'ACCEPTED_CONTINUATION',
+    )
 
     return {
         'phase':           phase,
@@ -647,6 +660,8 @@ def _classify_signal(
             return EXECUTION_READY, setup, base_rationale
         elif phase == 'OTE_TAGGED':
             return EXECUTION_READY, setup, base_rationale + ' | OTE tagged'
+        elif phase == 'ACCEPTED_CONTINUATION':
+            return EXECUTION_READY, setup, base_rationale + ' | accepted continuation regime — CONT confirmed'
         elif phase == 'OTE_APPROACHING':
             return HEADS_UP, setup, base_rationale + ' | OTE approaching'
         elif phase == 'BUILDING':
