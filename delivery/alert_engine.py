@@ -35,10 +35,11 @@ import requests
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-_BASE_DIR   = Path(__file__).parent.parent
-_MCP_DIR    = _BASE_DIR / 'mcp' / 'tradingview'
-_SS_DIR     = _MCP_DIR / 'screenshots'
-_STATE_FILE = _BASE_DIR / 'data' / 'donna_alert_state.json'
+_BASE_DIR    = Path(__file__).parent.parent
+_MCP_DIR     = _BASE_DIR / 'mcp' / 'tradingview'
+_SS_DIR      = _MCP_DIR / 'screenshots'
+_STATE_FILE  = _BASE_DIR / 'data' / 'donna_alert_state.json'
+_SIGNAL_LOG  = _BASE_DIR / 'data' / 'donna_signal_log.json'
 _DISCORD_API = 'https://discord.com/api/v10'
 
 try:
@@ -525,6 +526,49 @@ def send_telegram(data: AlertData, photo: Optional[Path] = None) -> dict:
         return {'ok': False, 'error': str(e)}
 
 
+# ── Signal log lookup (for card generation context) ────────────────────────────
+
+def _latest_signal_raw(symbol: str) -> dict:
+    """Return the most recent signal log entry for symbol (today only)."""
+    try:
+        import json as _json
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        raw   = _json.loads(_SIGNAL_LOG.read_text())
+        entries = raw if isinstance(raw, list) else raw.get('entries', [])
+        matches = [e for e in entries
+                   if e.get('symbol') == symbol and e.get('date') == today]
+        return matches[-1] if matches else {}
+    except Exception:
+        return {}
+
+
+def _generate_card(data: AlertData) -> Optional[Path]:
+    """
+    Build a NOVA execution card PNG from the latest signal context.
+    Merges AlertData execution levels (from Claude) on top of the raw signal.
+    Returns Path on success, None on failure.
+    """
+    try:
+        from delivery.card_compositor import generate_card
+        signal_raw = _latest_signal_raw(data.symbol)
+        # AlertData fields take precedence — these come from Claude's decision
+        signal_raw.update({
+            'entry_zone': data.entry_zone or signal_raw.get('entry_zone', ''),
+            'stop':       data.stop       or signal_raw.get('stop', ''),
+            'tp1':        data.tp1        or signal_raw.get('tp1', ''),
+            'rr':         data.rr         or signal_raw.get('rr', ''),
+            'grade':      data.grade      or signal_raw.get('grade', '?'),
+            'setup_type': data.setup_type or signal_raw.get('setup_type', '?'),
+            'direction':  data.direction  or signal_raw.get('direction', '?'),
+            'notes':      data.notes      or signal_raw.get('notes', ''),
+            'action':     data.action     or signal_raw.get('action', ''),
+        })
+        return generate_card(signal_raw, data.alert_type)
+    except Exception as exc:
+        print(f'[card] generate failed: {exc}')
+        return None
+
+
 # ── Main entry point ────────────────────────────────────────────────────────────
 
 def deliver_alert(data: AlertData, with_screenshot: bool = True) -> dict:
@@ -532,7 +576,7 @@ def deliver_alert(data: AlertData, with_screenshot: bool = True) -> dict:
     Deliver a NOVA alert. Discord is primary; Telegram is secondary.
 
     1. Governance check (cooldown, daily cap, dedup)
-    2. Screenshot capture
+    2. Card generation (NOVA renderer) — falls back to TV screenshot
     3. Discord delivery (primary)
     4. Telegram delivery (secondary, does not block on Discord failure)
     5. Record delivery / suppression
@@ -542,7 +586,11 @@ def deliver_alert(data: AlertData, with_screenshot: bool = True) -> dict:
         record_suppression()
         return {'delivered': False, 'suppressed': True, 'reason': reason}
 
-    photo = capture_screenshot() if (with_screenshot and ALERT_SCREENSHOT) else None
+    photo: Optional[Path] = None
+    if with_screenshot and ALERT_SCREENSHOT:
+        photo = _generate_card(data)
+        if photo is None:
+            photo = capture_screenshot()  # fallback if renderer fails
 
     discord_result  = send_discord(data, photo)
     telegram_result = send_telegram(data, photo)
