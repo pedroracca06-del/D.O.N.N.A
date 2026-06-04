@@ -91,17 +91,46 @@ def _is_paper() -> bool:
         return False
 
 
-def _load_test_config() -> dict:
-    """Load autonomous_test_mode config from donna_settings.json. Fails silently → defaults."""
+def _load_execution_config() -> tuple[str, dict]:
+    """
+    Load the active execution profile from donna_settings.json.
+
+    Returns (mode_name, profile_dict).
+    mode_name is 'disabled' if no mode is active.
+
+    Priority:
+      1. execution_mode + execution_profiles  (new structure)
+      2. autonomous_test_mode.enabled = true  (legacy fallback)
+      3. 'disabled'
+    """
     try:
         import json as _json
         p = Path(__file__).parent.parent / 'data' / 'donna_settings.json'
-        if p.exists():
-            s = _json.loads(p.read_text(encoding='utf-8'))
-            return s.get('autonomous_test_mode', {})
+        if not p.exists():
+            return 'disabled', {}
+        s = _json.loads(p.read_text(encoding='utf-8'))
+
+        # New structure: execution_mode selector
+        mode = str(s.get('execution_mode', 'disabled')).strip().lower()
+        if mode not in ('disabled', '', 'none'):
+            profile = s.get('execution_profiles', {}).get(mode, {})
+            if profile:
+                return mode, profile
+
+        # Legacy fallback: autonomous_test_mode.enabled
+        legacy = s.get('autonomous_test_mode', {})
+        if legacy.get('enabled', False):
+            return 'autonomous_test', legacy
+
     except Exception:
         pass
-    return {}
+    return 'disabled', {}
+
+
+def _load_test_config() -> dict:
+    """Legacy helper — returns the active profile dict regardless of mode name."""
+    _, cfg = _load_execution_config()
+    return cfg
 
 
 def _governance_snapshot(instrument: str, signal: str, grade: str, session: str) -> dict:
@@ -109,15 +138,16 @@ def _governance_snapshot(instrument: str, signal: str, grade: str, session: str)
     try:
         from core.state_engine import state as _st
         st = _st.get_state()
-        cfg = _load_test_config()
+        active_mode, cfg = _load_execution_config()
         return {
             'instrument':          instrument,
             'direction':           signal,
             'grade':               grade,
             'session':             session,
-            'test_mode_enabled':   cfg.get('enabled', False),
+            'execution_mode':      active_mode,
             'kill_switch':         cfg.get('kill_switch', False),
             'risk_tier':           cfg.get('risk_tier', 'standard_test'),
+            'min_grade':           cfg.get('min_grade', 'B'),
             'max_trades_per_day':  cfg.get('max_trades_per_day', 5),
             'daily_trade_count':   st.get('daily_trade_count', 0),
             'trade_permission':    st.get('trade_permission', True),
@@ -308,14 +338,15 @@ def route_to_execution(alert: 'AlertData') -> dict:
     instrument = routing['instrument']
     ticker     = routing['ticker']
 
-    # ── Gates 7–13: AUTONOMOUS_TEST_MODE governance ──────────────────────────────
-    cfg = _load_test_config()
-    if cfg.get('enabled', False):
+    # ── Gates 7–13: Execution profile governance ─────────────────────────────────
+    active_mode, cfg = _load_execution_config()
+    if active_mode != 'disabled' and cfg:
 
         def _reject(code: str, reason: str) -> dict:
             return _bridge_reject(code, reason, key, signal, setup_type, grade, session)
 
         # Gate 7: Emergency kill switch
+        _log(f'MODE  {active_mode}  risk_tier={cfg.get("risk_tier","?")}  max_trades={cfg.get("max_trades_per_day","?")}')
         if cfg.get('kill_switch', False):
             return _reject('KILL_SWITCH_ACTIVE', 'Emergency kill switch is engaged — no executions until cleared')
 
@@ -323,6 +354,12 @@ def route_to_execution(alert: 'AlertData') -> dict:
         allowed_instruments = [i.upper() for i in cfg.get('allowed_instruments', ['MNQ', 'MES'])]
         if instrument.upper() not in allowed_instruments:
             return _reject('INSTRUMENT_NOT_ALLOWED', f'{instrument} not in allowed list: {allowed_instruments}')
+
+        # Gate 8b: Minimum grade for this profile
+        min_grade = str(cfg.get('min_grade', 'B')).upper()
+        grade_order = {'A': 1, 'B': 2, 'C': 3, 'D': 4}
+        if grade_order.get(grade.upper(), 99) > grade_order.get(min_grade, 2):
+            return _reject('GRADE_BELOW_PROFILE_MIN', f'Grade {grade} below profile minimum {min_grade} for {active_mode}')
 
         # Gate 9: Strategy filter
         allowed_strategies = [s.upper() for s in cfg.get('allowed_strategies', ['PROS', 'ORB'])]
@@ -398,8 +435,8 @@ def route_to_execution(alert: 'AlertData') -> dict:
         f'session={session}  id={signal_id}'
     )
 
-    # Mark signal as seen and record route timestamp (test mode dedup + cooldown)
-    if cfg.get('enabled', False):
+    # Mark signal as seen and record route timestamp (dedup + cooldown tracking)
+    if active_mode != 'disabled' and cfg:
         _seen_signal_ids.add(f'{instrument}:{signal}:{setup_type}:{grade}')
         _last_trade_ts[instrument] = time.time()
 
