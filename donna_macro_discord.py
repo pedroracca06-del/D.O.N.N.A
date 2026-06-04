@@ -30,9 +30,9 @@ import requests
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 _BASE_DIR          = Path(__file__).parent
-_MACRO_EVENTS_FILE = _BASE_DIR / 'donna_macro_events.json'
-_RISK_STATE_FILE   = _BASE_DIR / 'donna_risk_state.json'
-_MACRO_DISC_STATE  = _BASE_DIR / 'donna_macro_discord_state.json'
+_MACRO_EVENTS_FILE = _BASE_DIR / 'data' / 'donna_macro_events.json'
+_RISK_STATE_FILE   = _BASE_DIR / 'data' / 'donna_risk_state.json'
+_MACRO_DISC_STATE  = _BASE_DIR / 'data' / 'donna_macro_discord_state.json'
 _DISCORD_API       = 'https://discord.com/api/v10'
 
 # ── Config imports ─────────────────────────────────────────────────────────────

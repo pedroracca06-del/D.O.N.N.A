@@ -33,7 +33,7 @@ from typing import Optional
 # ── Config ───────────────────────────────────────────────────────────────────────
 
 _BASE_DIR   = Path(__file__).parent
-_LOG_FILE   = _BASE_DIR / 'donna_signal_log.json'
+_LOG_FILE   = _BASE_DIR / 'data' / 'donna_signal_log.json'
 _MAX_ENTRIES = 10_000
 
 _lock = threading.Lock()

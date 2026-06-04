@@ -43,12 +43,12 @@ MCP_DIR   = BASE_DIR / 'mcp' / 'tradingview'
 SS_DIR    = MCP_DIR / 'screenshots'
 
 STATE_FILES = {
-    'risk_state':    BASE_DIR / 'donna_risk_state.json',
-    'state_engine':  BASE_DIR / 'donna_state_engine.json',
-    'risk_engine':   BASE_DIR / 'donna_risk_engine_state.json',
-    'alert_state':   BASE_DIR / 'donna_alert_state.json',
-    'macro_events':  BASE_DIR / 'donna_macro_events.json',
-    'macro_discord': BASE_DIR / 'donna_macro_discord_state.json',
+    'risk_state':    BASE_DIR / 'data' / 'donna_risk_state.json',
+    'state_engine':  BASE_DIR / 'data' / 'donna_state_engine.json',
+    'risk_engine':   BASE_DIR / 'data' / 'donna_risk_engine_state.json',
+    'alert_state':   BASE_DIR / 'data' / 'donna_alert_state.json',
+    'macro_events':  BASE_DIR / 'data' / 'donna_macro_events.json',
+    'macro_discord': BASE_DIR / 'data' / 'donna_macro_discord_state.json',
 }
 
 # ── Result primitives ──────────────────────────────────────────────────────────

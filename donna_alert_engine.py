@@ -38,7 +38,7 @@ import requests
 _BASE_DIR   = Path(__file__).parent
 _MCP_DIR    = _BASE_DIR / 'mcp' / 'tradingview'
 _SS_DIR     = _MCP_DIR / 'screenshots'
-_STATE_FILE = _BASE_DIR / 'donna_alert_state.json'
+_STATE_FILE = _BASE_DIR / 'data' / 'donna_alert_state.json'
 _DISCORD_API = 'https://discord.com/api/v10'
 
 try:

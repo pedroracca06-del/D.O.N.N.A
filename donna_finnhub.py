@@ -19,7 +19,7 @@ import yfinance as yf
 from donna_state_engine import state as _state
 
 BASE_DIR        = Path(__file__).parent
-RISK_STATE_FILE = BASE_DIR / 'donna_risk_state.json'
+RISK_STATE_FILE = BASE_DIR / 'data' / 'donna_risk_state.json'
 NY_TZ           = ZoneInfo('America/New_York')
 
 # Finnhub key kept solely for the news endpoint

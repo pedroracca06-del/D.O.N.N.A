@@ -36,7 +36,7 @@ def _utc_now_iso() -> str:
 
 # ── Schema ─────────────────────────────────────────────────────
 
-_STATE_FILE = Path(__file__).parent / 'donna_state_engine.json'
+_STATE_FILE = Path(__file__).parent / 'data' / 'donna_state_engine.json'
 
 _DEFAULT_STATE: dict = {
     'market_regime':         'UNKNOWN',

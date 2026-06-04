@@ -160,7 +160,7 @@ app = FastAPI(title='DONNA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
 
 _GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
-_GROK_INTEL_FILE   = Path(__file__).parent / 'donna_grok_intelligence.json'
+_GROK_INTEL_FILE   = Path(__file__).parent / 'data' / 'donna_grok_intelligence.json'
 _GROK_INTEL_PROMPT = (
     'You are a financial markets AI. Return ONLY valid JSON with these fields:\n'
     '{\n'
@@ -567,8 +567,8 @@ async def nq_components():
 
 # ── Stock Heatmaps ─────────────────────────────────────────────
 
-_SP500_HEATMAP_FILE = Path(__file__).parent / 'donna_sp500_heatmap.json'
-_NQ_HEATMAP_FILE    = Path(__file__).parent / 'donna_nq_heatmap.json'
+_SP500_HEATMAP_FILE = Path(__file__).parent / 'data' / 'donna_sp500_heatmap.json'
+_NQ_HEATMAP_FILE    = Path(__file__).parent / 'data' / 'donna_nq_heatmap.json'
 
 _SP500_SYMBOLS: dict[str, tuple[str, float]] = {
     'XLK':  ('Technology',               31.0),
@@ -662,7 +662,7 @@ async def nq_heatmap():
 
 # ── BTC + VIX live quotes ──────────────────────────────────────
 
-_BTC_VIX_CACHE_FILE = Path(__file__).parent / 'donna_btc_vix_cache.json'
+_BTC_VIX_CACHE_FILE = Path(__file__).parent / 'data' / 'donna_btc_vix_cache.json'
 
 
 def _finnhub_quote_raw(symbol: str) -> dict | None:
@@ -1496,7 +1496,7 @@ async def journal_signals():
     """Return recent signal log entries for the Journal intelligence feed."""
     import json as _json
     from pathlib import Path
-    sig_file = Path(__file__).parent / 'donna_signal_log.json'
+    sig_file = Path(__file__).parent / 'data' / 'donna_signal_log.json'
     try:
         entries = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
     except Exception:
@@ -1630,14 +1630,14 @@ async def journal_trade_detail(request: Request):
     trade = trades[trade_idx]
     ticker = (trade.get('ticker') or '').upper().replace('1!', '')
 
-    sig_file = Path(__file__).parent / 'donna_signal_log.json'
+    sig_file = Path(__file__).parent / 'data' / 'donna_signal_log.json'
     try:
         all_sigs = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
     except Exception:
         all_sigs = []
     nearby = [s for s in all_sigs if ticker in (s.get('symbol') or '').upper()][:10]
 
-    trace_file = Path(__file__).parent / 'donna_execution_trace.json'
+    trace_file = Path(__file__).parent / 'data' / 'donna_execution_trace.json'
     try:
         all_trace = _json.loads(trace_file.read_text(encoding='utf-8')) if trace_file.exists() else []
     except Exception:
@@ -1673,7 +1673,7 @@ async def journal_analyze(request: Request):
     trade = trades[trade_idx]
 
     # Load nearby signal log entries for context
-    sig_file = Path(__file__).parent / 'donna_signal_log.json'
+    sig_file = Path(__file__).parent / 'data' / 'donna_signal_log.json'
     try:
         all_sigs = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
     except Exception:

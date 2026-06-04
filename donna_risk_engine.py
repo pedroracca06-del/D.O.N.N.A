@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 NY_TZ  = ZoneInfo('America/New_York')
 BASE_DIR = Path(__file__).parent
 
-RISK_ENGINE_FILE = BASE_DIR / 'donna_risk_engine_state.json'
+RISK_ENGINE_FILE = BASE_DIR / 'data' / 'donna_risk_engine_state.json'
 
 DEFAULT_STATE: dict = {
     'account_size':     25000.0,

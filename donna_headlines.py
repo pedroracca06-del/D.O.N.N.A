@@ -18,8 +18,8 @@ import requests
 from donna_state_engine import state as _state
 
 BASE_DIR = Path(__file__).parent
-MACRO_EVENTS_FILE = BASE_DIR / 'donna_macro_events.json'
-RISK_STATE_FILE   = BASE_DIR / 'donna_risk_state.json'
+MACRO_EVENTS_FILE = BASE_DIR / 'data' / 'donna_macro_events.json'
+RISK_STATE_FILE   = BASE_DIR / 'data' / 'donna_risk_state.json'
 NY_TZ = ZoneInfo('America/New_York')
 
 FMP_API_KEY = os.getenv('FMP_API_KEY', '').strip()

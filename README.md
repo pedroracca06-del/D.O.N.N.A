@@ -1,49 +1,64 @@
-# DONNA / NOVA
+# NOVA — AI Trading Intelligence System
 
-**AI-native market intelligence and operational trading infrastructure for futures.**
+**AI-native market intelligence and execution infrastructure for futures trading.**
 
-DONNA is the backend execution and intelligence layer. NOVA is the AI reasoning engine embedded within it. Together they form a real-time system that reads live TradingView charts via CDP, evaluates trading setups against a deterministic rule engine, calls Claude (Anthropic) for grading and narration, and delivers structured alerts to Discord with chart screenshots.
+NOVA is a production trading system that reads live TradingView charts via Chrome DevTools Protocol, evaluates MES and MNQ futures setups through a deterministic rule engine, grades signals using Claude (Anthropic), and delivers structured alerts to Discord with chart screenshots — all running on a real-time 60–90 second evaluation cycle.
 
-Built for trading MES/ES and MNQ/NQ futures during the NY Open session.
+Built for: **backend engineering** · **AI systems** · **fintech infrastructure**
 
 ---
 
 ## What It Does
 
-- **Live chart reading** — connects to TradingView Desktop via Chrome DevTools Protocol (CDP) and a custom MCP server, reading NOVA indicator tables, OHLCV data, price levels, and labels directly from the chart
-- **Deterministic pre-assessment** — evaluates PROS continuation setups, ORB auction structure, IB draw alignment, and invalidation signals without any API calls
-- **AI grading** — calls Claude (Anthropic) only when a genuine signal is detected; grades setup quality A–D and generates structured Discord alert fields
-- **Discord delivery** — rich embeds with chart screenshots, routed by alert type to dedicated channels with anti-spam governance
-- **Macro intelligence** — monitors economic calendar events, VIX conditions, and breaking news via Finnhub, FMP, and Grok; delivers risk context to a dedicated macro channel
-- **Execution pipeline** — processes TradingView webhooks, applies a multi-gate risk engine, and routes live orders to Alpaca broker
-- **Dashboard** — FastAPI-served HTML dashboard with live market data, risk engine, trade journal, and session status
+- **Live chart intelligence** — connects to TradingView Desktop via a custom Node.js MCP server over Chrome DevTools Protocol, reading indicator tables, OHLCV, price levels, and labels directly from the DOM
+- **Deterministic signal evaluation** — evaluates PROS continuation setups, Opening Range Breakout structure, Initial Balance draw alignment, and macro invalidation — no AI calls until a genuine signal is detected
+- **AI grading pipeline** — calls Claude only when the deterministic engine flags a setup; grades A–D with structured narration, macro context, and execution parameters
+- **Discord delivery** — rich embeds with chart screenshots, routed by alert type to dedicated channels with anti-spam governance (cooldowns, daily caps, grade filters)
+- **Macro intelligence** — monitors economic calendar, VIX, and breaking news via Finnhub, FMP, and Grok; fires risk-tier alerts to Discord's macro channel
+- **Execution pipeline** — processes TradingView webhooks through a multi-gate risk engine, routes paper/live orders to Alpaca via REST
+- **Trade journal** — full operational intelligence journal with NOVA AI per-trade review, behavioral tracking, reasoning timeline, screenshot replay, and performance analytics
+- **Dashboard** — FastAPI-served HTML dashboard with live market data, session state, risk engine, journal, and bot controls
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
 TradingView Desktop
-      │
-      │  CDP (port 9222)
+      │ CDP :9222
       ▼
-  MCP Server (Node.js)          ← custom TradingView MCP
-      │
-      │  subprocess / JSON
+mcp/tradingview/               Custom Node.js MCP server
+      │ subprocess
       ▼
-donna_nova_reasoning.py         ← deterministic evaluators + Claude grading
-      │
-      │  AlertData
-      ▼
-donna_alert_engine.py           ← governance + Discord/Telegram delivery
-      │
-      ├── REST API (webhooks + dashboard)
-      ▼
-main.py  (FastAPI)              ← webhook ingestion, market data, journal
+donna_nova_reasoning.py        Deterministic evaluators + Claude grading
+      │ AlertData
+      ├──────────────────────► donna_alert_engine.py   Discord/Telegram delivery
       │
       ▼
-donna_execution.py              ← Alpaca broker integration
+main.py  (FastAPI / Render)    Webhooks · Dashboard · Journal · Market data
+      │
+      ▼
+donna_execution.py             Multi-gate risk engine → Alpaca broker
 ```
+
+**Two-environment split:**
+- **Render (cloud)** — FastAPI backend, dashboard, macro loops, journal, webhook ingestion. Always on.
+- **Local (trading machine)** — TradingView MCP, chart reading, NOVA reasoning monitor, Discord alerts. Active 09:15–16:00 ET weekdays via Windows Task Scheduler.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.11, FastAPI, uvicorn |
+| AI | Anthropic Claude (claude-sonnet-4-6, claude-haiku-4-5) |
+| Chart integration | Node.js, Chrome DevTools Protocol, custom MCP server |
+| Broker | Alpaca REST API |
+| Market data | Finnhub, yfinance, FMP, xAI Grok |
+| Delivery | Discord Bot API, Telegram |
+| Hosting | Render (cloud), Windows Task Scheduler (local) |
+| TradingView | Pine Script (NOVA EXECUTION V1 indicator) |
 
 ---
 
@@ -51,25 +66,51 @@ donna_execution.py              ← Alpaca broker integration
 
 ```
 D.O.N.N.A/
-├── main.py                        # FastAPI app — webhooks, dashboard, market data
-├── donna_nova_reasoning.py        # NOVA AI reasoning pipeline
-├── donna_alert_engine.py          # Alert governance + Discord/Telegram delivery
-├── donna_local_monitor.py         # Local session monitor (runs during NY Open)
-├── donna_state_engine.py          # Centralised state management
-├── donna_execution.py             # Alpaca broker integration + risk gates
-├── donna_config.py                # Environment, constants, API clients
-├── donna_signals.py               # TradingView webhook signal processor
-├── donna_engines.py               # Dashboard payload builders
-├── donna_risk_engine.py           # Position sizing, drawdown, R:R calculation
-├── donna_macro_discord.py         # Macro intelligence Discord delivery
-├── donna_html.py                  # Dashboard HTML
-├── indicators/
-│   └── nova_execution_v1.pine     # TradingView Pine Script indicator
-├── mcp/tradingview/               # Custom TradingView MCP server (Node.js)
-├── scripts/
-│   ├── start_trading_session.ps1  # One-click session launcher
-│   └── schedule_session.ps1       # Windows Task Scheduler registration
-└── NOVA_KNOWLEDGE_CORE/           # Strategy rules and knowledge base (JSON)
+│
+├── main.py                         # FastAPI app — all routes and background loops
+├── requirements.txt
+│
+├── donna_nova_reasoning.py         # Core intelligence: chart reading, evaluation, Claude
+├── donna_alert_engine.py           # Alert governance and Discord/Telegram delivery
+├── donna_local_monitor.py          # Session monitor — 60s polling loop + MCP health
+├── donna_execution.py              # Alpaca broker integration and risk gates
+├── donna_execution_bridge.py       # Routes EXECUTION_READY alerts to execution layer
+├── donna_config.py                 # Constants, env vars, API clients, file paths
+├── donna_state.py                  # State persistence helpers, journal stats
+├── donna_engines.py                # Dashboard payload builders (Harvey, scenarios)
+├── donna_signals.py                # TradingView webhook signal parser
+├── donna_signal_log.py             # Per-cycle NOVA evaluation log
+├── donna_state_engine.py           # Session state — trades taken, locks, daily P&L
+├── donna_risk_engine.py            # Position sizing, drawdown, R:R calculation
+├── donna_macro_discord.py          # Macro intelligence Discord delivery
+├── donna_headlines.py              # Economic calendar ingestion, red-folder governance
+├── donna_news.py                   # News risk scoring — headlines → risk_state
+├── donna_finnhub.py                # Live market data — quotes → risk_state
+├── donna_health.py                 # System health checks across all subsystems
+├── donna_assistant.py              # Claude conversational assistant
+├── donna_analytics.py              # Performance analytics helpers
+├── donna_html.py                   # Dashboard HTML/CSS/JS (~4,200 lines)
+│
+├── data/                           # Runtime state (gitignored, auto-generated)
+│   ├── donna_risk_state.json       # Live market snapshot, VIX, macro risk
+│   ├── donna_signal_log.json       # Full NOVA evaluation history
+│   ├── donna_journal.json          # Trade records with AI analysis
+│   └── ...                         # Execution trace, macro events, locks
+│
+├── mcp/tradingview/                # Custom TradingView MCP server (Node.js)
+│   └── src/                        # CDP connection, chart read/write, screenshot
+│
+├── nova_knowledge_core/            # Strategy rules and methodology
+│   ├── PROS_EVAN_INVESTING/        # PROS continuation strategy rules
+│   ├── ORB_RP/                     # Opening Range Breakout rules
+│   ├── INVALIDATION_RULES/         # Position invalidation logic
+│   └── RULES/nova_strategy_core.json
+│
+├── nova_ui_vision/                 # UI design philosophy and mockups
+├── indicators/                     # Pine Script — NOVA EXECUTION V1
+├── scripts/                        # Windows PowerShell session launchers
+├── tests/                          # Test suite
+└── docs/                           # Technical documentation
 ```
 
 ---
@@ -79,24 +120,29 @@ D.O.N.N.A/
 **Prerequisites:** Python 3.11+, Node.js 18+, TradingView Desktop
 
 ```bash
-git clone <repo>
+git clone --recurse-submodules <repo>
 cd D.O.N.N.A
 pip install -r requirements.txt
-cp .env.example .env   # fill in API keys
-cd mcp/tradingview && npm install
+cp .env.example .env        # add API keys
+
+cd mcp/tradingview
+npm install
 ```
 
-**Run the backend:**
+**Backend:**
 ```bash
 uvicorn main:app --reload --port 8000
+# Dashboard → http://localhost:8000/dashboard
 ```
 
-**Run the local session monitor:**
+**Local session monitor** (requires TradingView Desktop with CDP):
 ```bash
+# Windows — launches TradingView + monitor together
+powershell -ExecutionPolicy Bypass -File scripts/start_trading_session.ps1
+
+# Or manually
 python donna_local_monitor.py
 ```
-
-Or run `scripts/start_trading_session.ps1` — launches TradingView in CDP mode and the monitor together.
 
 ---
 
@@ -104,17 +150,17 @@ Or run `scripts/start_trading_session.ps1` — launches TradingView in CDP mode 
 
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API — setup grading and alert generation |
+| `ANTHROPIC_API_KEY` | Claude — setup grading, journal analysis, assistant |
 | `DISCORD_BOT_TOKEN` | Discord bot for alert delivery |
 | `DISCORD_CHANNEL_LIVE` | Fallback alert channel ID |
-| `DISCORD_CHANNEL_EXECUTION` | Execution-ready alert channel |
-| `DISCORD_CHANNEL_HEADS_UP` | Setup-forming alert channel |
-| `DISCORD_CHANNEL_MACRO` | Macro risk and calendar channel |
+| `DISCORD_CHANNEL_EXECUTION` | Execution-ready alerts |
+| `DISCORD_CHANNEL_HEADS_UP` | Setup-forming alerts |
+| `DISCORD_CHANNEL_MACRO` | Macro risk and calendar |
 | `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Broker integration |
 | `FINNHUB_API_KEY` | Market data and news |
-| `FMP_API_KEY` | Financial Modeling Prep data |
 | `GROK_API_KEY` | xAI Grok market intelligence |
-| `TELEGRAM_BOT_TOKEN` | Telegram fallback delivery |
+| `TV_CDP_PORT` | TradingView CDP port (default: 9222) |
+| `NOVA_AUTO_EXECUTE` | Enable automated execution (default: false) |
 
 ---
 

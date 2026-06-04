@@ -18,7 +18,7 @@ import requests
 
 # ── paths & config ──────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
-RISK_STATE_FILE = BASE_DIR / 'donna_risk_state.json'
+RISK_STATE_FILE = BASE_DIR / 'data' / 'donna_risk_state.json'
 NY_TZ = ZoneInfo('America/New_York')
 
 FINNHUB_API_KEY   = os.getenv('FINNHUB_API_KEY', '').strip()
@@ -224,7 +224,7 @@ def _compute_event_phase(minutes_to_event) -> str:
     return 'SCHEDULED'
 
 def _get_next_event_from_file() -> tuple[str, int | None]:
-    macro_file = BASE_DIR / 'donna_macro_events.json'
+    macro_file = BASE_DIR / 'data' / 'donna_macro_events.json'
     try:
         if not macro_file.exists():
             return 'No scheduled event', None

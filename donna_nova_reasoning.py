@@ -22,7 +22,7 @@ from typing import Optional
 
 _BASE_DIR   = Path(__file__).parent
 _MCP_DIR    = _BASE_DIR / 'mcp' / 'tradingview'
-_RULES_FILE = _BASE_DIR / 'NOVA_KNOWLEDGE_CORE' / 'RULES' / 'nova_strategy_core.json'
+_RULES_FILE = _BASE_DIR / 'nova_knowledge_core' / 'RULES' / 'nova_strategy_core.json'
 _RULES_ROOT = _BASE_DIR / 'nova_strategy_core.json'
 
 # ── Config imports ─────────────────────────────────────────────────────────────

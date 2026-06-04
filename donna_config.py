@@ -19,15 +19,18 @@ NY_TZ  = ZoneInfo('America/New_York')
 UTC_TZ = ZoneInfo('UTC')
 
 # ── File paths ────────────────────────────────────────────────
-RISK_STATE_FILE    = BASE_DIR / 'donna_risk_state.json'
-ALERTS_FILE        = BASE_DIR / 'donna_alert_history.json'
-ASSISTANT_FILE     = BASE_DIR / 'donna_assistant_state.json'
-SETTINGS_FILE      = BASE_DIR / 'donna_settings.json'
-MACRO_EVENTS_FILE  = BASE_DIR / 'donna_macro_events.json'
-MORNING_BRIEF_FILE = BASE_DIR / 'donna_morning_brief_state.json'
-JOURNAL_FILE       = BASE_DIR / 'donna_journal.json'
-REJECTIONS_FILE    = BASE_DIR / 'donna_rejections.json'
-TRACE_FILE         = BASE_DIR / 'donna_execution_trace.json'
+DATA_DIR           = BASE_DIR / 'data'
+DATA_DIR.mkdir(exist_ok=True)
+
+RISK_STATE_FILE    = DATA_DIR / 'donna_risk_state.json'
+ALERTS_FILE        = DATA_DIR / 'donna_alert_history.json'
+ASSISTANT_FILE     = DATA_DIR / 'donna_assistant_state.json'
+SETTINGS_FILE      = DATA_DIR / 'donna_settings.json'
+MACRO_EVENTS_FILE  = DATA_DIR / 'donna_macro_events.json'
+MORNING_BRIEF_FILE = DATA_DIR / 'donna_morning_brief_state.json'
+JOURNAL_FILE       = DATA_DIR / 'donna_journal.json'
+REJECTIONS_FILE    = DATA_DIR / 'donna_rejections.json'
+TRACE_FILE         = DATA_DIR / 'donna_execution_trace.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()
@@ -55,7 +58,7 @@ DISCORD_CHANNEL_SYSTEM_HEALTH  = os.getenv('DISCORD_CHANNEL_SYSTEM_HEALTH', '').
 ALERT_SCREENSHOT       = os.getenv('ALERT_SCREENSHOT', 'true').strip().lower() == 'true'
 ALERT_COOLDOWN_MINUTES = int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
 ALERT_DAILY_MAX        = int(os.getenv('ALERT_DAILY_MAX', '20'))
-ALERT_STATE_FILE       = BASE_DIR / 'donna_alert_state.json'
+ALERT_STATE_FILE       = DATA_DIR / 'donna_alert_state.json'
 
 FINNHUB_API_KEY         = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY             = os.getenv('FMP_API_KEY', '').strip()

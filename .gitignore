@@ -13,16 +13,28 @@ build/
 .venv/
 venv/
 
-# Runtime state files (auto-generated, should not be versioned)
-donna_state_engine.json
-donna_alert_history.json
-donna_journal.json
-donna_rejections.json
-donna_settings.json
-donna_alert_state.json
-donna_execution_trace.json
-donna_risk_engine_state.json
-donna_morning_brief_state.json
+# Runtime state (auto-generated, not versioned)
+# All runtime JSON lives in data/ — ignore volatile files, keep structural ones
+data/donna_risk_state.json
+data/donna_alert_history.json
+data/donna_alert_state.json
+data/donna_assistant_state.json
+data/donna_execution_trace.json
+data/donna_journal.json
+data/donna_macro_discord_state.json
+data/donna_macro_events.json
+data/donna_macro_calendar.json
+data/donna_morning_brief_state.json
+data/donna_rejections.json
+data/donna_risk_engine_state.json
+data/donna_signal_log.json
+data/donna_state_engine.json
+
+# Cache files (market data, auto-refreshed)
+data/donna_btc_vix_cache.json
+data/donna_grok_intelligence.json
+data/donna_sp500_heatmap.json
+data/donna_nq_heatmap.json
 
 # Screenshots (auto-captured, large, transient)
 mcp/tradingview/screenshots/
@@ -33,13 +45,6 @@ mcp/tradingview/.env
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Cache files (auto-generated market data)
-donna_grok_intelligence.json
-donna_btc_vix_cache.json
-donna_sp500_heatmap.json
-donna_nq_heatmap.json
-donna_macro_events.json
 
 # IDE
 .vscode/settings.json

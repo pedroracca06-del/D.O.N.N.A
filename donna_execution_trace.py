@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 BASE_DIR   = Path(__file__).parent
-TRACE_FILE = BASE_DIR / 'donna_execution_trace.json'
+TRACE_FILE = BASE_DIR / 'data' / 'donna_execution_trace.json'
 MAX_TRACE  = 500
 
 _lock = threading.Lock()
