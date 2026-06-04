@@ -436,9 +436,69 @@ def _check_alert_system() -> list[dict]:
 # SECTION 5 — EXECUTION SAFETY
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _blocked_signals_today() -> tuple[int, list[str]]:
+    """Read execution trace; return (count, grade_list) for STATE_GATE_BLOCKED today."""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        path  = BASE_DIR / 'data' / 'donna_execution_trace.json'
+        raw   = json.loads(path.read_text(encoding='utf-8'))
+        entries = raw if isinstance(raw, list) else raw.get('entries', [raw])
+        blocked, grades = [], []
+        for e in entries:
+            ts = e.get('timestamp_et', '')
+            if today not in ts:
+                continue
+            if e.get('event_type') == 'REJECTED' and e.get('rejection_code') == 'STATE_GATE_BLOCKED':
+                blocked.append(e)
+                grades.append(e.get('score', '?'))
+        return len(blocked), grades
+    except Exception:
+        return 0, []
+
+
+def _check_alpaca() -> list[dict]:
+    """Verify Alpaca credentials and paper/live account reachability."""
+    results = []
+    key    = os.getenv('ALPACA_API_KEY', '')
+    secret = os.getenv('ALPACA_SECRET_KEY', '')
+    base   = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets').rstrip('/')
+    mode   = 'PAPER' if 'paper' in base.lower() else 'LIVE'
+
+    if not key or not secret:
+        results.append(_r(FAIL, 'Alpaca credentials not set  —  broker unreachable'))
+        return results
+
+    results.append(_r(PASS, f'Alpaca credentials set  ({mode} mode  —  {base})'))
+
+    try:
+        import requests as _req
+        r = _req.get(f'{base}/v2/account',
+                     headers={'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret},
+                     timeout=8)
+        if r.status_code == 200:
+            acct  = r.json()
+            equity = float(acct.get('equity', 0))
+            bp     = float(acct.get('buying_power', 0))
+            status = acct.get('status', '?')
+            tradable = acct.get('trading_blocked', False)
+            if tradable:
+                results.append(_r(FAIL, f'Alpaca account TRADING BLOCKED  (status={status})'))
+            else:
+                results.append(_r(PASS,
+                    f'Alpaca account OK  equity=${equity:,.0f}  BP=${bp:,.0f}  status={status}'))
+        elif r.status_code == 403:
+            results.append(_r(FAIL, 'Alpaca API key rejected (403)  —  check credentials'))
+        else:
+            results.append(_r(WARNING, f'Alpaca API HTTP {r.status_code}'))
+    except Exception as e:
+        results.append(_r(WARNING, f'Alpaca API unreachable  ({str(e)[:60]})'))
+
+    return results
+
+
 def _check_execution_safety() -> tuple[list[dict], bool, str]:
-    results   = []
-    safe      = True
+    results     = []
+    safe        = True
     fail_reason = ''
 
     def _fail(detail: str):
@@ -447,21 +507,31 @@ def _check_execution_safety() -> tuple[list[dict], bool, str]:
         if not fail_reason:
             fail_reason = detail
 
-    now   = datetime.now(timezone.utc)
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # ── State engine ──
+    # ── NOVA_AUTO_EXECUTE master switch ──────────────────────────────────────
+    auto_exec = os.getenv('NOVA_AUTO_EXECUTE', '').strip().lower()
+    if auto_exec == 'true':
+        results.append(_r(PASS, 'NOVA_AUTO_EXECUTE: true  —  bridge active'))
+    else:
+        _fail('NOVA_AUTO_EXECUTE not set  —  execution bridge disabled')
+        results.append(_r(FAIL,
+            'NOVA_AUTO_EXECUTE: NOT SET  —  no signals will reach the broker  '
+            '(set NOVA_AUTO_EXECUTE=true in .env)'))
+
+    # ── State engine ─────────────────────────────────────────────────────────
     se = _read(STATE_FILES['state_engine']) or {}
 
-    trade_count   = se.get('daily_trade_count', 0)
-    loss_hit      = se.get('daily_loss_trade_hit', False)
-    trade_perm    = se.get('trade_permission', True)
-    state_date    = se.get('state_date', '')
-    stop_trading  = se.get('stop_trading', False)
+    trade_count  = se.get('daily_trade_count', 0)
+    loss_hit     = se.get('daily_loss_trade_hit', False)
+    trade_perm   = se.get('trade_permission', True)
+    state_date   = se.get('state_date', '')
+    stop_trading = se.get('stop_trading', False)
+    exec_lock    = se.get('execution_lock', False)
 
-    # Date drift check
     if state_date and state_date != today:
-        results.append(_r(WARNING, f'State engine date mismatch: {state_date} vs today {today}  —  may need reset'))
+        results.append(_r(WARNING,
+            f'State engine date mismatch: {state_date} vs today {today}  —  may need reset'))
     else:
         results.append(_r(PASS, f'State engine date: {state_date or today}'))
 
@@ -469,24 +539,35 @@ def _check_execution_safety() -> tuple[list[dict], bool, str]:
         f'Daily trade count: {trade_count} / 2'))
 
     if loss_hit:
-        _fail('Daily loss limit already hit  —  session closed')
+        _fail('Daily loss limit hit  —  session closed')
         results.append(_r(FAIL, 'Daily loss limit: HIT  —  no entries permitted'))
     else:
         results.append(_r(PASS, 'Daily loss limit: clear'))
 
+    # trade_permission — the critical gate that burned us today
     if not trade_perm:
-        _fail('Trade permission disabled')
-        results.append(_r(FAIL, 'Trade permission: DISABLED'))
+        blocked_n, blocked_grades = _blocked_signals_today()
+        grade_str = ', '.join(blocked_grades) if blocked_grades else 'none'
+        _fail('trade_permission DISABLED  —  all signals rejected at execution gate')
+        results.append(_r(FAIL,
+            f'TRADE PERMISSION: DISABLED  ——  {blocked_n} signal(s) blocked today '
+            f'(grades: {grade_str})  ——  run enable_trade_permission() to restore'))
     else:
         results.append(_r(PASS, 'Trade permission: ENABLED'))
 
+    if exec_lock:
+        _fail('execution_lock is set in state engine')
+        results.append(_r(FAIL, 'Execution lock: SET'))
+    else:
+        results.append(_r(PASS, 'Execution lock: clear'))
+
     if stop_trading:
-        _fail('stop_trading flag is set in state engine')
+        _fail('stop_trading flag set in state engine')
         results.append(_r(FAIL, 'Stop trading flag: SET'))
     else:
         results.append(_r(PASS, 'Stop trading flag: clear'))
 
-    # ── Risk engine ──
+    # ── Risk engine ──────────────────────────────────────────────────────────
     re = _read(STATE_FILES['risk_engine']) or {}
     if re.get('stop_trading'):
         _fail('stop_trading set in risk engine')
@@ -494,47 +575,51 @@ def _check_execution_safety() -> tuple[list[dict], bool, str]:
     else:
         results.append(_r(PASS, 'Risk engine stop_trading: clear'))
 
-    # ── Risk state locks ──
+    # ── Risk state locks ─────────────────────────────────────────────────────
     risk = _read(STATE_FILES['risk_state']) or {}
-    macro_lock      = risk.get('macro_lock', False)
-    red_folder_lock = risk.get('red_folder_lock', False)
-    red_folder_week = risk.get('red_folder_week', False)
 
-    if macro_lock:
-        _fail('Macro lock is active in risk state')
+    if risk.get('macro_lock'):
+        _fail('Macro lock active in risk state')
         results.append(_r(FAIL, 'Macro lock: ACTIVE'))
     else:
         results.append(_r(PASS, 'Macro lock: clear'))
 
-    if red_folder_lock:
+    if risk.get('red_folder_lock'):
         results.append(_r(WARNING, 'Red folder lock: ACTIVE  —  execution paused near macro event'))
     else:
         results.append(_r(PASS, 'Red folder lock: clear'))
 
-    if red_folder_week:
+    if risk.get('red_folder_week'):
         results.append(_r(WARNING, 'Red folder week flag: active  —  elevated caution'))
-    else:
-        results.append(_r(PASS, 'Red folder week: no key events'))
 
-    # ── Alert state — orphaned signals ──
+    # ── Blocked signals audit (execution trace) ───────────────────────────────
+    blocked_n, blocked_grades = _blocked_signals_today()
+    if blocked_n > 0:
+        grade_str = ', '.join(blocked_grades)
+        sev = FAIL if any(g in ('A', 'B') for g in blocked_grades) else WARNING
+        results.append(_r(sev,
+            f'Signals blocked today by STATE_GATE: {blocked_n}  (grades: {grade_str})'))
+        if sev == FAIL and trade_perm:
+            # Was blocked earlier but permission is now restored
+            results.append(_r(WARNING,
+                f'Permission was disabled earlier today — {blocked_n} setup(s) missed'))
+    else:
+        results.append(_r(PASS, 'No signals blocked by execution gate today'))
+
+    # ── Alpaca broker ─────────────────────────────────────────────────────────
+    results.extend(_check_alpaca())
+
+    # ── Alert state — orphaned signals ────────────────────────────────────────
     alert_st = _read(STATE_FILES['alert_state']) or {}
     signals  = alert_st.get('signals', {})
-    orphaned = []
-    for key, sig in signals.items():
-        ts_str = sig.get('last_delivery_time', '')
-        age    = _age_minutes(ts_str)
-        if age is not None and age > 24 * 60:
-            orphaned.append(key)
-
+    orphaned = [k for k, v in signals.items()
+                if (_age_minutes(v.get('last_delivery_time', '')) or 0) > 24 * 60]
     if orphaned:
         results.append(_r(WARNING, f'Orphaned signals ({len(orphaned)}): {", ".join(orphaned[:3])}'))
     else:
         results.append(_r(PASS, f'Active signals: {len(signals)}  —  no orphans'))
 
-    if not fail_reason:
-        fail_reason = ''
-
-    return results, safe, fail_reason
+    return results, safe, fail_reason or ''
 
 
 # ══════════════════════════════════════════════════════════════════════════════
