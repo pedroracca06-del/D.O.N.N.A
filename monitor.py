@@ -171,6 +171,17 @@ def _run_premarket_check() -> None:
     alpaca_url  = os.getenv('ALPACA_BASE_URL', 'paper')
     mode        = 'PAPER' if 'paper' in alpaca_url.lower() else 'LIVE'
 
+    # Auto-restore trade_permission if it's False with no valid blocking reason.
+    # This is the last line of defence before the session opens.
+    if not trade_perm and not exec_lock and not se.get('daily_loss_trade_hit', False):
+        try:
+            from services.execution import enable_trade_permission
+            enable_trade_permission()
+            trade_perm = True
+            log.info('Pre-market check: trade_permission auto-restored before open')
+        except Exception as _ep:
+            log.warning(f'Pre-market check: could not restore trade_permission: {_ep}')
+
     exec_parts = []
     exec_ok    = True
 
