@@ -296,6 +296,33 @@ def load_market_reality() -> dict:
     }
 
 
+def format_reality_for_assistant(mr: dict) -> str:
+    """
+    Compact single-line market reality summary for the assistant context.
+    Designed to be minimal so it doesn't inflate Claude's output or destabilise JSON.
+    Full format_reality_for_prompt() is for reasoning/grading prompts only.
+    """
+    direction = mr.get('direction', 'UNKNOWN')
+    severity  = mr.get('severity', 'LOW')
+    nq_pct    = mr.get('nq_change_pct', 0.0)
+    es_pct    = mr.get('es_change_pct', 0.0)
+    structure = mr.get('structure', 'RANGE')
+    tone      = mr.get('assistant_tone', 'NORMAL')
+    longs_ok  = mr.get('bullish_execution_allowed', True)
+    shorts_ok = mr.get('short_execution_allowed', True)
+
+    exec_note = ''
+    if not longs_ok:
+        exec_note = ' | LONGS_BLOCKED'
+    elif not shorts_ok:
+        exec_note = ' | SHORTS_BLOCKED'
+
+    return (
+        f'LIVE_MARKET: NQ {nq_pct:+.2f}% ES {es_pct:+.2f}% | '
+        f'{direction} {severity} | {structure} | tone={tone}{exec_note}'
+    )
+
+
 def format_reality_for_prompt(mr: dict) -> str:
     """
     Format market_reality_state into a compact block for AI prompt injection.

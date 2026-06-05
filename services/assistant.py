@@ -12,17 +12,16 @@ from engines.engines import (
     build_market_driver_engine, build_morning_edge,
     build_session_significance, build_market_movers_engine,
 )
-from engines.market_reality import load_market_reality, format_reality_for_prompt
+from engines.market_reality import load_market_reality, format_reality_for_assistant
 
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
-    'CRITICAL GROUNDING RULE: The MARKET REALITY block at the top of every context is live price truth. '
-    'It overrides all cached narratives, prior session bias, and old AI reads. '
-    'When direction=BEARISH and severity=HIGH or EXTREME, you MUST lead your reply by acknowledging '
-    'bearish conditions — NEVER say "my context shows the opposite" when live data contradicts it. '
-    'When tone=DEFENSIVE_REASSESSMENT: open with the bearish reality, then answer. '
-    'When tone=BEARISH_ALERT or BULLISH_ALERT: extreme conditions — acknowledge immediately. '
-    'Return JSON only: {"action":"none|set_focus|add_task|add_reminder|clear_tasks|clear_reminders","value":"","reply":"short reply"}'
+    'The LIVE_MARKET line in every context is live price truth — it overrides any cached session narrative. '
+    'When tone=CAUTIOUS/DEFENSIVE_REASSESSMENT/BEARISH_ALERT: your reply field must acknowledge '
+    'the live bearish conditions before addressing the user question. '
+    'When tone=BULLISH_ALERT: acknowledge the bullish conditions. '
+    'Return JSON only — no text outside the JSON object: '
+    '{"action":"none|set_focus|add_task|add_reminder|clear_tasks|clear_reminders","value":"","reply":"1-3 sentences"}'
 )
 
 
@@ -47,8 +46,10 @@ def summarize_system_context() -> str:
     assistant = load_assistant_state()
     mr        = load_market_reality()
 
-    # Market reality is prepended first — Claude reads live price truth before any cached state
-    reality_block = format_reality_for_prompt(mr)
+    # Compact single-line market reality — prepended so Claude reads live truth first
+    # Full format_reality_for_prompt() is intentionally NOT used here: it is verbose,
+    # causes Claude to write longer replies, and destabilises tight JSON output.
+    reality_line = format_reality_for_assistant(mr)
 
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"
@@ -68,7 +69,7 @@ def summarize_system_context() -> str:
         f"Daily Focus: {assistant.get('daily_focus')}"
     )
 
-    return f"{reality_block}\n\n{cached_context}"
+    return f"{reality_line}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):
@@ -103,11 +104,18 @@ def call_assistant_llm(message: str) -> dict:
         model=ANTHROPIC_ASSISTANT_MODEL,
         system=ASSISTANT_SYSTEM_PROMPT,
         messages=[{'role': 'user', 'content': f'User message:\n{message}\n\nSystem context:\n{summarize_system_context()}'}],
-        max_tokens=220,
+        max_tokens=400,
     )
-    parsed = parse_json_loose(response.content[0].text, fallback)
+    raw = response.content[0].text
+    parsed = parse_json_loose(raw, fallback)
+
+    # Log parse failures so we can see what Claude actually returned
+    reply = str(parsed.get('reply', '')).strip()
+    if not reply:
+        print(f'[assistant] parse miss — raw response: {raw[:300]!r}')
+
     return {
         'action': str(parsed.get('action', 'none')).strip().lower(),
         'value':  str(parsed.get('value', '')).strip(),
-        'reply':  str(parsed.get('reply', '')).strip() or 'Donna processed the request.',
+        'reply':  reply or 'No reply generated.',
     }
