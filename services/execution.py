@@ -69,7 +69,7 @@ _LOSS_LIMIT_NY_LON   = -1000.0  # Rule 3: NY + London P&L floor
 _LOSS_LIMIT_ASIA     = -500.0   # Rule 3: Asia P&L floor
 _ASIA_MIN_CONFIDENCE = 90.0     # Rule 4: min confidence for Asia execution
 _ASIA_MAX_TRADES     = 1        # Rule 4: max trades per Asia session
-_DAILY_MAX_TRADES    = 5        # Rule 2: max trades per calendar day
+_DAILY_MAX_TRADES    = int(os.getenv('NOVA_DAILY_MAX_TRADES', '5'))  # Rule 2: set in .env
 
 
 # ── Alpaca client ──────────────────────────────────────────────
