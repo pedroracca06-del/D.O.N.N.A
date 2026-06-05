@@ -116,6 +116,7 @@ var array<box>   histNYBoxes     = array.new<box>()
 var float ibHigh      = na
 var float ibLow       = na
 var int   ibLockBar   = na
+var int   ibStartBar  = na
 var line  ibHighLine  = na
 var line  ibLowLine   = na
 var label ibHighLabel = na
@@ -162,6 +163,7 @@ if newDay
     ibHigh      := na
     ibLow       := na
     ibLockBar   := na
+    ibStartBar  := na
     if not na(ibHighLine)
         line.delete(ibHighLine)
         ibHighLine := na
@@ -195,6 +197,8 @@ isIBWindow = (hourNow > 9 or (hourNow == 9 and minuteNow >= 30)) and
 isIBClose  = hourNow == 10 and minuteNow == 30
 
 if isIBWindow
+    if na(ibStartBar)
+        ibStartBar := bar_index
     ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
     ibLow  := na(ibLow)  ? low  : math.min(ibLow,  low)
 
@@ -404,13 +408,15 @@ if barstate.islast and showHistORB
 // Labels expose "IB HIGH" / "IB LOW" text for DONNA MCP level extraction.
 ibLineColor = color.new(#40C4FF, 0)    // bright sky blue — visible against dark background
 ibLabelColor = color.new(#40C4FF, 0)
-// IB visible from 10:30 through end of NY AM (12:30) only
+// IB visible from 9:30 through end of NY AM (11:59) — full session visibility.
+// Lines draw from the actual 9:30 open bar (ibStartBar) during the building phase,
+// then anchor to the 10:30 lock bar once IB is confirmed.
 ibVisible   = not na(ibHigh) and not na(ibLow) and
-              (hourNow > 10 or (hourNow == 10 and minuteNow >= 30)) and
-              (hourNow < 12 or (hourNow == 12 and minuteNow <= 30))
+              (hourNow > 9 or (hourNow == 9 and minuteNow >= 30)) and
+              hourNow < 12
 
 if ibVisible and barstate.islast
-    _ibStart = na(ibLockBar) ? bar_index - 50 : ibLockBar
+    _ibStart = not na(ibLockBar) ? ibLockBar : (not na(ibStartBar) ? ibStartBar : bar_index - 50)
 
     if na(ibHighLine)
         ibHighLine := line.new(_ibStart, ibHigh, bar_index, ibHigh,
