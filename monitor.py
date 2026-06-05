@@ -257,6 +257,26 @@ def main() -> None:
     _mcp_down_alerted    = False
     _premarket_check_date = ''   # YYYY-MM-DD of last pre-market check
 
+    # ── Startup: restore trade_permission if no valid block exists ────────────
+    # EOD disables it at 3:30 PM daily. The daily reset in state_engine should
+    # restore it each morning, but can be pre-empted if the state date is already
+    # updated before the reset fires. This guard catches that race condition.
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        _se_path = _Path(__file__).parent / 'data' / 'donna_state_engine.json'
+        _se = _json.loads(_se_path.read_text(encoding='utf-8')) if _se_path.exists() else {}
+        if (
+            not _se.get('trade_permission', True)
+            and not _se.get('daily_loss_trade_hit', False)
+            and not _se.get('execution_lock', False)
+        ):
+            from services.execution import enable_trade_permission
+            enable_trade_permission()
+            log.info('Startup: trade_permission restored — no blocking condition active')
+    except Exception as _spe:
+        log.warning(f'Startup trade_permission check failed: {_spe}')
+
     while True:
         try:
             now_ny = datetime.now(NY_TZ)
