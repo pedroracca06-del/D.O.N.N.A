@@ -90,6 +90,153 @@ def _send_health_alert(title: str, description: str, color: int) -> None:
         log.warning(f'Health alert send failed: {e}')
 
 
+def _run_premarket_check() -> None:
+    """
+    9:25 AM ET pre-market health check — alerts, TradingView MCP, execution.
+    Posts a focused status embed to the morning-brief Discord channel.
+    """
+    from engines.reasoning import _run_mcp
+
+    now_str = datetime.now(NY_TZ).strftime('%H:%M ET')
+    lines   = []
+    issues  = []
+
+    # ── TradingView MCP ───────────────────────────────────────────────────────
+    status_data, _ = None, None
+    try:
+        import subprocess, json as _json
+        from pathlib import Path
+        mcp_dir = Path(__file__).parent / 'mcp' / 'tradingview'
+
+        result = subprocess.run(
+            ['node', 'src/cli/index.js', 'status'],
+            cwd=str(mcp_dir), capture_output=True, text=True, timeout=10,
+        )
+        status_data = _json.loads(result.stdout.strip()) if result.stdout.strip() else None
+    except Exception:
+        pass
+
+    if status_data and status_data.get('success') is not False:
+        # Quick quote for live price confirmation
+        try:
+            qr = subprocess.run(
+                ['node', 'src/cli/index.js', 'quote'],
+                cwd=str(mcp_dir), capture_output=True, text=True, timeout=10,
+            )
+            quote = _json.loads(qr.stdout.strip()) if qr.stdout.strip() else {}
+            price = quote.get('last') or quote.get('close') or '?'
+            sym   = status_data.get('symbol', '?')
+            lines.append(f'**TradingView MCP**   ✅  CDP live  ·  {sym} @ {price}')
+        except Exception:
+            lines.append('**TradingView MCP**   ✅  CDP live')
+    else:
+        lines.append('**TradingView MCP**   ❌  CDP offline — TradingView not running')
+        issues.append('MCP offline')
+
+    # ── Alert system ──────────────────────────────────────────────────────────
+    token      = os.getenv('DISCORD_BOT_TOKEN', '')
+    ch_live    = os.getenv('DISCORD_CHANNEL_LIVE', '')
+    ch_exec    = os.getenv('DISCORD_CHANNEL_EXECUTION', '')
+    ch_brief   = os.getenv('DISCORD_CHANNEL_MORNING_BRIEF', '')
+
+    configured = sum(1 for c in [ch_live, ch_exec, ch_brief,
+                                  os.getenv('DISCORD_CHANNEL_HEADS_UP',''),
+                                  os.getenv('DISCORD_CHANNEL_INVALIDATION',''),
+                                  os.getenv('DISCORD_CHANNEL_NO_TRADE',''),
+                                  os.getenv('DISCORD_CHANNEL_MACRO','')] if c)
+    if token and configured >= 5:
+        lines.append(f'**Alert System**      ✅  {configured}/7 channels configured')
+    elif token:
+        lines.append(f'**Alert System**      ⚠️  {configured}/7 channels — some missing')
+        issues.append('alert channels incomplete')
+    else:
+        lines.append('**Alert System**      ❌  Discord bot token not set')
+        issues.append('Discord not configured')
+
+    # ── Execution ─────────────────────────────────────────────────────────────
+    try:
+        import json as _json2
+        from pathlib import Path as _Path
+        se_path = _Path(__file__).parent / 'data' / 'donna_state_engine.json'
+        se = _json2.loads(se_path.read_text(encoding='utf-8')) if se_path.exists() else {}
+    except Exception:
+        se = {}
+
+    trade_perm  = se.get('trade_permission', True)
+    exec_lock   = se.get('execution_lock', False)
+    macro_lock  = se.get('macro_lock', False)
+    trades_done = se.get('daily_trade_count', 0)
+    auto_exec   = os.getenv('NOVA_AUTO_EXECUTE', '').strip().lower() == 'true'
+    alpaca_key  = bool(os.getenv('ALPACA_API_KEY', ''))
+    alpaca_url  = os.getenv('ALPACA_BASE_URL', 'paper')
+    mode        = 'PAPER' if 'paper' in alpaca_url.lower() else 'LIVE'
+
+    exec_parts = []
+    exec_ok    = True
+
+    if not auto_exec:
+        exec_parts.append('NOVA_AUTO_EXECUTE not set')
+        exec_ok = False
+        issues.append('NOVA_AUTO_EXECUTE disabled')
+    else:
+        exec_parts.append(f'{mode} mode')
+
+    if not trade_perm:
+        exec_parts.append('trade permission **DISABLED**')
+        exec_ok = False
+        issues.append('trade_permission=False')
+    else:
+        exec_parts.append('permission ON')
+
+    if exec_lock or macro_lock:
+        exec_parts.append('LOCKED')
+        exec_ok = False
+        issues.append('execution locked')
+
+    if not alpaca_key:
+        exec_parts.append('Alpaca keys missing')
+        exec_ok = False
+        issues.append('Alpaca not configured')
+
+    exec_parts.append(f'trades today: {trades_done}/2')
+
+    exec_icon = '✅' if exec_ok else '❌'
+    lines.append(f'**Execution**         {exec_icon}  {" · ".join(exec_parts)}')
+
+    # ── Build and send embed ──────────────────────────────────────────────────
+    safe       = len(issues) == 0
+    color      = 0x00C851 if safe else (0xFF4444 if len(issues) >= 2 else 0xFFBB33)
+    verdict    = '✅  **READY — open in 5 min**' if safe else f'⚠️  **{len(issues)} issue(s) — fix before open**'
+
+    description = '\n'.join(lines) + f'\n\n{verdict}'
+    if issues:
+        description += '\n> ' + ' · '.join(issues)
+
+    try:
+        _token = os.getenv('DISCORD_BOT_TOKEN', '')
+        _ch    = os.getenv('DISCORD_CHANNEL_MORNING_BRIEF') or os.getenv('DISCORD_CHANNEL_LIVE', '')
+        if _token and _ch:
+            requests.post(
+                f'https://discord.com/api/v10/channels/{_ch}/messages',
+                headers={'Authorization': f'Bot {_token}', 'Content-Type': 'application/json'},
+                json={'embeds': [{
+                    'title':       f'NOVA PRE-MARKET CHECK  ·  {now_str}',
+                    'description': description,
+                    'color':       color,
+                    'timestamp':   datetime.utcnow().isoformat(),
+                    'footer':      {'text': 'NY_OPEN in 5 min  ·  09:30 ET'},
+                }]},
+                timeout=10,
+            )
+            log.info(f'Pre-market check sent to Discord — {"READY" if safe else "ISSUES: " + str(issues)}')
+        else:
+            log.warning('Pre-market check: Discord not configured — logging only')
+            for ln in lines:
+                log.info(ln.replace('**', ''))
+    except Exception as e:
+        log.warning(f'Pre-market check Discord send failed: {e}')
+
+
 def main() -> None:
     from engines.reasoning import run_reasoning_cycle, _run_mcp
     from delivery.alert_engine import deliver_alert
@@ -103,12 +250,35 @@ def main() -> None:
     log.info(f'Auto-execute: {_exec_label}')
     log.info('Ctrl+C to stop\n')
 
-    _mcp_fail_count   = 0
-    _mcp_down_alerted = False
+    _mcp_fail_count      = 0
+    _mcp_down_alerted    = False
+    _premarket_check_date = ''   # YYYY-MM-DD of last pre-market check
 
     while True:
         try:
+            now_ny = datetime.now(NY_TZ)
+            _today = now_ny.strftime('%Y-%m-%d')
+            _h, _m = now_ny.hour, now_ny.minute
+
+            # ── 9:25 AM pre-market check — fires once per trading day ─────────
+            if (
+                _h == 9 and 25 <= _m <= 29
+                and now_ny.weekday() < 5          # weekday only
+                and _premarket_check_date != _today
+            ):
+                _premarket_check_date = _today
+                log.info(f'{_time_et()} — running pre-market health check')
+                try:
+                    _run_premarket_check()
+                except Exception as _pce:
+                    log.error(f'Pre-market check failed: {_pce}')
+
             sess = _get_session()
+
+            # Shorten dead-zone sleep to 60s between 9:00–9:29 so the 9:25
+            # check is never missed due to a long 300s sleep cycle.
+            if not sess['active'] and _h == 9 and _m < 30:
+                sess['poll_interval'] = 60
 
             if sess['active']:
                 quality = sess['quality']
