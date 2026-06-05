@@ -8,6 +8,7 @@ _save() and _load() methods only. All other code stays identical.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -168,12 +169,16 @@ class DonnaStateEngine:
             s = self._state
             _ny = _now_ny()
             _h, _m = _ny.hour, _ny.minute
-            if _h < 9 or (_h == 9 and _m < 30) or _h >= 16:
-                return False
+            # NOVA_ALL_SESSIONS=true bypasses the NY-only time gate for testing.
+            # Remove or unset this env var when moving to production NY-session-only mode.
+            _all_sessions = os.getenv('NOVA_ALL_SESSIONS', '').strip().lower() == 'true'
+            if not _all_sessions:
+                if _h < 9 or (_h == 9 and _m < 30) or _h >= 16:
+                    return False
             return (
                 not s.get('execution_lock', False)
                 and bool(s.get('trade_permission', True))
-                and not s.get('eod_lock', False)
+                and (not s.get('eod_lock', False) or _all_sessions)
                 and not s.get('macro_lock', False)
                 and not s.get('red_folder_lock', False)
             )
