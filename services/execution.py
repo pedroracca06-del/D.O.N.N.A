@@ -69,6 +69,7 @@ _LOSS_LIMIT_NY_LON   = -1000.0  # Rule 3: NY + London P&L floor
 _LOSS_LIMIT_ASIA     = -500.0   # Rule 3: Asia P&L floor
 _ASIA_MIN_CONFIDENCE = 90.0     # Rule 4: min confidence for Asia execution
 _ASIA_MAX_TRADES     = 1        # Rule 4: max trades per Asia session
+_DAILY_MAX_TRADES    = 5        # Rule 2: max trades per calendar day
 
 
 # ── Alpaca client ──────────────────────────────────────────────
@@ -1372,7 +1373,7 @@ def execute_signal(signal_result: dict) -> dict:
 
     Rule 0 — STATE GATE         can_execute() must be True (eod/macro/red_folder/permission locks).
     Rule 1 — RED FOLDER        ±30 min around any HIGH macro event → block.
-    Rule 2 — DAILY TRADE LIMIT  max 2 trades per calendar day ET.
+    Rule 2 — DAILY TRADE LIMIT  max 5 trades per calendar day ET.
     Rule 3 — DAILY LOSS LIMIT   NY/London < -$1 000 | Asia < -$500 → block.
     Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
     Rule 5 — POSITION SIZING    broker-specific (ALPACA_ETF: floor($500/stop)).
@@ -1449,20 +1450,13 @@ def execute_signal(signal_result: dict) -> dict:
             data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'First trade loss — no more trades today', 'code': 'DAILY_LOSS_TRADE_HIT'}
 
-    if trades_today >= 2:
-        print('[execute_signal] BLOCKED — daily limit reached (2 trades)')
+    if trades_today >= _DAILY_MAX_TRADES:
+        print(f'[execute_signal] BLOCKED — daily limit reached ({trades_today}/{_DAILY_MAX_TRADES} trades)')
         _log_rejection(_rejection_context(
-            'DAILY_LIMIT_REACHED', f'Daily trade limit reached ({trades_today}/2)',
+            'DAILY_LIMIT_REACHED',
+            f'Daily trade limit reached ({trades_today}/{_DAILY_MAX_TRADES})',
             data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'Daily trade limit reached', 'code': 'DAILY_LIMIT_REACHED'}
-
-    if trades_today == 1 and first_outcome != 'WIN':
-        print('[execute_signal] BLOCKED — trade 2 requires trade 1 WIN')
-        _log_rejection(_rejection_context(
-            'TRADE2_REQUIRES_WIN',
-            f'Trade 2 blocked — first trade outcome is {first_outcome!r}, requires WIN',
-            data, parsed, routed_etf=routed_etf, session=session))
-        return {'status': 'skipped', 'reason': 'Trade 2 blocked — first trade not WIN', 'code': 'TRADE2_REQUIRES_WIN'}
 
     # ── ONE POSITION AT A TIME ──────────────────────────────────
     open_positions = _state.get_open_positions()

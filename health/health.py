@@ -535,8 +535,8 @@ def _check_execution_safety() -> tuple[list[dict], bool, str]:
     else:
         results.append(_r(PASS, f'State engine date: {state_date or today}'))
 
-    results.append(_r(PASS if trade_count < 2 else WARNING,
-        f'Daily trade count: {trade_count} / 2'))
+    results.append(_r(PASS if trade_count < 5 else WARNING,
+        f'Daily trade count: {trade_count} / 5'))
 
     if loss_hit:
         _fail('Daily loss limit hit  —  session closed')

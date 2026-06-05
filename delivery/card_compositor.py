@@ -95,7 +95,7 @@ class CardData:
 
     # Governance / session state
     trades_today:       int   = 0
-    max_trades:         int   = 2
+    max_trades:         int   = 5
     daily_pnl_pct:      float = 0.0
     daily_loss_limit:   float = 2.0
     cooldown_min:       int   = 15

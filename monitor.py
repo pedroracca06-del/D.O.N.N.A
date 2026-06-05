@@ -209,7 +209,7 @@ def _run_premarket_check() -> None:
         exec_ok = False
         issues.append('Alpaca not configured')
 
-    exec_parts.append(f'trades today: {trades_done}/2')
+    exec_parts.append(f'trades today: {trades_done}/5')
 
     exec_icon = '✅' if exec_ok else '❌'
     lines.append(f'**Execution**         {exec_icon}  {" · ".join(exec_parts)}')
