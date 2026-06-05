@@ -858,6 +858,15 @@ def _build_evaluation_prompt(
     levels = chart_ctx.get('nova_levels', [])[:10]
     labels = chart_ctx.get('nova_labels', [])
 
+    # Load market reality for directional grounding
+    try:
+        from engines.market_reality import load_market_reality, format_reality_for_prompt
+        _mr = load_market_reality()
+        _mr_block = format_reality_for_prompt(_mr)
+    except Exception:
+        _mr_block = ''
+        _mr = {}
+
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})
 
@@ -882,7 +891,9 @@ def _build_evaluation_prompt(
             f"aligned={ib_eval.get('aligned', '?')}"
         )
 
-    return f"""LIVE MARKET CONTEXT
+    return f"""{_mr_block}
+
+LIVE MARKET CONTEXT
 Symbol:        {symbol}
 Price:         {price}
 Time:          {session_ctx['time_et']}  ({session_ctx['day']})

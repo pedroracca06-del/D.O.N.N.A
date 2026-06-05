@@ -12,9 +12,16 @@ from engines.engines import (
     build_market_driver_engine, build_morning_edge,
     build_session_significance, build_market_movers_engine,
 )
+from engines.market_reality import load_market_reality, format_reality_for_prompt
 
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
+    'CRITICAL GROUNDING RULE: The MARKET REALITY block at the top of every context is live price truth. '
+    'It overrides all cached narratives, prior session bias, and old AI reads. '
+    'When direction=BEARISH and severity=HIGH or EXTREME, you MUST lead your reply by acknowledging '
+    'bearish conditions — NEVER say "my context shows the opposite" when live data contradicts it. '
+    'When tone=DEFENSIVE_REASSESSMENT: open with the bearish reality, then answer. '
+    'When tone=BEARISH_ALERT or BULLISH_ALERT: extreme conditions — acknowledge immediately. '
     'Return JSON only: {"action":"none|set_focus|add_task|add_reminder|clear_tasks|clear_reminders","value":"","reply":"short reply"}'
 )
 
@@ -32,13 +39,18 @@ def parse_json_loose(text, fallback):
 
 
 def summarize_system_context() -> str:
-    risk     = load_risk_state()
-    driver   = build_market_driver_engine(risk)
-    morning  = build_morning_edge(risk)
-    sig      = build_session_significance(risk)
-    movers   = build_market_movers_engine()
+    risk      = load_risk_state()
+    driver    = build_market_driver_engine(risk)
+    morning   = build_morning_edge(risk)
+    sig       = build_session_significance(risk)
+    movers    = build_market_movers_engine()
     assistant = load_assistant_state()
-    return (
+    mr        = load_market_reality()
+
+    # Market reality is prepended first — Claude reads live price truth before any cached state
+    reality_block = format_reality_for_prompt(mr)
+
+    cached_context = (
         f"Session: {risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
         f"Headline Risk: {risk.get('headline_risk')}\n"
@@ -55,6 +67,8 @@ def summarize_system_context() -> str:
         f"Likely Threats: {[x['ticker'] for x in movers['threats']]}\n"
         f"Daily Focus: {assistant.get('daily_focus')}"
     )
+
+    return f"{reality_block}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):

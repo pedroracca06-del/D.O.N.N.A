@@ -162,14 +162,18 @@ _sse_clients: list[asyncio.Queue] = []
 _GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
 _GROK_INTEL_FILE   = Path(__file__).parent / 'data' / 'donna_grok_intelligence.json'
 _GROK_INTEL_PROMPT = (
-    'You are a financial markets AI. Return ONLY valid JSON with these fields:\n'
+    'You are a financial markets AI with live access to X/Twitter and current news. '
+    'Return ONLY valid JSON with these fields:\n'
     '{\n'
     '  "top_story": "<headline of the single most market-moving story right now>",\n'
     '  "top_story_summary": "<2-3 sentence summary of that story and its market impact>",\n'
     '  "market_sentiment": "<one of: BULLISH | BEARISH | NEUTRAL | MIXED>",\n'
     '  "sentiment_reason": "<1-2 sentences explaining the sentiment>",\n'
     '  "donna_trade_read": "<actionable trading implication for today — what to watch, avoid, or lean into>",\n'
-    '  "key_names_to_watch": ["TICKER1", "TICKER2", "TICKER3"]\n'
+    '  "key_names_to_watch": ["TICKER1", "TICKER2", "TICKER3"],\n'
+    '  "x_market_chatter": "<dominant narrative traders and financial accounts are discussing on X/Twitter right now — 1 sentence>",\n'
+    '  "x_stress_signal": "<any unusual fear, panic, risk-off, or market stress signals trending on X/Twitter — or the string none>",\n'
+    '  "x_key_catalyst": "<main catalyst driving market discussion on X right now — Fed, macro, earnings, geopolitical — or none>"\n'
     '}\n'
     'No markdown fences, no extra keys, no commentary. Output raw JSON only.'
 )
@@ -828,8 +832,21 @@ async def grok_intelligence():
         'sentiment_reason':   'Intelligence is being fetched — check back shortly.',
         'donna_trade_read':   '',
         'key_names_to_watch': [],
+        'x_market_chatter':   '',
+        'x_stress_signal':    '',
+        'x_key_catalyst':     '',
         'fetched_at':         None,
     }
+
+
+@app.get('/market-reality')
+async def market_reality_endpoint():
+    """Live market reality state — direction, severity, structure, X/Twitter chatter."""
+    try:
+        from engines.market_reality import load_market_reality
+        return load_market_reality()
+    except Exception as exc:
+        return {'error': str(exc), 'direction': 'UNKNOWN', 'severity': 'LOW'}
 
 
 # ── Execution engine ───────────────────────────────────────────

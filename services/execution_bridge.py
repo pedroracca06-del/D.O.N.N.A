@@ -483,21 +483,46 @@ def route_to_execution(alert: 'AlertData') -> dict:
     ticker     = routing['ticker']
 
     # ── Gate 6b: Dominant directional context ────────────────────────────────────
-    # Blocks execution when signal direction conflicts with broader market context.
-    # Counter-trend micro-structures may still generate HEADS_UP alerts but must
-    # not auto-execute against the dominant direction.
+    # Two-layer check:
+    #   Layer A — signal log momentum + nova_state (fine-grained, per-instrument)
+    #   Layer B — market reality severity (macro override: HIGH/EXTREME blocks counter-trend)
     ctx = _get_signal_context(key)
     conflict, conflict_reason, conflict_detail = _check_directional_alignment(
         signal, instrument, ctx
     )
     if conflict:
         _log(f'DIRECTIONAL_CONTEXT_CONFLICT  {instrument} {signal}  {conflict_reason}')
-        # Full rejection with trace + journal logging
         return _bridge_reject(
             'DIRECTIONAL_CONTEXT_CONFLICT',
             conflict_reason,
             key, signal, setup_type, grade, session,
         )
+
+    # Layer B: Market Reality override — HIGH/EXTREME severity blocks counter-trend execution
+    try:
+        from engines.market_reality import load_market_reality
+        mr = load_market_reality()
+        mr_direction = mr.get('direction', 'UNKNOWN')
+        mr_severity  = mr.get('severity', 'LOW')
+        if mr_severity in ('HIGH', 'EXTREME'):
+            if signal == 'LONG' and mr_direction == 'BEARISH':
+                reason = (
+                    f'LONG {instrument} blocked — market_reality BEARISH at {mr_severity} severity '
+                    f'(NQ={mr.get("nq_change_pct", 0):+.2f}% ES={mr.get("es_change_pct", 0):+.2f}% '
+                    f'structure={mr.get("structure", "?")})'
+                )
+                _log(f'MARKET_REALITY_BLOCK  {reason}')
+                return _bridge_reject('MARKET_REALITY_BEARISH', reason, key, signal, setup_type, grade, session)
+            if signal == 'SHORT' and mr_direction == 'BULLISH':
+                reason = (
+                    f'SHORT {instrument} blocked — market_reality BULLISH at {mr_severity} severity '
+                    f'(NQ={mr.get("nq_change_pct", 0):+.2f}% ES={mr.get("es_change_pct", 0):+.2f}% '
+                    f'structure={mr.get("structure", "?")})'
+                )
+                _log(f'MARKET_REALITY_BLOCK  {reason}')
+                return _bridge_reject('MARKET_REALITY_BULLISH', reason, key, signal, setup_type, grade, session)
+    except Exception as exc:
+        _log(f'market_reality gate error (non-blocking): {exc}')
 
     # ── Gates 7–13: Execution profile governance ─────────────────────────────────
     active_mode, cfg = _load_execution_config()

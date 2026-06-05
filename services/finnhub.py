@@ -205,3 +205,10 @@ def process_finnhub_cycle():
     if failed:
         status += f' failed={failed}'
     print(f'[donna_finnhub] Done — {status}')
+
+    # Refresh market reality state after every price cycle
+    try:
+        from engines.market_reality import compute_market_reality
+        compute_market_reality()
+    except Exception as e:
+        print(f'[market_reality] compute error: {e}')
