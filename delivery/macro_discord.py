@@ -236,19 +236,19 @@ def _compute_phase_and_mins(time_et: str) -> tuple[str, Optional[int]]:
     """
     Compute event lifecycle phase relative to now.
 
-    UPCOMING      > 45 min away    — informational only
-    APPROACHING   10–45 min away   — governance active, prepare
+    UPCOMING      > 30 min away    — informational only
+    APPROACHING   10–30 min away   — governance active, prepare
     IMMINENT      0–10 min away    — governance active, stand aside
     LIVE          0–15 min past    — governance active, stand aside
-    POST_COOLDOWN 15–45 min past   — governance active, cooldown
-    EXPIRED       > 45 min past    — informational only, no governance
+    POST_COOLDOWN 15–30 min past   — governance active, cooldown
+    EXPIRED       > 30 min past    — informational only, no governance
     """
     try:
         now = now_ny()
         h, m = [int(x) for x in time_et.split(':')]
         target = now.replace(hour=h, minute=m, second=0, microsecond=0)
         mins = int((target - now).total_seconds() // 60)
-        if mins < -45:
+        if mins < -30:
             return 'EXPIRED', mins
         if mins < -15:
             return 'POST_COOLDOWN', mins
@@ -256,7 +256,7 @@ def _compute_phase_and_mins(time_et: str) -> tuple[str, Optional[int]]:
             return 'LIVE', mins
         if mins <= 10:
             return 'IMMINENT', mins
-        if mins <= 45:
+        if mins <= 30:
             return 'APPROACHING', mins
         return 'SCHEDULED', mins
     except Exception:

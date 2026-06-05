@@ -32,8 +32,8 @@ _RED_FOLDER_NAMES = {
 }
 
 # ── Event lifecycle governance ─────────────────────────────────
-_EVENT_PRE_MINS  = 60   # macro_risk=high up to 60 min before event
-_EVENT_POST_MINS = 45   # macro_risk=high up to 45 min after event
+_EVENT_PRE_MINS  = 30   # macro_risk=high up to 30 min before event
+_EVENT_POST_MINS = 30   # macro_risk=high up to 30 min after event
 
 
 def _in_governance_window(event: dict, now_et: datetime) -> bool:
