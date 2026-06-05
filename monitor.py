@@ -216,7 +216,7 @@ def _run_premarket_check() -> None:
         _token = os.getenv('DISCORD_BOT_TOKEN', '')
         _ch    = os.getenv('DISCORD_CHANNEL_MORNING_BRIEF') or os.getenv('DISCORD_CHANNEL_LIVE', '')
         if _token and _ch:
-            requests.post(
+            _r = requests.post(
                 f'https://discord.com/api/v10/channels/{_ch}/messages',
                 headers={'Authorization': f'Bot {_token}', 'Content-Type': 'application/json'},
                 json={'embeds': [{
@@ -228,7 +228,10 @@ def _run_premarket_check() -> None:
                 }]},
                 timeout=10,
             )
-            log.info(f'Pre-market check sent to Discord — {"READY" if safe else "ISSUES: " + str(issues)}')
+            if _r.status_code in (200, 201):
+                log.info(f'Pre-market check delivered — {"READY" if safe else "ISSUES: " + str(issues)}')
+            else:
+                log.error(f'Pre-market check Discord error {_r.status_code}: {_r.text[:200]}')
         else:
             log.warning('Pre-market check: Discord not configured — logging only')
             for ln in lines:
