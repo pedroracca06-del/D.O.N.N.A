@@ -27,6 +27,7 @@ Claude grades setups. The bridge governs access. The executor governs risk.
 """
 from __future__ import annotations
 
+import json as _json
 import os
 import time
 import uuid
@@ -280,6 +281,149 @@ def _notify_discord(alert: 'AlertData', result: dict, paper: bool) -> None:
         _log(f'discord notify error: {exc}')
 
 
+# ── Directional context gate ─────────────────────────────────────────────────────
+
+# Nova state keywords that signal an explicit directional drive
+_BEAR_DRIVE_STATES = {
+    'OPEN DRIVE BEAR', 'BEAR DRIVE', 'OPEN DRIVE SHORT', 'BEARISH OPEN DRIVE',
+    'FAILED AUCTION SHORT', 'STRONG BEAR', 'SELL DRIVE', 'BEAR CONTINUATION',
+    'T3 BEAR', 'T2 BEAR', 'OPEN DRIVE BEARISH', 'OPEN DRIVE SELL',
+}
+_BULL_DRIVE_STATES = {
+    'OPEN DRIVE BULL', 'BULL DRIVE', 'OPEN DRIVE LONG', 'BULLISH OPEN DRIVE',
+    'FAILED AUCTION LONG', 'STRONG BULL', 'BUY DRIVE', 'BULL CONTINUATION',
+    'T3 BULL', 'T2 BULL', 'OPEN DRIVE BULLISH', 'OPEN DRIVE BUY',
+}
+
+_NQ_INSTRUMENTS = {'MNQ', 'NQ'}
+_ES_INSTRUMENTS = {'MES', 'ES'}
+
+# Day-change % threshold — configurable via .env without code change
+_MOMENTUM_THRESHOLD = float(os.getenv('NOVA_MOMENTUM_CONFLICT_PCT', '0.30'))
+
+
+def _get_signal_context(symbol: str) -> dict:
+    """Return the most recent signal log entry for this symbol today."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        today = datetime.now(_ZI('America/New_York')).strftime('%Y-%m-%d')
+        p = Path(__file__).parent.parent / 'data' / 'donna_signal_log.json'
+        raw = _json.loads(p.read_text(encoding='utf-8'))
+        entries = raw if isinstance(raw, list) else raw.get('entries', [])
+        matches = [e for e in entries if e.get('symbol') == symbol and e.get('date') == today]
+        return matches[-1] if matches else {}
+    except Exception:
+        return {}
+
+
+def _check_directional_alignment(
+    signal: str, instrument: str, ctx: dict
+) -> tuple[bool, str, dict]:
+    """
+    Dominant directional context gate.
+
+    Autonomous execution should favor aligned continuation with dominant context.
+    Counter-trend micro-structures may generate HEADS_UP alerts but must not
+    auto-execute unless the broader directional context supports them.
+
+    Returns (conflict: bool, reason: str, detail: dict).
+
+    Block rules:
+      1. nova_state contains an explicit bearish/bullish drive keyword → solo block
+      2. Instrument-specific momentum conflict (nq_pct or es_pct) → solo block
+      3. Two or more secondary signals (regime, IB draw, nova_cmd) → block
+    """
+    is_long = signal == 'LONG'
+    thr     = _MOMENTUM_THRESHOLD
+
+    nova_state = (ctx.get('nova_state')                           or '').upper()
+    regime     = (ctx.get('regime')                               or '').upper()
+    ib_draw    = (ctx.get('ib_draw') or ctx.get('ib_draw_claude') or '').upper()
+    nova_cmd   = (ctx.get('nova_cmd')                             or '').upper()
+    nq_pct     = float(ctx.get('nq_pct') or 0)
+    es_pct     = float(ctx.get('es_pct') or 0)
+
+    conflict_signals: list[str] = []
+
+    # ── 1. Explicit drive state ───────────────────────────────────────────────
+    drive_block = (
+        is_long  and any(kw in nova_state for kw in _BEAR_DRIVE_STATES) or
+        not is_long and any(kw in nova_state for kw in _BULL_DRIVE_STATES)
+    )
+    if drive_block:
+        conflict_signals.append(f'nova_state="{nova_state}"')
+
+    # ── 2. Instrument-specific momentum (solo block) ──────────────────────────
+    momentum_block = False
+    if instrument in _NQ_INSTRUMENTS:
+        if is_long and nq_pct < -thr:
+            conflict_signals.append(
+                f'nq_pct={nq_pct:.2f}% < -{thr}% — NQ bearish on the day')
+            momentum_block = True
+        elif not is_long and nq_pct > thr:
+            conflict_signals.append(
+                f'nq_pct={nq_pct:.2f}% > +{thr}% — NQ bullish on the day')
+            momentum_block = True
+
+    if instrument in _ES_INSTRUMENTS:
+        if is_long and es_pct < -thr:
+            conflict_signals.append(
+                f'es_pct={es_pct:.2f}% < -{thr}% — ES bearish on the day')
+            momentum_block = True
+        elif not is_long and es_pct > thr:
+            conflict_signals.append(
+                f'es_pct={es_pct:.2f}% > +{thr}% — ES bullish on the day')
+            momentum_block = True
+
+    # ── 3. Secondary signals (require 2+ to block) ───────────────────────────
+    secondary: list[str] = []
+
+    if is_long and 'TRENDING_DOWN' in regime:
+        secondary.append(f'regime={regime}')
+    elif not is_long and 'TRENDING_UP' in regime:
+        secondary.append(f'regime={regime}')
+
+    if is_long and 'LOW' in ib_draw and 'UNCLEAR' not in ib_draw:
+        secondary.append(f'ib_draw={ib_draw} (drawing toward lows)')
+    elif not is_long and 'HIGH' in ib_draw and 'UNCLEAR' not in ib_draw:
+        secondary.append(f'ib_draw={ib_draw} (drawing toward highs)')
+
+    if is_long and nova_cmd in ('SELL', 'SHORT'):
+        secondary.append(f'nova_cmd={nova_cmd} conflicts with LONG')
+    elif not is_long and nova_cmd in ('BUY', 'LONG'):
+        secondary.append(f'nova_cmd={nova_cmd} conflicts with SHORT')
+
+    multi_block = len(secondary) >= 2
+    if secondary:
+        conflict_signals.extend(secondary)
+
+    conflict = drive_block or momentum_block or multi_block
+    if not conflict:
+        return False, '', {}
+
+    bias = 'bearish' if is_long else 'bullish'
+    reason = (
+        f'{signal} {instrument} blocked — dominant {bias} context: '
+        + '; '.join(conflict_signals)
+    )
+    detail = {
+        'signal':           signal,
+        'instrument':       instrument,
+        'nova_state':       nova_state,
+        'regime':           regime,
+        'ib_draw':          ib_draw,
+        'nova_cmd':         nova_cmd,
+        'nq_pct':           nq_pct,
+        'es_pct':           es_pct,
+        'threshold_pct':    thr,
+        'drive_block':      drive_block,
+        'momentum_block':   momentum_block,
+        'multi_block':      multi_block,
+        'conflict_signals': conflict_signals,
+    }
+    return True, reason, detail
+
+
 # ── Public API ───────────────────────────────────────────────────────────────────
 
 def route_to_execution(alert: 'AlertData') -> dict:
@@ -337,6 +481,23 @@ def route_to_execution(alert: 'AlertData') -> dict:
 
     instrument = routing['instrument']
     ticker     = routing['ticker']
+
+    # ── Gate 6b: Dominant directional context ────────────────────────────────────
+    # Blocks execution when signal direction conflicts with broader market context.
+    # Counter-trend micro-structures may still generate HEADS_UP alerts but must
+    # not auto-execute against the dominant direction.
+    ctx = _get_signal_context(key)
+    conflict, conflict_reason, conflict_detail = _check_directional_alignment(
+        signal, instrument, ctx
+    )
+    if conflict:
+        _log(f'DIRECTIONAL_CONTEXT_CONFLICT  {instrument} {signal}  {conflict_reason}')
+        # Full rejection with trace + journal logging
+        return _bridge_reject(
+            'DIRECTIONAL_CONTEXT_CONFLICT',
+            conflict_reason,
+            key, signal, setup_type, grade, session,
+        )
 
     # ── Gates 7–13: Execution profile governance ─────────────────────────────────
     active_mode, cfg = _load_execution_config()
