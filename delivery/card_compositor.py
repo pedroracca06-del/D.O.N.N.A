@@ -491,10 +491,11 @@ def render_card(d: CardData, output_path: Optional[Path] = None) -> Optional[Pat
         # Top bar
         _render_top_bar(ax_top, d)
 
-        # Chart — fetch OHLC then render
+        # Chart — fetch OHLC then render; both may return None if price is unavailable
         df = fetch_ohlc(d.symbol)
-        if df is None or df.empty:
+        if df is None or (hasattr(df, 'empty') and df.empty):
             df = synthetic_ohlc(d.current_price, d.high_30, d.low_30)
+        # df may still be None — render_chart_axes handles that gracefully
 
         render_chart_axes(ax_chart, df, d.signal_dict())
 

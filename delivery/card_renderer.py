@@ -77,10 +77,10 @@ def fetch_ohlc(symbol: str, bars: int = 78, interval: str = '5m'):
     ticker = _YF_MAP.get(symbol.upper(), symbol)
     try:
         df = yf.download(ticker, period='1d', interval=interval,
-                         progress=False, auto_adjust=True, multi_level_column=False)
+                         progress=False, auto_adjust=True, multi_level_index=False)
         if df is None or df.empty:
             df = yf.download(ticker, period='5d', interval=interval,
-                             progress=False, auto_adjust=True, multi_level_column=False)
+                             progress=False, auto_adjust=True, multi_level_index=False)
         if df is None or df.empty:
             return None
         df = df.tail(bars).copy()
@@ -98,9 +98,13 @@ def synthetic_ohlc(current_price: float, high_30: float, low_30: float,
     if not _PD_OK:
         return None
 
+    # Guard: if prices are zero or invalid, we can't generate meaningful candles
+    if not current_price or current_price <= 0:
+        return None
+
     rng = np.random.default_rng(seed=int(current_price) % 10000)
-    mid   = (high_30 + low_30) / 2
-    span  = max(high_30 - low_30, current_price * 0.001)
+    mid   = (high_30 + low_30) / 2 if (high_30 and low_30) else current_price
+    span  = max(high_30 - low_30, current_price * 0.001) if (high_30 and low_30) else current_price * 0.002
 
     prices = [mid]
     for _ in range(bars - 1):
