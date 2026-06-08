@@ -1426,34 +1426,26 @@ def execute_signal(signal_result: dict) -> dict:
             data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'Session trade limit reached', 'code': 'SESSION_LIMIT_REACHED'}
 
-    # ── ONE POSITION AT A TIME ──────────────────────────────────
+    # ── SESSION BOUNDARY — close any position opened in a prior major session ──────
+    # Liquidity profile changes sharply at session opens; stale positions must be
+    # closed before taking a new trade, not carried through into the next session.
+    def _major_session(s: str) -> str:
+        return 'NEW_YORK_CASH' if s in ('NY_OPEN', 'NY_AM', 'NY_PM', 'NEW_YORK_CASH') else s
+
     open_positions = _state.get_open_positions()
-    if len(open_positions) > 0:
-        _op_st  = _state.get_state()
-        _op_th  = _state.get_thesis()
-        _op_dir = 'LONG' if str(data.get('signal', '')).upper() in ('BUY', 'LONG') else 'SHORT'
-        _op_blk = {
-            'timestamp':          utc_now_iso(),
-            'ticker':             data.get('ticker', ''),
-            'routed_etf':         routed_etf,
-            'direction':          _op_dir,
-            'block_reason':       'POSITION_ALREADY_OPEN',
-            'active_thesis':      _op_th.get('active_thesis', 'NEUTRAL'),
-            'thesis_direction':   _op_th.get('thesis_direction'),
-            'spy_cooldown_until': _op_st.get('spy_cooldown_until'),
-            'qqq_cooldown_until': _op_st.get('qqq_cooldown_until'),
-            'open_positions':     open_positions,
-        }
-        _op_blocked = _op_st.get('blocked_signals_today', [])
-        _op_blocked.append(_op_blk)
-        _state.set('blocked_signals_today', _op_blocked[-20:])
-        _op_syms = [p.get('symbol', '?') for p in open_positions]
-        _log_rejection(_rejection_context(
-            'POSITION_ALREADY_OPEN', f'Position already open: {_op_syms}',
-            data, parsed, direction=_op_dir, routed_etf=routed_etf, session=session))
-        return {'status': 'skipped', 'reason': 'position_already_open', 'code': 'POSITION_ALREADY_OPEN'}
+    current_major  = _major_session(session)
+    stale = [p for p in open_positions if _major_session(str(p.get('session', ''))) != current_major]
+    if stale:
+        stale_syms = [p.get('symbol', '?') for p in stale]
+        print(f'[execute_signal] Session boundary ({session}) — closing stale positions: {stale_syms}')
+        close_all_positions()
+        for p in stale:
+            _state.remove_position(str(p.get('symbol', '')))
+        open_positions = _state.get_open_positions()   # refresh after close
 
     # ── ORCHESTRATION LAYER ──────────────────────────────────────
+    # Position governance (per-instrument + global cap + correlated exposure)
+    # is enforced upstream in execution_bridge.py Gate 11.
     signal_type = str(data.get('signal', '')).upper()
 
     # 1. Cooldown check
