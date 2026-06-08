@@ -558,17 +558,70 @@ def route_to_execution(alert: 'AlertData') -> dict:
         if sig_dedup_key in _seen_signal_ids:
             return _reject('DUPLICATE_SIGNAL', f'Signal already routed this session: {sig_dedup_key}')
 
-        # Gate 11: Max one open position per instrument
+        # Gate 11: Position governance — three layers
         try:
             from core.state_engine import state as _st
             open_positions = _st.get_open_positions()
+
+            # 11a: Per-instrument isolation — max 1 open position per instrument family.
+            # MNQ and NQ both route to QQQ; MES and ES both route to SPY.
             for pos in open_positions:
                 pos_sym = str(pos.get('symbol', '')).upper()
-                # Match instrument to ETF proxy (MNQ→QQQ, MES→SPY)
-                if instrument == 'MNQ' and 'QQQ' in pos_sym:
-                    return _reject('POSITION_ALREADY_OPEN', f'Open QQQ position exists for {instrument} — no stacking')
-                if instrument == 'MES' and 'SPY' in pos_sym:
-                    return _reject('POSITION_ALREADY_OPEN', f'Open SPY position exists for {instrument} — no stacking')
+                if instrument in _NQ_INSTRUMENTS and 'QQQ' in pos_sym:
+                    return _reject('POSITION_ALREADY_OPEN',
+                                   f'Open QQQ position exists for {instrument} — one per instrument')
+                if instrument in _ES_INSTRUMENTS and 'SPY' in pos_sym:
+                    return _reject('POSITION_ALREADY_OPEN',
+                                   f'Open SPY position exists for {instrument} — one per instrument')
+
+            # 11b: Global concurrent cap — default 2, configurable per execution profile.
+            # Prevents unlimited stacking while allowing legitimate multi-instrument exposure.
+            max_concurrent = int(cfg.get('max_concurrent_positions', 2))
+            if len(open_positions) >= max_concurrent:
+                return _reject('MAX_CONCURRENT_POSITIONS',
+                               f'Concurrent position cap: {len(open_positions)}/{max_concurrent} open')
+
+            # 11c: Correlated exposure guard.
+            # MNQ and MES are highly correlated — holding both in the same direction
+            # into a hostile market reality compounds uncontrolled risk.
+            # Allow when market supports the direction; block when market contradicts it.
+            if open_positions:
+                def _norm_side(s: str) -> str:
+                    u = str(s).upper().strip()
+                    return 'LONG' if u in ('BUY', 'LONG') else 'SHORT' if u in ('SELL', 'SHORT') else u
+
+                open_etfs = {str(p.get('symbol', '')).upper() for p in open_positions}
+                correlated = (
+                    (instrument in _NQ_INSTRUMENTS and any('SPY' in e for e in open_etfs)) or
+                    (instrument in _ES_INSTRUMENTS and any('QQQ' in e for e in open_etfs))
+                )
+                if correlated:
+                    open_sides = {_norm_side(p.get('side', '')) for p in open_positions}
+                    if signal in open_sides:
+                        # Same direction, correlated instruments — check market reality
+                        try:
+                            from engines.market_reality import load_market_reality
+                            mr  = load_market_reality()
+                            mrd = mr.get('direction', 'UNKNOWN')
+                            mrs = mr.get('severity', 'LOW')
+                            if signal == 'LONG' and mrd == 'BEARISH' and mrs in ('HIGH', 'EXTREME'):
+                                return _reject(
+                                    'CORRELATED_EXPOSURE_HOSTILE',
+                                    f'Correlated LONG (NQ+ES) blocked — market_reality {mrd} {mrs}: '
+                                    f'NQ={mr.get("nq_change_pct", 0):+.2f}% '
+                                    f'ES={mr.get("es_change_pct", 0):+.2f}%',
+                                )
+                            if signal == 'SHORT' and mrd == 'BULLISH' and mrs in ('HIGH', 'EXTREME'):
+                                return _reject(
+                                    'CORRELATED_EXPOSURE_HOSTILE',
+                                    f'Correlated SHORT (NQ+ES) blocked — market_reality {mrd} {mrs}: '
+                                    f'NQ={mr.get("nq_change_pct", 0):+.2f}% '
+                                    f'ES={mr.get("es_change_pct", 0):+.2f}%',
+                                )
+                        except Exception:
+                            pass
+                        _log(f'CORRELATED_EXPOSURE  {instrument} {signal} + existing {open_etfs} — market supports direction')
+
         except Exception:
             pass
 
