@@ -47,29 +47,19 @@ _ETF_MAP = {
     'NQ': 'QQQ', 'MNQ': 'QQQ',
 }
 
-# Session-aware sizing table — DONNA official risk rules
-# NY/London: 1% = $1 000/trade   Asia: 0.5% = $500/trade
-# stop/target are $/share distances; cap is hard max shares
+# Per-ETF sizing — stop/target are $/share distances; cap is hard max shares
+# Risk amount is computed dynamically from account equity × NOVA_RISK_PCT_PER_TRADE
 _ETF_SIZING: dict[str, dict] = {
-    'NY_LON': {
-        'SPY': {'risk': 1000.0, 'stop': 10.00, 'target': 20.00, 'cap': 100},
-        'QQQ': {'risk': 1000.0, 'stop': 15.00, 'target': 30.00, 'cap':  66},
-    },
-    'ASIA': {
-        'SPY': {'risk':  500.0, 'stop': 10.00, 'target': 20.00, 'cap': 10},
-        'QQQ': {'risk':  500.0, 'stop': 15.00, 'target': 30.00, 'cap':  8},
-    },
+    'SPY': {'stop': 10.00, 'target': 20.00, 'cap': 200},
+    'QQQ': {'stop': 15.00, 'target': 30.00, 'cap': 150},
 }
 
 # ── Risk rule constants ────────────────────────────────────────
 
-_RED_FOLDER_MINS     = 30       # Rule 1: blackout on each side of a HIGH event
-_DAILY_TRADE_LIMIT   = 2        # Rule 2: max trades per calendar day ET
-_LOSS_LIMIT_NY_LON   = -1000.0  # Rule 3: NY + London P&L floor
-_LOSS_LIMIT_ASIA     = -500.0   # Rule 3: Asia P&L floor
-_ASIA_MIN_CONFIDENCE = 90.0     # Rule 4: min confidence for Asia execution
-_ASIA_MAX_TRADES     = 1        # Rule 4: max trades per Asia session
-_DAILY_MAX_TRADES    = int(os.getenv('NOVA_DAILY_MAX_TRADES', '5'))  # Rule 2: set in .env
+_RED_FOLDER_MINS    = 30        # Rule 1: blackout on each side of a HIGH event
+_SESSION_MAX_TRADES = int(os.getenv('NOVA_SESSION_MAX_TRADES', '5'))   # Rule 2: max trades per session window
+_RISK_PCT_PER_TRADE = float(os.getenv('NOVA_RISK_PCT_PER_TRADE', '1.0'))  # Rule 5: % of equity per trade
+_LOSS_LIMIT_USD     = -1000.0   # Rule 3: unified P&L floor (all sessions)
 
 
 # ── Alpaca client ──────────────────────────────────────────────
@@ -125,12 +115,10 @@ def _map_etf(data: dict) -> str | None:
     return None
 
 
-def _get_etf_sizing(etf: str, session: str) -> dict:
-    """Return qty, stop_dist, tgt_dist for DONNA's official sizing rules."""
-    key    = 'ASIA' if session == 'ASIA' else 'NY_LON'
-    p      = _ETF_SIZING[key].get(etf, _ETF_SIZING['NY_LON']['SPY'])
-    qty    = max(1, min(math.floor(p['risk'] / p['stop']), p['cap']))
-    return {'qty': qty, 'stop': p['stop'], 'target': p['target']}
+def _get_etf_sizing(etf: str) -> dict:
+    """Return stop_dist, tgt_dist, cap for the given ETF."""
+    p = _ETF_SIZING.get(etf, _ETF_SIZING['SPY'])
+    return {'stop': p['stop'], 'target': p['target'], 'cap': p['cap']}
 
 
 def _log_skip(data: dict, parsed: dict, reason: str, code: str = '') -> dict:
@@ -528,15 +516,14 @@ def _increment_daily_trades() -> None:
 
 # ── RULE 3: Daily loss limit ───────────────────────────────────
 
-def _check_daily_loss_limit(session: str, pnl_today: float) -> tuple[bool, str]:
-    """Return (blocked, reason_code). Sets daily_loss_limit_hit if limit breached."""
+def _check_daily_loss_limit(pnl_today: float) -> tuple[bool, str]:
+    """Return (blocked, reason_code). Unified $-1 000 floor across all sessions."""
     risk = _get_daily_state()
 
     if risk.get('daily_loss_limit_hit'):
-        code = 'DAILY_LOSS_LIMIT_ASIA' if session == 'ASIA' else 'DAILY_LOSS_LIMIT_NY'
-        return True, code
+        return True, 'DAILY_LOSS_LIMIT'
 
-    if session == 'ASIA' and pnl_today < _LOSS_LIMIT_ASIA:
+    if pnl_today < _LOSS_LIMIT_USD:
         risk['daily_loss_limit_hit'] = True
         save_risk_state(risk)
         try:
@@ -544,22 +531,12 @@ def _check_daily_loss_limit(session: str, pnl_today: float) -> tuple[bool, str]:
             _state.add_lockout('DAILY_LOSS_LIMIT_HIT')
         except Exception as _e:
             print(f'[state_engine] _check_daily_loss_limit write failed: {_e}')
-        return True, 'DAILY_LOSS_LIMIT_ASIA'
-
-    if session in ('LONDON', 'NEW_YORK_CASH') and pnl_today < _LOSS_LIMIT_NY_LON:
-        risk['daily_loss_limit_hit'] = True
-        save_risk_state(risk)
-        try:
-            _state.set_many({'daily_loss_trade_hit': True, 'trade_permission': False})
-            _state.add_lockout('DAILY_LOSS_LIMIT_HIT')
-        except Exception as _e:
-            print(f'[state_engine] _check_daily_loss_limit write failed: {_e}')
-        return True, 'DAILY_LOSS_LIMIT_NY'
+        return True, 'DAILY_LOSS_LIMIT'
 
     return False, ''
 
 
-# ── RULE 4: Asia session ───────────────────────────────────────
+# ── RULE 4: Per-session trade counter ─────────────────────────
 
 def _asia_session_anchor() -> str | None:
     """Return start-day anchor for current Asia session (19:00–03:00 ET), or None."""
@@ -572,31 +549,26 @@ def _asia_session_anchor() -> str | None:
     return None
 
 
-def _get_asia_trade_taken() -> bool:
-    anchor = _asia_session_anchor()
-    if anchor is None:
-        return False
-    risk = load_risk_state()
-    if risk.get('asia_session_anchor') != anchor:
-        risk['asia_session_anchor'] = anchor
-        risk['asia_trade_taken']    = False
-        save_risk_state(risk)
-        return False
-    return bool(risk.get('asia_trade_taken', False))
+def _session_anchor(session: str) -> str:
+    """Anchor date for session window (handles Asia overnight span)."""
+    if session == 'ASIA':
+        return _asia_session_anchor() or now_ny().strftime('%Y-%m-%d')
+    return now_ny().strftime('%Y-%m-%d')
 
 
-def _set_asia_trade_taken() -> None:
-    anchor = _asia_session_anchor()
-    if anchor is None:
-        return
+def _get_session_trade_count(session: str) -> int:
+    key    = f'{session}_{_session_anchor(session)}'
+    counts = load_risk_state().get('session_trade_counts', {})
+    return int(counts.get(key, 0))
+
+
+def _increment_session_trade_count(session: str) -> None:
+    key  = f'{session}_{_session_anchor(session)}'
     risk = load_risk_state()
-    risk['asia_session_anchor'] = anchor
-    risk['asia_trade_taken']    = True
+    counts = risk.get('session_trade_counts', {})
+    counts[key] = counts.get(key, 0) + 1
+    risk['session_trade_counts'] = counts
     save_risk_state(risk)
-    try:
-        _state.set('asia_trade_taken', True)
-    except Exception as _e:
-        print(f'[state_engine] _set_asia_trade_taken write failed: {_e}')
 
 
 # ── Public helpers ─────────────────────────────────────────────
@@ -1143,7 +1115,18 @@ def _get_daily_risk_cap_usd() -> float:
             return round(equity * pct / 100, 2)
     except Exception:
         pass
-    # Fallback: conservative $500 if account unreachable
+    return 500.0
+
+
+def _get_per_trade_risk_usd() -> float:
+    """Risk in USD for one trade: account_equity × NOVA_RISK_PCT_PER_TRADE / 100."""
+    try:
+        acct = get_account()
+        equity = float(acct.get('equity', 0))
+        if equity > 0:
+            return round(equity * _RISK_PCT_PER_TRADE / 100, 2)
+    except Exception:
+        pass
     return 500.0
 
 
@@ -1164,33 +1147,18 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
             'reason': 'Alpaca client unavailable — check ALPACA_API_KEY/ALPACA_SECRET_KEY',
         }
 
-    # Load daily risk state for cumulative checks
-    risk_state       = _get_daily_state()
-    cumulative_risk  = float(risk_state.get('cumulative_risk_today', 0.0))
-
-    sizing    = _get_etf_sizing(etf, session)
-    qty       = sizing['qty']
+    sizing    = _get_etf_sizing(etf)
     stop_dist = sizing['stop']
     tgt_dist  = sizing['target']
+    cap       = sizing['cap']
+
+    # Qty = floor(equity × RISK_PCT / stop_dist), capped at hard share limit
+    risk_per_trade = _get_per_trade_risk_usd()
+    qty = max(1, min(math.floor(risk_per_trade / stop_dist), cap))
 
     # Trade 2 uses 50% size — decision made upstream in execute_signal()
     if apply_size_reduction:
         qty = max(1, qty // 2)
-
-    # Block if cumulative risk would exceed the configured daily risk cap
-    new_trade_risk = qty * stop_dist
-    daily_risk_cap = _get_daily_risk_cap_usd()
-    if cumulative_risk + new_trade_risk > daily_risk_cap:
-        _risk_cap_reason = (
-            f'daily risk cap: ${cumulative_risk:.0f} used + ${new_trade_risk:.0f} new '
-            f'>= ${daily_risk_cap:.0f} limit ({_get_active_risk_tier()})'
-        )
-        _log_rejection(_rejection_context(
-            'DAILY_RISK_LIMIT', _risk_cap_reason,
-            data, parsed,
-            direction='LONG' if is_long else 'SHORT',
-            routed_etf=etf, session=session))
-        return _log_skip(data, parsed, _risk_cap_reason, 'DAILY_RISK_LIMIT')
 
     side      = OrderSide.BUY if is_long else OrderSide.SELL
 
@@ -1261,8 +1229,7 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         _state.set('cumulative_risk_today', float(risk_after.get('cumulative_risk_today', 0.0)))
     except Exception as _e:
         print(f'[state_engine] _execute_alpaca_etf cumulative_risk write failed: {_e}')
-    if session == 'ASIA':
-        _set_asia_trade_taken()
+    _increment_session_trade_count(session)
 
     _journal_log_trade(
         data=data, parsed=parsed, symbol=etf,
@@ -1450,13 +1417,14 @@ def execute_signal(signal_result: dict) -> dict:
             data, parsed, routed_etf=routed_etf, session=session))
         return {'status': 'skipped', 'reason': 'First trade loss — no more trades today', 'code': 'DAILY_LOSS_TRADE_HIT'}
 
-    if trades_today >= _DAILY_MAX_TRADES:
-        print(f'[execute_signal] BLOCKED — daily limit reached ({trades_today}/{_DAILY_MAX_TRADES} trades)')
+    session_trades = _get_session_trade_count(session)
+    if session_trades >= _SESSION_MAX_TRADES:
+        print(f'[execute_signal] BLOCKED — session limit reached ({session_trades}/{_SESSION_MAX_TRADES} trades in {session})')
         _log_rejection(_rejection_context(
-            'DAILY_LIMIT_REACHED',
-            f'Daily trade limit reached ({trades_today}/{_DAILY_MAX_TRADES})',
+            'SESSION_LIMIT_REACHED',
+            f'Session trade limit reached ({session_trades}/{_SESSION_MAX_TRADES}) in {session}',
             data, parsed, routed_etf=routed_etf, session=session))
-        return {'status': 'skipped', 'reason': 'Daily trade limit reached', 'code': 'DAILY_LIMIT_REACHED'}
+        return {'status': 'skipped', 'reason': 'Session trade limit reached', 'code': 'SESSION_LIMIT_REACHED'}
 
     # ── ONE POSITION AT A TIME ──────────────────────────────────
     open_positions = _state.get_open_positions()
@@ -1575,54 +1543,25 @@ def execute_signal(signal_result: dict) -> dict:
     pnl_today = acct.get('pnl_today', 0.0) if acct.get('available') else 0.0
 
     # ── RULE 3: DAILY LOSS LIMIT
-    loss_hit, loss_code = _check_daily_loss_limit(session, pnl_today)
+    loss_hit, loss_code = _check_daily_loss_limit(pnl_today)
     if loss_hit:
-        limit        = _LOSS_LIMIT_ASIA if session == 'ASIA' else _LOSS_LIMIT_NY_LON
         _loss_reason = (
             f'daily loss limit hit — P&L ${pnl_today:,.2f} '
-            f'(limit ${limit:,.0f}) [{session}]'
+            f'(limit ${_LOSS_LIMIT_USD:,.0f}) [{session}]'
         )
         print(f'[execute_signal] {ts_et} | BLOCKED RULE3: '
-              f'P&L=${pnl_today:,.2f} limit=${limit:,.0f} session={session}')
+              f'P&L=${pnl_today:,.2f} limit=${_LOSS_LIMIT_USD:,.0f} session={session}')
         _log_rejection(_rejection_context(
             loss_code, _loss_reason,
             data, parsed, routed_etf=routed_etf, session=session))
         return _log_skip(data, parsed, _loss_reason, loss_code)
 
-    # ── RULE 4: ASIA SESSION RULES
-    if session == 'ASIA':
-        try:
-            confidence_val = float(
-                str(parsed.get('confidence', '0')).replace('%', '').strip()
-            )
-        except Exception:
-            confidence_val = 0.0
-
-        if confidence_val < _ASIA_MIN_CONFIDENCE:
-            _asia_conf_reason = (
-                f'Asia session requires confidence ≥ {_ASIA_MIN_CONFIDENCE:.0f}% '
-                f'— signal is {confidence_val:.1f}%'
-            )
-            print(f'[execute_signal] {ts_et} | BLOCKED RULE4a: '
-                  f'confidence={confidence_val:.1f}% < {_ASIA_MIN_CONFIDENCE:.0f}% (Asia minimum)')
-            _log_rejection(_rejection_context(
-                'ASIA_CONFIDENCE_TOO_LOW', _asia_conf_reason,
-                data, parsed, routed_etf=routed_etf, session=session))
-            return _log_skip(data, parsed, _asia_conf_reason, 'ASIA_CONFIDENCE_TOO_LOW')
-
-        if _get_asia_trade_taken():
-            _asia_trade_reason = 'Asia session trade already taken — max 1 trade per Asia session'
-            print(f'[execute_signal] {ts_et} | BLOCKED RULE4b: Asia trade already taken this session')
-            _log_rejection(_rejection_context(
-                'ASIA_TRADE_ALREADY_TAKEN', _asia_trade_reason,
-                data, parsed, routed_etf=routed_etf, session=session))
-            return _log_skip(data, parsed, _asia_trade_reason, 'ASIA_TRADE_ALREADY_TAKEN')
-
     # ── RULE 5 + ORDER — all rules passed, route to active broker
     signal  = str(data.get('signal', '')).upper()
     is_long = signal in ('LONG', 'BUY')
     print(f'[execute_signal] {ts_et} | ALL RULES PASSED — '
-          f'broker={BROKER_MODE} signal={signal} session={session} trades_today={trades_today}')
+          f'broker={BROKER_MODE} signal={signal} session={session} '
+          f'session_trades={session_trades}/{_SESSION_MAX_TRADES}')
 
     if BROKER_MODE == 'ALPACA_ETF':
         return _execute_alpaca_etf(data, parsed, session, is_long, routed_etf, apply_size_reduction)
