@@ -1443,6 +1443,55 @@ def execute_signal(signal_result: dict) -> dict:
             _state.remove_position(str(p.get('symbol', '')))
         open_positions = _state.get_open_positions()   # refresh after close
 
+    # ── LIVE BROKER POSITION + ORDER CHECK ────────────────────────
+    # Ground-truth check against live Alpaca state — independent of state engine.
+    # Catches stale state, race conditions, and positions opened outside DONNA.
+    def _norm_dir(s: str) -> str:
+        u = str(s).upper()
+        return 'LONG' if any(t in u for t in ('LONG', 'BUY')) else 'SHORT' if any(t in u for t in ('SHORT', 'SELL')) else u
+
+    _attempted_dir = _norm_dir(data.get('signal', ''))
+    _live_positions = get_positions()
+    for _lp in _live_positions:
+        if str(_lp.get('symbol', '')).upper() != routed_etf:
+            continue
+        _existing_dir = _norm_dir(_lp.get('side', ''))
+        if _existing_dir == _attempted_dir:
+            _conflict_msg = (
+                f'EXISTING_POSITION_CONFLICT: {routed_etf} already {_existing_dir} '
+                f'({_lp.get("qty","?")} shares @ avg {_lp.get("avg_entry","?")} | '
+                f'unrealized {_lp.get("unrealized_pnl","?")}) — '
+                f'attempted {_attempted_dir} {data.get("setup_type","")} [{data.get("grade","")}]'
+            )
+            print(f'[execute_signal] {ts_et} | BLOCKED — {_conflict_msg}')
+            _log_rejection(_rejection_context(
+                'EXISTING_POSITION_CONFLICT', _conflict_msg,
+                data, parsed, direction=_attempted_dir, routed_etf=routed_etf, session=session))
+            return {'status': 'skipped', 'reason': _conflict_msg, 'code': 'EXISTING_POSITION_CONFLICT'}
+
+    # Pending order conflict — don't stack if same-direction order already queued
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        _api = _client()
+        if _api:
+            _pending = _api.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[routed_etf]))
+            for _po in (_pending or []):
+                _po_dir = _norm_dir(str(getattr(_po, 'side', '')))
+                if _po_dir == _attempted_dir:
+                    _po_msg = (
+                        f'EXISTING_POSITION_CONFLICT: {routed_etf} has pending {_po_dir} order '
+                        f'(id={str(getattr(_po,"id","?"))[:8]}) — '
+                        f'attempted {_attempted_dir} {data.get("setup_type","")}'
+                    )
+                    print(f'[execute_signal] {ts_et} | BLOCKED — pending order conflict: {_po_msg}')
+                    _log_rejection(_rejection_context(
+                        'EXISTING_POSITION_CONFLICT', _po_msg,
+                        data, parsed, direction=_attempted_dir, routed_etf=routed_etf, session=session))
+                    return {'status': 'skipped', 'reason': _po_msg, 'code': 'EXISTING_POSITION_CONFLICT'}
+    except Exception as _pe:
+        print(f'[execute_signal] pending order check failed (non-blocking): {_pe}')
+
     # ── ORCHESTRATION LAYER ──────────────────────────────────────
     # Position governance (per-instrument + global cap + correlated exposure)
     # is enforced upstream in execution_bridge.py Gate 11.

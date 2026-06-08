@@ -559,46 +559,56 @@ def route_to_execution(alert: 'AlertData') -> dict:
             return _reject('DUPLICATE_SIGNAL', f'Signal already routed this session: {sig_dedup_key}')
 
         # Gate 11: Position governance — three layers
+        # Fail-safe: if state is unreadable we block rather than pass silently.
+        def _norm_dir(s: str) -> str:
+            u = str(s).upper().strip()
+            if any(t in u for t in ('LONG', 'BUY')):
+                return 'LONG'
+            if any(t in u for t in ('SHORT', 'SELL')):
+                return 'SHORT'
+            return u
+
+        _routed_etf = 'QQQ' if instrument in _NQ_INSTRUMENTS else 'SPY'
+
         try:
             from core.state_engine import state as _st
             open_positions = _st.get_open_positions()
 
-            # 11a: Per-instrument isolation — max 1 open position per instrument family.
-            # MNQ and NQ both route to QQQ; MES and ES both route to SPY.
+            # 11a: Direction-aware same-ETF conflict.
+            # One active directional position per routed ETF.
+            # MNQ + MES is OK (different ETFs). SPY SHORT + SPY SHORT is NOT.
             for pos in open_positions:
                 pos_sym = str(pos.get('symbol', '')).upper()
-                if instrument in _NQ_INSTRUMENTS and 'QQQ' in pos_sym:
-                    return _reject('POSITION_ALREADY_OPEN',
-                                   f'Open QQQ position exists for {instrument} — one per instrument')
-                if instrument in _ES_INSTRUMENTS and 'SPY' in pos_sym:
-                    return _reject('POSITION_ALREADY_OPEN',
-                                   f'Open SPY position exists for {instrument} — one per instrument')
+                if pos_sym != _routed_etf:
+                    continue
+                existing_dir  = _norm_dir(pos.get('side', ''))
+                attempted_dir = signal   # already LONG or SHORT upstream
+                if existing_dir == attempted_dir:
+                    return _reject(
+                        'EXISTING_POSITION_CONFLICT',
+                        f'{_routed_etf} already {existing_dir} '
+                        f'({pos.get("qty","?")} shares @ {pos.get("entry_ref","?")} '
+                        f'opened {pos.get("timestamp","?")[:16]}) — '
+                        f'attempted {attempted_dir} {setup_type} [{grade}]',
+                    )
 
             # 11b: Global concurrent cap — default 2, configurable per execution profile.
-            # Prevents unlimited stacking while allowing legitimate multi-instrument exposure.
             max_concurrent = int(cfg.get('max_concurrent_positions', 2))
             if len(open_positions) >= max_concurrent:
                 return _reject('MAX_CONCURRENT_POSITIONS',
                                f'Concurrent position cap: {len(open_positions)}/{max_concurrent} open')
 
             # 11c: Correlated exposure guard.
-            # MNQ and MES are highly correlated — holding both in the same direction
-            # into a hostile market reality compounds uncontrolled risk.
-            # Allow when market supports the direction; block when market contradicts it.
+            # MNQ + MES same direction into a hostile market reality compounds risk.
             if open_positions:
-                def _norm_side(s: str) -> str:
-                    u = str(s).upper().strip()
-                    return 'LONG' if u in ('BUY', 'LONG') else 'SHORT' if u in ('SELL', 'SHORT') else u
-
                 open_etfs = {str(p.get('symbol', '')).upper() for p in open_positions}
                 correlated = (
                     (instrument in _NQ_INSTRUMENTS and any('SPY' in e for e in open_etfs)) or
                     (instrument in _ES_INSTRUMENTS and any('QQQ' in e for e in open_etfs))
                 )
                 if correlated:
-                    open_sides = {_norm_side(p.get('side', '')) for p in open_positions}
+                    open_sides = {_norm_dir(p.get('side', '')) for p in open_positions}
                     if signal in open_sides:
-                        # Same direction, correlated instruments — check market reality
                         try:
                             from engines.market_reality import load_market_reality
                             mr  = load_market_reality()
@@ -622,8 +632,11 @@ def route_to_execution(alert: 'AlertData') -> dict:
                             pass
                         _log(f'CORRELATED_EXPOSURE  {instrument} {signal} + existing {open_etfs} — market supports direction')
 
-        except Exception:
-            pass
+        except Exception as _g11_err:
+            # State unreadable — block rather than silently pass.
+            _log(f'Gate 11 ERROR (blocking): {_g11_err}')
+            return _reject('POSITION_STATE_ERROR',
+                           f'Position state unreadable — blocking to prevent duplicate exposure: {_g11_err}')
 
         # Gate 12: Per-trade cooldown
         cooldown_minutes = float(cfg.get('trade_cooldown_minutes', 15))
