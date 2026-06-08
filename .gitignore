@@ -35,6 +35,7 @@ data/donna_signal_log.json
 data/donna_state_engine.json
 
 # Cache files (market data, auto-refreshed)
+data/donna_market_reality.json
 data/donna_btc_vix_cache.json
 data/donna_grok_intelligence.json
 data/donna_sp500_heatmap.json
