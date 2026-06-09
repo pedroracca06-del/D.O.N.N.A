@@ -382,6 +382,7 @@ async def startup():
     asyncio.create_task(morning_brief_loop())
     asyncio.create_task(macro_discord_loop())
     if _EXECUTION_AVAILABLE:
+        await asyncio.to_thread(sync_positions_from_alpaca)
         await asyncio.to_thread(reconcile_positions_from_alpaca)
         asyncio.create_task(position_outcomes_loop())
         asyncio.create_task(eod_close_loop())
