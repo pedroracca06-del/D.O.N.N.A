@@ -893,7 +893,8 @@ def check_position_outcomes() -> int:
             timeout=10,
         )
         today_orders = r.json() if (r.ok and isinstance(r.json(), list)) else []
-    except Exception:
+    except Exception as e:
+        print(f'[check_position_outcomes] Alpaca orders fetch failed: {e}')
         today_orders = []
 
     # Lookups: by parent order id; by symbol+side for filled exits

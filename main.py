@@ -290,7 +290,7 @@ async def morning_brief_loop():
         try:
             ny        = now_ny()
             today_str = ny.strftime('%Y-%m-%d')
-            if ny.weekday() < 5 and ny.hour == 9 and ny.minute == 0:
+            if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 5:
                 state = read_json_file(MORNING_BRIEF_FILE, {})
                 if state.get('last_sent_date') != today_str:
                     print(f'DONNA morning brief: sending for {today_str}')

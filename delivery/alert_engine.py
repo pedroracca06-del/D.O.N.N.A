@@ -349,6 +349,7 @@ def _reset_daily_if_needed(state: dict) -> dict:
     if state.get('daily_date') != today:
         state.update({'daily_total': 0, 'suppressed_today': 0,
                       'daily_date': today, 'signals': {}})
+        _save_alert_state(state)
     return state
 
 
@@ -396,7 +397,7 @@ def record_suppression() -> None:
 def clear_signal(signal_key: str) -> None:
     """Remove signal from governance (e.g. after invalidation — fresh start next setup)."""
     with _gov_lock:
-        state = _load_alert_state()
+        state = _reset_daily_if_needed(_load_alert_state())
         state['signals'].pop(signal_key, None)
         _save_alert_state(state)
 
