@@ -263,16 +263,22 @@ async def eod_close_loop():
             if is_weekday and now.hour == 15 and now.minute >= 45 and not closed_today:
                 if _EXECUTION_AVAILABLE:
                     from core.state_engine import state as _st
-                    positions = get_positions()
-                    if positions:
+                    try:
+                        positions = get_positions()
+                    except Exception as pos_err:
+                        print(f'[EOD] get_positions failed — will retry: {pos_err}')
+                        positions = None
+                    if positions is None:
+                        pass  # Alpaca unreachable — leave closed_today=False so we retry next tick
+                    elif positions:
                         print(f'[EOD] {now.strftime("%H:%M ET")} — closing {len(positions)} positions')
                         closed = close_all_positions_eod()
                         print(f'[EOD] Closed {closed} positions — eod_lock=True')
+                        if closed > 0:
+                            closed_today = True
                     else:
                         print(f'[EOD] {now.strftime("%H:%M ET")} — already flat, setting eod_lock')
                         _st.set('eod_lock', True)
-                        closed_today = True
-                    if not positions or closed > 0:
                         closed_today = True
         except Exception as e:
             print(f'[EOD loop error] {e}')

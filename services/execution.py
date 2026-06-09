@@ -607,8 +607,9 @@ def get_positions() -> list:
             }
             for p in api.get_all_positions()
         ]
-    except Exception:
-        return []
+    except Exception as e:
+        print(f'[get_positions] Alpaca error: {e}')
+        raise
 
 
 def close_position(symbol: str) -> dict:
