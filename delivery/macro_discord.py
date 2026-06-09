@@ -854,46 +854,55 @@ def run_vix_volatility_check(vix_threshold: float = 20.0) -> Optional[dict]:
 
 def run_breaking_news_check() -> Optional[dict]:
     """
-    Monitor for breaking high-impact macro news from the risk state.
-    Call every 5 minutes alongside the news cycle.
-
-    Reads last_headline and headline_risk from donna_risk_state.json.
-    Suppresses duplicates — each unique headline delivers at most once.
-    Only fires for HIGH and CRITICAL level breakings.
+    Scan all top headlines from the last news cycle for breaking events.
+    Fires a Discord alert for each HIGH/CRITICAL headline not yet delivered.
+    Deduped per headline — each unique story fires at most once.
     """
-    risk_state   = _read_json(_RISK_STATE_FILE)
-    headline_risk = risk_state.get('headline_risk', 'low')
-    last_headline = risk_state.get('last_headline', '')
+    risk_state  = _read_json(_RISK_STATE_FILE)
+    news_items  = risk_state.get('_news_items') or []
+    last_hl     = risk_state.get('last_headline', '')
 
-    # Only act on HIGH risk state
-    if headline_risk != 'high' or not last_headline:
+    # Build candidate list: all stored items + last_headline as fallback
+    candidates: list[tuple[str, str]] = []  # (headline, source)
+    seen_in_batch: set[str] = set()
+    for item in news_items[:10]:
+        hl = item.get('headline', '')
+        if hl and hl not in seen_in_batch:
+            candidates.append((hl, item.get('source', '')))
+            seen_in_batch.add(hl)
+    if last_hl and last_hl not in seen_in_batch:
+        candidates.append((last_hl, ''))
+
+    if not candidates:
         return None
 
-    severity, category = _classify_breaking(last_headline)
+    state  = _load_macro_state()
+    known  = state.get('breaking_keys', [])
+    fired  = 0
+    result = None
 
-    # Don't deliver MEDIUM-classified breaking headlines (too noisy)
-    if severity == MEDIUM:
-        return None
+    for headline, source in candidates:
+        severity, _ = _classify_breaking(headline)
+        if severity == MEDIUM:
+            continue
 
-    # Dedup check
-    state   = _load_macro_state()
-    bk_key  = _breaking_key(last_headline)
-    known   = state.get('breaking_keys', [])
+        bk_key = _breaking_key(headline)
+        if bk_key in known:
+            continue
 
-    if bk_key in known:
-        return {'ok': True, 'skipped': True, 'reason': 'Breaking headline already delivered'}
+        embed  = _build_breaking_embed(headline, severity, source)
+        result = _deliver_to_macro_channel(embed)
 
-    source = (risk_state.get('_news_items') or [{}])[0].get('source', '')
-    embed  = _build_breaking_embed(last_headline, severity, source)
-    result = _deliver_to_macro_channel(embed)
+        if result.get('ok'):
+            known.append(bk_key)
+            fired += 1
+            print(f'[macro-discord] Breaking news — {severity}: {headline[:80]}')
 
-    if result.get('ok'):
-        known.append(bk_key)
-        state['breaking_keys'] = known[-20:]   # Keep last 20 only
+    if fired:
+        state['breaking_keys'] = known[-30:]
         _save_macro_state(state)
-        print(f'[macro-discord] Breaking news delivered — {severity}: {last_headline[:60]}')
 
-    return result
+    return result or {'ok': True, 'skipped': True, 'reason': 'No new breaking headlines'}
 
 
 def get_macro_discord_status() -> dict:

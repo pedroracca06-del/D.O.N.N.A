@@ -301,13 +301,24 @@ async def morning_brief_loop():
         await asyncio.sleep(60)
 
 
+def _news_sleep_seconds() -> int:
+    """60s during market hours (09:00–16:30 ET weekdays), 300s otherwise."""
+    ny = now_ny()
+    m  = ny.hour * 60 + ny.minute
+    if ny.weekday() < 5 and 9 * 60 <= m <= 16 * 60 + 30:
+        return 60
+    return 300
+
+
 async def news_loop():
     while True:
         try:
             await asyncio.to_thread(process_news_guard_cycle)
+            if _MACRO_DISCORD_AVAILABLE:
+                await asyncio.to_thread(run_breaking_news_check)
         except Exception as e:
             print('Donna News loop error:', str(e))
-        await asyncio.sleep(300)
+        await asyncio.sleep(_news_sleep_seconds())
 
 
 async def headline_loop():
@@ -316,7 +327,7 @@ async def headline_loop():
             await asyncio.to_thread(process_headlines_cycle)
         except Exception as e:
             print('Headline loop error:', str(e))
-        await asyncio.sleep(900)
+        await asyncio.sleep(_news_sleep_seconds())
 
 
 async def finnhub_loop():
@@ -361,7 +372,7 @@ async def macro_discord_loop():
                 await asyncio.to_thread(run_breaking_news_check)
         except Exception as e:
             print(f'[macro_discord_loop] error: {e}')
-        await asyncio.sleep(300)
+        await asyncio.sleep(_news_sleep_seconds())
 
 
 # ── Startup ────────────────────────────────────────────────────
