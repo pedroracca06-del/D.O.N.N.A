@@ -67,6 +67,31 @@ def _time_et() -> str:
     return datetime.now(NY_TZ).strftime('%H:%M ET')
 
 
+def _is_extreme_market() -> bool:
+    """True when market reality reports EXTREME or CRITICAL severity."""
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        mr = _j.loads((_P(__file__).parent / 'data' / 'donna_market_reality.json').read_text())
+        return mr.get('severity') in ('EXTREME', 'CRITICAL')
+    except Exception:
+        return False
+
+
+def _market_summary() -> str:
+    """Short market context string for Discord notifications."""
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        rs = _j.loads((_P(__file__).parent / 'data' / 'donna_risk_state.json').read_text())
+        snap = rs.get('market_snapshot', {})
+        nq   = snap.get('NQ', {})
+        vix  = snap.get('VIX', {})
+        return f"NQ {nq.get('last', '?')} ({nq.get('pct', '?')}%)  |  VIX {vix.get('last', '?')}"
+    except Exception:
+        return ''
+
+
 def _send_health_alert(title: str, description: str, color: int) -> None:
     """Send a system health embed to the live Discord channel."""
     try:
@@ -264,9 +289,11 @@ def main() -> None:
     log.info(f'Auto-execute: {_exec_label}')
     log.info('Ctrl+C to stop\n')
 
-    _mcp_fail_count      = 0
-    _mcp_down_alerted    = False
+    _mcp_fail_count       = 0
+    _mcp_down_alerted     = False
     _premarket_check_date = ''   # YYYY-MM-DD of last pre-market check
+    _lunch_alerted        = False
+    _lunch_override_alerted = False
 
     # ── Startup: restore trade_permission if no valid block exists ────────────
     # EOD disables it at 3:30 PM daily. The daily reset in state_engine should
@@ -313,6 +340,33 @@ def main() -> None:
             # check is never missed due to a long 300s sleep cycle.
             if not sess['active'] and _h == 9 and _m < 30:
                 sess['poll_interval'] = 60
+
+            # EXTREME market override — never go dark during LUNCH in a crisis
+            if sess['name'] == 'LUNCH':
+                if _is_extreme_market():
+                    sess = {'name': 'NY_AM', 'quality': 'B', 'active': True, 'poll_interval': 60}
+                    if not _lunch_override_alerted:
+                        _send_health_alert(
+                            'NOVA LUNCH OVERRIDE — EXTREME MARKET',
+                            f'Market severity EXTREME. Scanner continuing through lunch break.\n{_market_summary()}',
+                            0xFF8800,
+                        )
+                        _lunch_override_alerted = True
+                        log.warning('LUNCH override active — extreme market conditions')
+                else:
+                    _lunch_override_alerted = False
+                    if not _lunch_alerted:
+                        mkt = _market_summary()
+                        _send_health_alert(
+                            'NOVA PAUSED — LUNCH 12:30-13:30 ET',
+                            f'Scanner entering lunch break. Resumes at 13:30 ET.\n{mkt}',
+                            0x888888,
+                        )
+                        _lunch_alerted = True
+                        log.info('Lunch break — Discord notification sent')
+            else:
+                _lunch_alerted        = False
+                _lunch_override_alerted = False
 
             if sess['active']:
                 quality = sess['quality']
