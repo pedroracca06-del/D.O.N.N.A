@@ -1182,14 +1182,15 @@ def _build_evaluation_prompt(
     except Exception:
         pass
 
-    # Market Reality v1 — directional context (follows MR2)
-    try:
-        from engines.market_reality import load_market_reality, format_reality_for_prompt
-        _mr = load_market_reality()
-        _mr_block = format_reality_for_prompt(_mr)
-    except Exception:
-        _mr_block = ''
-        _mr = {}
+    # Market Reality v1 — only included when V2 is unavailable (avoids dual-source drift)
+    _mr_block = ''
+    if not _mr2_block:
+        try:
+            from engines.market_reality import load_market_reality, format_reality_for_prompt
+            _mr = load_market_reality()
+            _mr_block = format_reality_for_prompt(_mr)
+        except Exception:
+            _mr = {}
 
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})

@@ -859,7 +859,24 @@ async def grok_intelligence():
 
 @app.get('/market-reality')
 async def market_reality_endpoint():
-    """Live market reality state — direction, severity, structure, X/Twitter chatter."""
+    """Live market reality state. Returns V2 (fact-based) with V1 fields merged as fallback."""
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        mr2 = load_market_reality_v2()
+        if mr2 and mr2.get('state'):
+            # Supplement with V1 fields any caller may still expect (weekly_structure, grok)
+            try:
+                from engines.market_reality import load_market_reality
+                mr1 = load_market_reality()
+                mr2.setdefault('weekly_structure', mr1.get('weekly_structure', ''))
+                mr2.setdefault('grok_sentiment',   mr1.get('grok_sentiment', ''))
+                mr2.setdefault('direction',         mr1.get('direction', ''))
+                mr2.setdefault('severity',          mr1.get('severity', ''))
+            except Exception:
+                pass
+            return mr2
+    except Exception:
+        pass
     try:
         from engines.market_reality import load_market_reality
         return load_market_reality()

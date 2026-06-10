@@ -293,9 +293,35 @@ _EMBED_BUILDERS = {
 }
 
 
+def _mr2_context_field() -> dict | None:
+    """Read MR2 from disk and return a compact embed field. Returns None if unavailable."""
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        mr2   = load_market_reality_v2()
+        state = mr2.get('state', '')
+        score = mr2.get('score', 0)
+        if not state or state == 'NEUTRAL':
+            return None
+        parts = [f'{state} | score={score:+d}']
+        if mr2.get('block_longs'):
+            parts.append('LONGS BLOCKED')
+        elif mr2.get('block_shorts'):
+            parts.append('SHORTS BLOCKED')
+        return _field('Market Reality', '  ·  '.join(parts), inline=False)
+    except Exception:
+        return None
+
+
 def build_embed(d: AlertData) -> dict:
     builder = _EMBED_BUILDERS.get(d.alert_type, _build_no_trade_embed)
     embed = builder(d)
+
+    # Inject MR2 state into execution-critical embeds (read-only, non-blocking)
+    if d.alert_type in (HEADS_UP, EXECUTION_READY):
+        mr2_field = _mr2_context_field()
+        if mr2_field:
+            embed.setdefault('fields', []).append(mr2_field)
+
     embed['footer'] = {'text': f'NOVA  ·  {now_ny().strftime("%H:%M ET")}  ·  {d.symbol}'}
     embed['timestamp'] = datetime.now(timezone.utc).isoformat()
     return embed

@@ -498,59 +498,66 @@ def route_to_execution(alert: 'AlertData') -> dict:
             key, signal, setup_type, grade, session,
         )
 
-    # Layer B: Market Reality override — HIGH/EXTREME severity blocks counter-trend execution
+    # Gate 6c: Market Reality directional block — single unified gate, V2-preferred.
+    # V2 uses objective price facts (VWAP, IB, session range, weekly structure).
+    # V1 used only as fallback when V2 file is absent or stale.
+    # One source, one read, one decision. No parallel V1/V2 state drift.
     try:
-        from engines.market_reality import load_market_reality
-        mr = load_market_reality()
-        mr_direction = mr.get('direction', 'UNKNOWN')
-        mr_severity  = mr.get('severity', 'LOW')
-        if mr_severity in ('HIGH', 'EXTREME'):
-            if signal == 'LONG' and mr_direction == 'BEARISH':
-                reason = (
-                    f'LONG {instrument} blocked — market_reality BEARISH at {mr_severity} severity '
-                    f'(NQ={mr.get("nq_change_pct", 0):+.2f}% ES={mr.get("es_change_pct", 0):+.2f}% '
-                    f'structure={mr.get("structure", "?")})'
+        _block_code   = ''
+        _block_reason = ''
+
+        # Prefer V2 — authoritative fact-based block flags
+        try:
+            from engines.market_reality_v2 import load_market_reality_v2
+            mr2      = load_market_reality_v2()
+            mr2_st   = mr2.get('state', 'NEUTRAL')
+            if signal == 'LONG' and mr2.get('block_longs'):
+                _block_code   = 'MR2_LONG_BLOCKED'
+                _block_reason = (
+                    f'LONG {instrument} blocked — MR2 state={mr2_st} '
+                    f'score={mr2.get("score", 0):+d} | '
+                    f'{mr2.get("block_longs_reason", mr2_st)}'
                 )
-                _log(f'MARKET_REALITY_BLOCK  {reason}')
-                return _bridge_reject('MARKET_REALITY_BEARISH', reason, key, signal, setup_type, grade, session)
-            if signal == 'SHORT' and mr_direction == 'BULLISH':
-                reason = (
-                    f'SHORT {instrument} blocked — market_reality BULLISH at {mr_severity} severity '
-                    f'(NQ={mr.get("nq_change_pct", 0):+.2f}% ES={mr.get("es_change_pct", 0):+.2f}% '
-                    f'structure={mr.get("structure", "?")})'
+            elif signal == 'SHORT' and mr2.get('block_shorts'):
+                _block_code   = 'MR2_SHORT_BLOCKED'
+                _block_reason = (
+                    f'SHORT {instrument} blocked — MR2 state={mr2_st} '
+                    f'score={mr2.get("score", 0):+d} | '
+                    f'{mr2.get("block_shorts_reason", mr2_st)}'
                 )
-                _log(f'MARKET_REALITY_BLOCK  {reason}')
-                return _bridge_reject('MARKET_REALITY_BULLISH', reason, key, signal, setup_type, grade, session)
+        except Exception:
+            pass  # V2 unavailable — fall through to V1 safety net below
+
+        # V1 safety net — only evaluated when V2 produced no block decision
+        if not _block_code:
+            from engines.market_reality import load_market_reality
+            mr  = load_market_reality()
+            mrd = mr.get('direction', 'UNKNOWN')
+            mrs = mr.get('severity', 'LOW')
+            if mrs in ('HIGH', 'EXTREME'):
+                if signal == 'LONG' and mrd == 'BEARISH':
+                    _block_code   = 'MARKET_REALITY_BEARISH'
+                    _block_reason = (
+                        f'LONG {instrument} blocked — market_reality BEARISH at {mrs} severity '
+                        f'(NQ={mr.get("nq_change_pct", 0):+.2f}% '
+                        f'ES={mr.get("es_change_pct", 0):+.2f}% '
+                        f'structure={mr.get("structure", "?")})'
+                    )
+                elif signal == 'SHORT' and mrd == 'BULLISH':
+                    _block_code   = 'MARKET_REALITY_BULLISH'
+                    _block_reason = (
+                        f'SHORT {instrument} blocked — market_reality BULLISH at {mrs} severity '
+                        f'(NQ={mr.get("nq_change_pct", 0):+.2f}% '
+                        f'ES={mr.get("es_change_pct", 0):+.2f}% '
+                        f'structure={mr.get("structure", "?")})'
+                    )
+
+        if _block_code:
+            _log(f'MARKET_REALITY_GATE  {_block_code}  {_block_reason}')
+            return _bridge_reject(_block_code, _block_reason, key, signal, setup_type, grade, session)
+
     except Exception as exc:
         _log(f'market_reality gate error (non-blocking): {exc}')
-
-    # Layer C: Market Reality 2.0 hard gate — objective ground-truth block.
-    # MR2 scores hard price facts (VWAP, IB, session range, weekly structure).
-    # block_longs=True when state is BEARISH_DOMINANT or PANIC_SELLING.
-    # block_shorts=True when state is BULLISH_DOMINANT.
-    # This gate cannot be overridden by grade, setup type, or conviction.
-    try:
-        from engines.market_reality_v2 import load_market_reality_v2
-        mr2       = load_market_reality_v2()
-        mr2_state = mr2.get('state', 'NEUTRAL')
-        if signal == 'LONG' and mr2.get('block_longs'):
-            reason = (
-                f'LONG {instrument} blocked — MR2 state={mr2_state} '
-                f'score={mr2.get("score", 0):+d} | '
-                f'{mr2.get("block_longs_reason", mr2_state)}'
-            )
-            _log(f'MR2_LONG_BLOCKED  {reason}')
-            return _bridge_reject('MR2_LONG_BLOCKED', reason, key, signal, setup_type, grade, session)
-        if signal == 'SHORT' and mr2.get('block_shorts'):
-            reason = (
-                f'SHORT {instrument} blocked — MR2 state={mr2_state} '
-                f'score={mr2.get("score", 0):+d} | '
-                f'{mr2.get("block_shorts_reason", mr2_state)}'
-            )
-            _log(f'MR2_SHORT_BLOCKED  {reason}')
-            return _bridge_reject('MR2_SHORT_BLOCKED', reason, key, signal, setup_type, grade, session)
-    except Exception as exc:
-        _log(f'MR2 gate error (non-blocking): {exc}')
 
     # ── Gates 7–13: Execution profile governance ─────────────────────────────────
     active_mode, cfg = _load_execution_config()
