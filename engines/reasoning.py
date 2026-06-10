@@ -351,6 +351,120 @@ def _extract_level(labels: list, levels: list, keyword: str) -> Optional[float]:
 
 # ── Deterministic evaluators ──────────────────────────────────────────────────
 
+def _evaluate_price_structure(
+    chart_ctx:  dict,
+    ib_eval:    dict,
+    pros_eval:  dict,
+    main_state: dict,
+) -> dict:
+    """
+    State-based OTE detection from raw price and fib math.
+
+    Architecture principle: Pine events CONTRIBUTE to execution intelligence —
+    they do not DEFINE it. A valid PROS environment persists even after Pine's
+    one-bar prosContinuation reference is consumed. This evaluator detects OTE
+    from market state directly so the system stays alert through the full window.
+
+    Returns has_ote=True when price is in the 0.618–0.786 retracement zone
+    relative to the 30-bar swing, regardless of indicator trigger state.
+    """
+    price = chart_ctx.get('price')
+    ohlcv = chart_ctx.get('ohlcv', {})
+
+    try:
+        price   = float(price)
+        high_30 = float(ohlcv.get('high_30') or 0)
+        low_30  = float(ohlcv.get('low_30')  or 0)
+    except (TypeError, ValueError):
+        return {'has_ote': False, 'reason': 'invalid price data'}
+
+    if not high_30 or not low_30 or high_30 <= low_30:
+        return {'has_ote': False, 'reason': 'no 30-bar range data'}
+
+    swing_range = high_30 - low_30
+    if swing_range < 8:
+        return {'has_ote': False, 'reason': f'range {swing_range:.1f}pts too narrow'}
+
+    ib_draw = ib_eval.get('draw', 'UNCLEAR')
+    ib_high = ib_eval.get('ib_high')
+    ib_low  = ib_eval.get('ib_low')
+    cmd_up  = main_state.get('CMD', '').upper()
+    displ   = (main_state.get('PROS', '') or '').upper()
+
+    # Fib levels from the 30-bar swing
+    # LONG: displacement was DOWN → retracing UP into these levels
+    long_ote_lo  = low_30  + swing_range * 0.618
+    long_ote_hi  = low_30  + swing_range * 0.705
+    long_ext_hi  = low_30  + swing_range * 0.786   # outer boundary
+
+    # SHORT: displacement was UP → retracing DOWN into these levels
+    short_ote_hi = high_30 - swing_range * 0.618
+    short_ote_lo = high_30 - swing_range * 0.705
+    short_ext_lo = high_30 - swing_range * 0.786   # outer boundary
+
+    in_long_ote  = long_ote_lo  <= price <= long_ext_hi
+    in_short_ote = short_ext_lo <= price <= short_ote_hi
+
+    if not in_long_ote and not in_short_ote:
+        return {
+            'has_ote':   False,
+            'reason':    f'price {price} outside OTE zones',
+            'long_ote':  f'{long_ote_lo:.2f}–{long_ext_hi:.2f}',
+            'short_ote': f'{short_ext_lo:.2f}–{short_ote_hi:.2f}',
+        }
+
+    # Direction: IB draw is primary, CMD/DISPL secondary, then price-zone logic
+    bias_long  = (ib_draw == 'IB HIGH'
+                  or 'LONG' in cmd_up or 'BUY' in cmd_up or 'BULL' in cmd_up
+                  or 'BULL' in displ)
+    bias_short = (ib_draw == 'IB LOW'
+                  or 'SHORT' in cmd_up or 'SELL' in cmd_up or 'BEAR' in cmd_up
+                  or 'BEAR' in displ)
+
+    direction = 'N/A'
+    if in_long_ote and not bias_short:
+        direction = 'LONG'
+    elif in_short_ote and not bias_long:
+        direction = 'SHORT'
+    elif in_long_ote and in_short_ote:
+        # Overlapping zone — use bias
+        if bias_long:
+            direction = 'LONG'
+        elif bias_short:
+            direction = 'SHORT'
+
+    if direction == 'N/A':
+        return {'has_ote': False, 'reason': 'direction bias conflicts with OTE zone'}
+
+    if direction == 'LONG':
+        fib_pct  = (price - low_30)  / swing_range
+        clean    = long_ote_lo <= price <= long_ote_hi
+        ote_lo, ote_hi = long_ote_lo, long_ext_hi
+    else:
+        fib_pct  = (high_30 - price) / swing_range
+        clean    = short_ote_lo <= price <= short_ote_hi
+        ote_lo, ote_hi = short_ext_lo, short_ote_hi
+
+    ib_aligned = (
+        (direction == 'LONG'  and ib_high and price < ib_high) or
+        (direction == 'SHORT' and ib_low  and price > ib_low)
+    )
+
+    return {
+        'has_ote':      True,
+        'direction':    direction,
+        'fib_pct':      round(fib_pct, 3),
+        'clean_ote':    clean,
+        'swing_high':   high_30,
+        'swing_low':    low_30,
+        'swing_range':  round(swing_range, 2),
+        'ote_lo':       round(ote_lo,  2),
+        'ote_hi':       round(ote_hi,  2),
+        'ib_aligned':   ib_aligned,
+        'source':       'price_structure',
+    }
+
+
 def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) -> dict:
     """
     Detect PROS setup phase from NOVA indicator table values.
@@ -634,11 +748,12 @@ def _check_invalidation_signals(main_state: dict, pros_state: dict, chart_ctx: d
 
 
 def _classify_signal(
-    pros_eval:   dict,
-    orb_eval:    dict,
-    ib_eval:     dict,
-    inv_eval:    dict,
-    session_ctx: dict,
+    pros_eval:       dict,
+    orb_eval:        dict,
+    ib_eval:         dict,
+    inv_eval:        dict,
+    session_ctx:     dict,
+    price_ote_eval:  dict | None = None,
 ) -> tuple[Optional[str], str, str]:
     """
     Classify signal type from deterministic evaluations.
@@ -693,6 +808,21 @@ def _classify_signal(
             return HEADS_UP, setup, base_rationale + ' | OTE approaching'
         elif phase == 'BUILDING':
             return HEADS_UP, setup, base_rationale + ' | displacement building'
+
+    # Price structure OTE — fires when indicator hasn't triggered but market state is valid.
+    # This is the state-based layer: Pine events contribute context but do not define reality.
+    if price_ote_eval and price_ote_eval.get('has_ote') and not session_ctx.get('is_dead_zone'):
+        direction = price_ote_eval['direction']
+        fib_pct   = price_ote_eval.get('fib_pct', 0)
+        clean     = price_ote_eval.get('clean_ote', False)
+        ib_note   = 'IB aligned' if price_ote_eval.get('ib_aligned') else 'IB unclear'
+        zone_desc = f'OTE {fib_pct:.1%} ({"clean 0.618-0.705" if clean else "outer 0.786"})'
+        return (
+            HEADS_UP,
+            f'PROS_{direction}',
+            f'{zone_desc} | {ib_note} | swing {price_ote_eval.get("swing_range","?")}pts'
+            f' | session={session_name}({session_quality}) | source=price_structure',
+        )
 
     # ORB signals — NY_OPEN only, before IB window closes (09:30-10:30 ET)
     orb_session_valid = session_name == 'NY_OPEN' and not session_ctx['ib_window_closed']
@@ -912,10 +1042,11 @@ def _build_evaluation_prompt(
     pros_state = nova_state.get('pros', {})
 
     pre = pre_assess or {}
-    pros_eval = pre.get('pros_eval', {})
-    orb_eval  = pre.get('orb_eval', {})
-    ib_eval   = pre.get('ib_eval', {})
-    inv_eval  = pre.get('inv_eval', {})
+    pros_eval       = pre.get('pros_eval', {})
+    orb_eval        = pre.get('orb_eval', {})
+    ib_eval         = pre.get('ib_eval', {})
+    inv_eval        = pre.get('inv_eval', {})
+    price_ote_eval  = pre.get('price_ote_eval', {})
 
     orb_range_str = ''
     if orb_eval.get('orb_high') and orb_eval.get('orb_low'):
@@ -960,7 +1091,7 @@ SESSION LABELS
 Range: {ohlcv.get('range_30', '?')} pts | Change: {ohlcv.get('change_pct', '?')} | Avg vol: {ohlcv.get('avg_volume', '?')}
 30-bar high: {ohlcv.get('high_30', '?')} | 30-bar low: {ohlcv.get('low_30', '?')}
 
-DETERMINISTIC PRE-ASSESSMENT
+DETERMINISTIC PRE-ASSESSMENT (indicator-driven)
 PROS: phase={pros_eval.get('phase', 'N/A')} | direction={pros_eval.get('direction', 'N/A')} | OTE={pros_eval.get('ote_status', 'N/A')} | cont={pros_eval.get('cont_quality', '?')}
 ORB:  phase={orb_eval.get('phase', 'N/A')} | {orb_range_str or 'levels not extracted'}
 IB:   {ib_str or 'levels not extracted'}
@@ -968,15 +1099,21 @@ INVALIDATION: {inv_eval.get('invalidated', False)} | {inv_eval.get('reason', '')
 Pre-signal: {pre.get('pre_signal', 'NONE')} | setup={pre.get('pre_setup', 'N/A')}
 Rationale:  {pre.get('rationale', '')}
 
+PRICE STRUCTURE (state-based — independent of Pine event triggers)
+{f"Direction={price_ote_eval.get('direction')} | Fib={price_ote_eval.get('fib_pct',0):.1%} | Clean OTE={price_ote_eval.get('clean_ote')} | IB aligned={price_ote_eval.get('ib_aligned')} | Zone={price_ote_eval.get('ote_lo')}–{price_ote_eval.get('ote_hi')} | Swing={price_ote_eval.get('swing_low')}→{price_ote_eval.get('swing_high')} ({price_ote_eval.get('swing_range')}pts)" if price_ote_eval.get('has_ote') else f"Not in OTE zone — {price_ote_eval.get('reason', 'no data')}"}
+
 EVALUATION TASK
-The deterministic layer classified a potential {pre.get('pre_signal', 'NONE')} signal.
-1. Confirm or override the signal type (alert_required=false if conditions don't warrant it)
-2. Grade the setup A/B/C/D using full PROS + ORB + IB criteria from the system prompt
+Architecture note: Pine indicator events CONTRIBUTE to intelligence — they do not define it.
+If the indicator is WAIT/READING but PRICE STRUCTURE shows OTE, evaluate from market state directly.
+A valid displacement + price at OTE is a trade regardless of whether Pine re-fired its trigger.
+
+1. Use BOTH indicator state AND price structure to assess the setup
+2. Grade A/B/C/D — if price structure shows clean OTE with IB aligned = Grade B minimum
 3. Generate all alert fields for Discord delivery
 4. For EXECUTION_READY: include entry_zone, stop, tp1, rr
-5. For HEADS_UP: include watch_time and timeframe context
-6. Infer daily_bias and htf_4h_bias from available price action context
-7. If grade is C or D → set alert_required=false with no_alert_reason
+5. For HEADS_UP: include watch_time and entry zone to watch
+6. Infer daily_bias and htf_4h_bias from price action and market reality
+7. Grade D = skip (structure broken). Grade C = HEADS_UP only. Grade A/B = execute.
 
 Respond with JSON only — no markdown."""
 
@@ -1068,13 +1205,14 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     main_state = nova_state.get('main', {})
     pros_state_data = nova_state.get('pros', {})
 
-    pros_eval = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
-    orb_eval  = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
-    ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
-    inv_eval  = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
+    pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
+    orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
+    ib_eval         = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
+    inv_eval        = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
+    price_ote_eval  = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
 
     signal_type, setup_type, rationale = _classify_signal(
-        pros_eval, orb_eval, ib_eval, inv_eval, session_ctx
+        pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
     )
 
     if signal_type is None:
@@ -1094,13 +1232,14 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         )]
 
     pre_assess = {
-        'pros_eval':  pros_eval,
-        'orb_eval':   orb_eval,
-        'ib_eval':    ib_eval,
-        'inv_eval':   inv_eval,
-        'pre_signal': signal_type,
-        'pre_setup':  setup_type,
-        'rationale':  rationale,
+        'pros_eval':      pros_eval,
+        'orb_eval':       orb_eval,
+        'ib_eval':        ib_eval,
+        'inv_eval':       inv_eval,
+        'price_ote_eval': price_ote_eval,
+        'pre_signal':     signal_type,
+        'pre_setup':      setup_type,
+        'rationale':      rationale,
     }
     decision = evaluate_with_claude(nova_state, session_ctx, chart_ctx, pre_assess)
     if not decision:
@@ -1288,23 +1427,25 @@ def analyze_now(verbose: bool = False) -> dict:
     pros_state_data = nova_state.get('pros', {})
 
     # Run all deterministic evaluators
-    pros_eval = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
-    orb_eval  = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
-    ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
-    inv_eval  = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
+    pros_eval      = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
+    orb_eval       = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
+    ib_eval        = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
+    inv_eval       = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
+    price_ote_eval = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
 
     signal_type, setup_type, rationale = _classify_signal(
-        pros_eval, orb_eval, ib_eval, inv_eval, session_ctx
+        pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
     )
 
     pre_assess = {
-        'pros_eval':  pros_eval,
-        'orb_eval':   orb_eval,
-        'ib_eval':    ib_eval,
-        'inv_eval':   inv_eval,
-        'pre_signal': signal_type,
-        'pre_setup':  setup_type,
-        'rationale':  rationale,
+        'pros_eval':      pros_eval,
+        'orb_eval':       orb_eval,
+        'ib_eval':        ib_eval,
+        'inv_eval':       inv_eval,
+        'price_ote_eval': price_ote_eval,
+        'pre_signal':     signal_type,
+        'pre_setup':      setup_type,
+        'rationale':      rationale,
     }
 
     decision = evaluate_with_claude(nova_state, session_ctx, chart_ctx, pre_assess) or {}
