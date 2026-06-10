@@ -68,7 +68,18 @@ def _time_et() -> str:
 
 
 def _is_extreme_market() -> bool:
-    """True when market reality reports EXTREME or CRITICAL severity."""
+    """True when market reality reports PANIC_SELLING or BEARISH_DOMINANT (V2), or EXTREME/CRITICAL severity (V1 fallback)."""
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        mr2_path = _P(__file__).parent / 'data' / 'donna_market_reality_v2.json'
+        if mr2_path.exists():
+            mr2 = _j.loads(mr2_path.read_text())
+            if mr2.get('state'):
+                return mr2.get('state') in ('PANIC_SELLING', 'BEARISH_DOMINANT')
+    except Exception:
+        pass
+    # V1 fallback when V2 file is absent or unreadable
     try:
         import json as _j
         from pathlib import Path as _P

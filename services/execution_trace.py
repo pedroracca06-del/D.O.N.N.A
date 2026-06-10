@@ -370,14 +370,20 @@ def log_reasoning_snapshot(
             'dir_pressure':  dp_summary,
             'market_memory': mem,
 
-            # Market Reality 2.0 state at decision time
+            # Market Reality 2.0 state at decision time — self-contained for replay
             'mr2': {
-                'state':       (mr2_state or {}).get('state', ''),
-                'score':       (mr2_state or {}).get('score', 0),
-                'block_longs': (mr2_state or {}).get('block_longs', False),
-                'block_shorts':(mr2_state or {}).get('block_shorts', False),
-                'bull_facts':  (mr2_state or {}).get('bull_fact_count', 0),
-                'bear_facts':  (mr2_state or {}).get('bear_fact_count', 0),
+                'state':            (mr2_state or {}).get('state', ''),
+                'score':            (mr2_state or {}).get('score', 0),
+                'block_longs':      (mr2_state or {}).get('block_longs', False),
+                'block_shorts':     (mr2_state or {}).get('block_shorts', False),
+                'bull_facts':       (mr2_state or {}).get('bull_fact_count', 0),
+                'bear_facts':       (mr2_state or {}).get('bear_fact_count', 0),
+                'nq_pct':           (mr2_state or {}).get('nq_pct', 0),
+                'es_pct':           (mr2_state or {}).get('es_pct', 0),
+                'vix':              (mr2_state or {}).get('vix', 0),
+                'weekly_structure': (mr2_state or {}).get('weekly_structure', ''),
+                'nq_levels':        (mr2_state or {}).get('nq_levels', {}),
+                'es_levels':        (mr2_state or {}).get('es_levels', {}),
             },
 
             # Decision

@@ -41,41 +41,27 @@ _DISAGREE_THRESHOLD  = 6    # losing-side pts to flag a source as disagreeing
 
 # ── Individual source scorers ─────────────────────────────────────────────────
 
-def _score_reality(mr: dict) -> tuple[int, int, str]:
+def _score_reality(mr: dict, mr2: dict | None = None) -> tuple[int, int, str]:
     """
     Live price truth layer — highest-authority source.
-    Prefers Market Reality 2.0 (objective fact-based score) over v1 direction/severity
-    when available, since MR2 quantifies bull/bear facts directly.
+    Uses Market Reality 2.0 fact score when provided (passed from compute()).
+    Falls back to v1 direction/severity when mr2 is unavailable.
     """
     bull = bear = 0
     notes: list[str] = []
 
-    # Try Market Reality 2.0 first — it scores hard facts directly
-    try:
-        from engines.market_reality_v2 import load_market_reality_v2
-        mr2   = load_market_reality_v2()
+    # V2 path — pure fact-based score, no V1 narrative blending
+    if mr2:
         state = mr2.get('state', 'NEUTRAL')
         score = mr2.get('score', 0)
-
         if state not in ('NEUTRAL',) and score != 0:
-            # Map MR2 score to directional pressure points (scale: MR2 max ~19 → DP max 20)
             scaled = min(abs(score) * 1.0, _W_REALITY)
             if score > 0:
                 bull = round(scaled)
-                notes.append(f'MR2:{state} score={score:+d}')
             else:
                 bear = round(scaled)
-                notes.append(f'MR2:{state} score={score:+d}')
-
-            grok = (mr.get('grok_sentiment') or 'UNKNOWN').upper()
-            if grok == 'BULLISH':
-                bull = min(bull + 2, _W_REALITY)
-            elif grok == 'BEARISH':
-                bear = min(bear + 2, _W_REALITY)
-
+            notes.append(f'MR2:{state} score={score:+d}')
             return min(bull, _W_REALITY), min(bear, _W_REALITY), ' | '.join(notes)
-    except Exception:
-        pass
 
     # Fallback to v1 direction/severity scoring
     direction = (mr.get('direction')    or 'UNKNOWN').upper()
@@ -271,11 +257,25 @@ def compute(
           session_quality: str,
         }
     """
+    # Load V2 once — authoritative source when available
+    _mr2: dict | None = None
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        _loaded = load_market_reality_v2()
+        if _loaded.get('state'):
+            _mr2 = _loaded
+    except Exception:
+        pass
+
+    # Load V1 only as fallback when V2 is unavailable
     if mr is None:
-        try:
-            from engines.market_reality import load_market_reality
-            mr = load_market_reality()
-        except Exception:
+        if _mr2 is None:
+            try:
+                from engines.market_reality import load_market_reality
+                mr = load_market_reality()
+            except Exception:
+                mr = {}
+        else:
             mr = {}
 
     quality  = (session_ctx.get('session_quality') or 'dead').upper()
@@ -290,11 +290,16 @@ def compute(
         }
 
     # Score each source independently
-    r_b,  r_s,  r_n  = _score_reality(mr)
+    r_b,  r_s,  r_n  = _score_reality(mr, _mr2)
     p_b,  p_s,  p_n  = _score_pine(pros_eval)
     ib_b, ib_s, ib_n = _score_ib(ib_eval)
     m_b,  m_s,  m_n  = _score_memory(mem_summary)
-    x_b,  x_s,  x_n  = _score_macro(mr)
+
+    # V2 already scores VIX as a hard fact — skip macro to avoid double-counting
+    if _mr2 is not None:
+        x_b, x_s, x_n = 0, 0, f'VIX in MR2 facts (score={_mr2.get("score", 0):+d})'
+    else:
+        x_b, x_s, x_n = _score_macro(mr)
 
     sources = {
         'market_reality': {'bull': r_b,  'bear': r_s,  'note': r_n},
