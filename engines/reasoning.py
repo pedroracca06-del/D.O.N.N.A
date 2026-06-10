@@ -579,11 +579,11 @@ def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict |
 
     ib_range = ib_high - ib_low
 
-    # Infer draw from CMD
+    # Infer draw from CMD — substring match handles "WATCH LONG", "WATCH SHORT" etc.
     draw = 'UNCLEAR'
-    if cmd_up in ('BUY', 'LONG') or 'BULL' in cmd_up:
+    if 'BUY' in cmd_up or 'LONG' in cmd_up or 'BULL' in cmd_up:
         draw = 'IB HIGH'
-    elif cmd_up in ('SELL', 'SHORT') or 'BEAR' in cmd_up:
+    elif 'SELL' in cmd_up or 'SHORT' in cmd_up or 'BEAR' in cmd_up:
         draw = 'IB LOW'
 
     # Verify price is positioned to reach the draw
@@ -738,18 +738,25 @@ Evaluate live market conditions from TradingView NOVA indicator data and generat
 A deterministic pre-assessment has already been run. Your job is to confirm or override it, grade the setup, and produce alert fields.
 
 ## OPERATING PRINCIPLES
-- Quality over quantity. Silence is correct when there is no genuine edge.
 - Never alert when session_blocked=true (daily loss hit or trade limit reached).
-- A missed alert is better than a false positive. Be conservative.
-- HEADS_UP = setup forming BEFORE confirmation. This is the system's key differentiator.
-- EXECUTION_READY = setup confirmed and actionable RIGHT NOW.
-- Grade C or D setups → no alert. Downgrade rather than silence if context is partly bullish.
+- HEADS_UP = price is approaching or AT the OTE zone. Fire early so the trader can prepare. Does NOT require confirmation.
+- EXECUTION_READY = rejection confirmed at OTE, continuation signal fired. Fire when the setup is actionable now.
+- Silence is correct when there is NO valid displacement leg, or when IB draw directly opposes the setup.
+- Do NOT silence a HEADS_UP just because CONT=WAIT or QUALITY=WEAK — that is the normal state for a setup that hasn't confirmed yet.
 
 ## SESSION QUALITY THRESHOLDS
-The session context includes session_quality (A/B/C) and session name. Apply stricter grading in lower-quality sessions:
-- NY_OPEN (A): grade A or B → alert. Highest liquidity, ORB + PROS both valid.
-- NY_AM (B) / LONDON (B): grade A or B → alert. PROS only — ORB window closed.
-- NY_PM (C) / ASIA (C): grade A only → alert. Liquidity reduced, require near-perfect setup.
+Apply these thresholds differently by alert type:
+
+HEADS_UP thresholds (alert early, trader decides):
+- NY_OPEN (A): grade B or C → alert. Price at OTE with valid leg is enough.
+- NY_AM (B) / LONDON (B): grade B or C → alert.
+- NY_PM (C) / ASIA (C): grade B → alert. Require decent structure.
+
+EXECUTION_READY thresholds (only when confirmed):
+- NY_OPEN (A): grade A or B → alert.
+- NY_AM (B) / LONDON (B): grade A or B → alert.
+- NY_PM (C) / ASIA (C): grade A only → alert.
+
 - ORB is only valid during NY_OPEN session (09:30–10:30 ET). Never alert ORB outside that window.
 - In ASIA / LONDON sessions: apply extra caution on displacement size and continuation quality.
 
@@ -772,9 +779,13 @@ OTE zone: 0.618–0.705 fib (primary). 0.786 valid as outer boundary. 0.5 = subo
 
 Grade criteria:
   A = clean expansion + clear displacement + OTE tap 0.618–0.705 + strong rejection + IB alignment confirmed + session timing correct
-  B = most criteria met; one element weak or unclear
-  C = two or more elements weak, ambiguous, or countertrend IB draw
-  D = do not trade (multiple failures, no clear structure)
+  B = most criteria met; one element weak or unclear. For HEADS_UP: valid leg + price at/near OTE + IB draw aligned = Grade B.
+  C = two or more elements weak, ambiguous, or countertrend IB draw. HEADS_UP at Grade C is still alertable in NY_OPEN/NY_AM.
+  D = do not trade (multiple failures, no valid displacement, countertrend IB with no structural justification)
+
+For HEADS_UP specifically: CONT=WAIT and QUALITY=WEAK are expected — the setup hasn't confirmed yet.
+Grade the displacement quality and OTE precision, not the confirmation status.
+A clean displacement leg with price pulling back to 0.618–0.705 is Grade B for HEADS_UP even with no rejection yet.
 
 PROS invalidation (set alert_required=false or INVALIDATION if setup was active):
 - Price closes beyond displacement base (expansion origin violated)
