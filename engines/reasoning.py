@@ -374,11 +374,18 @@ def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) ->
     pros_retrace = pros_state.get('RETRACE', '').upper()
     pros_cont_up = pros_state.get('CONT', '').upper()
 
-    # Direction: CMD is authoritative; DISPL is the secondary signal
+    # Direction: CMD is unconditionally authoritative.
+    # DISPL describes structural context (the leg price displaced from), not trade direction.
+    # DISPL is only used when CMD is neutral (WAIT/empty) — never overrides an explicit CMD.
+    # Bug case: CMD=SELL + DISPL=BULL must route SHORT, not LONG.
     direction = 'N/A'
-    if cmd_up in ('BUY', 'LONG') or 'BULL' in displ_up:
+    if cmd_up in ('BUY', 'LONG'):
         direction = 'LONG'
-    elif cmd_up in ('SELL', 'SHORT') or 'BEAR' in displ_up:
+    elif cmd_up in ('SELL', 'SHORT'):
+        direction = 'SHORT'
+    elif 'BULL' in displ_up:
+        direction = 'LONG'
+    elif 'BEAR' in displ_up:
         direction = 'SHORT'
 
     # Phase from prosEngineState keywords (all ASCII — arrow chars are skipped intentionally)
