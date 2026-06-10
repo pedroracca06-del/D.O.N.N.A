@@ -58,6 +58,11 @@ try:
 except Exception:
     _dp_engine = None
 
+try:
+    from services.execution_trace import log_reasoning_snapshot as _log_snapshot
+except Exception:
+    _log_snapshot = None
+
 # ── MCP data collection ────────────────────────────────────────────────────────
 
 def _run_mcp(*args: str, timeout: int = 10) -> Optional[dict]:
@@ -1275,6 +1280,24 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     if not decision:
         return []
 
+    if _log_snapshot:
+        try:
+            _log_snapshot(
+                symbol          = symbol,
+                session_ctx     = session_ctx,
+                chart_ctx       = chart_ctx,
+                pine_state      = {'main': main_state, 'pros': pros_state_data},
+                pros_eval       = pros_eval,
+                ib_eval         = ib_eval,
+                price_ote_eval  = price_ote_eval,
+                dir_pressure    = dir_pressure,
+                mem_summary     = mem_summary,
+                pre_signal      = signal_type,
+                claude_decision = decision,
+            )
+        except Exception:
+            pass
+
     alert_required = decision.get('alert_required', False)
     log_reason = decision.get('no_alert_reason', '') if not alert_required else decision.get('alert_type', '')
     print(
@@ -1495,6 +1518,24 @@ def analyze_now(verbose: bool = False) -> dict:
     }
 
     decision = evaluate_with_claude(nova_state, session_ctx, chart_ctx, pre_assess) or {}
+
+    if _log_snapshot:
+        try:
+            _log_snapshot(
+                symbol          = symbol,
+                session_ctx     = session_ctx,
+                chart_ctx       = chart_ctx,
+                pine_state      = {'main': main_state, 'pros': pros_state_data},
+                pros_eval       = pros_eval,
+                ib_eval         = ib_eval,
+                price_ote_eval  = price_ote_eval,
+                dir_pressure    = dir_pressure,
+                mem_summary     = mem_summary,
+                pre_signal      = signal_type,
+                claude_decision = decision,
+            )
+        except Exception:
+            pass
 
     result = {
         'connected':      True,

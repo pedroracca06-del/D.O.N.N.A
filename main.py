@@ -935,6 +935,34 @@ async def execution_trace(limit: int = 100):
         return {'total': 0, 'entries': [], 'error': str(e)}
 
 
+@app.get('/reasoning/trace')
+async def reasoning_trace(limit: int = 50):
+    """
+    Full reasoning intelligence snapshots — every Claude evaluation cycle.
+    Each entry is self-contained: Pine state, price OTE, directional pressure,
+    market memory, and Claude's decision captured together at decision time.
+
+    Answers: "Why did NOVA think this?" / "Why was this blocked?" /
+             "What differentiated good from bad trades?"
+
+    Query: ?limit=N (max 300)
+    """
+    try:
+        from services.execution_trace import get_reasoning_trace
+        entries = await asyncio.to_thread(get_reasoning_trace, min(limit, 300))
+        grades: dict = {}
+        for e in entries:
+            g = (e.get('claude') or {}).get('grade', 'N/A')
+            grades[g] = grades.get(g, 0) + 1
+        return {
+            'total':   len(entries),
+            'grades':  grades,
+            'entries': entries,
+        }
+    except Exception as e:
+        return {'total': 0, 'entries': [], 'error': str(e)}
+
+
 @app.get('/orchestration-status')
 async def orchestration_status():
     from datetime import datetime, timezone

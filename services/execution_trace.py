@@ -17,9 +17,11 @@ import threading
 import time
 from pathlib import Path
 
-BASE_DIR   = Path(__file__).parent.parent
-TRACE_FILE = BASE_DIR / 'data' / 'donna_execution_trace.json'
-MAX_TRACE  = 500
+BASE_DIR        = Path(__file__).parent.parent
+TRACE_FILE      = BASE_DIR / 'data' / 'donna_execution_trace.json'
+REASONING_FILE  = BASE_DIR / 'data' / 'donna_reasoning_trace.json'
+MAX_TRACE       = 500
+MAX_REASONING   = 300
 
 _lock = threading.Lock()
 
@@ -217,5 +219,173 @@ def get_trace(limit: int = 100) -> list:
     """Return the most recent trace entries (for /execution-trace API endpoint)."""
     try:
         return _load()[:min(limit, MAX_TRACE)]
+    except Exception:
+        return []
+
+
+# ── Reasoning snapshot ─────────────────────────────────────────────────────────
+
+def _load_reasoning() -> list:
+    try:
+        if REASONING_FILE.exists():
+            raw = json.loads(REASONING_FILE.read_text(encoding='utf-8'))
+            return raw if isinstance(raw, list) else []
+    except Exception:
+        pass
+    return []
+
+
+def _save_reasoning(entries: list) -> None:
+    try:
+        REASONING_FILE.write_text(
+            json.dumps(entries, indent=2, default=str), encoding='utf-8'
+        )
+    except Exception as e:
+        print(f'[trace] reasoning save error: {e}')
+
+
+def log_reasoning_snapshot(
+    symbol:          str,
+    session_ctx:     dict,
+    chart_ctx:       dict,
+    pine_state:      dict,
+    pros_eval:       dict,
+    ib_eval:         dict,
+    price_ote_eval:  dict,
+    dir_pressure:    dict,
+    mem_summary:     dict,
+    pre_signal:      str,
+    claude_decision: dict,
+) -> None:
+    """
+    Full intelligence context snapshot captured at every Claude reasoning decision.
+
+    Answers: "Why did NOVA think this?" / "Why was this blocked?" /
+             "What differentiated good from bad trades?"
+
+    Stored in donna_reasoning_trace.json (separate from execution trace).
+    Each entry is self-contained — reconstructable without any other state.
+
+    Called from reasoning.py after evaluate_with_claude() returns, before
+    AlertData is built.
+    """
+    try:
+        # ── Pine state summary (key fields only, not full raw table) ──────────
+        main_st = pine_state.get('main', {})
+        pros_st = pine_state.get('pros', {})
+        pine_summary = {
+            'CMD':     main_st.get('CMD', ''),
+            'DISPL':   main_st.get('DISPL', ''),
+            'PROS':    main_st.get('PROS', ''),
+            'OTE':     pros_st.get('OTE',  ''),
+            'CONT':    pros_st.get('CONT', ''),
+            'RETRACE': pros_st.get('RETRACE', ''),
+            'IB_H':    pros_st.get('IB H', ''),
+            'IB_L':    pros_st.get('IB L', ''),
+        }
+
+        # ── Price context ─────────────────────────────────────────────────────
+        ohlcv = chart_ctx.get('ohlcv', {})
+        price_summary = {
+            'price':    chart_ctx.get('price'),
+            'high_30':  ohlcv.get('high_30'),
+            'low_30':   ohlcv.get('low_30'),
+            'range_30': ohlcv.get('range_30'),
+        }
+
+        # ── Directional pressure (scores only, skip verbose sources) ──────────
+        dp_summary = {
+            'bullish':       dir_pressure.get('bullish', 0),
+            'bearish':       dir_pressure.get('bearish', 0),
+            'net':           dir_pressure.get('net', 0),
+            'dominance':     dir_pressure.get('dominance', ''),
+            'conviction':    dir_pressure.get('conviction', ''),
+            'disagreements': dir_pressure.get('disagreements', []),
+        }
+
+        # ── Market memory summary ─────────────────────────────────────────────
+        mem = {
+            'long':  mem_summary.get('long',  {}),
+            'short': mem_summary.get('short', {}),
+        }
+
+        # ── Claude decision summary ───────────────────────────────────────────
+        claude_summary = {
+            'alert_required':  claude_decision.get('alert_required', False),
+            'alert_type':      claude_decision.get('alert_type', ''),
+            'grade':           claude_decision.get('grade', ''),
+            'no_alert_reason': claude_decision.get('no_alert_reason', ''),
+            'entry_zone':      claude_decision.get('entry_zone', ''),
+            'stop':            claude_decision.get('stop', ''),
+            'tp1':             claude_decision.get('tp1', ''),
+            'rr':              claude_decision.get('rr', ''),
+            'watch_time':      claude_decision.get('watch_time', ''),
+            'reasoning':       (
+                claude_decision.get('reasoning') or
+                claude_decision.get('confidence') or
+                claude_decision.get('analysis') or ''
+            ),
+        }
+
+        entry: dict = {
+            'id':             _new_id(),
+            'event_type':     'REASONING_SNAPSHOT',
+            'timestamp_et':   _ts_et(),
+            'symbol':         symbol,
+
+            # Session context
+            'session':        session_ctx.get('session', ''),
+            'session_quality':session_ctx.get('session_quality', ''),
+            'time_et':        session_ctx.get('time_et', ''),
+            'daily_trades':   session_ctx.get('daily_trades', 0),
+            'daily_loss_hit': session_ctx.get('daily_loss_hit', False),
+
+            # Intelligence layers
+            'pine':           pine_summary,
+            'price':          price_summary,
+            'pros_eval': {
+                'phase':        pros_eval.get('phase', ''),
+                'direction':    pros_eval.get('direction', ''),
+                'cont_quality': pros_eval.get('cont_quality', ''),
+                'ote_status':   pros_eval.get('ote_status', ''),
+                'has_signal':   pros_eval.get('has_signal', False),
+            },
+            'ib_eval': {
+                'draw':    ib_eval.get('draw', ''),
+                'aligned': ib_eval.get('aligned', False),
+                'ib_high': ib_eval.get('ib_high'),
+                'ib_low':  ib_eval.get('ib_low'),
+            },
+            'price_ote': {
+                'has_ote':   price_ote_eval.get('has_ote', False),
+                'direction': price_ote_eval.get('direction', ''),
+                'fib_pct':   price_ote_eval.get('fib_pct', 0),
+                'clean_ote': price_ote_eval.get('clean_ote', False),
+                'ib_aligned':price_ote_eval.get('ib_aligned', False),
+                'ote_lo':    price_ote_eval.get('ote_lo'),
+                'ote_hi':    price_ote_eval.get('ote_hi'),
+                'reason':    price_ote_eval.get('reason', ''),
+            },
+            'dir_pressure':  dp_summary,
+            'market_memory': mem,
+
+            # Decision
+            'pre_signal':    pre_signal,
+            'claude':        claude_summary,
+        }
+
+        with _lock:
+            entries = _load_reasoning()
+            entries.insert(0, entry)
+            _save_reasoning(entries[:MAX_REASONING])
+
+    except Exception as e:
+        print(f'[trace] log_reasoning_snapshot error: {e}')
+
+
+def get_reasoning_trace(limit: int = 50) -> list:
+    """Return the most recent reasoning snapshots."""
+    try:
+        return _load_reasoning()[:min(limit, MAX_REASONING)]
     except Exception:
         return []
