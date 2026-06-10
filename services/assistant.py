@@ -49,14 +49,14 @@ def summarize_system_context() -> str:
     sig       = build_session_significance(risk)
     movers    = build_market_movers_engine()
     assistant = load_assistant_state()
-    mr  = load_market_reality()
     mr2 = load_market_reality_v2() if load_market_reality_v2 else {}
 
     # MR2 ground truth prepended first so Claude reads objective state before any narrative.
-    # Falls back to v1 compact line if v2 unavailable.
+    # V1 loaded only as fallback when V2 is unavailable — avoids unconditional dual read.
     if mr2 and _mr2_fmt:
         reality_line = _mr2_fmt(mr2)
     else:
+        mr = load_market_reality()
         reality_line = format_reality_for_assistant(mr)
 
     cached_context = (

@@ -644,27 +644,54 @@ def route_to_execution(alert: 'AlertData') -> dict:
                 if correlated:
                     open_sides = {_norm_dir(p.get('side', '')) for p in open_positions}
                     if signal in open_sides:
+                        # Gate 11c: V2-primary hostile-market check — same source as Gate 6c.
+                        _c_hostile        = False
+                        _c_hostile_reason = ''
                         try:
-                            from engines.market_reality import load_market_reality
-                            mr  = load_market_reality()
-                            mrd = mr.get('direction', 'UNKNOWN')
-                            mrs = mr.get('severity', 'LOW')
-                            if signal == 'LONG' and mrd == 'BEARISH' and mrs in ('HIGH', 'EXTREME'):
-                                return _reject(
-                                    'CORRELATED_EXPOSURE_HOSTILE',
-                                    f'Correlated LONG (NQ+ES) blocked — market_reality {mrd} {mrs}: '
-                                    f'NQ={mr.get("nq_change_pct", 0):+.2f}% '
-                                    f'ES={mr.get("es_change_pct", 0):+.2f}%',
+                            from engines.market_reality_v2 import load_market_reality_v2
+                            _mr2c    = load_market_reality_v2()
+                            _mr2c_st = _mr2c.get('state', 'NEUTRAL')
+                            if signal == 'LONG' and _mr2c.get('block_longs'):
+                                _c_hostile        = True
+                                _c_hostile_reason = (
+                                    f'Correlated LONG (NQ+ES) blocked — MR2 state={_mr2c_st} '
+                                    f'score={_mr2c.get("score", 0):+d}: '
+                                    f'NQ={_mr2c.get("nq_pct", 0):+.2f}% '
+                                    f'ES={_mr2c.get("es_pct", 0):+.2f}%'
                                 )
-                            if signal == 'SHORT' and mrd == 'BULLISH' and mrs in ('HIGH', 'EXTREME'):
-                                return _reject(
-                                    'CORRELATED_EXPOSURE_HOSTILE',
-                                    f'Correlated SHORT (NQ+ES) blocked — market_reality {mrd} {mrs}: '
-                                    f'NQ={mr.get("nq_change_pct", 0):+.2f}% '
-                                    f'ES={mr.get("es_change_pct", 0):+.2f}%',
+                            elif signal == 'SHORT' and _mr2c.get('block_shorts'):
+                                _c_hostile        = True
+                                _c_hostile_reason = (
+                                    f'Correlated SHORT (NQ+ES) blocked — MR2 state={_mr2c_st} '
+                                    f'score={_mr2c.get("score", 0):+d}: '
+                                    f'NQ={_mr2c.get("nq_pct", 0):+.2f}% '
+                                    f'ES={_mr2c.get("es_pct", 0):+.2f}%'
                                 )
                         except Exception:
-                            pass
+                            # V1 safety net — V2 unavailable
+                            try:
+                                from engines.market_reality import load_market_reality
+                                _mr1c = load_market_reality()
+                                _mrd  = _mr1c.get('direction', 'UNKNOWN')
+                                _mrs  = _mr1c.get('severity', 'LOW')
+                                if signal == 'LONG' and _mrd == 'BEARISH' and _mrs in ('HIGH', 'EXTREME'):
+                                    _c_hostile        = True
+                                    _c_hostile_reason = (
+                                        f'Correlated LONG (NQ+ES) blocked — market_reality {_mrd} {_mrs}: '
+                                        f'NQ={_mr1c.get("nq_change_pct", 0):+.2f}% '
+                                        f'ES={_mr1c.get("es_change_pct", 0):+.2f}%'
+                                    )
+                                elif signal == 'SHORT' and _mrd == 'BULLISH' and _mrs in ('HIGH', 'EXTREME'):
+                                    _c_hostile        = True
+                                    _c_hostile_reason = (
+                                        f'Correlated SHORT (NQ+ES) blocked — market_reality {_mrd} {_mrs}: '
+                                        f'NQ={_mr1c.get("nq_change_pct", 0):+.2f}% '
+                                        f'ES={_mr1c.get("es_change_pct", 0):+.2f}%'
+                                    )
+                            except Exception:
+                                pass
+                        if _c_hostile:
+                            return _reject('CORRELATED_EXPOSURE_HOSTILE', _c_hostile_reason)
                         _log(f'CORRELATED_EXPOSURE  {instrument} {signal} + existing {open_etfs} — market supports direction')
 
         except Exception as _g11_err:
