@@ -48,6 +48,11 @@ except Exception:
     INVALIDATION    = 'INVALIDATION'
     NO_TRADE        = 'NO_TRADE'
 
+try:
+    from engines import market_memory as _market_memory
+except Exception:
+    _market_memory = None
+
 # ── MCP data collection ────────────────────────────────────────────────────────
 
 def _run_mcp(*args: str, timeout: int = 10) -> Optional[dict]:
@@ -1102,6 +1107,8 @@ Rationale:  {pre.get('rationale', '')}
 PRICE STRUCTURE (state-based — independent of Pine event triggers)
 {f"Direction={price_ote_eval.get('direction')} | Fib={price_ote_eval.get('fib_pct',0):.1%} | Clean OTE={price_ote_eval.get('clean_ote')} | IB aligned={price_ote_eval.get('ib_aligned')} | Zone={price_ote_eval.get('ote_lo')}–{price_ote_eval.get('ote_hi')} | Swing={price_ote_eval.get('swing_low')}→{price_ote_eval.get('swing_high')} ({price_ote_eval.get('swing_range')}pts)" if price_ote_eval.get('has_ote') else f"Not in OTE zone — {price_ote_eval.get('reason', 'no data')}"}
 
+{_market_memory.format_for_prompt(symbol) if _market_memory else ''}
+
 EVALUATION TASK
 Architecture note: Pine indicator events CONTRIBUTE to intelligence — they do not define it.
 If the indicator is WAIT/READING but PRICE STRUCTURE shows OTE, evaluate from market state directly.
@@ -1210,6 +1217,12 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     ib_eval         = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
     inv_eval        = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
     price_ote_eval  = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
+
+    if _market_memory:
+        try:
+            _market_memory.update(symbol, session_ctx, price_ote_eval, pros_eval, chart_ctx)
+        except Exception:
+            pass
 
     signal_type, setup_type, rationale = _classify_signal(
         pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
@@ -1432,6 +1445,12 @@ def analyze_now(verbose: bool = False) -> dict:
     ib_eval        = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
     inv_eval       = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
     price_ote_eval = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
+
+    if _market_memory:
+        try:
+            _market_memory.update(symbol, session_ctx, price_ote_eval, pros_eval, chart_ctx)
+        except Exception:
+            pass
 
     signal_type, setup_type, rationale = _classify_signal(
         pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval

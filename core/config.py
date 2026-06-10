@@ -34,6 +34,7 @@ MORNING_BRIEF_FILE = DATA_DIR / 'donna_morning_brief_state.json'
 JOURNAL_FILE       = DATA_DIR / 'donna_journal.json'
 REJECTIONS_FILE    = DATA_DIR / 'donna_rejections.json'
 TRACE_FILE         = DATA_DIR / 'donna_execution_trace.json'
+MARKET_MEMORY_FILE = DATA_DIR / 'donna_market_memory.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()
