@@ -42,7 +42,42 @@ _DISAGREE_THRESHOLD  = 6    # losing-side pts to flag a source as disagreeing
 # ── Individual source scorers ─────────────────────────────────────────────────
 
 def _score_reality(mr: dict) -> tuple[int, int, str]:
-    """Live price truth layer — highest-authority source."""
+    """
+    Live price truth layer — highest-authority source.
+    Prefers Market Reality 2.0 (objective fact-based score) over v1 direction/severity
+    when available, since MR2 quantifies bull/bear facts directly.
+    """
+    bull = bear = 0
+    notes: list[str] = []
+
+    # Try Market Reality 2.0 first — it scores hard facts directly
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        mr2   = load_market_reality_v2()
+        state = mr2.get('state', 'NEUTRAL')
+        score = mr2.get('score', 0)
+
+        if state not in ('NEUTRAL',) and score != 0:
+            # Map MR2 score to directional pressure points (scale: MR2 max ~19 → DP max 20)
+            scaled = min(abs(score) * 1.0, _W_REALITY)
+            if score > 0:
+                bull = round(scaled)
+                notes.append(f'MR2:{state} score={score:+d}')
+            else:
+                bear = round(scaled)
+                notes.append(f'MR2:{state} score={score:+d}')
+
+            grok = (mr.get('grok_sentiment') or 'UNKNOWN').upper()
+            if grok == 'BULLISH':
+                bull = min(bull + 2, _W_REALITY)
+            elif grok == 'BEARISH':
+                bear = min(bear + 2, _W_REALITY)
+
+            return min(bull, _W_REALITY), min(bear, _W_REALITY), ' | '.join(notes)
+    except Exception:
+        pass
+
+    # Fallback to v1 direction/severity scoring
     direction = (mr.get('direction')    or 'UNKNOWN').upper()
     severity  = (mr.get('severity')     or 'LOW').upper()
     drive     = (mr.get('session_drive')or '').upper()
@@ -50,9 +85,6 @@ def _score_reality(mr: dict) -> tuple[int, int, str]:
     grok      = (mr.get('grok_sentiment') or 'UNKNOWN').upper()
 
     sev_pts = {'LOW': 5, 'MEDIUM': 10, 'HIGH': 15, 'EXTREME': 20}.get(severity, 5)
-
-    bull = bear = 0
-    notes: list[str] = []
 
     if direction == 'BULLISH':
         bull += sev_pts
@@ -66,20 +98,12 @@ def _score_reality(mr: dict) -> tuple[int, int, str]:
     else:
         notes.append('NEUTRAL')
 
-    if 'BULL' in drive:
-        bull += 4
-    elif 'BEAR' in drive:
-        bear += 4
-
-    if structure == 'WEEKLY_HIGH_BREAK':
-        bull += 3
-    elif structure == 'WEEKLY_LOW_BREAK':
-        bear += 3
-
-    if grok == 'BULLISH':
-        bull += 2
-    elif grok == 'BEARISH':
-        bear += 2
+    if 'BULL' in drive:   bull += 4
+    elif 'BEAR' in drive: bear += 4
+    if structure == 'WEEKLY_HIGH_BREAK': bull += 3
+    elif structure == 'WEEKLY_LOW_BREAK': bear += 3
+    if grok == 'BULLISH': bull += 2
+    elif grok == 'BEARISH': bear += 2
 
     return min(bull, _W_REALITY), min(bear, _W_REALITY), ' | '.join(notes)
 

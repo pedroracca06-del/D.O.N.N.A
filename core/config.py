@@ -36,6 +36,7 @@ REJECTIONS_FILE    = DATA_DIR / 'donna_rejections.json'
 TRACE_FILE         = DATA_DIR / 'donna_execution_trace.json'
 MARKET_MEMORY_FILE    = DATA_DIR / 'donna_market_memory.json'
 REASONING_TRACE_FILE  = DATA_DIR / 'donna_reasoning_trace.json'
+MARKET_REALITY_V2_FILE = DATA_DIR / 'donna_market_reality_v2.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()

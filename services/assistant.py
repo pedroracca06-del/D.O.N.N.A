@@ -13,13 +13,18 @@ from engines.engines import (
     build_session_significance, build_market_movers_engine,
 )
 from engines.market_reality import load_market_reality, format_reality_for_assistant
+try:
+    from engines.market_reality_v2 import load_market_reality_v2, format_for_assistant as _mr2_fmt
+except Exception:
+    load_market_reality_v2 = None
+    _mr2_fmt = None
 
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
-    'The LIVE_MARKET line in every context is live price truth — it overrides any cached session narrative. '
-    'When tone=CAUTIOUS/DEFENSIVE_REASSESSMENT/BEARISH_ALERT: your reply field must acknowledge '
-    'the live bearish conditions before addressing the user question. '
-    'When tone=BULLISH_ALERT: acknowledge the bullish conditions. '
+    'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
+    'When MR2 state is BEARISH_DOMINANT or PANIC_SELLING: acknowledge bearish conditions first. '
+    'When MR2 state is BULLISH_DOMINANT: acknowledge bullish conditions. '
+    'When LONGS_BLOCKED or SHORTS_BLOCKED: respect the execution rule explicitly. '
     'Return JSON only — no text outside the JSON object: '
     '{"action":"none|set_focus|add_task|add_reminder|clear_tasks|clear_reminders","value":"","reply":"1-3 sentences"}'
 )
@@ -44,12 +49,15 @@ def summarize_system_context() -> str:
     sig       = build_session_significance(risk)
     movers    = build_market_movers_engine()
     assistant = load_assistant_state()
-    mr        = load_market_reality()
+    mr  = load_market_reality()
+    mr2 = load_market_reality_v2() if load_market_reality_v2 else {}
 
-    # Compact single-line market reality — prepended so Claude reads live truth first
-    # Full format_reality_for_prompt() is intentionally NOT used here: it is verbose,
-    # causes Claude to write longer replies, and destabilises tight JSON output.
-    reality_line = format_reality_for_assistant(mr)
+    # MR2 ground truth prepended first so Claude reads objective state before any narrative.
+    # Falls back to v1 compact line if v2 unavailable.
+    if mr2 and _mr2_fmt:
+        reality_line = _mr2_fmt(mr2)
+    else:
+        reality_line = format_reality_for_assistant(mr)
 
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"

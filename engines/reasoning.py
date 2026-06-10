@@ -63,6 +63,12 @@ try:
 except Exception:
     _log_snapshot = None
 
+try:
+    from engines.market_reality_v2 import load_market_reality_v2 as _load_mr2, format_for_prompt as _mr2_prompt
+except Exception:
+    _load_mr2    = None
+    _mr2_prompt  = None
+
 # ── MCP data collection ────────────────────────────────────────────────────────
 
 def _run_mcp(*args: str, timeout: int = 10) -> Optional[dict]:
@@ -853,6 +859,53 @@ def _classify_signal(
     return None, 'N/A', 'No qualifying signal detected'
 
 
+def _apply_market_reality_gate(
+    signal_type: str,
+    setup_type:  str,
+    rationale:   str,
+) -> tuple[str, str, str]:
+    """
+    Hard gate based on Market Reality 2.0 objective state.
+    Runs BEFORE the conviction gate — highest priority override.
+
+    BEARISH_DOMINANT / PANIC_SELLING → LONG signals capped at HEADS_UP.
+    BULLISH_DOMINANT                 → SHORT signals capped at HEADS_UP.
+
+    This gate cannot be overridden by Pine state, PROS phase, or IB draw.
+    If the market is objectively BEARISH_DOMINANT, the system will not
+    autonomously execute longs regardless of any setup signal.
+    """
+    if not _load_mr2:
+        return signal_type, setup_type, rationale
+
+    try:
+        mr2   = _load_mr2()
+        state = mr2.get('state', 'NEUTRAL')
+
+        is_long  = 'LONG' in setup_type or 'BULL' in setup_type
+        is_short = 'SHORT' in setup_type or 'BEAR' in setup_type
+
+        if signal_type == EXECUTION_READY:
+            if is_long and mr2.get('block_longs'):
+                return (
+                    HEADS_UP,
+                    setup_type,
+                    f'[MR2_GATE {state}] LONG auto-execution blocked — '
+                    f'{mr2.get("block_longs_reason", state)} | {rationale}',
+                )
+            if is_short and mr2.get('block_shorts'):
+                return (
+                    HEADS_UP,
+                    setup_type,
+                    f'[MR2_GATE {state}] SHORT auto-execution blocked — '
+                    f'{mr2.get("block_shorts_reason", state)} | {rationale}',
+                )
+    except Exception:
+        pass
+
+    return signal_type, setup_type, rationale
+
+
 def _apply_conviction_gate(
     signal_type:  str,
     setup_type:   str,
@@ -1120,7 +1173,16 @@ def _build_evaluation_prompt(
     levels = chart_ctx.get('nova_levels', [])[:10]
     labels = chart_ctx.get('nova_labels', [])
 
-    # Load market reality for directional grounding
+    # Market Reality 2.0 — objective ground truth (leads the prompt)
+    _mr2_block = ''
+    try:
+        if _load_mr2 and _mr2_prompt:
+            _mr2      = _load_mr2()
+            _mr2_block = _mr2_prompt(_mr2)
+    except Exception:
+        pass
+
+    # Market Reality v1 — directional context (follows MR2)
     try:
         from engines.market_reality import load_market_reality, format_reality_for_prompt
         _mr = load_market_reality()
@@ -1154,7 +1216,9 @@ def _build_evaluation_prompt(
             f"aligned={ib_eval.get('aligned', '?')}"
         )
 
-    return f"""{_mr_block}
+    return f"""{_mr2_block}
+
+{_mr_block}
 
 LIVE MARKET CONTEXT
 Symbol:        {symbol}
@@ -1329,6 +1393,9 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         print(f'[nova-reasoning] {session_ctx["time_et"]} | {symbol} | no signal | {rationale}')
         return []
 
+    signal_type, setup_type, rationale = _apply_market_reality_gate(
+        signal_type, setup_type, rationale
+    )
     signal_type, setup_type, rationale = _apply_conviction_gate(
         signal_type, setup_type, rationale, dir_pressure
     )
@@ -1583,6 +1650,9 @@ def analyze_now(verbose: bool = False) -> dict:
 
     signal_type, setup_type, rationale = _classify_signal(
         pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
+    )
+    signal_type, setup_type, rationale = _apply_market_reality_gate(
+        signal_type, setup_type, rationale
     )
     signal_type, setup_type, rationale = _apply_conviction_gate(
         signal_type, setup_type, rationale, dir_pressure
