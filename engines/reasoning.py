@@ -853,6 +853,82 @@ def _classify_signal(
     return None, 'N/A', 'No qualifying signal detected'
 
 
+def _apply_conviction_gate(
+    signal_type:  str,
+    setup_type:   str,
+    rationale:    str,
+    dir_pressure: dict,
+) -> tuple[str, str, str]:
+    """
+    Post-classification conviction filter. Runs after _classify_signal(),
+    before evaluate_with_claude(). Makes directional intelligence load-bearing
+    in the execution path — not just informational to Claude.
+
+    Rules:
+      CONFLICTED / LOW conviction  → cap EXECUTION_READY at HEADS_UP.
+        When primary intelligence sources disagree, the system must not
+        autonomously execute regardless of Claude's grade. Claude still
+        evaluates, but the output is capped at HEADS_UP.
+
+      Counter-dominant signal      → flag in rationale.
+        LONG vs BEAR_DOMINANT (or vice versa) doesn't block the signal —
+        exceptional counter-trend setups exist. But Claude must see the
+        pressure conflict explicitly and justify the grade.
+
+      Aligned signal               → affirm in rationale.
+        LONG + BULL_DOMINANT + HIGH conviction is the ideal environment.
+        Claude sees alignment and can grade with confidence.
+    """
+    if not dir_pressure or dir_pressure.get('dominance') == 'NEUTRAL':
+        return signal_type, setup_type, rationale
+
+    conviction = dir_pressure.get('conviction', 'HIGH')
+    dominance  = dir_pressure.get('dominance',  'CONTESTED')
+    bull_pts   = dir_pressure.get('bullish', 0)
+    bear_pts   = dir_pressure.get('bearish', 0)
+    net        = dir_pressure.get('net', 0)
+
+    is_long  = 'LONG' in setup_type or 'BULL' in setup_type
+    is_short = 'SHORT' in setup_type or 'BEAR' in setup_type
+
+    # Gate 1: low conviction blocks autonomous execution
+    if signal_type == EXECUTION_READY and conviction in ('CONFLICTED', 'LOW'):
+        return (
+            HEADS_UP,
+            setup_type,
+            f'[CONVICTION_GATE conviction={conviction}] '
+            f'EXECUTION_READY capped at HEADS_UP | '
+            f'bull={bull_pts} bear={bear_pts} net={net:+d} | {rationale}',
+        )
+
+    # Gate 2: counter-dominant trade — require explicit Claude justification
+    if is_long and 'BEAR' in dominance:
+        rationale = (
+            f'[COUNTER_DOMINANT {dominance} bear={bear_pts} vs bull={bull_pts}] '
+            f'Grade A requires clear structural reason to trade against dominance. '
+            f'{rationale}'
+        )
+    elif is_short and 'BULL' in dominance:
+        rationale = (
+            f'[COUNTER_DOMINANT {dominance} bull={bull_pts} vs bear={bear_pts}] '
+            f'Grade A requires clear structural reason to trade against dominance. '
+            f'{rationale}'
+        )
+
+    # Gate 3: fully aligned environment — affirm for Claude
+    elif conviction == 'HIGH' and (
+        (is_long  and 'BULL' in dominance) or
+        (is_short and 'BEAR' in dominance)
+    ):
+        rationale = (
+            f'[ALIGNED {dominance} conviction=HIGH net={net:+d}] '
+            f'All intelligence sources agree. '
+            f'{rationale}'
+        )
+
+    return signal_type, setup_type, rationale
+
+
 # ── Strategy rules loader ──────────────────────────────────────────────────────
 
 def _load_strategy_rules() -> str:
@@ -1253,6 +1329,10 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         print(f'[nova-reasoning] {session_ctx["time_et"]} | {symbol} | no signal | {rationale}')
         return []
 
+    signal_type, setup_type, rationale = _apply_conviction_gate(
+        signal_type, setup_type, rationale, dir_pressure
+    )
+
     if signal_type == NO_TRADE and session_ctx.get('daily_loss_hit') and AlertData:
         return [AlertData(
             alert_type  = NO_TRADE,
@@ -1503,6 +1583,9 @@ def analyze_now(verbose: bool = False) -> dict:
 
     signal_type, setup_type, rationale = _classify_signal(
         pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
+    )
+    signal_type, setup_type, rationale = _apply_conviction_gate(
+        signal_type, setup_type, rationale, dir_pressure
     )
 
     pre_assess = {
