@@ -1197,6 +1197,27 @@ if prosContinuationBear
     prosConRefLow  := na
     prosConBarBear := na
 
+// CONT display stickiness — keep "CONFIRMED" visible for 5 bars after signal fires.
+// prosContinuationBull/Bear are one-bar signals; without this the table flips immediately
+// from CONFIRMED back to RETRACING on the very next bar, which is confusing.
+var int prosContStickyBull = 0
+var int prosContStickyBear = 0
+if newDay
+    prosContStickyBull := 0
+    prosContStickyBear := 0
+if prosContinuationBull
+    prosContStickyBull := 5
+if prosContinuationBear
+    prosContStickyBear := 5
+if not prosLegValidBull
+    prosContStickyBull := 0
+if not prosLegValidBear
+    prosContStickyBear := 0
+if prosContStickyBull > 0 and not prosContinuationBull
+    prosContStickyBull := prosContStickyBull - 1
+if prosContStickyBear > 0 and not prosContinuationBear
+    prosContStickyBear := prosContStickyBear - 1
+
 //====================================================
 // PROS CONTEXT ENGINE — PHASE A5
 // OTE quality weighting + displacement stretch context
@@ -2588,7 +2609,7 @@ var table dash2 = table.new(position.top_right, 2, 8, border_width=1)
 // ORB TABLE — ES/MES only, bottom right
 var table orbDash = table.new(position.bottom_right, 2, 11, border_width=1)
 // PROS TABLE — dedicated continuation intelligence, bottom left
-var table prosDash = table.new(position.bottom_left, 2, 8, border_width=1)
+var table prosDash = table.new(position.bottom_left, 2, 10, border_width=1)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2744,7 +2765,9 @@ prosRetraceText =
      (prosLegValidBull or prosLegValidBear)          ? "ABOVE"    : "—"
 
 // OTE context — deepest retrace reached during this leg
+// DEEP = price went beyond OTE zone (over-retrace, depth 5) — riskier but OTE was traversed
 prosOteText =
+     prosActiveDeepest == 5                            ? "DEEP"     :
      prosActiveDeepest >= 3 and prosActiveDeepest <= 4 ? "TAGGED"   :
      prosActiveDeepest == 2                            ? "MID ONLY" :
      prosActiveDeepest == 1                            ? "SHALLOW"  :
@@ -2752,8 +2775,8 @@ prosOteText =
 
 // Continuation phase — operational detail for the CONT row
 prosContText =
-     prosContinuationBull                              ? "CONFIRMED ▲"   :
-     prosContinuationBear                              ? "CONFIRMED ▼"   :
+     prosContinuationBull or prosContStickyBull > 0    ? "CONFIRMED ▲"   :
+     prosContinuationBear or prosContStickyBear > 0    ? "CONFIRMED ▼"   :
      prosConFreshBull                                  ? "BUILDING ▲"    :
      prosConFreshBear                                  ? "BUILDING ▼"    :
      prosZoneTouchedBull                               ? "ZONE TOUCH ▲"  :
@@ -2803,7 +2826,8 @@ prosRetraceCol = prosActiveDepth == 3 ? colBull :
                  prosActiveDepth == 4 ? colWarn :
                  prosActiveDepth == 5 ? colBear :
                  prosActiveDepth >= 1 ? colWhite : colMuted
-prosOteCol     = prosActiveDeepest >= 3 and prosActiveDeepest <= 4 ? colBull :
+prosOteCol     = prosActiveDeepest == 5                            ? colWarn :
+                 prosActiveDeepest >= 3 and prosActiveDeepest <= 4 ? colBull :
                  prosActiveDeepest == 2                            ? colWarn : colMuted
 prosQualCol    = prosQualText == "ELITE"  ? colWarn  :
                  prosQualText == "STRONG" ? colBull  :
@@ -2959,6 +2983,18 @@ if showDashboard and barstate.islast
     table.cell(prosDash, 1, 7, dashSessionText,
          text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
          bgcolor=dashSessionBg, text_size=size.tiny)
+
+    // ── IB LEVELS (exported for Python parser reliability) ───────────
+    prosIbHighText = not na(ibHigh) ? str.tostring(ibHigh, "#.##") : "—"
+    prosIbLowText  = not na(ibLow)  ? str.tostring(ibLow,  "#.##") : "—"
+    table.cell(prosDash, 0, 8, "IB H",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 8, prosIbHighText,
+         text_color=colWhite, bgcolor=ictCellColor, text_size=size.tiny)
+    table.cell(prosDash, 0, 9, "IB L",
+         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
+    table.cell(prosDash, 1, 9, prosIbLowText,
+         text_color=colWhite, bgcolor=ictCellColor, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE

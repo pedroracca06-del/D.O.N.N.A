@@ -398,7 +398,9 @@ def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) ->
         if 'TAGGED' in pros_ote_up:
             phase           = 'OTE_TAGGED'
             signal_strength = 'high'
-        elif pros_retrace in ('OTE', 'DEEP'):
+        elif 'DEEP' in pros_ote_up or pros_retrace in ('OTE', 'DEEP'):
+            # DEEP in OTE field = over-retrace (price traversed OTE zone going deeper)
+            # Riskier than a clean tag but OTE was still reached — treat as approaching
             phase           = 'OTE_APPROACHING'
             signal_strength = 'medium'
         else:
@@ -409,7 +411,8 @@ def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) ->
         if 'TAGGED' in pros_ote_up:
             phase           = 'OTE_TAGGED'
             signal_strength = 'high'
-        elif pros_retrace in ('OTE', 'DEEP'):
+        elif 'DEEP' in pros_ote_up or pros_retrace in ('OTE', 'DEEP'):
+            # DEEP in OTE field = over-retrace — still worth monitoring, lower conviction
             phase           = 'OTE_APPROACHING'
             signal_strength = 'medium'
         else:
@@ -539,17 +542,34 @@ def _evaluate_orb_phase(main_state: dict, chart_ctx: dict, session_ctx: dict) ->
     }
 
 
-def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict) -> dict:
+def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict | None = None) -> dict:
     """
     Assess IB draw alignment.
-    IB levels come from NOVA labels/lines. CMD gives the directional bias.
+    IB levels come from PROS table rows IB H / IB L (preferred — added in Pine v1.x+) or
+    fall back to NOVA labels/lines. CMD gives the directional bias.
     """
     labels = chart_ctx.get('nova_labels', [])
     levels = chart_ctx.get('nova_levels', [])
     price  = chart_ctx.get('price')
 
-    ib_high = _extract_level(labels, levels, 'IB HIGH') or _extract_level(labels, levels, 'IB_HIGH')
-    ib_low  = _extract_level(labels, levels, 'IB LOW')  or _extract_level(labels, levels, 'IB_LOW')
+    # Prefer table-exported values — reliable bridge, no label parsing risk
+    ib_high: float | None = None
+    ib_low:  float | None = None
+    if pros_state:
+        try:
+            ib_high = float(pros_state.get('IB H', '') or '')
+        except (ValueError, TypeError):
+            pass
+        try:
+            ib_low = float(pros_state.get('IB L', '') or '')
+        except (ValueError, TypeError):
+            pass
+
+    # Fall back to label extraction for older Pine builds
+    if not ib_high:
+        ib_high = _extract_level(labels, levels, 'IB HIGH') or _extract_level(labels, levels, 'IB_HIGH')
+    if not ib_low:
+        ib_low  = _extract_level(labels, levels, 'IB LOW')  or _extract_level(labels, levels, 'IB_LOW')
 
     cmd_up = main_state.get('CMD', '').upper()
 
@@ -1036,7 +1056,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
 
     pros_eval = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval  = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
-    ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx)
+    ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
     inv_eval  = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
 
     signal_type, setup_type, rationale = _classify_signal(
@@ -1256,7 +1276,7 @@ def analyze_now(verbose: bool = False) -> dict:
     # Run all deterministic evaluators
     pros_eval = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval  = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
-    ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx)
+    ib_eval   = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
     inv_eval  = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
 
     signal_type, setup_type, rationale = _classify_signal(
