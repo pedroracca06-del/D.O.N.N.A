@@ -524,6 +524,34 @@ def route_to_execution(alert: 'AlertData') -> dict:
     except Exception as exc:
         _log(f'market_reality gate error (non-blocking): {exc}')
 
+    # Layer C: Market Reality 2.0 hard gate — objective ground-truth block.
+    # MR2 scores hard price facts (VWAP, IB, session range, weekly structure).
+    # block_longs=True when state is BEARISH_DOMINANT or PANIC_SELLING.
+    # block_shorts=True when state is BULLISH_DOMINANT.
+    # This gate cannot be overridden by grade, setup type, or conviction.
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        mr2       = load_market_reality_v2()
+        mr2_state = mr2.get('state', 'NEUTRAL')
+        if signal == 'LONG' and mr2.get('block_longs'):
+            reason = (
+                f'LONG {instrument} blocked — MR2 state={mr2_state} '
+                f'score={mr2.get("score", 0):+d} | '
+                f'{mr2.get("block_longs_reason", mr2_state)}'
+            )
+            _log(f'MR2_LONG_BLOCKED  {reason}')
+            return _bridge_reject('MR2_LONG_BLOCKED', reason, key, signal, setup_type, grade, session)
+        if signal == 'SHORT' and mr2.get('block_shorts'):
+            reason = (
+                f'SHORT {instrument} blocked — MR2 state={mr2_state} '
+                f'score={mr2.get("score", 0):+d} | '
+                f'{mr2.get("block_shorts_reason", mr2_state)}'
+            )
+            _log(f'MR2_SHORT_BLOCKED  {reason}')
+            return _bridge_reject('MR2_SHORT_BLOCKED', reason, key, signal, setup_type, grade, session)
+    except Exception as exc:
+        _log(f'MR2 gate error (non-blocking): {exc}')
+
     # ── Gates 7–13: Execution profile governance ─────────────────────────────────
     active_mode, cfg = _load_execution_config()
     if active_mode != 'disabled' and cfg:

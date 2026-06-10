@@ -1441,6 +1441,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
                 mem_summary     = mem_summary,
                 pre_signal      = signal_type,
                 claude_decision = decision,
+                mr2_state       = _load_mr2() if _load_mr2 else {},
             )
         except Exception:
             pass
@@ -1686,6 +1687,7 @@ def analyze_now(verbose: bool = False) -> dict:
                 mem_summary     = mem_summary,
                 pre_signal      = signal_type,
                 claude_decision = decision,
+                mr2_state       = _load_mr2() if _load_mr2 else {},
             )
         except Exception:
             pass

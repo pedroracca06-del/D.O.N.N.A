@@ -256,6 +256,7 @@ def log_reasoning_snapshot(
     mem_summary:     dict,
     pre_signal:      str,
     claude_decision: dict,
+    mr2_state:       dict | None = None,
 ) -> None:
     """
     Full intelligence context snapshot captured at every Claude reasoning decision.
@@ -368,6 +369,16 @@ def log_reasoning_snapshot(
             },
             'dir_pressure':  dp_summary,
             'market_memory': mem,
+
+            # Market Reality 2.0 state at decision time
+            'mr2': {
+                'state':       (mr2_state or {}).get('state', ''),
+                'score':       (mr2_state or {}).get('score', 0),
+                'block_longs': (mr2_state or {}).get('block_longs', False),
+                'block_shorts':(mr2_state or {}).get('block_shorts', False),
+                'bull_facts':  (mr2_state or {}).get('bull_fact_count', 0),
+                'bear_facts':  (mr2_state or {}).get('bear_fact_count', 0),
+            },
 
             # Decision
             'pre_signal':    pre_signal,
