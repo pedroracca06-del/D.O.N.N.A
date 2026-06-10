@@ -53,6 +53,11 @@ try:
 except Exception:
     _market_memory = None
 
+try:
+    from engines import directional_pressure as _dp_engine
+except Exception:
+    _dp_engine = None
+
 # ── MCP data collection ────────────────────────────────────────────────────────
 
 def _run_mcp(*args: str, timeout: int = 10) -> Optional[dict]:
@@ -1109,6 +1114,8 @@ PRICE STRUCTURE (state-based — independent of Pine event triggers)
 
 {_market_memory.format_for_prompt(symbol) if _market_memory else ''}
 
+{_dp_engine.format_for_prompt(pre.get('dir_pressure', {})) if _dp_engine else ''}
+
 EVALUATION TASK
 Architecture note: Pine indicator events CONTRIBUTE to intelligence — they do not define it.
 If the indicator is WAIT/READING but PRICE STRUCTURE shows OTE, evaluate from market state directly.
@@ -1218,9 +1225,18 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     inv_eval        = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
     price_ote_eval  = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
 
+    mem_summary = {}
     if _market_memory:
         try:
             _market_memory.update(symbol, session_ctx, price_ote_eval, pros_eval, chart_ctx)
+            mem_summary = _market_memory.get_summary(symbol)
+        except Exception:
+            pass
+
+    dir_pressure = {}
+    if _dp_engine:
+        try:
+            dir_pressure = _dp_engine.compute(pros_eval, ib_eval, session_ctx, mem_summary)
         except Exception:
             pass
 
@@ -1250,6 +1266,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         'ib_eval':        ib_eval,
         'inv_eval':       inv_eval,
         'price_ote_eval': price_ote_eval,
+        'dir_pressure':   dir_pressure,
         'pre_signal':     signal_type,
         'pre_setup':      setup_type,
         'rationale':      rationale,
@@ -1446,9 +1463,18 @@ def analyze_now(verbose: bool = False) -> dict:
     inv_eval       = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
     price_ote_eval = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
 
+    mem_summary = {}
     if _market_memory:
         try:
             _market_memory.update(symbol, session_ctx, price_ote_eval, pros_eval, chart_ctx)
+            mem_summary = _market_memory.get_summary(symbol)
+        except Exception:
+            pass
+
+    dir_pressure = {}
+    if _dp_engine:
+        try:
+            dir_pressure = _dp_engine.compute(pros_eval, ib_eval, session_ctx, mem_summary)
         except Exception:
             pass
 
@@ -1462,6 +1488,7 @@ def analyze_now(verbose: bool = False) -> dict:
         'ib_eval':        ib_eval,
         'inv_eval':       inv_eval,
         'price_ote_eval': price_ote_eval,
+        'dir_pressure':   dir_pressure,
         'pre_signal':     signal_type,
         'pre_setup':      setup_type,
         'rationale':      rationale,
