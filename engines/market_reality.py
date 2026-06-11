@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 import yfinance as yf
 
+from engines.market_reality_shared import fetch_weekly_structure
+
 _BASE_DIR     = Path(__file__).parent.parent
 _REALITY_FILE = _BASE_DIR / 'data' / 'donna_market_reality.json'
 _RISK_FILE    = _BASE_DIR / 'data' / 'donna_risk_state.json'
@@ -109,46 +111,6 @@ def _compute_assistant_tone(direction: str, severity: str, prior_valid: bool) ->
     return 'NORMAL'
 
 
-# ── Weekly structure detection (yfinance 5d history) ──────────────────────────
-
-def _fetch_weekly_structure() -> dict:
-    """
-    Detect weekly high/low breaks by comparing today's range against the
-    prior 4 days of NQ=F and ES=F data.  Tolerates yfinance outages gracefully.
-    """
-    result: dict = {
-        'structure': 'RANGE',
-        'nq_week_high': None, 'nq_week_low': None,
-        'es_week_high': None, 'es_week_low': None,
-    }
-    try:
-        structures: list[str] = []
-        for yf_sym, label in (('NQ=F', 'nq'), ('ES=F', 'es')):
-            hist = yf.Ticker(yf_sym).history(period='5d', interval='1d')
-            if hist is None or hist.empty or len(hist) < 2:
-                continue
-            prior      = hist.iloc[:-1]
-            today      = hist.iloc[-1]
-            prior_high = float(prior['High'].max())
-            prior_low  = float(prior['Low'].min())
-            today_low  = float(today['Low'])
-            today_high = float(today['High'])
-            result[f'{label}_week_high'] = round(prior_high, 2)
-            result[f'{label}_week_low']  = round(prior_low, 2)
-            tol = prior_high * 0.0005  # 0.05% tolerance
-            if today_low < prior_low - tol:
-                structures.append('WEEKLY_LOW_BREAK')
-            elif today_high > prior_high + tol:
-                structures.append('WEEKLY_HIGH_BREAK')
-        if 'WEEKLY_LOW_BREAK' in structures:
-            result['structure'] = 'WEEKLY_LOW_BREAK'
-        elif 'WEEKLY_HIGH_BREAK' in structures:
-            result['structure'] = 'WEEKLY_HIGH_BREAK'
-    except Exception as exc:
-        print(f'[market_reality] weekly structure fetch failed: {exc}')
-    return result
-
-
 # ── Prior context validity check ───────────────────────────────────────────────
 
 def _check_prior_context(direction: str, severity: str, grok: dict) -> tuple[bool, str]:
@@ -206,7 +168,7 @@ def compute_market_reality() -> dict:
     assistant_tone = _compute_assistant_tone(direction, severity, prior_valid)
     session_drive  = _compute_session_drive(direction, severity, regime, session)
 
-    weekly    = _fetch_weekly_structure()
+    weekly    = fetch_weekly_structure()
     structure = weekly.get('structure', 'RANGE')
     # Weekly break with no corresponding pct move → upgrade severity floor to MEDIUM
     if structure in ('WEEKLY_LOW_BREAK', 'WEEKLY_HIGH_BREAK') and severity == 'LOW':

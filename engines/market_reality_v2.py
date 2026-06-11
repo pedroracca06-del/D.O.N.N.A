@@ -48,6 +48,8 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from engines.market_reality_shared import fetch_weekly_structure
+
 _BASE_DIR  = Path(__file__).parent.parent
 _V2_FILE   = _BASE_DIR / 'data' / 'donna_market_reality_v2.json'
 _RISK_FILE = _BASE_DIR / 'data' / 'donna_risk_state.json'
@@ -306,9 +308,10 @@ def _classify_state(
 
 def compute_market_reality_v2() -> dict:
     """
-    Compute Market Reality 2.0 state. Called from process_finnhub_cycle()
-    after v1 completes. Fetches intraday 5m bars for NQ=F and ES=F, scores
-    all hard facts, and saves result to donna_market_reality_v2.json.
+    Compute Market Reality 2.0 state. Called from process_finnhub_cycle().
+    Fetches intraday 5m bars for NQ=F and ES=F, scores all hard facts,
+    and saves result to donna_market_reality_v2.json.
+    Fully independent of V1 — weekly structure fetched via shared module.
 
     Returns the full state dict. Never raises — returns a NEUTRAL state on
     any failure so the rest of the system is never blocked.
@@ -324,14 +327,9 @@ def compute_market_reality_v2() -> dict:
         es_pct   = _safe((snapshot.get('ES') or {}).get('pct'))
         vix      = _safe((snapshot.get('VIX') or {}).get('last'))
 
-        # Load weekly structure from v1 (already computed, avoids duplicate fetch)
-        try:
-            from engines.market_reality import load_market_reality
-            v1              = load_market_reality()
-            weekly_structure = v1.get('structure', 'RANGE')
-        except Exception:
-            weekly_structure = 'RANGE'
-            v1 = {}
+        # Fetch weekly structure from shared module — independent of V1
+        weekly_data      = fetch_weekly_structure()
+        weekly_structure = weekly_data.get('structure', 'RANGE')
 
         # Fetch intraday levels (network calls — both tolerate failure)
         nq_levels = _fetch_intraday('NQ=F')

@@ -213,7 +213,7 @@ def process_finnhub_cycle():
     except Exception as e:
         print(f'[market_reality] compute error: {e}')
 
-    # Market Reality 2.0 — objective ground-truth layer (runs after v1)
+    # Market Reality 2.0 — objective ground-truth layer (independent of v1)
     try:
         from engines.market_reality_v2 import compute_market_reality_v2
         compute_market_reality_v2()
