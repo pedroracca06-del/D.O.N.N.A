@@ -259,8 +259,9 @@ async def eod_close_loop():
                     if not _st.get('eod_lock') and _st.get('trade_permission'):
                         disable_trade_permission('EOD_NO_NEW_ENTRIES_AFTER_1530')
                         print(f'[EOD] {now.strftime("%H:%M ET")} — no new entries after 3:30 PM')
-            # Force close all at 3:45 PM — retry every 60s until flat
-            if is_weekday and now.hour == 15 and now.minute >= 45 and not closed_today:
+            # Force close all at 3:45 PM — retry every 60s until flat (up to 4:30 PM)
+            _eod_hour = now.hour * 60 + now.minute
+            if is_weekday and 15 * 60 + 45 <= _eod_hour <= 16 * 60 + 30 and not closed_today:
                 if _EXECUTION_AVAILABLE:
                     from core.state_engine import state as _st
                     try:

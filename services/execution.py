@@ -665,6 +665,21 @@ def close_all_positions_eod() -> int:
         exit_price = round(mkt_val / qty, 2) if qty > 0 else avg_entry
 
         try:
+            # Cancel any pending bracket legs (take-profit / stop-loss) first.
+            # Without this, close_position() can be rejected on some broker configs.
+            try:
+                from alpaca.trading.requests import GetOrdersRequest
+                from alpaca.trading.enums import QueryOrderStatus
+                _pending = api.get_orders(GetOrdersRequest(
+                    status=QueryOrderStatus.OPEN, symbols=[symbol]
+                ))
+                for _o in (_pending or []):
+                    try:
+                        api.cancel_order_by_id(_o.id)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             api.close_position(symbol)
             _state.remove_position(symbol)
         except Exception as e:
@@ -1434,9 +1449,28 @@ def execute_signal(signal_result: dict) -> dict:
     def _major_session(s: str) -> str:
         return 'NEW_YORK_CASH' if s in ('NY_OPEN', 'NY_AM', 'NY_PM', 'NEW_YORK_CASH') else s
 
+    def _pos_date_et(p: dict) -> str:
+        ts = p.get('timestamp', '')
+        if not ts:
+            return ''
+        try:
+            from datetime import timezone
+            dt_utc = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            return dt_utc.astimezone(NY_TZ).strftime('%Y-%m-%d')
+        except Exception:
+            return ''
+
+    _today_et = now_ny().strftime('%Y-%m-%d')
+
     open_positions = _state.get_open_positions()
     current_major  = _major_session(session)
-    stale = [p for p in open_positions if _major_session(str(p.get('session', ''))) != current_major]
+    stale = [
+        p for p in open_positions
+        if (
+            _major_session(str(p.get('session', ''))) != current_major
+            or (_pos_date_et(p) and _pos_date_et(p) != _today_et)
+        )
+    ]
     if stale:
         stale_syms = [p.get('symbol', '?') for p in stale]
         print(f'[execute_signal] Session boundary ({session}) — closing stale positions: {stale_syms}')

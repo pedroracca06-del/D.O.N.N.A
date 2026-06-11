@@ -643,6 +643,27 @@ def route_to_execution(alert: 'AlertData') -> dict:
                 )
                 if correlated:
                     open_sides = {_norm_dir(p.get('side', '')) for p in open_positions}
+
+                    # 11d: Portfolio Direction Coherence.
+                    # NOVA does not grade relative-strength spreads (long one correlated
+                    # instrument, short the other). Block before any market-reality check.
+                    _d_opposite = 'SHORT' if signal == 'LONG' else 'LONG'
+                    if _d_opposite in open_sides:
+                        _d_existing = next(
+                            (p for p in open_positions
+                             if _norm_dir(p.get('side', '')) == _d_opposite),
+                            {}
+                        )
+                        _d_sym = _d_existing.get('symbol', ', '.join(sorted(open_etfs)))
+                        _d_msg = (
+                            f'{signal} {instrument} conflicts with existing {_d_opposite} '
+                            f'on correlated instrument ({_d_sym}) — '
+                            f'NOVA does not grade relative-strength spreads. '
+                            f'Close the existing {_d_opposite} leg first.'
+                        )
+                        _log(f'PORTFOLIO_SPREAD_CONFLICT  {_d_msg}')
+                        return _reject('PORTFOLIO_SPREAD_CONFLICT', _d_msg)
+
                     if signal in open_sides:
                         # Gate 11c: correlated hostile-market check.
                         # Mirrors Gate 6c exactly: V2-primary, V1 safety net,
