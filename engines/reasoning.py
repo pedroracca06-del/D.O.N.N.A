@@ -59,6 +59,12 @@ except Exception:
     _dp_engine = None
 
 try:
+    from engines.momentum import compute_momentum as _compute_momentum, format_for_prompt as _momentum_fmt
+except Exception:
+    _compute_momentum = None
+    _momentum_fmt     = None
+
+try:
     from services.execution_trace import log_reasoning_snapshot as _log_snapshot
 except Exception:
     _log_snapshot = None
@@ -1115,6 +1121,29 @@ Standby: 3+ degradations or hostile environment — observe only
 Degradation factors: ORB >15pts, IB too tight/choppy, pre-market choppy, low volume at open,
 spread >2pts, macro event same day, VIX elevated >20, NQ/ES diverging, PROS/ORB signals in conflict.
 
+## MOMENTUM CONFIRMATION (MACD quality factor — never a trigger)
+Evidence of buyer/seller control returning during OTE retracement. 5m MACD slope, acceleration, and curl.
+This is a quality modifier — it adjusts grade, not the decision to trade.
+
+STRONG_BULLISH: MACD slope turned positive + curl up + histogram growing → buyers stepping in at OTE
+BULLISH:        Positive slope or histogram growing — partial confirmation
+NEUTRAL:        No clear momentum signal — grade from structure alone
+BEARISH:        Selling momentum persists at OTE — caution
+STRONG_BEARISH: Sellers accelerating — structural concern
+
+Grade adjustment rules (apply after all other factors):
+- LONG setup + STRONG_BULLISH → upgrade one tier if borderline (B→A possible if all else aligns)
+- LONG setup + BEARISH        → downgrade one tier (A→B, B→C)
+- LONG setup + STRONG_BEARISH → downgrade one tier + note active selling at OTE
+- SHORT setup + STRONG_BEARISH → upgrade one tier if borderline
+- SHORT setup + BULLISH       → downgrade one tier
+- SHORT setup + STRONG_BULLISH → downgrade one tier + note active buying at OTE
+- NEUTRAL → no change; use structure and IB to determine grade
+
+Critical: MACD curl near OTE (slope direction reversal) is the highest-value momentum signal.
+It marks the exact bar where control is transferring. A clean curl + IB aligned = high-confidence setup.
+NEVER downgrade to D solely for BEARISH/STRONG_BEARISH momentum — it is one input among many.
+
 ## NOVA INDICATOR TABLES
 Main table: CMD / STATE / PROS / OTE / CONT / QUALITY / STDV / SESS
 PROS table: DISPL / RETRACE / OTE / CONT / QUALITY / STDV
@@ -1201,6 +1230,7 @@ def _build_evaluation_prompt(
     ib_eval         = pre.get('ib_eval', {})
     inv_eval        = pre.get('inv_eval', {})
     price_ote_eval  = pre.get('price_ote_eval', {})
+    momentum_eval   = pre.get('momentum_eval', {})
 
     orb_range_str = ''
     if orb_eval.get('orb_high') and orb_eval.get('orb_low'):
@@ -1261,6 +1291,8 @@ PRICE STRUCTURE (state-based — independent of Pine event triggers)
 {_market_memory.format_for_prompt(symbol) if _market_memory else ''}
 
 {_dp_engine.format_for_prompt(pre.get('dir_pressure', {})) if _dp_engine else ''}
+
+{_momentum_fmt(momentum_eval) if _momentum_fmt and momentum_eval else ''}
 
 EVALUATION TASK
 Architecture note: Pine indicator events CONTRIBUTE to intelligence — they do not define it.
@@ -1379,10 +1411,20 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         except Exception:
             pass
 
+    momentum_eval = {}
+    if _compute_momentum:
+        try:
+            momentum_eval = _compute_momentum(symbol, ote_eval=price_ote_eval)
+        except Exception:
+            pass
+
     dir_pressure = {}
     if _dp_engine:
         try:
-            dir_pressure = _dp_engine.compute(pros_eval, ib_eval, session_ctx, mem_summary)
+            dir_pressure = _dp_engine.compute(
+                pros_eval, ib_eval, session_ctx, mem_summary,
+                momentum_eval=momentum_eval or None,
+            )
         except Exception:
             pass
 
@@ -1420,6 +1462,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         'inv_eval':       inv_eval,
         'price_ote_eval': price_ote_eval,
         'dir_pressure':   dir_pressure,
+        'momentum_eval':  momentum_eval,
         'pre_signal':     signal_type,
         'pre_setup':      setup_type,
         'rationale':      rationale,
@@ -1643,10 +1686,20 @@ def analyze_now(verbose: bool = False) -> dict:
         except Exception:
             pass
 
+    momentum_eval = {}
+    if _compute_momentum:
+        try:
+            momentum_eval = _compute_momentum(symbol, ote_eval=price_ote_eval)
+        except Exception:
+            pass
+
     dir_pressure = {}
     if _dp_engine:
         try:
-            dir_pressure = _dp_engine.compute(pros_eval, ib_eval, session_ctx, mem_summary)
+            dir_pressure = _dp_engine.compute(
+                pros_eval, ib_eval, session_ctx, mem_summary,
+                momentum_eval=momentum_eval or None,
+            )
         except Exception:
             pass
 
@@ -1667,6 +1720,7 @@ def analyze_now(verbose: bool = False) -> dict:
         'inv_eval':       inv_eval,
         'price_ote_eval': price_ote_eval,
         'dir_pressure':   dir_pressure,
+        'momentum_eval':  momentum_eval,
         'pre_signal':     signal_type,
         'pre_setup':      setup_type,
         'rationale':      rationale,

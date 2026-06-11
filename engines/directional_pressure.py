@@ -27,11 +27,12 @@ from __future__ import annotations
 from typing import Optional
 
 # ── Source weight ceilings (max pts per direction per source) ─────────────────
-_W_REALITY = 20
-_W_PINE    = 25
-_W_IB      = 15
-_W_MEMORY  = 20
-_W_MACRO   = 10
+_W_REALITY  = 20
+_W_PINE     = 25
+_W_IB       = 15
+_W_MEMORY   = 20
+_W_MACRO    = 10
+_W_MOMENTUM = 12   # MACD curl/slope evidence at OTE
 
 # ── Decision thresholds ───────────────────────────────────────────────────────
 _DOMINANT_THRESHOLD  = 30   # net score for DOMINANT label
@@ -199,6 +200,35 @@ def _score_memory(mem: dict) -> tuple[int, int, str]:
     return min(bull, _W_MEMORY), min(bear, _W_MEMORY), ' | '.join(notes)
 
 
+def _score_momentum(momentum_eval: dict) -> tuple[int, int, str]:
+    """
+    MACD slope/curl evidence of buyer or seller control returning at OTE.
+    momentum_confirmation is ABSOLUTE: STRONG_BULLISH always → bull pts.
+    Agreement vs conflict with the OTE direction surfaces via the existing
+    disagreement-detection loop — no special casing needed here.
+    """
+    state = (momentum_eval.get('momentum_confirmation') or 'NEUTRAL').upper()
+    slope = momentum_eval.get('macd_slope', 0)
+    curl  = 'CURL_UP' if momentum_eval.get('curl_up') else ('CURL_DOWN' if momentum_eval.get('curl_down') else '')
+    ote   = momentum_eval.get('ote_context', 'N/A')
+
+    pts_map = {
+        'STRONG_BULLISH': (12, 0),
+        'BULLISH':         (7, 0),
+        'NEUTRAL':         (0, 0),
+        'BEARISH':         (0, 7),
+        'STRONG_BEARISH':  (0, 12),
+    }
+    bull, bear = pts_map.get(state, (0, 0))
+    note = f'momentum={state} slope={slope:+.4f}'
+    if curl:
+        note += f' {curl}'
+    if ote and ote != 'N/A':
+        note += f' OTE={ote}'
+
+    return min(bull, _W_MOMENTUM), min(bear, _W_MOMENTUM), note
+
+
 def _score_macro(mr: dict) -> tuple[int, int, str]:
     """VIX and volatility regime — creates directional headwinds."""
     vix    = float(mr.get('vix', 0) or 0)
@@ -229,21 +259,23 @@ def _score_macro(mr: dict) -> tuple[int, int, str]:
 # ── Main compute ──────────────────────────────────────────────────────────────
 
 def compute(
-    pros_eval:   dict,
-    ib_eval:     dict,
-    session_ctx: dict,
-    mem_summary: dict,
-    mr:          Optional[dict] = None,
+    pros_eval:     dict,
+    ib_eval:       dict,
+    session_ctx:   dict,
+    mem_summary:   dict,
+    mr:            Optional[dict] = None,
+    momentum_eval: Optional[dict] = None,
 ) -> dict:
     """
     Compute directional pressure from all intelligence sources.
 
     Args:
-        pros_eval:   return value of _evaluate_pros_phase()
-        ib_eval:     return value of _evaluate_ib_alignment()
-        session_ctx: session context dict from _build_session_context()
-        mem_summary: return value of market_memory.get_summary(symbol)
-        mr:          market reality state (loaded from file if None)
+        pros_eval:     return value of _evaluate_pros_phase()
+        ib_eval:       return value of _evaluate_ib_alignment()
+        session_ctx:   session context dict from _build_session_context()
+        mem_summary:   return value of market_memory.get_summary(symbol)
+        mr:            market reality state (loaded from file if None)
+        momentum_eval: return value of compute_momentum() from engines.momentum
 
     Returns:
         {
@@ -294,6 +326,7 @@ def compute(
     p_b,  p_s,  p_n  = _score_pine(pros_eval)
     ib_b, ib_s, ib_n = _score_ib(ib_eval)
     m_b,  m_s,  m_n  = _score_memory(mem_summary)
+    mo_b, mo_s, mo_n = _score_momentum(momentum_eval) if momentum_eval else (0, 0, 'momentum=not_computed')
 
     # V2 already scores VIX as a hard fact — skip macro to avoid double-counting
     if _mr2 is not None:
@@ -307,13 +340,14 @@ def compute(
         'ib_eval':        {'bull': ib_b, 'bear': ib_s, 'note': ib_n},
         'market_memory':  {'bull': m_b,  'bear': m_s,  'note': m_n},
         'macro':          {'bull': x_b,  'bear': x_s,  'note': x_n},
+        'momentum':       {'bull': mo_b, 'bear': mo_s, 'note': mo_n},
     }
 
     # Session quality multiplier (A=1.0 B=0.85 C=0.70)
     q_mult = {'A': 1.0, 'B': 0.85, 'C': 0.70}.get(quality, 0.5)
 
-    raw_bull = r_b + p_b + ib_b + m_b + x_b
-    raw_bear = r_s + p_s + ib_s + m_s + x_s
+    raw_bull = r_b + p_b + ib_b + m_b + x_b + mo_b
+    raw_bear = r_s + p_s + ib_s + m_s + x_s + mo_s
 
     bull = round(raw_bull * q_mult)
     bear = round(raw_bear * q_mult)
@@ -339,6 +373,7 @@ def compute(
         'ib_eval':        'IB analysis',
         'market_memory':  'Market memory',
         'macro':          'Macro/VIX',
+        'momentum':       'MACD momentum',
     }
     disagreements: list[str] = []
     disagree_count = 0
