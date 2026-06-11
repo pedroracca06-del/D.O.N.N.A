@@ -1455,9 +1455,19 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             action      = 'Session closed. No further entries.',
         )]
 
+    # Tier 1 family isolation: Claude sees only the responsible strategy family.
+    # A PROS trade is graded as PROS. An ORB trade is graded as ORB. Never both.
+    _strat_family = setup_type.split('_')[0].upper() if '_' in setup_type else ''
+    if _strat_family == 'ORB':
+        _pros_for_claude, _orb_for_claude = {}, orb_eval
+    elif _strat_family == 'PROS':
+        _pros_for_claude, _orb_for_claude = pros_eval, {}
+    else:
+        _pros_for_claude, _orb_for_claude = pros_eval, orb_eval
+
     pre_assess = {
-        'pros_eval':      pros_eval,
-        'orb_eval':       orb_eval,
+        'pros_eval':      _pros_for_claude,
+        'orb_eval':       _orb_for_claude,
         'ib_eval':        ib_eval,
         'inv_eval':       inv_eval,
         'price_ote_eval': price_ote_eval,
@@ -1714,9 +1724,19 @@ def analyze_now(verbose: bool = False) -> dict:
         signal_type, setup_type, rationale, dir_pressure
     )
 
+    # Tier 1 family isolation: Claude sees only the responsible strategy family.
+    # A PROS trade is graded as PROS. An ORB trade is graded as ORB. Never both.
+    _strat_family = setup_type.split('_')[0].upper() if '_' in setup_type else ''
+    if _strat_family == 'ORB':
+        _pros_for_claude, _orb_for_claude = {}, orb_eval
+    elif _strat_family == 'PROS':
+        _pros_for_claude, _orb_for_claude = pros_eval, {}
+    else:
+        _pros_for_claude, _orb_for_claude = pros_eval, orb_eval
+
     pre_assess = {
-        'pros_eval':      pros_eval,
-        'orb_eval':       orb_eval,
+        'pros_eval':      _pros_for_claude,
+        'orb_eval':       _orb_for_claude,
         'ib_eval':        ib_eval,
         'inv_eval':       inv_eval,
         'price_ote_eval': price_ote_eval,
