@@ -257,6 +257,7 @@ def log_reasoning_snapshot(
     pre_signal:      str,
     claude_decision: dict,
     mr2_state:       dict | None = None,
+    momentum_eval:   dict | None = None,
 ) -> None:
     """
     Full intelligence context snapshot captured at every Claude reasoning decision.
@@ -369,6 +370,19 @@ def log_reasoning_snapshot(
             },
             'dir_pressure':  dp_summary,
             'market_memory': mem,
+
+            # MACD momentum state at decision time — for validation study
+            'momentum': {
+                'momentum_confirmation': (momentum_eval or {}).get('momentum_confirmation', 'NEUTRAL'),
+                'macd_slope':   (momentum_eval or {}).get('macd_slope', 0.0),
+                'macd_accel':   (momentum_eval or {}).get('macd_accel', 0.0),
+                'histogram':    (momentum_eval or {}).get('histogram', 0.0),
+                'hist_delta':   (momentum_eval or {}).get('hist_delta', 0.0),
+                'curl_up':      (momentum_eval or {}).get('curl_up', False),
+                'curl_down':    (momentum_eval or {}).get('curl_down', False),
+                'ote_context':  (momentum_eval or {}).get('ote_context', 'N/A'),
+                'source':       (momentum_eval or {}).get('source', 'unavailable'),
+            },
 
             # Market Reality 2.0 state at decision time — self-contained for replay
             'mr2': {

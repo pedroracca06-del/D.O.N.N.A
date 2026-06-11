@@ -1486,6 +1486,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
                 pre_signal      = signal_type,
                 claude_decision = decision,
                 mr2_state       = _load_mr2() if _load_mr2 else {},
+                momentum_eval   = momentum_eval,
             )
         except Exception:
             pass
@@ -1743,6 +1744,7 @@ def analyze_now(verbose: bool = False) -> dict:
                 pre_signal      = signal_type,
                 claude_decision = decision,
                 mr2_state       = _load_mr2() if _load_mr2 else {},
+                momentum_eval   = momentum_eval,
             )
         except Exception:
             pass
