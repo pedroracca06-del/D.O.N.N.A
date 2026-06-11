@@ -28,7 +28,8 @@ from typing import Optional
 
 # ── Source weight ceilings (max pts per direction per source) ─────────────────
 _W_REALITY  = 20
-_W_PINE     = 25
+_W_PINE     = 25   # PROS phase + cont quality
+_W_ORB      = 14   # ORB breakout confirmation
 _W_IB       = 15
 _W_MEMORY   = 20
 _W_MACRO    = 10
@@ -125,6 +126,45 @@ def _score_pine(pros_eval: dict) -> tuple[int, int, str]:
         bear = phase_pts + cont_pts
 
     return min(bull, _W_PINE), min(bear, _W_PINE), note
+
+
+def _score_orb(orb_eval: dict) -> tuple[int, int, str]:
+    """
+    ORB breakout confirmation pressure.
+    Active only in NY_OPEN within the IB window (in_context=True).
+    Breakout phases carry directional weight; ambiguous/internal phases carry none.
+    """
+    if not orb_eval or not orb_eval.get('has_signal') or not orb_eval.get('in_context'):
+        return 0, 0, 'ORB: no signal or out of context'
+
+    phase     = (orb_eval.get('phase')     or 'UNDEFINED').upper()
+    direction = (orb_eval.get('direction') or 'N/A').upper()
+    orb_wide  = orb_eval.get('orb_wide', False)
+    orb_range = orb_eval.get('orb_range') or 0
+
+    phase_pts = {
+        'BREAKOUT_LONG':  12,
+        'BREAKOUT_SHORT': 12,
+        'AT_MIDPOINT':     5,
+    }.get(phase, 0)
+
+    if orb_wide:
+        phase_pts = max(0, phase_pts - 2)
+
+    bull = bear = 0
+    if direction == 'LONG':
+        bull = phase_pts
+        note = f'ORB {phase} range={orb_range:.1f}pts' + (' WIDE' if orb_wide else '')
+    elif direction == 'SHORT':
+        bear = phase_pts
+        note = f'ORB {phase} range={orb_range:.1f}pts' + (' WIDE' if orb_wide else '')
+    elif phase == 'AT_MIDPOINT':
+        bull = bear = phase_pts // 2
+        note = f'ORB AT_MIDPOINT (ambiguous) range={orb_range:.1f}pts'
+    else:
+        note = f'ORB {phase} no directional signal'
+
+    return min(bull, _W_ORB), min(bear, _W_ORB), note
 
 
 def _score_ib(ib_eval: dict) -> tuple[int, int, str]:
@@ -265,6 +305,7 @@ def compute(
     mem_summary:   dict,
     mr:            Optional[dict] = None,
     momentum_eval: Optional[dict] = None,
+    orb_eval:      Optional[dict] = None,
 ) -> dict:
     """
     Compute directional pressure from all intelligence sources.
@@ -276,6 +317,7 @@ def compute(
         mem_summary:   return value of market_memory.get_summary(symbol)
         mr:            market reality state (loaded from file if None)
         momentum_eval: return value of compute_momentum() from engines.momentum
+        orb_eval:      return value of _evaluate_orb_phase() — ORB breakout pressure
 
     Returns:
         {
@@ -284,8 +326,8 @@ def compute(
           net:           int,          # positive = bullish, negative = bearish
           dominance:     str,          # BULL_DOMINANT / BEAR_DOMINANT / BULL_LEANING / BEAR_LEANING / CONTESTED
           conviction:    str,          # HIGH / MODERATE / LOW / CONFLICTED / NONE
-          sources:       dict,         # per-source {bull, bear, note}
-          disagreements: list[str],    # source conflicts — explicit for AI interpretation
+          sources:       dict,         # per-source {bull, bear, note} — keys are family-attributed
+          disagreements: list[str],    # family-attributed source conflicts visible to Claude
           session_quality: str,
         }
     """
@@ -321,12 +363,13 @@ def compute(
             'session_quality': quality,
         }
 
-    # Score each source independently
-    r_b,  r_s,  r_n  = _score_reality(mr, _mr2)
-    p_b,  p_s,  p_n  = _score_pine(pros_eval)
-    ib_b, ib_s, ib_n = _score_ib(ib_eval)
-    m_b,  m_s,  m_n  = _score_memory(mem_summary)
-    mo_b, mo_s, mo_n = _score_momentum(momentum_eval) if momentum_eval else (0, 0, 'momentum=not_computed')
+    # Score each source independently — family-attributed
+    r_b,   r_s,   r_n   = _score_reality(mr, _mr2)
+    p_b,   p_s,   p_n   = _score_pine(pros_eval)
+    orb_b, orb_s, orb_n = _score_orb(orb_eval) if orb_eval else (0, 0, 'ORB: not provided')
+    ib_b,  ib_s,  ib_n  = _score_ib(ib_eval)
+    m_b,   m_s,   m_n   = _score_memory(mem_summary)
+    mo_b,  mo_s,  mo_n  = _score_momentum(momentum_eval) if momentum_eval else (0, 0, 'momentum=not_computed')
 
     # V2 already scores VIX as a hard fact — skip macro to avoid double-counting
     if _mr2 is not None:
@@ -334,20 +377,22 @@ def compute(
     else:
         x_b, x_s, x_n = _score_macro(mr)
 
+    # Sources keyed by family name for attribution-aware disagreement reporting
     sources = {
-        'market_reality': {'bull': r_b,  'bear': r_s,  'note': r_n},
-        'pine_state':     {'bull': p_b,  'bear': p_s,  'note': p_n},
-        'ib_eval':        {'bull': ib_b, 'bear': ib_s, 'note': ib_n},
-        'market_memory':  {'bull': m_b,  'bear': m_s,  'note': m_n},
-        'macro':          {'bull': x_b,  'bear': x_s,  'note': x_n},
-        'momentum':       {'bull': mo_b, 'bear': mo_s, 'note': mo_n},
+        'reality':  {'bull': r_b,   'bear': r_s,   'note': r_n},
+        'pros':     {'bull': p_b,   'bear': p_s,   'note': p_n},
+        'orb':      {'bull': orb_b, 'bear': orb_s, 'note': orb_n},
+        'ib':       {'bull': ib_b,  'bear': ib_s,  'note': ib_n},
+        'memory':   {'bull': m_b,   'bear': m_s,   'note': m_n},
+        'macro':    {'bull': x_b,   'bear': x_s,   'note': x_n},
+        'momentum': {'bull': mo_b,  'bear': mo_s,  'note': mo_n},
     }
 
     # Session quality multiplier (A=1.0 B=0.85 C=0.70)
     q_mult = {'A': 1.0, 'B': 0.85, 'C': 0.70}.get(quality, 0.5)
 
-    raw_bull = r_b + p_b + ib_b + m_b + x_b + mo_b
-    raw_bear = r_s + p_s + ib_s + m_s + x_s + mo_s
+    raw_bull = r_b + p_b + orb_b + ib_b + m_b + x_b + mo_b
+    raw_bear = r_s + p_s + orb_s + ib_s + m_s + x_s + mo_s
 
     bull = round(raw_bull * q_mult)
     bear = round(raw_bear * q_mult)
@@ -368,12 +413,13 @@ def compute(
     # Disagreement detection — explicit source conflicts visible to Claude
     winning_is_bull = net > 0
     label_map = {
-        'market_reality': 'Market Reality',
-        'pine_state':     'Pine indicator',
-        'ib_eval':        'IB analysis',
-        'market_memory':  'Market memory',
-        'macro':          'Macro/VIX',
-        'momentum':       'MACD momentum',
+        'reality':  'Market Reality',
+        'pros':     'PROS',
+        'orb':      'ORB',
+        'ib':       'IB',
+        'memory':   'memory',
+        'macro':    'macro/VIX',
+        'momentum': 'MACD momentum',
     }
     disagreements: list[str] = []
     disagree_count = 0
@@ -412,17 +458,19 @@ def compute(
 
 def format_for_prompt(dp: dict) -> str:
     """
-    Compact directional pressure block for Claude prompt injection.
+    Family-attributed directional pressure block for Claude prompt injection.
 
     Example:
       DIRECTIONAL PRESSURE: bull=42 bear=18 net=+24 | dominance=BULL_LEANING | conviction=MODERATE
-        market_reality    bull=12 bear= 5 | BULLISH MEDIUM | BULL_TREND
-        pine_state        bull=18 bear= 0 | LONG ACCEPTED_CONTINUATION cont=STRONG
-        ib_eval           bull=12 bear= 0 | draw=HIGH aligned=True
-        market_memory     bull= 0 bear= 0 | no structural evidence yet
-        macro             bull= 0 bear= 3 | VIX=17.2 mild risk-off
+        reality   bull=12 bear= 5 | BULLISH MEDIUM
+        PROS      bull=18 bear= 0 | LONG ACCEPTED_CONTINUATION cont=STRONG
+        ORB       bull= 0 bear= 0 | ORB: no signal or out of context
+        ib        bull=12 bear= 0 | draw=HIGH aligned=True
+        memory    bull= 0 bear= 0 | no structural evidence yet
+        macro     bull= 0 bear= 3 | VIX=17.2 mild risk-off
+        momentum  bull= 5 bear= 0 | momentum=BULLISH slope=+0.0042
         DISAGREEMENTS:
-          ⚑ Macro/VIX BEARISH (3pts) — conflicts with dominant BULLISH
+          >> PROS BEARISH (8pts) vs dominant BULLISH
     """
     if not dp or dp.get('dominance') == 'NEUTRAL':
         return 'DIRECTIONAL PRESSURE: session inactive / dead zone'
@@ -433,10 +481,9 @@ def format_for_prompt(dp: dict) -> str:
     ]
 
     for key, s in dp.get('sources', {}).items():
-        if s['bull'] > 0 or s['bear'] > 0:
-            lines.append(
-                f'  {key:<16} bull={s["bull"]:>2} bear={s["bear"]:>2} | {s["note"]}'
-            )
+        lines.append(
+            f'  {key:<9} bull={s["bull"]:>2} bear={s["bear"]:>2} | {s["note"]}'
+        )
 
     disagreements = dp.get('disagreements', [])
     if disagreements:

@@ -1424,6 +1424,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             dir_pressure = _dp_engine.compute(
                 pros_eval, ib_eval, session_ctx, mem_summary,
                 momentum_eval=momentum_eval or None,
+                orb_eval=orb_eval or None,
             )
         except Exception:
             pass
@@ -1710,6 +1711,7 @@ def analyze_now(verbose: bool = False) -> dict:
             dir_pressure = _dp_engine.compute(
                 pros_eval, ib_eval, session_ctx, mem_summary,
                 momentum_eval=momentum_eval or None,
+                orb_eval=orb_eval or None,
             )
         except Exception:
             pass
