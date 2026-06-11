@@ -633,6 +633,40 @@ def route_to_execution(alert: 'AlertData') -> dict:
                 return _reject('MAX_CONCURRENT_POSITIONS',
                                f'Concurrent position cap: {len(open_positions)}/{max_concurrent} open')
 
+            # 11e: Live-broker correlated ETF check.
+            # Gates 11c/d read the state engine — which can be empty after a restart.
+            # This gate goes directly to Alpaca for the CORRELATED ETF so a ghost
+            # position (ALPACA_RECONCILE, orphaned bracket, manual) cannot slip through.
+            _corr_etf = 'SPY' if instrument in _NQ_INSTRUMENTS else 'QQQ'
+            try:
+                from services.execution import get_positions as _get_live_positions
+                _live_all = _get_live_positions()
+                for _lp in _live_all:
+                    _lp_sym = str(_lp.get('symbol', '')).upper()
+                    if _lp_sym != _corr_etf:
+                        continue
+                    _lp_dir = _norm_dir(_lp.get('side', ''))
+                    _lp_qty = _lp.get('qty', 0)
+                    _lp_avg = _lp.get('avg_entry', '?')
+                    _opposite_dir = 'SHORT' if signal == 'LONG' else 'LONG'
+                    if _lp_dir == _opposite_dir:
+                        _e_msg = (
+                            f'{signal} {instrument} conflicts with live {_lp_dir} {_corr_etf} '
+                            f'({_lp_qty} shares @ {_lp_avg}) not tracked in state engine — '
+                            f'NOVA does not grade relative-strength spreads. '
+                            f'Close {_corr_etf} {_lp_dir} first.'
+                        )
+                        _log(f'PORTFOLIO_SPREAD_CONFLICT (live-broker)  {_e_msg}')
+                        return _reject('PORTFOLIO_SPREAD_CONFLICT', _e_msg)
+                    if _lp_dir == signal:
+                        _s_msg = (
+                            f'{signal} {instrument} — {_corr_etf} already {_lp_dir} '
+                            f'({_lp_qty} shares @ {_lp_avg}) in Alpaca but missing from state engine'
+                        )
+                        _log(f'CORRELATED_EXPOSURE_STATE_MISMATCH  {_s_msg}')
+            except Exception as _e_err:
+                _log(f'Gate 11e live-broker check error (non-blocking): {_e_err}')
+
             # 11c: Correlated exposure guard.
             # MNQ + MES same direction into a hostile market reality compounds risk.
             if open_positions:
