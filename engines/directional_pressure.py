@@ -306,6 +306,7 @@ def compute(
     mr:            Optional[dict] = None,
     momentum_eval: Optional[dict] = None,
     orb_eval:      Optional[dict] = None,
+    active_family: str            = '',
 ) -> dict:
     """
     Compute directional pressure from all intelligence sources.
@@ -318,6 +319,7 @@ def compute(
         mr:            market reality state (loaded from file if None)
         momentum_eval: return value of compute_momentum() from engines.momentum
         orb_eval:      return value of _evaluate_orb_phase() — ORB breakout pressure
+        active_family: 'PROS' | 'ORB' | '' — gates which scorers run ('' = diagnostic, all run)
 
     Returns:
         {
@@ -363,12 +365,29 @@ def compute(
             'session_quality': quality,
         }
 
+    # Family-gated scoring — scorers run only for the active family.
+    # active_family='' is diagnostic mode: all scorers run for observability.
+    _pros_active   = active_family in ('PROS', '')
+    _orb_active    = active_family in ('ORB',  '')
+    _memory_active = active_family in ('PROS', '')  # market memory events are PROS-sourced only
+
     # Score each source independently — family-attributed
     r_b,   r_s,   r_n   = _score_reality(mr, _mr2)
-    p_b,   p_s,   p_n   = _score_pine(pros_eval)
-    orb_b, orb_s, orb_n = _score_orb(orb_eval) if orb_eval else (0, 0, 'ORB: not provided')
+    p_b,   p_s,   p_n   = (
+        _score_pine(pros_eval) if _pros_active
+        else (0, 0, f'PROS: not active family ({active_family})')
+    )
+    if not _orb_active:
+        orb_b, orb_s, orb_n = 0, 0, f'ORB: not active family ({active_family})'
+    elif orb_eval:
+        orb_b, orb_s, orb_n = _score_orb(orb_eval)
+    else:
+        orb_b, orb_s, orb_n = 0, 0, 'ORB: not provided'
     ib_b,  ib_s,  ib_n  = _score_ib(ib_eval)
-    m_b,   m_s,   m_n   = _score_memory(mem_summary)
+    m_b,   m_s,   m_n   = (
+        _score_memory(mem_summary) if _memory_active
+        else (0, 0, 'memory: excluded — PROS-sourced state')
+    )
     mo_b,  mo_s,  mo_n  = _score_momentum(momentum_eval) if momentum_eval else (0, 0, 'momentum=not_computed')
 
     # V2 already scores VIX as a hard fact — skip macro to avoid double-counting

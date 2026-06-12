@@ -1418,17 +1418,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         except Exception:
             pass
 
-    dir_pressure = {}
-    if _dp_engine:
-        try:
-            dir_pressure = _dp_engine.compute(
-                pros_eval, ib_eval, session_ctx, mem_summary,
-                momentum_eval=momentum_eval or None,
-                orb_eval=orb_eval or None,
-            )
-        except Exception:
-            pass
-
+    # Classify first — family must be known before DP can be computed
     signal_type, setup_type, rationale = _classify_signal(
         pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
     )
@@ -1436,6 +1426,21 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     if signal_type is None:
         print(f'[nova-reasoning] {session_ctx["time_et"]} | {symbol} | no signal | {rationale}')
         return []
+
+    # Derive active family from classification — gates which DP scorers run
+    _active_family = setup_type.split('_')[0].upper() if '_' in setup_type else ''
+
+    dir_pressure = {}
+    if _dp_engine:
+        try:
+            dir_pressure = _dp_engine.compute(
+                pros_eval, ib_eval, session_ctx, mem_summary,
+                momentum_eval=momentum_eval or None,
+                orb_eval=orb_eval or None,
+                active_family=_active_family,
+            )
+        except Exception:
+            pass
 
     signal_type, setup_type, rationale = _apply_market_reality_gate(
         signal_type, setup_type, rationale
@@ -1457,11 +1462,10 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         )]
 
     # Tier 1 family isolation: Claude sees only the responsible strategy family.
-    # A PROS trade is graded as PROS. An ORB trade is graded as ORB. Never both.
-    _strat_family = setup_type.split('_')[0].upper() if '_' in setup_type else ''
-    if _strat_family == 'ORB':
+    # _active_family was derived from setup_type before any gate modification.
+    if _active_family == 'ORB':
         _pros_for_claude, _orb_for_claude = {}, orb_eval
-    elif _strat_family == 'PROS':
+    elif _active_family == 'PROS':
         _pros_for_claude, _orb_for_claude = pros_eval, {}
     else:
         _pros_for_claude, _orb_for_claude = pros_eval, orb_eval
@@ -1705,6 +1709,14 @@ def analyze_now(verbose: bool = False) -> dict:
         except Exception:
             pass
 
+    # Classify first — family must be known before DP can be computed
+    signal_type, setup_type, rationale = _classify_signal(
+        pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
+    )
+
+    # Derive active family from classification — gates which DP scorers run
+    _active_family = setup_type.split('_')[0].upper() if '_' in setup_type else ''
+
     dir_pressure = {}
     if _dp_engine:
         try:
@@ -1712,13 +1724,11 @@ def analyze_now(verbose: bool = False) -> dict:
                 pros_eval, ib_eval, session_ctx, mem_summary,
                 momentum_eval=momentum_eval or None,
                 orb_eval=orb_eval or None,
+                active_family=_active_family,
             )
         except Exception:
             pass
 
-    signal_type, setup_type, rationale = _classify_signal(
-        pros_eval, orb_eval, ib_eval, inv_eval, session_ctx, price_ote_eval
-    )
     signal_type, setup_type, rationale = _apply_market_reality_gate(
         signal_type, setup_type, rationale
     )
@@ -1727,11 +1737,10 @@ def analyze_now(verbose: bool = False) -> dict:
     )
 
     # Tier 1 family isolation: Claude sees only the responsible strategy family.
-    # A PROS trade is graded as PROS. An ORB trade is graded as ORB. Never both.
-    _strat_family = setup_type.split('_')[0].upper() if '_' in setup_type else ''
-    if _strat_family == 'ORB':
+    # _active_family was derived from setup_type before any gate modification.
+    if _active_family == 'ORB':
         _pros_for_claude, _orb_for_claude = {}, orb_eval
-    elif _strat_family == 'PROS':
+    elif _active_family == 'PROS':
         _pros_for_claude, _orb_for_claude = pros_eval, {}
     else:
         _pros_for_claude, _orb_for_claude = pros_eval, orb_eval
