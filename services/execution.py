@@ -823,6 +823,94 @@ def get_execution_status() -> dict:
     }
 
 
+# ── Context snapshot ──────────────────────────────────────────
+
+def _get_context_snapshot(instrument: str) -> dict:
+    """
+    Build a point-in-time context snapshot at execution time.
+
+    Layer 1 — reasoning trace (donna_reasoning_trace.json):
+      Structured dir_pressure, mr2, ib_eval, momentum blocks.
+      Available when execution runs locally via the monitor bridge.
+      Not available on Render cloud (returns partial snapshot).
+
+    Layer 2 — MR2 cache (donna_market_reality_v2.json):
+      Overrides mr2_state/score if the cached file is fresher or trace absent.
+
+    Layer 3 — state engine:
+      active_thesis, thesis_direction at moment of execution.
+
+    Returns {} only on complete failure.
+    """
+    snapshot: dict = {}
+    norm = instrument.upper().replace('CME_MINI:', '').replace('1!', '').strip()
+
+    # Layer 1: reasoning trace ------------------------------------------------
+    try:
+        from pathlib import Path as _P
+        trace_path = _P(__file__).parent.parent / 'data' / 'donna_reasoning_trace.json'
+        if trace_path.exists():
+            import json as _j
+            entries = _j.loads(trace_path.read_text(encoding='utf-8'))
+            if not isinstance(entries, list):
+                entries = []
+            matches = [e for e in entries if str(e.get('symbol', '')).upper() == norm]
+            if matches:
+                # Sort newest-first by timestamp_et string (ISO-comparable)
+                matches.sort(key=lambda e: e.get('timestamp_et', ''), reverse=True)
+                t   = matches[0]
+                dp  = t.get('dir_pressure', {}) or {}
+                mr2 = t.get('mr2', {}) or {}
+                ib  = t.get('ib_eval', {}) or {}
+                mom = t.get('momentum', {}) or {}
+
+                snapshot['dominance']        = dp.get('dominance',  'NEUTRAL')
+                snapshot['conviction']       = dp.get('conviction', 'UNKNOWN')
+                snapshot['dp_net']           = int(dp.get('net',     0))
+                snapshot['dp_bullish']       = int(dp.get('bullish', 0))
+                snapshot['dp_bearish']       = int(dp.get('bearish', 0))
+
+                snapshot['mr2_state']        = mr2.get('state', 'NEUTRAL')
+                snapshot['mr2_score']        = int(mr2.get('score', 0))
+                snapshot['block_longs']      = bool(mr2.get('block_longs',  False))
+                snapshot['block_shorts']     = bool(mr2.get('block_shorts', False))
+
+                snapshot['ib_draw']          = ib.get('draw',     'UNCLEAR')
+                snapshot['ib_aligned']       = bool(ib.get('aligned') or False)
+                snapshot['ib_high']          = float(ib.get('ib_high') or 0)
+                snapshot['ib_low']           = float(ib.get('ib_low')  or 0)
+
+                snapshot['momentum']         = mom.get('momentum_confirmation', 'NEUTRAL')
+                snapshot['macd_slope']       = float(mom.get('macd_slope') or 0)
+
+                snapshot['session_quality']  = str(t.get('session_quality', ''))
+                snapshot['trace_id']         = str(t.get('id', ''))
+                snapshot['trace_ts']         = str(t.get('timestamp_et', ''))
+    except Exception:
+        pass  # trace absent on Render — continue to Layer 2
+
+    # Layer 2: MR2 cache (overrides trace mr2 if fresher / trace absent) ------
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        mr2c = load_market_reality_v2()
+        if mr2c.get('state'):
+            snapshot['mr2_state']    = mr2c['state']
+            snapshot['mr2_score']    = int(mr2c.get('score', 0))
+            snapshot['block_longs']  = bool(mr2c.get('block_longs',  False))
+            snapshot['block_shorts'] = bool(mr2c.get('block_shorts', False))
+    except Exception:
+        pass
+
+    # Layer 3: state engine thesis --------------------------------------------
+    try:
+        snapshot['active_thesis']    = _state.get('active_thesis',    '')
+        snapshot['thesis_direction'] = _state.get('thesis_direction', '')
+    except Exception:
+        pass
+
+    return snapshot
+
+
 # ── Journal helpers ────────────────────────────────────────────
 
 def _journal_log_trade(
@@ -831,37 +919,46 @@ def _journal_log_trade(
     stop_px: float, tgt_px: float, order_id: str, session: str,
 ) -> None:
     """Write a DONNA_AUTO journal entry immediately after a confirmed order."""
-    risk   = load_risk_state()
-    regime = str(data.get('regime', '') or risk.get('market_regime', '')).upper() or 'UNKNOWN'
-    conf   = str(parsed.get('confidence', ''))
-    setup  = str(data.get('setup_type', ''))
-    tier   = str(data.get('tier', ''))
-    ny     = now_ny()
+    risk             = load_risk_state()
+    regime           = str(data.get('regime', '') or risk.get('market_regime', '')).upper() or 'UNKNOWN'
+    conf             = str(parsed.get('confidence', ''))
+    setup            = str(data.get('setup_type', ''))
+    tier             = str(data.get('tier', ''))
+    instrument       = str(data.get('instrument', '')).upper()   # futures root (MNQ/MES/etc.)
+    strategy_family  = str(data.get('strategy_family', setup.split('_')[0] if '_' in setup else setup)).upper()
+    ny               = now_ny()
+
+    # Capture market context at execution time for post-trade thesis analysis
+    ctx_snap = _get_context_snapshot(instrument) if instrument else {}
 
     entry = {
-        'source':         'DONNA_AUTO',
-        'order_id':       order_id,
-        'ticker':         symbol,
-        'direction':      'LONG' if is_long else 'SHORT',
-        'trade_date':     ny.strftime('%Y-%m-%d'),
-        'time':           ny.strftime('%H:%M:%S ET'),
-        'entry_price':    entry_ref,
-        'stop_price':     stop_px,
-        'target_price':   tgt_px,
-        'exit_price':     None,
-        'exit_time':      None,
-        'size':           qty,
-        'setup_type':     setup,
-        'tier':           tier,
-        'confidence':     conf,
-        'regime':         regime,
-        'active_regime':  regime,
-        'session':        session,
-        'harvey_verdict': 'TAKE',
-        'broker_mode':    BROKER_MODE,
-        'realized_pnl':   None,
-        'pnl':            None,
-        'outcome':        'OPEN',
+        'source':            'DONNA_AUTO',
+        'order_id':          order_id,
+        'ticker':            symbol,       # routed ETF (SPY / QQQ)
+        'instrument':        instrument,   # futures root (MNQ / MES)
+        'direction':         'LONG' if is_long else 'SHORT',
+        'trade_date':        ny.strftime('%Y-%m-%d'),
+        'time':              ny.strftime('%H:%M:%S ET'),
+        'entry_price':       entry_ref,
+        'stop_price':        stop_px,
+        'target_price':      tgt_px,
+        'exit_price':        None,
+        'exit_time':         None,
+        'size':              qty,
+        'setup_type':        setup,
+        'strategy_family':   strategy_family,
+        'tier':              tier,
+        'confidence':        conf,
+        'regime':            regime,
+        'active_regime':     regime,
+        'session':           session,
+        'harvey_verdict':    'TAKE',
+        'broker_mode':       BROKER_MODE,
+        'realized_pnl':      None,
+        'pnl':               None,
+        'outcome':           'OPEN',
+        'context_snapshot':  ctx_snap,     # market state at entry — used by thesis_analysis
+        'thesis_analysis':   None,         # populated by check_position_outcomes after close
         'notes': (
             f'DONNA autonomous trade. {setup} on {symbol}. '
             f'Regime: {regime}. Confidence: {conf}. Broker: {BROKER_MODE}.'
@@ -986,7 +1083,7 @@ def check_position_outcomes() -> int:
         realized_pnl = round(raw_pnl, 2)
         outcome      = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
 
-        trades[idx] = {
+        closed_trade = {
             **trade,
             'entry_price':  entry_px,
             'exit_price':   exit_price,
@@ -995,6 +1092,21 @@ def check_position_outcomes() -> int:
             'pnl':          realized_pnl,
             'outcome':      outcome,
         }
+
+        # Thesis analysis — runs synchronously; Alpaca bar fetch (~2s per trade)
+        try:
+            from engines.thesis_analysis import analyze_closed_trade as _analyze
+            ta = _analyze(closed_trade)
+            if ta:
+                closed_trade['thesis_analysis'] = ta
+                print(
+                    f'[thesis_analysis] {symbol} {direction} → '
+                    f'{ta.get("classification", "?")} | {ta.get("classification_reason", "")[:80]}'
+                )
+        except Exception as _ta_err:
+            print(f'[thesis_analysis] error for {symbol}: {_ta_err}')
+
+        trades[idx] = closed_trade
         updated += 1
         try:
             _state.remove_position(symbol)

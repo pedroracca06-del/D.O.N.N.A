@@ -139,6 +139,21 @@ def save_journal(trades: list):
     write_json_file(JOURNAL_FILE, trades)
 
 
+def update_trade_thesis_analysis(order_id: str, analysis: dict) -> bool:
+    """
+    Patch a thesis_analysis block onto a journal entry by order_id.
+    Used for manual re-analysis or external callers.
+    Returns True if entry was found and updated.
+    """
+    trades = load_journal()
+    for i, t in enumerate(trades):
+        if str(t.get('order_id', '')) == order_id:
+            trades[i] = {**t, 'thesis_analysis': analysis}
+            save_journal(trades)
+            return True
+    return False
+
+
 def compute_journal_stats(trades: list) -> dict:
     from datetime import date, timedelta
 
