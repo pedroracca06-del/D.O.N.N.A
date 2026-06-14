@@ -602,14 +602,21 @@ def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) ->
     }
 
 
-def _evaluate_orb_phase(main_state: dict, chart_ctx: dict, session_ctx: dict) -> dict:
+def _evaluate_orb_phase(main_state: dict, chart_ctx: dict, session_ctx: dict, orb_table: dict | None = None) -> dict:
     """
-    Detect ORB setup phase from chart context and NOVA levels.
-    ORB is defined at 09:30–09:32 ET; context is valid through 11:00 ET.
+    Detect ORB setup from the NOVA indicator's ORB CONSOLE table.
+
+    Primary source: TYPE and BIAS fields populated by the orbPassXxx gate layer
+    (orbPassMidRejectBull/Bear, orbPassLiqRejectBull/Bear, orbPassEdgeRejectBull/Bear).
+    These implement RP's three setup types directly:
+      MID_REJECT  → ORB_BREAK_RETEST (break → mandatory midpoint retest → confirmation)
+      LIQ_REJECT  → ORB_BOUNCE / ORB_REJECTION (external key level sweep + reclaim)
+      EDGE_REJECT → ORB_BOUNCE / ORB_REJECTION (ORB boundary tap + rejection)
+
+    No longer re-derives signal from price proximity (old E1/E2 logic removed).
     """
     labels = chart_ctx.get('nova_labels', [])
     levels = chart_ctx.get('nova_levels', [])
-    price  = chart_ctx.get('price')
 
     orb_high = _extract_level(labels, levels, 'ORB HIGH') or _extract_level(labels, levels, 'ORB_HIGH')
     orb_low  = _extract_level(labels, levels, 'ORB LOW')  or _extract_level(labels, levels, 'ORB_LOW')
@@ -617,69 +624,83 @@ def _evaluate_orb_phase(main_state: dict, chart_ctx: dict, session_ctx: dict) ->
 
     if not orb_high or not orb_low:
         return {
-            'phase':      'UNDEFINED',
-            'has_signal': False,
-            'orb_high':   None,
-            'orb_low':    None,
-            'orb_mid':    None,
-            'orb_range':  None,
-            'in_context': session_ctx['in_window'],
+            'phase':         'UNDEFINED',
+            'has_signal':    False,
+            'setup_type':    'N/A',
+            'direction':     'N/A',
+            'entry_type':    '',
+            'entry_quality': '',
+            'orb_high':      None,
+            'orb_low':       None,
+            'orb_mid':       None,
+            'orb_range':     None,
+            'orb_wide':      False,
+            'in_context':    session_ctx['in_window'],
         }
 
     orb_range = orb_high - orb_low
     if not orb_mid:
         orb_mid = (orb_high + orb_low) / 2
 
-    phase     = 'INSIDE_ORB'
-    direction = 'N/A'
-    has_signal = False
+    # Read indicator's RP-framework classification from ORB CONSOLE table
+    _tbl          = orb_table or {}
+    entry_type    = _tbl.get('TYPE', '').strip()
+    entry_quality = _tbl.get('REJ Q', '').strip()
+    bias_raw      = _tbl.get('BIAS', '').strip().upper()
 
-    if price is not None:
-        try:
-            p = float(price)
-            orb_tolerance = orb_range * 0.15  # 15% of range = "near boundary"
+    # BIAS values from Pine Script: "BULL", "BEAR", "BULL DEAD", "BEAR DEAD", "NEUTRAL"
+    if 'BULL' in bias_raw and 'DEAD' not in bias_raw:
+        direction = 'LONG'
+    elif 'BEAR' in bias_raw and 'DEAD' not in bias_raw:
+        direction = 'SHORT'
+    else:
+        direction = 'N/A'
 
-            if p > orb_high:
-                direction = 'LONG'
-                if p <= orb_high + orb_tolerance:
-                    # Just broke out — E1 setup may be forming as price extends
-                    phase      = 'BREAKOUT_LONG'
-                    has_signal = True
-                else:
-                    phase = 'ABOVE_ORB'
-            elif p < orb_low:
-                direction = 'SHORT'
-                if p >= orb_low - orb_tolerance:
-                    phase      = 'BREAKOUT_SHORT'
-                    has_signal = True
-                else:
-                    phase = 'BELOW_ORB'
-            elif abs(p - orb_mid) <= orb_range * 0.10:
-                # Price at midpoint — E1 rejection setup area
-                phase      = 'AT_MIDPOINT'
-                has_signal = True
-        except (TypeError, ValueError):
-            pass
+    # TYPE values that indicate an active orbPassXxx gate has fired:
+    #   MID_REJECT  — orbPassMidRejectBull/Bear: break confirmed + midpoint retest + closure
+    #   LIQ_REJECT  — orbPassLiqRejectBull/Bear: external key level swept + 2-bar reclaim
+    #   EDGE_REJECT — orbPassEdgeRejectBull/Bear: ORB boundary tap + rejection quality sequence
+    # All other TYPE values (MID DEFEND ▲, LIQ DETECT, EXPANDING, etc.) are context display only.
+    _SETUP_MAP = {
+        'MID_REJECT': {
+            'LONG':  'ORB_BREAK_RETEST_LONG',
+            'SHORT': 'ORB_BREAK_RETEST_SHORT',
+            'N/A':   'ORB_BREAK_RETEST',
+        },
+        'LIQ_REJECT': {
+            'LONG':  'ORB_BOUNCE_LONG',
+            'SHORT': 'ORB_REJECTION_SHORT',
+            'N/A':   'ORB_LIQ_REJECT',
+        },
+        'EDGE_REJECT': {
+            'LONG':  'ORB_BOUNCE_LONG',
+            'SHORT': 'ORB_REJECTION_SHORT',
+            'N/A':   'ORB_EDGE_REJECT',
+        },
+    }
 
-    # Determine E1 vs E2 setup type
-    setup_type = 'N/A'
-    if has_signal and direction != 'N/A':
-        if phase in ('BREAKOUT_LONG', 'BREAKOUT_SHORT'):
-            setup_type = f'ORB_E2_{direction}'   # Breakout → external liquidity rejection
-        elif phase == 'AT_MIDPOINT':
-            setup_type = 'ORB_E1_UNKNOWN'         # Direction depends on which side broke
+    if entry_type in _SETUP_MAP:
+        phase      = entry_type
+        setup_type = _SETUP_MAP[entry_type].get(direction, _SETUP_MAP[entry_type]['N/A'])
+        has_signal = True
+    else:
+        phase      = 'NO_SETUP'
+        setup_type = 'N/A'
+        has_signal = False
 
     return {
-        'phase':      phase,
-        'direction':  direction,
-        'setup_type': setup_type,
-        'has_signal': has_signal,
-        'orb_high':   orb_high,
-        'orb_low':    orb_low,
-        'orb_mid':    orb_mid,
-        'orb_range':  orb_range,
-        'orb_wide':   orb_range > 15,    # MES: >15pts reduces reliability
-        'in_context': session_ctx['in_window'],
+        'phase':         phase,
+        'direction':     direction,
+        'setup_type':    setup_type,
+        'has_signal':    has_signal,
+        'entry_type':    entry_type,
+        'entry_quality': entry_quality,
+        'orb_high':      orb_high,
+        'orb_low':       orb_low,
+        'orb_mid':       orb_mid,
+        'orb_range':     orb_range,
+        'orb_wide':      orb_range > 15,
+        'in_context':    session_ctx['in_window'],
     }
 
 
@@ -859,7 +880,10 @@ def _classify_signal(
         orb_wide  = orb_eval.get('orb_wide', False)
 
         wide_note = ' | WIDE ORB — reliability reduced' if orb_wide else ''
-        rationale = f'ORB {phase} | range={orb_eval.get("orb_range", "?"):.1f}pts{wide_note}'
+        quality   = orb_eval.get('entry_quality', '') or '?'
+        orb_range_val = orb_eval.get('orb_range')
+        range_str = f'{orb_range_val:.1f}' if orb_range_val is not None else '?'
+        rationale = f'ORB {phase} | {setup} | quality={quality} | range={range_str}pts{wide_note}'
         return HEADS_UP, setup, rationale
 
     return None, 'N/A', 'No qualifying signal detected'
@@ -1396,9 +1420,10 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     nova_state = parse_nova_tables(raw_tables)
     main_state = nova_state.get('main', {})
     pros_state_data = nova_state.get('pros', {})
+    orb_table       = nova_state.get('orb', {})
 
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
-    orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
+    orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
     ib_eval         = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
     inv_eval        = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
     price_ote_eval  = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
@@ -1577,14 +1602,16 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             pros_stdv     = pros_state_data.get('STDV', ''),
 
             # ORB
-            orb_state  = orb_parsed.get('STATE', ''),
-            orb_bias   = orb_parsed.get('BIAS', ''),
-            orb_high   = _safe_float(orb_parsed.get('HIGH')),
-            orb_mid    = _safe_float(orb_parsed.get('MID')),
-            orb_low    = _safe_float(orb_parsed.get('LOW')),
-            orb_signal = bool(orb_eval.get('has_signal')),
-            orb_phase  = orb_eval.get('phase', ''),
-            orb_range  = orb_eval.get('orb_range'),
+            orb_state        = orb_parsed.get('STATE', ''),
+            orb_bias         = orb_parsed.get('BIAS', ''),
+            orb_high         = _safe_float(orb_parsed.get('HIGH')),
+            orb_mid          = _safe_float(orb_parsed.get('MID')),
+            orb_low          = _safe_float(orb_parsed.get('LOW')),
+            orb_signal       = bool(orb_eval.get('has_signal')),
+            orb_phase        = orb_eval.get('phase', ''),
+            orb_range        = orb_eval.get('orb_range'),
+            orb_entry_type   = orb_eval.get('entry_type', ''),
+            orb_entry_quality= orb_eval.get('entry_quality', ''),
 
             # IB
             ib_high    = ib_eval.get('ib_high'),
@@ -1686,10 +1713,11 @@ def analyze_now(verbose: bool = False) -> dict:
     nova_state     = parse_nova_tables(raw_tables)
     main_state     = nova_state.get('main', {})
     pros_state_data = nova_state.get('pros', {})
+    orb_table       = nova_state.get('orb', {})
 
     # Run all deterministic evaluators
     pros_eval      = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
-    orb_eval       = _evaluate_orb_phase(main_state, chart_ctx, session_ctx)
+    orb_eval       = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
     ib_eval        = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
     inv_eval       = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
     price_ote_eval = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)

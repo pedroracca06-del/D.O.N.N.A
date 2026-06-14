@@ -1916,8 +1916,9 @@ buyScore  += failedAuctionBull ? 20 : 0
 sellScore += failedAuctionBear ? 20 : 0
 
 // ICT STEP MODEL — adaptive weights
-buyScore  += orbLongReady    ? orbWeight  : 0
-sellScore += orbShortReady   ? orbWeight  : 0
+// ORB score now sourced from orbBuyPass/orbSellPass (new RP-faithful gate layer) — see below
+// buyScore  += orbLongReady    ? orbWeight  : 0  [replaced — old composite gate]
+// sellScore += orbShortReady   ? orbWeight  : 0  [replaced — old composite gate]
 buyScore  += ictLongReady    ? ictWeight  : 0
 sellScore += ictShortReady   ? ictWeight  : 0
 buyScore  += step3LongElite  ? 15 : 0
@@ -2101,6 +2102,9 @@ orbLiqTarget = (orbPassLiqRejectBull or orbPassLiqRejectBear) and not na(orbMid)
 // ── EXECUTION GATES ───────────────────────────────────────────────────────────
 orbBuyPass  = isESChart and (orbPassMidRejectBull or orbPassLiqRejectBull or orbPassEdgeRejectBull)
 orbSellPass = isESChart and (orbPassMidRejectBear or orbPassLiqRejectBear or orbPassEdgeRejectBear)
+// ORB score: sourced from orbPassXxx gate layer (MID_REJECT / LIQ_REJECT / EDGE_REJECT)
+buyScore  += orbBuyPass  ? orbWeight : 0
+sellScore += orbSellPass ? orbWeight : 0
 //================ STRATEGY OWNERSHIP ================
 orbBuySignal  = orbBuyPass  and canSmartBuy
 orbSellSignal = orbSellPass and canSmartSell
