@@ -18,12 +18,17 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
-_BASE_DIR        = Path(__file__).parent.parent
-_SIGNAL_LOG      = _BASE_DIR / 'data' / 'donna_signal_log.json'
-_EXEC_TRACE      = _BASE_DIR / 'data' / 'donna_execution_trace.json'
+from core.config import (
+    SIGNAL_LOG_FILE    as _SIGNAL_LOG,
+    TRACE_FILE         as _EXEC_TRACE,
+    REASONING_TRACE_FILE,
+    FEED_SYNC_FILE,
+    NOVA_INGEST_SECRET,
+)
 
 _lock = threading.Lock()
 
@@ -596,4 +601,126 @@ def get_feed_stats() -> dict:
             'total_executed':  executions,
             'total_rejected':  rejections,
         },
+    }
+
+
+# ── Ingest (Render-side replica append) ──────────────────────────────────────
+
+_MAX_SIGNAL    = 10_000
+_MAX_REASONING = 300
+
+
+def _sync_ts() -> str:
+    try:
+        from core.config import now_ny
+        return now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
+    except Exception:
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
+
+
+def _update_sync_state(signal_id: str = '', reasoning_id: str = '') -> None:
+    try:
+        state: dict = {}
+        if FEED_SYNC_FILE.exists():
+            state = json.loads(FEED_SYNC_FILE.read_text(encoding='utf-8'))
+        ts = _sync_ts()
+        if signal_id:
+            state['last_signal_id']        = signal_id
+            state['last_signal_ingest_ts'] = ts
+        if reasoning_id:
+            state['last_reasoning_id']        = reasoning_id
+            state['last_reasoning_ingest_ts'] = ts
+        state['last_ingest_ts'] = ts
+        FEED_SYNC_FILE.write_text(json.dumps(state, indent=2), encoding='utf-8')
+    except Exception:
+        pass
+
+
+def ingest_signal(entry: dict) -> str:
+    """
+    Append one signal_log entry received from the local monitor.
+    Deduplicates against the 20 most recent entries.
+    Returns the entry ID on success, '' on failure.
+    """
+    entry_id = entry.get('id', '')
+    with _lock:
+        try:
+            data = _read_json(_SIGNAL_LOG)
+            if any(e.get('id') == entry_id for e in data[:20]):
+                return entry_id                        # already present
+            data.insert(0, entry)
+            _SIGNAL_LOG.write_text(
+                json.dumps(data[:_MAX_SIGNAL], indent=2, default=str),
+                encoding='utf-8',
+            )
+        except Exception as e:
+            print(f'[feed_ingest] signal write error: {e}')
+            return ''
+    _update_sync_state(signal_id=entry_id)
+    return entry_id
+
+
+def ingest_reasoning(entry: dict) -> str:
+    """
+    Append one reasoning_trace entry received from the local monitor.
+    Deduplicates against the 20 most recent entries.
+    Returns the entry ID on success, '' on failure.
+    """
+    entry_id = entry.get('id', '')
+    with _lock:
+        try:
+            data = _read_json(REASONING_TRACE_FILE)
+            if any(e.get('id') == entry_id for e in data[:20]):
+                return entry_id
+            data.insert(0, entry)
+            REASONING_TRACE_FILE.write_text(
+                json.dumps(data[:_MAX_REASONING], indent=2, default=str),
+                encoding='utf-8',
+            )
+        except Exception as e:
+            print(f'[feed_ingest] reasoning write error: {e}')
+            return ''
+    _update_sync_state(reasoning_id=entry_id)
+    return entry_id
+
+
+# ── Feed health ───────────────────────────────────────────────────────────────
+
+def get_feed_health() -> dict:
+    """
+    Sync health snapshot for GET /api/feed/health.
+
+    Answers immediately: is the feed empty because nothing happened,
+    or because sync failed?
+    """
+    with _lock:
+        signals   = _read_json(_SIGNAL_LOG)
+        exec_data = _read_json(_EXEC_TRACE)
+        reasoning = _read_json(REASONING_TRACE_FILE)
+
+    sync_state: dict = {}
+    try:
+        if FEED_SYNC_FILE.exists():
+            sync_state = json.loads(FEED_SYNC_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        pass
+
+    newest_signal    = signals[0].get('timestamp_et', '')   if signals   else ''
+    newest_reasoning = reasoning[0].get('timestamp_et', '') if reasoning else ''
+    exec_total       = sum(1 for e in exec_data if e.get('event_type') == 'EXECUTED')
+    gov_total        = sum(1 for e in exec_data if e.get('event_type') in ('REJECTED', 'BRIDGE_REJECTED'))
+
+    return {
+        'signal_count':          len(signals),
+        'reasoning_count':       len(reasoning),
+        'execution_count':       exec_total,
+        'governance_count':      gov_total,
+        'newest_signal_ts':      newest_signal,
+        'newest_reasoning_ts':   newest_reasoning,
+        'last_ingest_ts':        sync_state.get('last_ingest_ts', ''),
+        'last_signal_ingest_ts': sync_state.get('last_signal_ingest_ts', ''),
+        'last_signal_id':        sync_state.get('last_signal_id', ''),
+        'feed_populated':        len(signals) > 0,
+        'sync_configured':       bool(sync_state),
     }

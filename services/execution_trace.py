@@ -15,14 +15,12 @@ import json
 import random
 import threading
 import time
-from pathlib import Path
 from typing import Optional
 
-BASE_DIR        = Path(__file__).parent.parent
-TRACE_FILE      = BASE_DIR / 'data' / 'donna_execution_trace.json'
-REASONING_FILE  = BASE_DIR / 'data' / 'donna_reasoning_trace.json'
-MAX_TRACE       = 500
-MAX_REASONING   = 300
+from core.config import TRACE_FILE, REASONING_TRACE_FILE as REASONING_FILE
+
+MAX_TRACE     = 500
+MAX_REASONING = 300
 
 _lock = threading.Lock()
 
@@ -259,20 +257,17 @@ def log_reasoning_snapshot(
     claude_decision: dict,
     mr2_state:       dict | None = None,
     momentum_eval:   dict | None = None,
-) -> Optional[str]:
+) -> Optional[dict]:
     """
     Full intelligence context snapshot captured at every Claude reasoning decision.
-
-    Answers: "Why did NOVA think this?" / "Why was this blocked?" /
-             "What differentiated good from bad trades?"
 
     Stored in donna_reasoning_trace.json (separate from execution trace).
     Each entry is self-contained — reconstructable without any other state.
 
-    Called from reasoning.py after evaluate_with_claude() returns, before
-    AlertData is built.
-
-    Returns the entry ID so signal_log can store a cross-reference.
+    Returns the full entry dict so the caller can:
+      - extract entry['id'] for the signal_log cross-reference
+      - push the entry to Render's ingest endpoint without a second disk read
+    Returns None on error.
     """
     try:
         # ── Pine state summary (key fields only, not full raw table) ──────────
@@ -414,7 +409,7 @@ def log_reasoning_snapshot(
             entries.insert(0, entry)
             _save_reasoning(entries[:MAX_REASONING])
 
-        return _entry_id
+        return entry
 
     except Exception as e:
         print(f'[trace] log_reasoning_snapshot error: {e}')

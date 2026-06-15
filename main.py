@@ -1049,15 +1049,69 @@ async def nova_feed_card(source_id: str):
 
 @app.get('/api/feed/stats')
 async def nova_feed_stats():
-    """
-    Aggregate statistics across the full feed — signal counts, grade distribution,
-    MR2 state distribution, DP dominance counts, draw category breakdown.
-    """
+    """Aggregate statistics across the full feed."""
     try:
         from services.feed import get_feed_stats
         return await asyncio.to_thread(get_feed_stats)
     except Exception as e:
         return {'error': str(e)}
+
+
+@app.get('/api/feed/health')
+async def nova_feed_health():
+    """
+    Sync health: signal/reasoning/execution counts, newest timestamps, last ingest.
+    Use this to diagnose whether an empty feed means no events or sync failure.
+    """
+    try:
+        from services.feed import get_feed_health
+        return await asyncio.to_thread(get_feed_health)
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@app.post('/api/feed/ingest')
+async def nova_feed_ingest(request: Request):
+    """
+    Receive signal and/or reasoning entries pushed by the local intelligence monitor.
+    Authenticated via X-Nova-Ingest-Secret header (shared secret).
+    Body: { "signal": {...}, "reasoning": {...} }  — both fields are optional.
+    """
+    from core.config import NOVA_INGEST_SECRET
+    if not NOVA_INGEST_SECRET:
+        raise HTTPException(status_code=503, detail='Ingest not configured on this instance.')
+
+    secret = request.headers.get('X-Nova-Ingest-Secret', '')
+    if secret != NOVA_INGEST_SECRET:
+        raise HTTPException(status_code=401, detail='Invalid ingest secret.')
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid JSON body.')
+
+    signal_entry    = body.get('signal')
+    reasoning_entry = body.get('reasoning')
+
+    if not signal_entry and not reasoning_entry:
+        raise HTTPException(status_code=400, detail='Body must contain signal and/or reasoning.')
+
+    from services.feed import ingest_signal, ingest_reasoning
+
+    signal_id    = ''
+    reasoning_id = ''
+
+    if signal_entry and isinstance(signal_entry, dict):
+        signal_id = await asyncio.to_thread(ingest_signal, signal_entry)
+
+    if reasoning_entry and isinstance(reasoning_entry, dict):
+        reasoning_id = await asyncio.to_thread(ingest_reasoning, reasoning_entry)
+
+    return {
+        'ok':           True,
+        'signal_id':    signal_id,
+        'reasoning_id': reasoning_id,
+    }
 
 
 @app.get('/orchestration-status')

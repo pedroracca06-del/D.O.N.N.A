@@ -33,10 +33,12 @@ MACRO_EVENTS_FILE  = DATA_DIR / 'donna_macro_events.json'
 MORNING_BRIEF_FILE = DATA_DIR / 'donna_morning_brief_state.json'
 JOURNAL_FILE       = DATA_DIR / 'donna_journal.json'
 REJECTIONS_FILE    = DATA_DIR / 'donna_rejections.json'
-TRACE_FILE         = DATA_DIR / 'donna_execution_trace.json'
-MARKET_MEMORY_FILE    = DATA_DIR / 'donna_market_memory.json'
-REASONING_TRACE_FILE  = DATA_DIR / 'donna_reasoning_trace.json'
+SIGNAL_LOG_FILE        = DATA_DIR / 'donna_signal_log.json'
+TRACE_FILE             = DATA_DIR / 'donna_execution_trace.json'
+MARKET_MEMORY_FILE     = DATA_DIR / 'donna_market_memory.json'
+REASONING_TRACE_FILE   = DATA_DIR / 'donna_reasoning_trace.json'
 MARKET_REALITY_V2_FILE = DATA_DIR / 'donna_market_reality_v2.json'
+FEED_SYNC_FILE         = DATA_DIR / 'donna_feed_sync.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()
@@ -65,6 +67,12 @@ ALERT_SCREENSHOT       = os.getenv('ALERT_SCREENSHOT', 'true').strip().lower() =
 ALERT_COOLDOWN_MINUTES = int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
 ALERT_DAILY_MAX        = int(os.getenv('ALERT_DAILY_MAX', '20'))
 ALERT_STATE_FILE       = DATA_DIR / 'donna_alert_state.json'
+
+# ── Feed sync (local → Render replication) ────────────────────
+# NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)
+# NOVA_INGEST_SECRET: shared secret for POST /api/feed/ingest — set in both local .env and Render env vars
+NOVA_RENDER_URL    = os.getenv('NOVA_RENDER_URL', '').strip().rstrip('/')
+NOVA_INGEST_SECRET = os.getenv('NOVA_INGEST_SECRET', '').strip()
 
 FINNHUB_API_KEY         = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY             = os.getenv('FMP_API_KEY', '').strip()

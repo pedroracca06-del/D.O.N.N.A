@@ -75,6 +75,40 @@ except Exception:
     _load_mr2    = None
     _mr2_prompt  = None
 
+# ── Feed sync — fire-and-forget push to Render ────────────────────────────────
+
+import threading as _threading
+
+def _push_feed_entry(signal_entry: dict, reasoning_entry: dict) -> None:
+    """
+    Push one signal + reasoning entry to Render's /api/feed/ingest.
+    Runs in a daemon thread — never blocks the monitor cycle.
+    Silent on all failures (Render may be down, env vars unset, etc.).
+    """
+    if not signal_entry and not reasoning_entry:
+        return
+    def _do():
+        try:
+            import requests as _req
+            from core.config import NOVA_RENDER_URL, NOVA_INGEST_SECRET
+            if not NOVA_RENDER_URL or not NOVA_INGEST_SECRET:
+                return
+            payload: dict = {}
+            if signal_entry:
+                payload['signal'] = signal_entry
+            if reasoning_entry:
+                payload['reasoning'] = reasoning_entry
+            _req.post(
+                NOVA_RENDER_URL + '/api/feed/ingest',
+                json    = payload,
+                headers = {'X-Nova-Ingest-Secret': NOVA_INGEST_SECRET},
+                timeout = 4,
+            )
+        except Exception:
+            pass
+    _threading.Thread(target=_do, daemon=True).start()
+
+
 # ── MCP data collection ────────────────────────────────────────────────────────
 
 def _run_mcp(*args: str, timeout: int = 10) -> Optional[dict]:
@@ -1582,10 +1616,11 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         except Exception:
             pass
 
+    _snapshot_entry: dict = {}
     _snapshot_id = ''
     if _log_snapshot:
         try:
-            _snapshot_id = _log_snapshot(
+            _snap_result = _log_snapshot(
                 symbol          = symbol,
                 session_ctx     = session_ctx,
                 chart_ctx       = chart_ctx,
@@ -1599,7 +1634,10 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
                 claude_decision = decision,
                 mr2_state       = _mr2_snap,
                 momentum_eval   = momentum_eval,
-            ) or ''
+            )
+            if isinstance(_snap_result, dict):
+                _snapshot_entry = _snap_result
+                _snapshot_id    = _snap_result.get('id', '')
         except Exception:
             pass
 
@@ -1655,7 +1693,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             session        = session_ctx.get('session', ''),
         )
 
-        log_cycle(
+        _signal_entry = log_cycle(
             # Instrument
             symbol       = symbol,
             price        = chart_ctx.get('price'),
@@ -1772,6 +1810,8 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             # Screenshot
             screenshot = _screenshot,
         )
+        # Push to Render — fire-and-forget, never blocks the monitor cycle
+        _push_feed_entry(_signal_entry, _snapshot_entry)
     except Exception as _sle:
         print(f'[signal_log] log error: {_sle}')
 

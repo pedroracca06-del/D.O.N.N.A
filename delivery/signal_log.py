@@ -27,13 +27,12 @@ import json
 import threading
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
+
+from core.config import SIGNAL_LOG_FILE as _LOG_FILE
 
 # ── Config ───────────────────────────────────────────────────────────────────────
 
-_BASE_DIR   = Path(__file__).parent.parent
-_LOG_FILE   = _BASE_DIR / 'data' / 'donna_signal_log.json'
 _MAX_ENTRIES = 10_000
 
 _lock = threading.Lock()
@@ -191,10 +190,11 @@ def log_cycle(
 
     # Screenshot
     screenshot:      str              = '',
-) -> str:
+) -> dict:
     """
-    Write one signal detection record to the log. Returns the entry ID.
-    Thread-safe, non-blocking on failure.
+    Write one signal detection record to the log.
+    Returns the full entry dict (caller can use entry['id'] for the ID).
+    Thread-safe, non-blocking on failure — returns {} on error.
     """
     now_ny = _now_ny()
     entry_id = f'SIG_{now_ny.strftime("%Y%m%d_%H%M%S")}_{uuid.uuid4().hex[:6].upper()}'
@@ -332,8 +332,9 @@ def log_cycle(
             print(f'[signal_log] {entry_id}  {symbol}  {pre_signal}  grade={grade or "?"}  alert={alert_type or "none"}')
         except Exception as e:
             print(f'[signal_log] write error: {e}')
+            return {}
 
-    return entry_id
+    return entry
 
 
 # ── Read API ─────────────────────────────────────────────────────────────────────
