@@ -7,6 +7,8 @@ services:
     envVars:
       - key: DONNA_DATA_DIR
         value: /data
+      - key: NOVA_INGEST_SECRET
+        sync: false   # Set value in Render dashboard → Environment → do not commit secret here
     disk:
       name: donna-data
       mountPath: /data
