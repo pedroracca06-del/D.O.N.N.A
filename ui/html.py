@@ -4668,20 +4668,29 @@ async function loadMoreFeed() {
 
 async function refreshFeed(append) {
   const params = new URLSearchParams({ limit: 50, offset: _fdOffset });
+  let todayStr = '';
   if (_fdDate === 'today') {
     const t = new Date();
-    params.set('date', t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0'));
+    todayStr = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
+    params.set('date', todayStr);
   }
   if (_fdSym !== 'all') params.set('symbol', _fdSym);
   if (_fdAlertOnly) params.set('alert_only', 'true');
   try {
-    const res = await fetch('/api/feed?' + params);
-    if (!res.ok) { setHtml('feedBody', '<div class="fd-empty">Feed unavailable.</div>'); return; }
-    const data = await res.json();
+    // Feed body (filtered + paginated) and stats (always unfiltered) fetched in parallel
+    const [feedRes, statsRes] = await Promise.all([
+      fetch('/api/feed?' + params),
+      append ? Promise.resolve(null) : fetch('/api/feed/stats'),
+    ]);
+    if (!feedRes.ok) { setHtml('feedBody', '<div class="fd-empty">Feed unavailable.</div>'); return; }
+    const data = await feedRes.json();
     if (!append) _fdCards = data.feed || [];
     else _fdCards = _fdCards.concat(data.feed || []);
-    renderFeed();
-    if (data.stats) renderFdStats(data.stats);
+    renderFeed(todayStr);
+    if (statsRes && statsRes.ok) {
+      const stats = await statsRes.json();
+      renderFdStats(stats);
+    }
     const now = new Date();
     setText('fdLastUpdated', now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
     const lm = document.getElementById('fdLoadMore');
@@ -4692,8 +4701,13 @@ async function refreshFeed(append) {
   }
 }
 
-function renderFeed() {
-  if (!_fdCards.length) { setHtml('feedBody', '<div class="fd-empty">No events for this filter.</div>'); return; }
+function renderFeed(todayStr) {
+  if (!_fdCards.length) {
+    let msg = 'No events for this filter.';
+    if (_fdDate === 'today') msg = 'No signals logged today (' + (todayStr||'') + ').<br>Switch to <strong>ALL TIME</strong> to see history.';
+    setHtml('feedBody', '<div class="fd-empty">' + msg + '</div>');
+    return;
+  }
   setHtml('feedBody', _fdCards.map(c => fdCard(c)).join(''));
 }
 
@@ -4817,16 +4831,18 @@ function fdMr2Change(c) {
 }
 
 function renderFdStats(stats) {
+  // stats is from GET /api/feed/stats — always unfiltered totals
+  // Shape: { signals: {total, alerts_fired, by_grade, ...}, execution: {total_executed, total_rejected} }
   const sig = stats.signals   || {};
   const ex  = stats.execution || {};
-  const bg  = sig.by_grade   || {};
+  const bg  = sig.by_grade    || {};
   const parts = [
     '<span class="fd-stat">SIGNALS <strong>' + (sig.total||0) + '</strong></span>',
     bg.A ? '<span class="fd-stat">A <strong style="color:var(--green)">'  + bg.A + '</strong></span>' : '',
     bg.B ? '<span class="fd-stat">B <strong style="color:var(--yellow)">' + bg.B + '</strong></span>' : '',
     '<span class="fd-stat">ALERTS FIRED <strong>' + (sig.alerts_fired||0) + '</strong></span>',
-    '<span class="fd-stat">EXECUTED <strong>'  + (ex.executed||0) + '</strong></span>',
-    '<span class="fd-stat">REJECTED <strong>' + ((ex.rejected||0)+(ex.bridge_rejected||0)) + '</strong></span>',
+    '<span class="fd-stat">EXECUTED <strong>'  + (ex.total_executed||0) + '</strong></span>',
+    '<span class="fd-stat">REJECTED <strong>' + (ex.total_rejected||0) + '</strong></span>',
   ];
   setHtml('fdStatsRow', parts.filter(Boolean).join(''));
 }
