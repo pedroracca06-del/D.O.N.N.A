@@ -981,6 +981,85 @@ async def reasoning_trace(limit: int = 50):
         return {'total': 0, 'entries': [], 'error': str(e)}
 
 
+@app.get('/api/feed')
+async def nova_feed(
+    limit:      int  = 50,
+    offset:     int  = 0,
+    event_type: str  = None,
+    symbol:     str  = None,
+    date:       str  = None,
+    grade:      str  = None,
+    subtype:    str  = None,
+    alert_only: bool = False,
+):
+    """
+    NOVA Intelligence Feed — merged chronological timeline.
+
+    Merges signal evaluations, governance rejections, confirmed executions,
+    and Market Reality state transitions into a single time-ordered feed.
+    Each card is self-contained: strategy, MR2 state, DP state, draw context,
+    and rationale are embedded directly — no external lookups needed.
+
+    Filters (all optional, combinable):
+      ?event_type=SIGNAL|EXECUTION|GOVERNANCE|MR2_CHANGE
+      ?symbol=MES|MNQ
+      ?date=YYYY-MM-DD
+      ?grade=A|B|C|D
+      ?subtype=HEADS_UP|EXECUTION_READY|BRIDGE_REJECTED|LONGS_BLOCKED|...
+      ?alert_only=true   — only signal cards where an alert actually fired
+      ?limit=N &offset=N — pagination
+    """
+    try:
+        from services.feed import build_feed
+        result = await asyncio.to_thread(
+            build_feed,
+            limit=min(limit, 500),
+            offset=offset,
+            event_type=event_type,
+            symbol=symbol,
+            date=date,
+            grade=grade,
+            subtype=subtype,
+            alert_only=alert_only,
+        )
+        return result
+    except Exception as e:
+        return {'error': str(e), 'feed': [], 'total': 0}
+
+
+@app.get('/api/feed/card/{source_id}')
+async def nova_feed_card(source_id: str):
+    """
+    Single feed card detail by source_id.
+
+    For SIGNAL cards with a reasoning_trace_id, returns the full reasoning
+    snapshot under _reasoning_detail for complete intelligence audit.
+    """
+    try:
+        from services.feed import get_feed_card
+        card = await asyncio.to_thread(get_feed_card, source_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail=f'Card not found: {source_id}')
+        return card
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@app.get('/api/feed/stats')
+async def nova_feed_stats():
+    """
+    Aggregate statistics across the full feed — signal counts, grade distribution,
+    MR2 state distribution, DP dominance counts, draw category breakdown.
+    """
+    try:
+        from services.feed import get_feed_stats
+        return await asyncio.to_thread(get_feed_stats)
+    except Exception as e:
+        return {'error': str(e)}
+
+
 @app.get('/orchestration-status')
 async def orchestration_status():
     from datetime import datetime, timezone
