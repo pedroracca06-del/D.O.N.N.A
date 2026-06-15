@@ -916,6 +916,54 @@ tr:last-child td{border-bottom:none}
 .j-filter-btn.active{background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.3);color:var(--gold)}
 @media(max-width:600px){.j-overview{gap:16px}.itc-exec{gap:12px}.sf-chips{gap:6px}}
 
+/* ── NOVA FEED ── */
+.fd-page-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px}
+.fd-page-title{font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:700;letter-spacing:1px}
+.fd-meta{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);letter-spacing:.5px}
+.fd-filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.fd-filter-btn{padding:5px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.fd-filter-btn:hover{border-color:rgba(184,134,11,.3);color:var(--gold)}
+.fd-filter-btn.active{background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.3);color:var(--gold)}
+.fd-refresh-btn{padding:5px 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.fd-refresh-btn:hover{color:var(--text);border-color:var(--muted2)}
+.fd-card{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px;margin-bottom:7px}
+.fd-card.fd-signal{border-left:3px solid var(--line)}
+.fd-card.fd-signal.fd-alerted{border-left-color:var(--gold)}
+.fd-card.fd-signal.fd-grade-a{border-left-color:var(--green)}
+.fd-card.fd-signal.fd-grade-b{border-left-color:var(--yellow)}
+.fd-card.fd-governance{border-left:3px solid var(--muted2);background:var(--panel2)}
+.fd-card.fd-execution{border-left:3px solid var(--blue)}
+.fd-card.fd-mr2change{border-left:3px solid rgba(96,165,250,.4)}
+.fd-row1{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px}
+.fd-ts{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);white-space:nowrap;min-width:60px}
+.fd-symbol{font-family:\'Rajdhani\',sans-serif;font-size:14px;font-weight:700}
+.fd-badge{font-family:\'Space Mono\',monospace;font-size:8px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:.5px;border:1px solid transparent}
+.fd-badge.dir-long{color:var(--green);background:var(--green2);border-color:rgba(74,222,128,.2)}
+.fd-badge.dir-short{color:var(--red);background:var(--red2);border-color:rgba(255,107,107,.2)}
+.fd-badge.grade-a{color:var(--green)}
+.fd-badge.grade-b{color:var(--yellow)}
+.fd-badge.grade-c,.fd-badge.grade-d{color:var(--muted2)}
+.fd-badge.st-er{color:var(--gold);background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.2)}
+.fd-badge.st-hu{color:var(--blue);background:rgba(96,165,250,.08);border-color:rgba(96,165,250,.2)}
+.fd-badge.st-ev{color:var(--muted2);background:rgba(160,160,160,.05);border-color:var(--line)}
+.fd-badge.st-inv{color:var(--red);background:var(--red2);border-color:rgba(255,107,107,.2)}
+.fd-badge.st-nt{color:var(--muted2);background:rgba(160,160,160,.05);border-color:var(--line)}
+.fd-badge.ev-gov{color:var(--muted2);background:rgba(160,160,160,.05);border-color:var(--line)}
+.fd-badge.ev-exec{color:var(--blue);background:rgba(96,165,250,.08);border-color:rgba(96,165,250,.2)}
+.fd-badge.ev-mr2{color:var(--blue2);background:rgba(96,165,250,.06);border-color:rgba(96,165,250,.15)}
+.fd-row2{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.fd-chip{font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted2);letter-spacing:.3px;white-space:nowrap}
+.fd-chip strong{color:var(--text);font-weight:700}
+.fd-rationale{font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fd-gov-reason{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4}
+.fd-empty{text-align:center;padding:60px 20px;color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:11px}
+.fd-load-btn{padding:7px 22px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted2);font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.fd-load-btn:hover{border-color:var(--muted2);color:var(--text)}
+.fd-stats-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.fd-stat{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2)}
+.fd-stat strong{color:var(--text)}
+.fd-sep{width:1px;background:var(--line);align-self:stretch;margin:0 4px}
+
 /* ── NOVA REVIEW PANEL ── */
 .itc-review{margin-top:10px;border:1px solid rgba(184,134,11,.15);border-radius:10px;overflow:hidden}
 .itc-review-hdr{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;background:rgba(184,134,11,.04);transition:background .15s}
@@ -1358,6 +1406,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
         <button class="tab-btn journal-btn" data-page="journal">Journal</button>
         <button class="tab-btn" data-page="execution">Execution</button>
+        <button class="tab-btn" data-page="feed">Feed</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -2263,6 +2312,56 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     </div>
   </div>
 
+  <!-- ════════════════════ FEED ════════════════════ -->
+  <div class="page" id="page-feed">
+    <div class="vstack">
+      <div class="panel" style="padding:16px 20px">
+
+        <!-- Header -->
+        <div class="fd-page-header">
+          <div>
+            <div class="fd-page-title">INTELLIGENCE FEED</div>
+            <div class="fd-meta" style="margin-top:3px">Signals · Executions · Governance · Reasoning snapshots</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="fd-meta" id="fdLastUpdated">—</span>
+            <button class="fd-refresh-btn" onclick="refreshFeed()">↻ REFRESH</button>
+          </div>
+        </div>
+
+        <!-- Stats row -->
+        <div class="fd-stats-row" id="fdStatsRow">
+          <span class="fd-stat" style="color:var(--muted2)">Loading...</span>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="fd-filter-bar">
+          <span class="fd-meta" style="margin-right:2px">DATE</span>
+          <button class="fd-filter-btn active" data-fd-date="today" onclick="setFdDate(\'today\',this)">TODAY</button>
+          <button class="fd-filter-btn" data-fd-date="all" onclick="setFdDate(\'all\',this)">ALL TIME</button>
+          <div class="fd-sep"></div>
+          <span class="fd-meta" style="margin-right:2px">SYM</span>
+          <button class="fd-filter-btn active" data-fd-sym="all" onclick="setFdSym(\'all\',this)">ALL</button>
+          <button class="fd-filter-btn" data-fd-sym="MES" onclick="setFdSym(\'MES\',this)">MES</button>
+          <button class="fd-filter-btn" data-fd-sym="MNQ" onclick="setFdSym(\'MNQ\',this)">MNQ</button>
+          <div class="fd-sep"></div>
+          <button class="fd-filter-btn" id="fdAlertOnlyBtn" onclick="toggleFdAlertOnly()">ALERTS ONLY</button>
+        </div>
+
+        <!-- Cards -->
+        <div id="feedBody">
+          <div class="fd-empty">Loading feed...</div>
+        </div>
+
+        <!-- Load more -->
+        <div style="text-align:center;margin-top:10px;display:none" id="fdLoadMore">
+          <button class="fd-load-btn" onclick="loadMoreFeed()">LOAD MORE</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- FOOTER -->
   <div class="footer">
     <span>NOVA v5.0 // LIVE MARKET CORE</span>
@@ -2463,6 +2562,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
     if (btn.dataset.page === 'execution') { refreshExecutionTab(); }
+    if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; refreshFeed(); }
   });
 });
 
@@ -4535,6 +4635,201 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
 
 // refresh signals when switching to signals tab
 document.getElementById('jTab-signals').addEventListener('click', () => refreshSignals());
+
+// ════════ NOVA FEED ════════
+let _fdDate      = 'today';
+let _fdSym       = 'all';
+let _fdAlertOnly = false;
+let _fdOffset    = 0;
+let _fdCards     = [];
+
+function setFdDate(val, btn) {
+  _fdDate = val;
+  document.querySelectorAll('[data-fd-date]').forEach(b => b.classList.toggle('active', b === btn));
+  _fdOffset = 0; _fdCards = [];
+  refreshFeed();
+}
+function setFdSym(val, btn) {
+  _fdSym = val;
+  document.querySelectorAll('[data-fd-sym]').forEach(b => b.classList.toggle('active', b === btn));
+  _fdOffset = 0; _fdCards = [];
+  refreshFeed();
+}
+function toggleFdAlertOnly() {
+  _fdAlertOnly = !_fdAlertOnly;
+  document.getElementById('fdAlertOnlyBtn').classList.toggle('active', _fdAlertOnly);
+  _fdOffset = 0; _fdCards = [];
+  refreshFeed();
+}
+async function loadMoreFeed() {
+  _fdOffset += 50;
+  await refreshFeed(true);
+}
+
+async function refreshFeed(append) {
+  const params = new URLSearchParams({ limit: 50, offset: _fdOffset });
+  if (_fdDate === 'today') {
+    const t = new Date();
+    params.set('date', t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0'));
+  }
+  if (_fdSym !== 'all') params.set('symbol', _fdSym);
+  if (_fdAlertOnly) params.set('alert_only', 'true');
+  try {
+    const res = await fetch('/api/feed?' + params);
+    if (!res.ok) { setHtml('feedBody', '<div class="fd-empty">Feed unavailable.</div>'); return; }
+    const data = await res.json();
+    if (!append) _fdCards = data.feed || [];
+    else _fdCards = _fdCards.concat(data.feed || []);
+    renderFeed();
+    if (data.stats) renderFdStats(data.stats);
+    const now = new Date();
+    setText('fdLastUpdated', now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+    const lm = document.getElementById('fdLoadMore');
+    if (lm) lm.style.display = data.has_more ? '' : 'none';
+  } catch(e) {
+    console.error('Feed error:', e);
+    setHtml('feedBody', '<div class="fd-empty">Connection error.</div>');
+  }
+}
+
+function renderFeed() {
+  if (!_fdCards.length) { setHtml('feedBody', '<div class="fd-empty">No events for this filter.</div>'); return; }
+  setHtml('feedBody', _fdCards.map(c => fdCard(c)).join(''));
+}
+
+function fdCard(c) {
+  const t = c.event_type || '';
+  if (t === 'SIGNAL')     return fdSignal(c);
+  if (t === 'EXECUTION')  return fdExecution(c);
+  if (t === 'GOVERNANCE') return fdGovernance(c);
+  if (t === 'MR2_CHANGE') return fdMr2Change(c);
+  return '';
+}
+
+function fdTs(ts) {
+  if (!ts) return '—';
+  const s = String(ts).replace(' ET','').trim();
+  const parts = s.split(' ');
+  return parts.length >= 2 ? parts[1] : s;
+}
+function fdChip(label, val) {
+  if (val === null || val === undefined || val === '') return '';
+  return '<span class="fd-chip">' + label + ' <strong>' + val + '</strong></span>';
+}
+function fdGradeClass(g) {
+  const m = {A:'grade-a', B:'grade-b', C:'grade-c', D:'grade-d'};
+  return m[(g||'').toUpperCase()] || 'grade-d';
+}
+function fdDirClass(d) {
+  const v = (d||'').toUpperCase();
+  if (v === 'LONG' || v === 'BUY')   return 'dir-long';
+  if (v === 'SHORT' || v === 'SELL') return 'dir-short';
+  return '';
+}
+function fdSubClass(st) {
+  const m = {EXECUTION_READY:'st-er', HEADS_UP:'st-hu', EVALUATED:'st-ev', INVALIDATION:'st-inv', NO_TRADE:'st-nt'};
+  return m[st] || 'st-ev';
+}
+
+function fdSignal(c) {
+  const alerted  = c.alert_fired;
+  const subtype  = c.subtype || 'EVALUATED';
+  const grade    = (c.grade||'').toUpperCase();
+  const dir      = (c.direction||'').toUpperCase();
+  const mr2      = c.mr2  || {};
+  const dp       = c.dp   || {};
+  const draw     = c.draw || {};
+  const rat      = c.claude_rationale || c.pre_rationale || '';
+
+  let cls = 'fd-card fd-signal';
+  if (alerted) {
+    cls += ' fd-alerted';
+    if (grade === 'A') cls += ' fd-grade-a';
+    else if (grade === 'B') cls += ' fd-grade-b';
+  }
+
+  const dirBadge     = dir     ? '<span class="fd-badge ' + fdDirClass(dir) + '">' + dir + '</span>' : '';
+  const gradeBadge   = grade   ? '<span class="fd-badge ' + fdGradeClass(grade) + '">' + grade + '</span>' : '';
+  const subtypeBadge = subtype ? '<span class="fd-badge ' + fdSubClass(subtype) + '">' + subtype.replace('_',' ') + '</span>' : '';
+  const symEl        = c.symbol ? '<span class="fd-symbol">' + c.symbol + '</span>' : '';
+
+  const dpTxt = dp.dominance ? dp.dominance + (dp.conviction ? ' ' + dp.conviction : '') : '';
+  const drawTxt = draw.name ? draw.name + (draw.category ? ' (' + draw.category + ')' : '') : '';
+
+  const chips = [
+    fdChip('FAMILY',  c.strategy_family),
+    fdChip('SETUP',   c.setup_type),
+    fdChip('SESSION', c.session),
+    fdChip('MR2',     mr2.state),
+    dpTxt  ? fdChip('DP', dpTxt)   : '',
+    drawTxt ? fdChip('DRAW', drawTxt) : '',
+    c.rr   ? fdChip('RR', c.rr)    : '',
+  ].filter(Boolean).join('');
+
+  const ratEl = rat ? '<div class="fd-rationale">' + rat + '</div>' : '';
+
+  return '<div class="' + cls + '">' +
+    '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' + symEl + dirBadge + gradeBadge + subtypeBadge + '</div>' +
+    '<div class="fd-row2">' + (chips || '<span class="fd-chip">no context</span>') + '</div>' +
+    ratEl + '</div>';
+}
+
+function fdGovernance(c) {
+  const code   = c.rejection_code || 'GOV';
+  const reason = c.rejection_reason || '—';
+  return '<div class="fd-card fd-governance">' +
+    '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' +
+    '<span class="fd-badge ev-gov">' + code + '</span></div>' +
+    '<div class="fd-gov-reason">' + reason + '</div></div>';
+}
+
+function fdExecution(c) {
+  const dir    = (c.direction||'').toUpperCase();
+  const sym    = c.etf || c.ticker || c.symbol || '—';
+  const qty    = c.qty || 0;
+  const entry  = c.entry_ref  ? Number(c.entry_ref).toFixed(2)  : '—';
+  const stop   = c.stop_px    ? Number(c.stop_px).toFixed(2)    : '—';
+  const target = c.target_px  ? Number(c.target_px).toFixed(2)  : '—';
+  const risk   = c.risk_usd   ? '$' + Number(c.risk_usd).toFixed(0) : '—';
+  return '<div class="fd-card fd-execution">' +
+    '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' +
+    '<span class="fd-symbol">' + sym + '</span>' +
+    '<span class="fd-badge ' + fdDirClass(dir) + '">' + (dir||'?') + '</span>' +
+    '<span class="fd-badge ev-exec">EXECUTED</span></div>' +
+    '<div class="fd-row2">' +
+    fdChip('QTY', qty) + fdChip('ENTRY', entry) + fdChip('STOP', stop) + fdChip('TARGET', target) + fdChip('RISK', risk) +
+    '</div></div>';
+}
+
+function fdMr2Change(c) {
+  const mr2 = c.mr2 || {};
+  const sym = c.symbol || '—';
+  const sub = (c.subtype||'STATE CHANGE').replace(/_/g,' ');
+  return '<div class="fd-card fd-mr2change">' +
+    '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' +
+    '<span class="fd-symbol">' + sym + '</span>' +
+    '<span class="fd-badge ev-mr2">' + sub + '</span></div>' +
+    '<div class="fd-row2">' +
+    fdChip('FROM', mr2.from_state) + fdChip('→', mr2.state) +
+    (mr2.block_longs  ? '<span class="fd-chip" style="color:var(--red)"><strong>LONGS BLOCKED</strong></span>'  : '') +
+    (mr2.block_shorts ? '<span class="fd-chip" style="color:var(--red)"><strong>SHORTS BLOCKED</strong></span>' : '') +
+    '</div></div>';
+}
+
+function renderFdStats(stats) {
+  const sig = stats.signals   || {};
+  const ex  = stats.execution || {};
+  const bg  = sig.by_grade   || {};
+  const parts = [
+    '<span class="fd-stat">SIGNALS <strong>' + (sig.total||0) + '</strong></span>',
+    bg.A ? '<span class="fd-stat">A <strong style="color:var(--green)">'  + bg.A + '</strong></span>' : '',
+    bg.B ? '<span class="fd-stat">B <strong style="color:var(--yellow)">' + bg.B + '</strong></span>' : '',
+    '<span class="fd-stat">ALERTS FIRED <strong>' + (sig.alerts_fired||0) + '</strong></span>',
+    '<span class="fd-stat">EXECUTED <strong>'  + (ex.executed||0) + '</strong></span>',
+    '<span class="fd-stat">REJECTED <strong>' + ((ex.rejected||0)+(ex.bridge_rejected||0)) + '</strong></span>',
+  ];
+  setHtml('fdStatsRow', parts.filter(Boolean).join(''));
+}
 
 // ════════ BOOT ════════
 function todayDateStr() {
