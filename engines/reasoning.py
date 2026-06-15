@@ -579,10 +579,13 @@ def _evaluate_pros_phase(main_state: dict, pros_state: dict, chart_ctx: dict) ->
     # ACCEPTED_CONTINUATION: Pine's CONT=CONFIRMED signals that buyers have accepted
     # the continuation regime — stair-step defense, persistent bid at OTE.
     # The single-fire prosContinuationBull may have already consumed its reference,
-    # leaving the engine in BUILDING/ACTIVE. That reference consumption is not a
+    # leaving the engine in ACTIVE. That reference consumption is not a
     # failure; it means the sequence completed and price is now in accepted regime.
     # Promote to ACCEPTED_CONTINUATION so Claude can grade it — all risk gates intact.
-    if cont_quality == 'STRONG' and phase in ('BUILDING', 'OTE_APPROACHING', 'OTE_TAGGED'):
+    # BUILDING excluded: price has not yet reached OTE — CONT=CONFIRMED before OTE is a
+    # sequence violation (manipulation → OTE → rejection → continuation requires the
+    # OTE to be reached before continuation can be confirmed).
+    if cont_quality == 'STRONG' and phase in ('OTE_APPROACHING', 'OTE_TAGGED'):
         phase           = 'ACCEPTED_CONTINUATION'
         signal_strength = 'high'
 
@@ -742,11 +745,23 @@ def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict |
     ib_range = ib_high - ib_low
 
     # Infer draw from CMD — substring match handles "WATCH LONG", "WATCH SHORT" etc.
-    draw = 'UNCLEAR'
+    draw           = 'UNCLEAR'
+    draw_source    = 'CMD'
     if 'BUY' in cmd_up or 'LONG' in cmd_up or 'BULL' in cmd_up:
         draw = 'IB HIGH'
     elif 'SELL' in cmd_up or 'SHORT' in cmd_up or 'BEAR' in cmd_up:
         draw = 'IB LOW'
+
+    # DISPL fallback: when CMD is WAIT/neutral, PROS table DISPL field carries direction.
+    # Marked as fallback so callers can surface it in rationale — direction is less certain.
+    if draw == 'UNCLEAR' and pros_state:
+        displ_up = (pros_state.get('DISPL', '') or '').upper()
+        if 'BULL' in displ_up:
+            draw        = 'IB HIGH'
+            draw_source = 'DISPL_FALLBACK'
+        elif 'BEAR' in displ_up:
+            draw        = 'IB LOW'
+            draw_source = 'DISPL_FALLBACK'
 
     # Verify price is positioned to reach the draw
     aligned = None
@@ -761,22 +776,29 @@ def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict |
             pass
 
     return {
-        'draw':     draw,
-        'ib_high':  ib_high,
-        'ib_low':   ib_low,
-        'ib_range': ib_range,
-        'aligned':  aligned,
-        'ib_tight': ib_range is not None and ib_range < 5,  # Very small range = less reliable
+        'draw':        draw,
+        'draw_source': draw_source,
+        'ib_high':     ib_high,
+        'ib_low':      ib_low,
+        'ib_range':    ib_range,
+        'aligned':     aligned,
+        'ib_tight':    ib_range is not None and ib_range < 5,
     }
 
 
-def _check_invalidation_signals(main_state: dict, pros_state: dict, chart_ctx: dict) -> dict:
+def _check_invalidation_signals(
+    main_state: dict,
+    pros_state: dict,
+    chart_ctx:  dict,
+    pros_eval:  dict | None = None,
+) -> dict:
     """
     Detect explicit invalidation signals from NOVA indicator state.
     Returns whether an active setup has been broken.
+
+    pros_eval is optional; when present, enables H2 (price beyond displacement base).
     """
     state_up = main_state.get('STATE', '').upper()
-    cmd_up   = main_state.get('CMD', '').upper()
 
     invalidated = False
     reason      = ''
@@ -787,6 +809,27 @@ def _check_invalidation_signals(main_state: dict, pros_state: dict, chart_ctx: d
             invalidated = True
             reason = f'Setup {keyword.lower()} per NOVA indicator'
             break
+
+    # H2: price closed beyond displacement base — directional thesis structurally broken.
+    # Uses 30-bar swing as the displacement origin proxy (same data as price_ote_eval).
+    # Only runs when an active PROS signal with a known direction exists.
+    if not invalidated and pros_eval and pros_eval.get('has_signal'):
+        direction = pros_eval.get('direction', 'N/A')
+        ohlcv     = chart_ctx.get('ohlcv', {})
+        try:
+            price = float(chart_ctx.get('price') or 0)
+            if direction == 'SHORT':
+                sw_hi = float(ohlcv.get('high_30') or 0)
+                if sw_hi and price > sw_hi:
+                    invalidated = True
+                    reason = f'H2: price {price:.2f} above displacement base {sw_hi:.2f} — bearish thesis broken'
+            elif direction == 'LONG':
+                sw_lo = float(ohlcv.get('low_30') or 0)
+                if sw_lo and price < sw_lo:
+                    invalidated = True
+                    reason = f'H2: price {price:.2f} below displacement base {sw_lo:.2f} — bullish thesis broken'
+        except (TypeError, ValueError):
+            pass
 
     return {
         'invalidated': invalidated,
@@ -845,13 +888,33 @@ def _classify_signal(
         )
         if ib_note:
             base_rationale += f' | IB: {ib_note}'
+        if ib_eval.get('draw_source') == 'DISPL_FALLBACK':
+            base_rationale += ' | IB_DIR:DISPL_FALLBACK(CMD=WAIT)'
+
+        # Fix 4: surface PROS/ORB conflict for Claude — do not block, just flag.
+        if orb_eval.get('has_signal') and orb_eval.get('in_context'):
+            base_rationale = (
+                f'[ORB_CONFLICT: ORB also signaling {orb_eval.get("phase","?")} {orb_eval.get("direction","?")}] '
+                + base_rationale
+            )
+
+        # Fix 1: direction must be known before autonomous execution is permitted.
+        # N/A means both CMD and DISPL were absent/neutral — no routing target exists.
+        _can_execute = direction != 'N/A'
+        _no_dir_note = '' if _can_execute else ' | [NO_DIR] direction indeterminate — capped at HEADS_UP'
 
         if phase == 'SETUP_READY':
-            return EXECUTION_READY, setup, base_rationale
+            if _can_execute:
+                return EXECUTION_READY, setup, base_rationale
+            return HEADS_UP, setup, base_rationale + _no_dir_note
         elif phase == 'OTE_TAGGED':
-            return EXECUTION_READY, setup, base_rationale + ' | OTE tagged'
+            if _can_execute:
+                return EXECUTION_READY, setup, base_rationale + ' | OTE tagged'
+            return HEADS_UP, setup, base_rationale + ' | OTE tagged' + _no_dir_note
         elif phase == 'ACCEPTED_CONTINUATION':
-            return EXECUTION_READY, setup, base_rationale + ' | accepted continuation regime — CONT confirmed'
+            if _can_execute:
+                return EXECUTION_READY, setup, base_rationale + ' | accepted continuation regime — CONT confirmed'
+            return HEADS_UP, setup, base_rationale + ' | accepted continuation regime' + _no_dir_note
         elif phase == 'OTE_APPROACHING':
             return HEADS_UP, setup, base_rationale + ' | OTE approaching'
         elif phase == 'BUILDING':
@@ -1425,7 +1488,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
     ib_eval         = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
-    inv_eval        = _check_invalidation_signals(main_state, pros_state_data, chart_ctx)
+    inv_eval        = _check_invalidation_signals(main_state, pros_state_data, chart_ctx, pros_eval)
     price_ote_eval  = _evaluate_price_structure(chart_ctx, ib_eval, pros_eval, main_state)
 
     mem_summary = {}
@@ -1511,9 +1574,18 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     if not decision:
         return []
 
+    # Load MR2 once — shared between reasoning snapshot and signal log entry.
+    _mr2_snap: dict = {}
+    if _load_mr2:
+        try:
+            _mr2_snap = _load_mr2()
+        except Exception:
+            pass
+
+    _snapshot_id = ''
     if _log_snapshot:
         try:
-            _log_snapshot(
+            _snapshot_id = _log_snapshot(
                 symbol          = symbol,
                 session_ctx     = session_ctx,
                 chart_ctx       = chart_ctx,
@@ -1525,11 +1597,17 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
                 mem_summary     = mem_summary,
                 pre_signal      = signal_type,
                 claude_decision = decision,
-                mr2_state       = _load_mr2() if _load_mr2 else {},
+                mr2_state       = _mr2_snap,
                 momentum_eval   = momentum_eval,
-            )
+            ) or ''
         except Exception:
             pass
+
+    # Derive fields for self-contained signal log entry (readable months later without reconstruction).
+    _final_setup      = decision.get('setup_type', '') or setup_type or ''
+    _strategy_family  = _final_setup.split('_')[0].upper() if '_' in _final_setup else _active_family or ''
+    _claude_rationale = decision.get('reasoning', '') or decision.get('notes', '') or ''
+    _mr2_block_reason = _mr2_snap.get('block_longs_reason', '') or _mr2_snap.get('block_shorts_reason', '')
 
     alert_required = decision.get('alert_required', False)
     log_reason = decision.get('no_alert_reason', '') if not alert_required else decision.get('alert_type', '')
@@ -1667,6 +1745,29 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             draw_category    = _draw_tel.get('draw_category', ''),
             draw_tp1_pts     = _draw_tel.get('draw_tp1_pts'),
             draw_independent = _draw_tel.get('draw_independent'),
+
+            # Strategy metadata
+            strategy_family  = _strategy_family,
+
+            # Claude rationale text
+            claude_rationale = _claude_rationale,
+
+            # Market Reality snapshot at signal time
+            mr2_state        = _mr2_snap.get('state', ''),
+            mr2_score        = _mr2_snap.get('score'),
+            mr2_block_longs  = bool(_mr2_snap.get('block_longs', False)),
+            mr2_block_shorts = bool(_mr2_snap.get('block_shorts', False)),
+            mr2_block_reason = _mr2_block_reason,
+
+            # Directional Pressure snapshot at signal time
+            dp_dominance     = dir_pressure.get('dominance', ''),
+            dp_conviction    = dir_pressure.get('conviction', ''),
+            dp_bullish       = dir_pressure.get('bullish'),
+            dp_bearish       = dir_pressure.get('bearish'),
+            dp_net           = dir_pressure.get('net'),
+
+            # Cross-reference to full reasoning snapshot
+            reasoning_trace_id = _snapshot_id,
 
             # Screenshot
             screenshot = _screenshot,
@@ -1896,6 +1997,13 @@ def analyze_now(verbose: bool = False) -> dict:
 
     decision = evaluate_with_claude(nova_state, session_ctx, chart_ctx, pre_assess) or {}
 
+    _mr2_snap_debug: dict = {}
+    if _load_mr2:
+        try:
+            _mr2_snap_debug = _load_mr2()
+        except Exception:
+            pass
+
     if _log_snapshot:
         try:
             _log_snapshot(
@@ -1910,7 +2018,7 @@ def analyze_now(verbose: bool = False) -> dict:
                 mem_summary     = mem_summary,
                 pre_signal      = signal_type,
                 claude_decision = decision,
-                mr2_state       = _load_mr2() if _load_mr2 else {},
+                mr2_state       = _mr2_snap_debug,
                 momentum_eval   = momentum_eval,
             )
         except Exception:

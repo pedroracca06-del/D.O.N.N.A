@@ -166,6 +166,29 @@ def log_cycle(
     draw_tp1_pts:    Optional[float]  = None,
     draw_independent: Optional[bool]  = None,
 
+    # Strategy metadata (stored explicitly — avoids parsing setup_type in UI/query layer)
+    strategy_family:  str             = '',
+
+    # Claude rationale text (notes field from decision; combine with pre_rationale for full context)
+    claude_rationale: str             = '',
+
+    # Market Reality snapshot at signal time (self-contained — no external lookup needed months later)
+    mr2_state:        str             = '',
+    mr2_score:        Optional[int]   = None,
+    mr2_block_longs:  bool            = False,
+    mr2_block_shorts: bool            = False,
+    mr2_block_reason: str             = '',
+
+    # Directional Pressure snapshot at signal time
+    dp_dominance:     str             = '',
+    dp_conviction:    str             = '',
+    dp_bullish:       Optional[float] = None,
+    dp_bearish:       Optional[float] = None,
+    dp_net:           Optional[float] = None,
+
+    # Cross-reference to donna_reasoning_trace.json for full intelligence audit
+    reasoning_trace_id: str           = '',
+
     # Screenshot
     screenshot:      str              = '',
 ) -> str:
@@ -271,6 +294,29 @@ def log_cycle(
         'draw_category':   draw_category,
         'draw_tp1_pts':    draw_tp1_pts,
         'draw_independent': draw_independent,
+
+        # Strategy metadata
+        'strategy_family':  strategy_family,
+
+        # Rationale (Claude's assessment; read alongside pre_rationale for full reasoning context)
+        'claude_rationale': claude_rationale,
+
+        # Market Reality snapshot at signal time
+        'mr2_state':        mr2_state,
+        'mr2_score':        mr2_score,
+        'mr2_block_longs':  mr2_block_longs,
+        'mr2_block_shorts': mr2_block_shorts,
+        'mr2_block_reason': mr2_block_reason,
+
+        # Directional Pressure snapshot at signal time
+        'dp_dominance':     dp_dominance,
+        'dp_conviction':    dp_conviction,
+        'dp_bullish':       dp_bullish,
+        'dp_bearish':       dp_bearish,
+        'dp_net':           dp_net,
+
+        # Cross-reference to donna_reasoning_trace.json (full intelligence audit trail)
+        'reasoning_trace_id': reasoning_trace_id,
 
         # Screenshot
         'screenshot':     screenshot,
