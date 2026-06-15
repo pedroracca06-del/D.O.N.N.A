@@ -1569,6 +1569,14 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         ohlcv      = chart_ctx.get('ohlcv', {})
         orb_parsed = nova_state.get('orb', {})
 
+        _draw_tel = _classify_draw(
+            price          = chart_ctx.get('price'),
+            tp1_str        = decision.get('tp1', '') or '',
+            ib_draw        = ib_eval.get('draw', ''),
+            ib_draw_claude = decision.get('ib_draw', '') or '',
+            session        = session_ctx.get('session', ''),
+        )
+
         log_cycle(
             # Instrument
             symbol       = symbol,
@@ -1654,6 +1662,12 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             nq_pct     = _nq_p,
             es_pct     = _es_p,
 
+            # Draw Validation telemetry
+            draw_name        = _draw_tel.get('draw_name', ''),
+            draw_category    = _draw_tel.get('draw_category', ''),
+            draw_tp1_pts     = _draw_tel.get('draw_tp1_pts'),
+            draw_independent = _draw_tel.get('draw_independent'),
+
             # Screenshot
             screenshot = _screenshot,
         )
@@ -1670,6 +1684,100 @@ def _safe_float(val) -> Optional[float]:
         return float(val) if val not in (None, '', '—') else None
     except (TypeError, ValueError):
         return None
+
+
+# ── Draw Validation Telemetry ──────────────────────────────────────────────────
+
+def _parse_tp1_price(tp1_str: str) -> Optional[float]:
+    """Extract the first numeric price value from Claude's TP1 string."""
+    import re
+    if not tp1_str:
+        return None
+    matches = re.findall(r'\d{3,}(?:\.\d+)?', tp1_str)  # 3+ digits = price, not fib level
+    if matches:
+        return _safe_float(matches[0])
+    return None
+
+
+# Sessions where the NY IB window is confirmed closed (10:30 ET has passed)
+_IB_CONFIRMED_SESSIONS = {'NY_AM', 'NY_PM', 'NEW_YORK_CASH'}
+
+# Keywords in Claude's named draw that indicate a strong, pre-existing draw
+_STRONG_DRAW_KEYWORDS = ('PDL', 'PDH', 'PRIOR DAY', 'PREV DAY', 'WEEK', 'MONTH',
+                         'EQUAL HIGH', 'EQUAL LOW', 'EQL', 'SWING HIGH', 'SWING LOW')
+
+# TP1 distance below which the draw is classified as collapsed / circular
+_TP1_COLLAPSE_PTS = 3.0
+
+
+def _classify_draw(
+    price:          Optional[float],
+    tp1_str:        str,
+    ib_draw:        str,
+    ib_draw_claude: str,
+    session:        str,
+) -> dict:
+    """
+    Classify the draw independence for Draw Validation telemetry.
+
+    Returns draw_name, draw_category (STRONG / CONDITIONAL / CIRCULAR),
+    draw_tp1_pts, and draw_independent. Logged only — never used as an
+    execution gate. See nova_knowledge_core/PROS_EVAN_INVESTING/draw_validation.md.
+    """
+    draw_name = ib_draw_claude or ib_draw or 'UNKNOWN'
+    tp1_price = _parse_tp1_price(tp1_str)
+
+    draw_tp1_pts: Optional[float] = None
+    if tp1_price is not None and price:
+        try:
+            draw_tp1_pts = round(abs(float(tp1_price) - float(price)), 2)
+        except (TypeError, ValueError):
+            pass
+
+    # Rule 1: TP1 collapse → CIRCULAR regardless of draw label
+    if draw_tp1_pts is not None and draw_tp1_pts < _TP1_COLLAPSE_PTS:
+        return {
+            'draw_name':       draw_name,
+            'draw_category':   'CIRCULAR',
+            'draw_tp1_pts':    draw_tp1_pts,
+            'draw_independent': False,
+        }
+
+    # Rule 2: Named draw contains prior-session / structural keywords → STRONG
+    named_upper = (ib_draw_claude or '').upper()
+    if any(kw in named_upper for kw in _STRONG_DRAW_KEYWORDS):
+        return {
+            'draw_name':       draw_name,
+            'draw_category':   'STRONG',
+            'draw_tp1_pts':    draw_tp1_pts,
+            'draw_independent': True,
+        }
+
+    # Rule 3: IB draw after IB window has closed → STRONG
+    if ib_draw in ('IB HIGH', 'IB LOW') and session in _IB_CONFIRMED_SESSIONS:
+        return {
+            'draw_name':       draw_name,
+            'draw_category':   'STRONG',
+            'draw_tp1_pts':    draw_tp1_pts,
+            'draw_independent': True,
+        }
+
+    # Rule 4: IB draw while IB is still forming (NY_OPEN) → CONDITIONAL
+    if ib_draw in ('IB HIGH', 'IB LOW') and session == 'NY_OPEN':
+        return {
+            'draw_name':       draw_name,
+            'draw_category':   'CONDITIONAL',
+            'draw_tp1_pts':    draw_tp1_pts,
+            'draw_independent': True,
+        }
+
+    # Default: CONDITIONAL — something is named but cannot be confirmed strong
+    return {
+        'draw_name':       draw_name,
+        'draw_category':   'CONDITIONAL',
+        'draw_tp1_pts':    draw_tp1_pts,
+        'draw_independent': draw_tp1_pts is None or draw_tp1_pts >= _TP1_COLLAPSE_PTS,
+    }
 
 
 # ── Top-level reasoning cycle ──────────────────────────────────────────────────

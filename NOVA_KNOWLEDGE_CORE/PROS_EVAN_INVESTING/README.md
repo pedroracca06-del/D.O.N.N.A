@@ -17,6 +17,7 @@ Do not modify without a source transcript to back the change.
 | `continuation_and_exhaustion.md` | Continuation sequence, confirmation signals, exhaustion conditions, structure break as confirmation |
 | `invalidation_and_no_trade.md` | Invalidation conditions, no-trade environments, bias shift / structure invalidation |
 | `session_logic.md` | NY AM vs Asia vs London, pre-market context, session trade timing |
+| `draw_validation.md` | **INFERRED** — Draw independence framework: Strong / Conditional / Circular draw categories, draw independence test, TP1 collapse diagnostic. Formalizes what the existing framework implies but does not name. Document-only, not yet enforced. |
 
 ---
 

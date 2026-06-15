@@ -108,14 +108,16 @@ def log_cycle(
     pros_stdv:       str              = '',
 
     # ORB
-    orb_state:       str              = '',
-    orb_bias:        str              = '',
-    orb_high:        Optional[float]  = None,
-    orb_mid:         Optional[float]  = None,
-    orb_low:         Optional[float]  = None,
-    orb_signal:      bool             = False,
-    orb_phase:       str              = '',
-    orb_range:       Optional[float]  = None,
+    orb_state:        str              = '',
+    orb_bias:         str              = '',
+    orb_high:         Optional[float]  = None,
+    orb_mid:          Optional[float]  = None,
+    orb_low:          Optional[float]  = None,
+    orb_signal:       bool             = False,
+    orb_phase:        str              = '',
+    orb_range:        Optional[float]  = None,
+    orb_entry_type:   str              = '',
+    orb_entry_quality: str             = '',
 
     # IB
     ib_high:         Optional[float]  = None,
@@ -157,6 +159,12 @@ def log_cycle(
     regime:          str              = '',
     nq_pct:          Optional[float]  = None,
     es_pct:          Optional[float]  = None,
+
+    # Draw Validation telemetry (logged only — not enforced)
+    draw_name:       str              = '',
+    draw_category:   str              = '',   # STRONG / CONDITIONAL / CIRCULAR
+    draw_tp1_pts:    Optional[float]  = None,
+    draw_independent: Optional[bool]  = None,
 
     # Screenshot
     screenshot:      str              = '',
@@ -206,14 +214,16 @@ def log_cycle(
         'pros_stdv':      pros_stdv,
 
         # ORB
-        'orb_state':      orb_state,
-        'orb_bias':       orb_bias,
-        'orb_high':       orb_high,
-        'orb_mid':        orb_mid,
-        'orb_low':        orb_low,
-        'orb_signal':     orb_signal,
-        'orb_phase':      orb_phase,
-        'orb_range':      orb_range,
+        'orb_state':        orb_state,
+        'orb_bias':         orb_bias,
+        'orb_high':         orb_high,
+        'orb_mid':          orb_mid,
+        'orb_low':          orb_low,
+        'orb_signal':       orb_signal,
+        'orb_phase':        orb_phase,
+        'orb_range':        orb_range,
+        'orb_entry_type':   orb_entry_type,
+        'orb_entry_quality': orb_entry_quality,
 
         # IB
         'ib_high':        ib_high,
@@ -255,6 +265,12 @@ def log_cycle(
         'regime':         regime,
         'nq_pct':         nq_pct,
         'es_pct':         es_pct,
+
+        # Draw Validation telemetry
+        'draw_name':       draw_name,
+        'draw_category':   draw_category,
+        'draw_tp1_pts':    draw_tp1_pts,
+        'draw_independent': draw_independent,
 
         # Screenshot
         'screenshot':     screenshot,

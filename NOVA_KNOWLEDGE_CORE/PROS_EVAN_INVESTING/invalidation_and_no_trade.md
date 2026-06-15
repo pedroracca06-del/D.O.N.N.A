@@ -28,7 +28,7 @@ Conditions under which Evan explicitly avoids taking a trade:
 | IB window not yet closed AND bias/confluence not compelling | Prefers to wait for 10:30 (NY AM) or 9:00 PM (Asia) to form |
 | Choppy overlapping price action with no clear manipulation leg | No measurable range = no OTE = no trade |
 | 0.5 fib only — OTE zone not reached | Suboptimal retracement — skip or reduce size |
-| Draw unclear or not confirmed | "I should only be trading this if I know this is going to happen" |
+| Draw unclear or not confirmed | "I should only be trading this if I know this is going to happen" — see `draw_validation.md` for Strong / Conditional / Circular draw categories |
 
 > "I waited because 9 p.m. was not formed yet. I wanted to see a clean delivery to the downside."
 
