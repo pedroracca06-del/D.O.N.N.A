@@ -5037,7 +5037,7 @@ function fdSignal(c) {
     if (rat.length > 180) {
       ratEl = '<div class="fd-rationale" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + short + '</div>' +
               '<div class="fd-rationale-full" id="fdRat_' + uid + '" style="display:none">' + rat + '</div>' +
-              '<button class="fd-expand-btn" id="fdRatBtn_' + uid + '" onclick="fdToggleRationale(\'' + uid + '\')" style="display:block">▼ FULL REASONING</button>';
+              '<button class="fd-expand-btn" id="fdRatBtn_' + uid + '" data-uid="' + uid + '" onclick="fdToggleRationale(this.dataset.uid)" style="display:block">▼ FULL REASONING</button>';
     } else {
       ratEl = '<div class="fd-rationale" style="max-height:none;overflow:visible">' + rat + '</div>';
     }
