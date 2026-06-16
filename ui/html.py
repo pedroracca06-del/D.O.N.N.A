@@ -963,6 +963,54 @@ tr:last-child td{border-bottom:none}
 .fd-stat{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2)}
 .fd-stat strong{color:var(--text)}
 .fd-sep{width:1px;background:var(--line);align-self:stretch;margin:0 4px}
+.fd-rationale-full{font-size:11px;color:var(--muted);line-height:1.6;margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+.fd-entry-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px}
+.fd-entry-cell{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2)}
+.fd-entry-cell strong{color:var(--text);display:block;font-size:11px;margin-top:1px}
+.fd-expand-btn{font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:.5px;color:var(--muted2);background:none;border:none;cursor:pointer;padding:2px 0;margin-top:4px;transition:color .15s}
+.fd-expand-btn:hover{color:var(--gold)}
+.fd-notify-banner{display:flex;align-items:center;gap:10px;padding:8px 14px;background:rgba(0,128,255,.07);border:1px solid rgba(0,128,255,.2);border-radius:8px;margin-bottom:12px;font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2)}
+.fd-notify-btn{padding:4px 12px;border-radius:6px;border:1px solid rgba(0,128,255,.3);background:rgba(0,128,255,.1);color:#60a5fa;font-family:\'Space Mono\',monospace;font-size:8px;cursor:pointer;letter-spacing:.5px;transition:all .15s}
+.fd-notify-btn:hover{background:rgba(0,128,255,.2)}
+
+/* ── MARKET REALITY PAGE ── */
+.mr-page-title{font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:700;letter-spacing:1px;margin-bottom:4px}
+.mr-state-badge{display:inline-block;padding:6px 18px;border-radius:8px;font-family:\'Rajdhani\',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:4px}
+.mr-state-bull-dom{background:rgba(0,200,81,.12);border:1px solid rgba(0,200,81,.3);color:#00c851}
+.mr-state-bull-lean{background:rgba(0,200,81,.06);border:1px solid rgba(0,200,81,.2);color:#00c851}
+.mr-state-bear-dom{background:rgba(255,68,68,.12);border:1px solid rgba(255,68,68,.3);color:#ff4444}
+.mr-state-bear-lean{background:rgba(255,68,68,.06);border:1px solid rgba(255,68,68,.2);color:#ff4444}
+.mr-state-panic{background:rgba(255,0,0,.2);border:1px solid rgba(255,0,0,.5);color:#ff0000}
+.mr-state-range{background:rgba(160,160,160,.1);border:1px solid var(--line);color:var(--muted)}
+.mr-state-neutral{background:rgba(160,160,160,.08);border:1px solid var(--line);color:var(--muted2)}
+.mr-block-flag{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:7px;font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:.5px;font-weight:700;margin:2px}
+.mr-block-active{background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.35);color:#ff4444}
+.mr-block-clear{background:rgba(0,200,81,.07);border:1px solid rgba(0,200,81,.2);color:#00c851}
+.mr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:14px}
+.mr-cell{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+.mr-cell-label{font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:1px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px}
+.mr-cell-val{font-size:18px;font-weight:700;font-family:\'Rajdhani\',sans-serif;color:var(--text)}
+.mr-cell-sub{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);margin-top:2px}
+.mr-score-bar{height:6px;border-radius:3px;background:var(--line);margin-top:6px;overflow:hidden}
+.mr-score-fill-bull{height:100%;background:var(--green);border-radius:3px;transition:width .4s}
+.mr-score-fill-bear{height:100%;background:var(--red);border-radius:3px;transition:width .4s}
+
+/* ── GOVERNANCE PAGE ── */
+.gov-page-title{font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:700;letter-spacing:1px;margin-bottom:4px}
+.gov-gate-list{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.gov-gate{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);transition:border-color .15s}
+.gov-gate-name{font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:.5px;color:var(--muted2);text-transform:uppercase;flex:1}
+.gov-gate-detail{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);margin:0 10px;text-align:right;flex:2}
+.gov-status{display:inline-block;padding:3px 10px;border-radius:5px;font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:.5px;font-weight:700;min-width:56px;text-align:center}
+.gov-open{background:rgba(0,200,81,.1);border:1px solid rgba(0,200,81,.25);color:#00c851}
+.gov-locked{background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.3);color:#ff4444}
+.gov-warn{background:rgba(255,187,51,.1);border:1px solid rgba(255,187,51,.3);color:#ffbb33}
+.gov-off{background:rgba(160,160,160,.08);border:1px solid var(--line);color:var(--muted2)}
+.gov-section-label{font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-top:14px;margin-bottom:6px;padding-left:2px}
+.gov-lockouts{margin-top:10px;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,68,68,.2);background:rgba(255,68,68,.04)}
+.gov-lockout-item{font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--line)}
+.gov-lockout-item:last-child{border-bottom:none}
+.gov-header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 
 /* ── NOVA REVIEW PANEL ── */
 .itc-review{margin-top:10px;border:1px solid rgba(184,134,11,.15);border-radius:10px;overflow:hidden}
@@ -1401,12 +1449,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     <div class="top-right">
       <div class="nav">
         <button class="tab-btn active" data-page="dashboard">Dashboard</button>
+        <button class="tab-btn" data-page="feed">Feed<span class="signal-dot" id="feedUnreadDot" style="display:none"></span></button>
+        <button class="tab-btn" data-page="market-reality">MKT REALITY</button>
+        <button class="tab-btn" data-page="governance">GOVERNANCE</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
         <button class="tab-btn journal-btn" data-page="journal">Journal</button>
         <button class="tab-btn" data-page="execution">Execution</button>
-        <button class="tab-btn" data-page="feed">Feed</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -2348,6 +2398,12 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-filter-btn" id="fdAlertOnlyBtn" onclick="toggleFdAlertOnly()">ALERTS ONLY</button>
         </div>
 
+        <!-- Notification banner (shown when permission not yet granted) -->
+        <div class="fd-notify-banner" id="fdNotifBanner" style="display:none">
+          <span>Enable browser notifications for EXECUTION_READY and Grade A/B alerts</span>
+          <button class="fd-notify-btn" onclick="requestFeedNotifPermission()">ENABLE NOTIFICATIONS</button>
+        </div>
+
         <!-- Cards -->
         <div id="feedBody">
           <div class="fd-empty">Loading feed...</div>
@@ -2358,6 +2414,103 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-load-btn" onclick="loadMoreFeed()">LOAD MORE</button>
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ MARKET REALITY ════════════════════ -->
+  <div class="page" id="page-market-reality">
+    <div class="vstack">
+      <div class="panel" style="padding:16px 20px">
+        <div class="gov-header-row">
+          <div>
+            <div class="mr-page-title">MARKET REALITY</div>
+            <div class="fd-meta" style="margin-top:3px">Fact-based objective market state · MR2 engine · no narrative</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="fd-meta" id="mrLastUpdated">—</span>
+            <button class="fd-refresh-btn" onclick="refreshMarketReality()">↻ REFRESH</button>
+          </div>
+        </div>
+
+        <!-- State + block flags -->
+        <div style="margin-bottom:14px">
+          <div id="mrStateBadge" class="mr-state-badge mr-state-neutral">—</div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap" id="mrBlockFlags">
+            <span class="mr-block-flag mr-block-clear">LONGS CLEAR</span>
+            <span class="mr-block-flag mr-block-clear">SHORTS CLEAR</span>
+          </div>
+        </div>
+
+        <!-- Price grid -->
+        <div class="mr-grid" id="mrGrid">
+          <div class="mr-cell"><div class="mr-cell-label">NQ PRICE</div><div class="mr-cell-val" id="mrNqPrice">—</div><div class="mr-cell-sub" id="mrNqPct">—</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">ES PRICE</div><div class="mr-cell-val" id="mrEsPrice">—</div><div class="mr-cell-sub" id="mrEsPct">—</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">VIX</div><div class="mr-cell-val" id="mrVix">—</div><div class="mr-cell-sub" id="mrVixSub">volatility index</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">MR2 SCORE</div><div class="mr-cell-val" id="mrScore">—</div><div class="mr-cell-sub">bull − bear points</div><div class="mr-score-bar"><div class="mr-score-fill-bull" id="mrScoreBar" style="width:50%"></div></div></div>
+          <div class="mr-cell"><div class="mr-cell-label">SESSION</div><div class="mr-cell-val" id="mrSession" style="font-size:14px">—</div><div class="mr-cell-sub" id="mrRegime">—</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">WEEKLY STRUCTURE</div><div class="mr-cell-val" id="mrWeekly" style="font-size:14px">—</div><div class="mr-cell-sub" id="mrDisplacement">—</div></div>
+        </div>
+
+        <!-- Fact breakdown -->
+        <div style="margin-top:16px">
+          <div class="fd-meta" style="letter-spacing:2px;margin-bottom:8px">FACT BREAKDOWN</div>
+          <div id="mrFactBreakdown" style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);line-height:2">Loading...</div>
+        </div>
+
+        <!-- Block reason -->
+        <div id="mrBlockReasonWrap" style="display:none;margin-top:12px;padding:10px 14px;border-radius:9px;border:1px solid rgba(255,68,68,.2);background:rgba(255,68,68,.04)">
+          <div class="fd-meta" style="margin-bottom:4px;letter-spacing:1px">BLOCK REASON</div>
+          <div id="mrBlockReason" style="font-size:11px;color:var(--muted);line-height:1.5"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ GOVERNANCE ════════════════════ -->
+  <div class="page" id="page-governance">
+    <div class="vstack">
+      <div class="panel" style="padding:16px 20px">
+        <div class="gov-header-row">
+          <div>
+            <div class="gov-page-title">GOVERNANCE</div>
+            <div class="fd-meta" style="margin-top:3px">All execution gates · live state · no assumptions</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="fd-meta" id="govLastUpdated">—</span>
+            <button class="fd-refresh-btn" onclick="refreshGovernance()">↻ REFRESH</button>
+          </div>
+        </div>
+
+        <div class="gov-section-label">SYSTEM GATES</div>
+        <div class="gov-gate-list" id="govSystemGates">
+          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+        </div>
+
+        <div class="gov-section-label">RISK GATES</div>
+        <div class="gov-gate-list" id="govRiskGates">
+          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+        </div>
+
+        <div class="gov-section-label">POSITION GATES</div>
+        <div class="gov-gate-list" id="govPositionGates">
+          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+        </div>
+
+        <div class="gov-section-label">COOLDOWNS</div>
+        <div class="gov-gate-list" id="govCooldowns">
+          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+        </div>
+
+        <div id="govLockoutsWrap" style="display:none;margin-top:8px">
+          <div class="gov-section-label">RECENT LOCKOUTS</div>
+          <div class="gov-lockouts" id="govLockouts"></div>
+        </div>
+
+        <div id="govBlockedWrap" style="display:none;margin-top:8px">
+          <div class="gov-section-label">BLOCKED SIGNALS TODAY</div>
+          <div class="gov-lockouts" id="govBlocked"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -2562,7 +2715,9 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
     if (btn.dataset.page === 'execution') { refreshExecutionTab(); }
-    if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; refreshFeed(); }
+    if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); }
+    if (btn.dataset.page === 'market-reality') refreshMarketReality();
+    if (btn.dataset.page === 'governance') refreshGovernance();
   });
 });
 
@@ -4642,6 +4797,61 @@ let _fdSym       = 'all';
 let _fdAlertOnly = false;
 let _fdOffset    = 0;
 let _fdCards     = [];
+let _fdSeenIds   = new Set();   // tracks IDs seen so far for unread detection
+let _fdUnread    = 0;
+let _fdNotifPerm = false;       // true once Notification.permission === 'granted'
+
+// ── Notification setup ──────────────────────────────────────────────────────
+function initFeedNotifications() {
+  if (!('Notification' in window)) return;
+  _fdNotifPerm = Notification.permission === 'granted';
+  if (Notification.permission === 'default') {
+    // Show banner in feed asking user to enable
+    const banner = document.getElementById('fdNotifBanner');
+    if (banner) banner.style.display = 'flex';
+  }
+}
+
+function requestFeedNotifPermission() {
+  if (!('Notification' in window)) return;
+  Notification.requestPermission().then(p => {
+    _fdNotifPerm = p === 'granted';
+    const banner = document.getElementById('fdNotifBanner');
+    if (banner) banner.style.display = 'none';
+  });
+}
+
+function maybeSendNotif(card) {
+  if (!_fdNotifPerm) return;
+  const subtype = card.subtype || '';
+  const grade   = (card.grade || '').toUpperCase();
+  const isHighPri = (
+    subtype === 'EXECUTION_READY' ||
+    (subtype === 'HEADS_UP' && (grade === 'A' || grade === 'B'))
+  );
+  if (!isHighPri) return;
+  try {
+    const sym  = card.symbol || '';
+    const dir  = card.direction || '';
+    const body = [
+      card.strategy_family ? card.strategy_family : '',
+      card.setup_type ? card.setup_type : '',
+      card.entry_zone ? 'Entry: ' + card.entry_zone : '',
+      card.rr ? 'R:R ' + card.rr : '',
+      (card.mr2 || {}).state ? 'MR2: ' + card.mr2.state : '',
+    ].filter(Boolean).join(' · ');
+    new Notification('NOVA — ' + subtype.replace('_',' ') + ' ' + grade + ' ' + sym + ' ' + dir, {
+      body: body || 'New intelligence event',
+      tag:  card.id || subtype,
+    });
+  } catch(e) {}
+}
+
+function clearFeedUnread() {
+  _fdUnread = 0;
+  const dot = document.getElementById('feedUnreadDot');
+  if (dot) dot.style.display = 'none';
+}
 
 function setFdDate(val, btn) {
   _fdDate = val;
@@ -4677,15 +4887,30 @@ async function refreshFeed(append) {
   if (_fdSym !== 'all') params.set('symbol', _fdSym);
   if (_fdAlertOnly) params.set('alert_only', 'true');
   try {
-    // Feed body (filtered + paginated) and stats (always unfiltered) fetched in parallel
     const [feedRes, statsRes] = await Promise.all([
       fetch('/api/feed?' + params),
       append ? Promise.resolve(null) : fetch('/api/feed/stats'),
     ]);
     if (!feedRes.ok) { setHtml('feedBody', '<div class="fd-empty">Feed unavailable.</div>'); return; }
     const data = await feedRes.json();
-    if (!append) _fdCards = data.feed || [];
-    else _fdCards = _fdCards.concat(data.feed || []);
+    const newCards = data.feed || [];
+
+    // Detect genuinely new cards for unread badge + notifications
+    const isOnFeedPage = document.getElementById('page-feed').classList.contains('active');
+    newCards.forEach(c => {
+      if (_fdSeenIds.has(c.id)) return;
+      if (_fdSeenIds.size > 0) {          // skip first load
+        if (!isOnFeedPage) { _fdUnread++; maybeSendNotif(c); }
+      }
+      _fdSeenIds.add(c.id);
+    });
+    if (_fdUnread > 0) {
+      const dot = document.getElementById('feedUnreadDot');
+      if (dot) dot.style.display = '';
+    }
+
+    if (!append) _fdCards = newCards;
+    else _fdCards = _fdCards.concat(newCards);
     renderFeed(todayStr);
     if (statsRes && statsRes.ok) {
       const stats = await statsRes.json();
@@ -4745,6 +4970,14 @@ function fdSubClass(st) {
   return m[st] || 'st-ev';
 }
 
+function fdToggleRationale(id) {
+  const el = document.getElementById('fdRat_' + id);
+  if (!el) return;
+  const btn = document.getElementById('fdRatBtn_' + id);
+  const open = el.classList.toggle('open');
+  if (btn) btn.textContent = open ? '▲ COLLAPSE' : '▼ FULL REASONING';
+}
+
 function fdSignal(c) {
   const alerted  = c.alert_fired;
   const subtype  = c.subtype || 'EVALUATED';
@@ -4754,6 +4987,7 @@ function fdSignal(c) {
   const dp       = c.dp   || {};
   const draw     = c.draw || {};
   const rat      = c.claude_rationale || c.pre_rationale || '';
+  const uid      = (c.source_id || c.id || '').replace(/[^a-zA-Z0-9]/g, '_');
 
   let cls = 'fd-card fd-signal';
   if (alerted) {
@@ -4764,10 +4998,10 @@ function fdSignal(c) {
 
   const dirBadge     = dir     ? '<span class="fd-badge ' + fdDirClass(dir) + '">' + dir + '</span>' : '';
   const gradeBadge   = grade   ? '<span class="fd-badge ' + fdGradeClass(grade) + '">' + grade + '</span>' : '';
-  const subtypeBadge = subtype ? '<span class="fd-badge ' + fdSubClass(subtype) + '">' + subtype.replace('_',' ') + '</span>' : '';
+  const subtypeBadge = subtype ? '<span class="fd-badge ' + fdSubClass(subtype) + '">' + subtype.replace(/_/g,' ') + '</span>' : '';
   const symEl        = c.symbol ? '<span class="fd-symbol">' + c.symbol + '</span>' : '';
 
-  const dpTxt = dp.dominance ? dp.dominance + (dp.conviction ? ' ' + dp.conviction : '') : '';
+  const dpTxt   = dp.dominance ? dp.dominance + (dp.conviction ? ' ' + dp.conviction : '') : '';
   const drawTxt = draw.name ? draw.name + (draw.category ? ' (' + draw.category + ')' : '') : '';
 
   const chips = [
@@ -4775,25 +5009,57 @@ function fdSignal(c) {
     fdChip('SETUP',   c.setup_type),
     fdChip('SESSION', c.session),
     fdChip('MR2',     mr2.state),
-    dpTxt  ? fdChip('DP', dpTxt)   : '',
+    dpTxt  ? fdChip('DP',   dpTxt)   : '',
     drawTxt ? fdChip('DRAW', drawTxt) : '',
-    c.rr   ? fdChip('RR', c.rr)    : '',
   ].filter(Boolean).join('');
 
-  const ratEl = rat ? '<div class="fd-rationale">' + rat + '</div>' : '';
+  // Entry levels row — only for EXECUTION_READY or when any level present
+  let entryRow = '';
+  if (c.entry_zone || c.stop || c.tp1 || c.rr) {
+    entryRow = '<div class="fd-entry-row">' +
+      (c.entry_zone ? '<div class="fd-entry-cell">ENTRY<strong>' + c.entry_zone + '</strong></div>' : '') +
+      (c.stop       ? '<div class="fd-entry-cell">STOP<strong>' + c.stop + '</strong></div>' : '') +
+      (c.tp1        ? '<div class="fd-entry-cell">TP1<strong>' + c.tp1 + '</strong></div>' : '') +
+      (c.rr         ? '<div class="fd-entry-cell">R:R<strong>' + c.rr + '</strong></div>' : '') +
+      '</div>';
+  }
+
+  // MR2 block flags inline
+  const blockBits = [
+    mr2.block_longs  ? '<span style="color:var(--red);font-size:9px;font-weight:700">⛔ LONGS BLOCKED</span>' : '',
+    mr2.block_shorts ? '<span style="color:var(--red);font-size:9px;font-weight:700">⛔ SHORTS BLOCKED</span>' : '',
+  ].filter(Boolean).join(' ');
+
+  // Rationale — first 2 lines always, expandable for full text
+  let ratEl = '';
+  if (rat) {
+    const short = rat.length > 180 ? rat.slice(0, 180) + '…' : rat;
+    if (rat.length > 180) {
+      ratEl = '<div class="fd-rationale" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + short + '</div>' +
+              '<div class="fd-rationale-full" id="fdRat_' + uid + '" style="display:none">' + rat + '</div>' +
+              '<button class="fd-expand-btn" id="fdRatBtn_' + uid + '" onclick="fdToggleRationale(\'' + uid + '\')" style="display:block">▼ FULL REASONING</button>';
+    } else {
+      ratEl = '<div class="fd-rationale" style="max-height:none;overflow:visible">' + rat + '</div>';
+    }
+  }
 
   return '<div class="' + cls + '">' +
     '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' + symEl + dirBadge + gradeBadge + subtypeBadge + '</div>' +
-    '<div class="fd-row2">' + (chips || '<span class="fd-chip">no context</span>') + '</div>' +
+    '<div class="fd-row2">' + (chips || '<span class="fd-chip">no context</span>') + (blockBits ? ' ' + blockBits : '') + '</div>' +
+    entryRow +
     ratEl + '</div>';
 }
 
 function fdGovernance(c) {
   const code   = c.rejection_code || 'GOV';
   const reason = c.rejection_reason || '—';
+  const sym    = c.symbol ? '<span class="fd-symbol">' + c.symbol + '</span>' : '';
+  const dir    = c.direction ? '<span class="fd-badge ' + fdDirClass(c.direction) + '">' + c.direction.toUpperCase() + '</span>' : '';
+  const grade  = c.grade ? '<span class="fd-badge ' + fdGradeClass(c.grade) + '">' + c.grade.toUpperCase() + '</span>' : '';
   return '<div class="fd-card fd-governance">' +
     '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' +
-    '<span class="fd-badge ev-gov">' + code + '</span></div>' +
+    sym + dir + grade +
+    '<span class="fd-badge ev-gov">' + code.replace(/_/g,' ') + '</span></div>' +
     '<div class="fd-gov-reason">' + reason + '</div></div>';
 }
 
@@ -4810,8 +5076,12 @@ function fdExecution(c) {
     '<span class="fd-symbol">' + sym + '</span>' +
     '<span class="fd-badge ' + fdDirClass(dir) + '">' + (dir||'?') + '</span>' +
     '<span class="fd-badge ev-exec">EXECUTED</span></div>' +
-    '<div class="fd-row2">' +
-    fdChip('QTY', qty) + fdChip('ENTRY', entry) + fdChip('STOP', stop) + fdChip('TARGET', target) + fdChip('RISK', risk) +
+    '<div class="fd-entry-row">' +
+    (qty    ? '<div class="fd-entry-cell">QTY<strong>' + qty + '</strong></div>' : '') +
+    (entry !== '—' ? '<div class="fd-entry-cell">ENTRY<strong>' + entry + '</strong></div>' : '') +
+    (stop  !== '—' ? '<div class="fd-entry-cell">STOP<strong>' + stop + '</strong></div>' : '') +
+    (target !== '—' ? '<div class="fd-entry-cell">TARGET<strong>' + target + '</strong></div>' : '') +
+    (risk  !== '—' ? '<div class="fd-entry-cell">RISK<strong>' + risk + '</strong></div>' : '') +
     '</div></div>';
 }
 
@@ -4819,20 +5089,20 @@ function fdMr2Change(c) {
   const mr2 = c.mr2 || {};
   const sym = c.symbol || '—';
   const sub = (c.subtype||'STATE CHANGE').replace(/_/g,' ');
+  const scoreVal = mr2.score !== null && mr2.score !== undefined ? (mr2.score >= 0 ? '+' : '') + mr2.score : '';
   return '<div class="fd-card fd-mr2change">' +
     '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' +
     '<span class="fd-symbol">' + sym + '</span>' +
     '<span class="fd-badge ev-mr2">' + sub + '</span></div>' +
     '<div class="fd-row2">' +
-    fdChip('FROM', mr2.from_state) + fdChip('→', mr2.state) +
-    (mr2.block_longs  ? '<span class="fd-chip" style="color:var(--red)"><strong>LONGS BLOCKED</strong></span>'  : '') +
-    (mr2.block_shorts ? '<span class="fd-chip" style="color:var(--red)"><strong>SHORTS BLOCKED</strong></span>' : '') +
+    fdChip('FROM', mr2.from_state) + fdChip('→', mr2.state) + (scoreVal ? fdChip('SCORE', scoreVal) : '') +
+    (mr2.block_longs  ? '<span class="fd-chip" style="color:var(--red);font-weight:700"><strong>⛔ LONGS BLOCKED</strong></span>'  : '') +
+    (mr2.block_shorts ? '<span class="fd-chip" style="color:var(--red);font-weight:700"><strong>⛔ SHORTS BLOCKED</strong></span>' : '') +
+    (mr2.block_reason ? '<span class="fd-chip" style="color:var(--muted)"><strong>' + mr2.block_reason.slice(0,80) + '</strong></span>' : '') +
     '</div></div>';
 }
 
 function renderFdStats(stats) {
-  // stats is from GET /api/feed/stats — always unfiltered totals
-  // Shape: { signals: {total, alerts_fired, by_grade, ...}, execution: {total_executed, total_rejected} }
   const sig = stats.signals   || {};
   const ex  = stats.execution || {};
   const bg  = sig.by_grade    || {};
@@ -4840,11 +5110,211 @@ function renderFdStats(stats) {
     '<span class="fd-stat">SIGNALS <strong>' + (sig.total||0) + '</strong></span>',
     bg.A ? '<span class="fd-stat">A <strong style="color:var(--green)">'  + bg.A + '</strong></span>' : '',
     bg.B ? '<span class="fd-stat">B <strong style="color:var(--yellow)">' + bg.B + '</strong></span>' : '',
-    '<span class="fd-stat">ALERTS FIRED <strong>' + (sig.alerts_fired||0) + '</strong></span>',
+    '<span class="fd-stat">ALERTS <strong>' + (sig.alerts_fired||0) + '</strong></span>',
     '<span class="fd-stat">EXECUTED <strong>'  + (ex.total_executed||0) + '</strong></span>',
     '<span class="fd-stat">REJECTED <strong>' + (ex.total_rejected||0) + '</strong></span>',
   ];
   setHtml('fdStatsRow', parts.filter(Boolean).join(''));
+}
+
+// ════════ MARKET REALITY ════════
+function mrStateClass(state) {
+  const s = (state||'').toUpperCase();
+  if (s.includes('BULLISH_DOMINANT')) return 'mr-state-bull-dom';
+  if (s.includes('BULLISH_LEANING'))  return 'mr-state-bull-lean';
+  if (s.includes('BEARISH_DOMINANT')) return 'mr-state-bear-dom';
+  if (s.includes('BEARISH_LEANING'))  return 'mr-state-bear-lean';
+  if (s.includes('PANIC'))            return 'mr-state-panic';
+  if (s.includes('RANGE'))            return 'mr-state-range';
+  return 'mr-state-neutral';
+}
+
+async function refreshMarketReality() {
+  try {
+    const res = await fetch('/market-reality');
+    if (!res.ok) return;
+    const d = await res.json();
+
+    // State badge
+    const state = d.state || d.direction || 'UNKNOWN';
+    const badge = document.getElementById('mrStateBadge');
+    if (badge) {
+      badge.textContent = state.replace(/_/g,' ');
+      badge.className = 'mr-state-badge ' + mrStateClass(state);
+    }
+
+    // Block flags
+    const flagsEl = document.getElementById('mrBlockFlags');
+    if (flagsEl) {
+      const blockL = d.block_longs  || (d.bullish_execution_allowed === false);
+      const blockS = d.block_shorts || (d.short_execution_allowed   === false);
+      flagsEl.innerHTML =
+        '<span class="mr-block-flag ' + (blockL ? 'mr-block-active' : 'mr-block-clear') + '">' +
+        (blockL ? '⛔' : '✓') + ' LONGS</span>' +
+        '<span class="mr-block-flag ' + (blockS ? 'mr-block-active' : 'mr-block-clear') + '">' +
+        (blockS ? '⛔' : '✓') + ' SHORTS</span>';
+    }
+
+    // Price cells
+    const nqP = d.nq_price || 0;
+    const esP = d.es_price || 0;
+    const nqPct = d.nq_change_pct || d.nq_pct || 0;
+    const esPct = d.es_change_pct || d.es_pct || 0;
+    const vix   = d.vix || 0;
+    const score = d.score !== undefined ? d.score : null;
+
+    setText('mrNqPrice', nqP ? nqP.toLocaleString('en-US',{maximumFractionDigits:2}) : '—');
+    setText('mrNqPct',   nqPct ? (nqPct >= 0 ? '+' : '') + nqPct.toFixed(2) + '%' : '—');
+    setText('mrEsPrice', esP ? esP.toLocaleString('en-US',{maximumFractionDigits:2}) : '—');
+    setText('mrEsPct',   esPct ? (esPct >= 0 ? '+' : '') + esPct.toFixed(2) + '%' : '—');
+    setText('mrVix',     vix ? vix.toFixed(1) : '—');
+    setText('mrSession', d.session || '—');
+    setText('mrRegime',  d.market_regime || d.regime || '—');
+    setText('mrWeekly',  (d.weekly_structure || d.structure || '—').replace(/_/g,' '));
+    setText('mrDisplacement', d.displacement || '—');
+
+    if (score !== null) {
+      setText('mrScore', (score >= 0 ? '+' : '') + score);
+      // Score bar: 0 = center, max ±19
+      const pct = Math.min(100, Math.max(0, ((score + 19) / 38) * 100));
+      const bar = document.getElementById('mrScoreBar');
+      if (bar) {
+        bar.style.width = Math.abs(pct - 50) + '%';
+        bar.style.marginLeft = score >= 0 ? '50%' : (pct + '%');
+        bar.className = score >= 0 ? 'mr-score-fill-bull' : 'mr-score-fill-bear';
+      }
+    }
+
+    // Fact breakdown
+    const fb = document.getElementById('mrFactBreakdown');
+    if (fb) {
+      const rows = [];
+      if (d.bull_facts_count !== undefined) rows.push('Bull facts: +' + d.bull_facts_count);
+      if (d.bear_facts_count !== undefined) rows.push('Bear facts: −' + d.bear_facts_count);
+      if (d.block_longs_reason)  rows.push('Long block: ' + d.block_longs_reason);
+      if (d.block_shorts_reason) rows.push('Short block: ' + d.block_shorts_reason);
+      if (d.nq_week_high) rows.push('NQ week hi/lo: ' + d.nq_week_high + ' / ' + (d.nq_week_low||'—'));
+      if (d.es_week_high)  rows.push('ES week hi/lo: ' + d.es_week_high  + ' / ' + (d.es_week_low||'—'));
+      fb.innerHTML = rows.length ? rows.map(r => '<div>' + r + '</div>').join('') : '<div>No breakdown available</div>';
+    }
+
+    // Block reason panel
+    const blockReason = d.block_longs_reason || d.block_shorts_reason || '';
+    const brWrap = document.getElementById('mrBlockReasonWrap');
+    if (brWrap) {
+      brWrap.style.display = blockReason ? '' : 'none';
+      setText('mrBlockReason', blockReason);
+    }
+
+    const ts = d.last_updated ? new Date(d.last_updated).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+    setText('mrLastUpdated', ts);
+  } catch(e) {
+    console.error('MR error:', e);
+  }
+}
+
+// ════════ GOVERNANCE ════════
+function govBadge(open, label) {
+  const cls = open ? 'gov-open' : 'gov-locked';
+  const txt = open ? (label || 'OPEN') : (label || 'LOCKED');
+  return '<span class="gov-status ' + cls + '">' + txt + '</span>';
+}
+function govGate(name, detail, open, label) {
+  return '<div class="gov-gate">' +
+    '<span class="gov-gate-name">' + name + '</span>' +
+    '<span class="gov-gate-detail">' + (detail||'') + '</span>' +
+    govBadge(open, label) +
+    '</div>';
+}
+function govWarn(name, detail, warn, label) {
+  const cls = warn ? 'gov-warn' : 'gov-open';
+  const txt = warn ? (label || 'WARN') : 'CLEAR';
+  return '<div class="gov-gate">' +
+    '<span class="gov-gate-name">' + name + '</span>' +
+    '<span class="gov-gate-detail">' + (detail||'') + '</span>' +
+    '<span class="gov-status ' + cls + '">' + txt + '</span>' +
+    '</div>';
+}
+
+async function refreshGovernance() {
+  try {
+    const res = await fetch('/api/governance');
+    if (!res.ok) return;
+    const d = await res.json();
+
+    const execMode  = d.execution_mode || 'disabled';
+    const autoExec  = d.nova_auto_execute || false;
+    const tradePerm = d.trade_permission  || false;
+    const tradesDay = d.daily_trade_count || 0;
+    const maxTrades = d.max_trades        || 5;
+    const openPos   = d.open_positions_count || 0;
+    const maxPos    = d.max_concurrent_positions || 2;
+    const minGrade  = d.min_grade || 'N/A';
+
+    // System gates
+    const sysHtml = [
+      govGate('NOVA_AUTO_EXECUTE', 'env var — master enable', autoExec, autoExec ? 'ON' : 'OFF'),
+      govGate('execution_mode',    execMode + (d.risk_tier ? ' · ' + d.risk_tier : ''), execMode !== 'disabled', execMode !== 'disabled' ? execMode.toUpperCase() : 'DISABLED'),
+      govGate('min_grade',         'minimum grade required', minGrade === 'A' || minGrade === 'B' || minGrade === 'N/A', minGrade),
+      govGate('trade_permission',  'daily permission flag', tradePerm, tradePerm ? 'OPEN' : 'CLOSED'),
+    ].join('');
+    setHtml('govSystemGates', sysHtml);
+
+    // Risk gates
+    const riskHtml = [
+      govGate('eod_lock',          'no entries after 15:30 ET', !d.eod_lock,        d.eod_lock ? 'LOCKED' : 'OPEN'),
+      govGate('macro_lock',        'macro event active',        !d.macro_lock,       d.macro_lock ? 'LOCKED' : 'OPEN'),
+      govGate('red_folder_lock',   'red-folder event',          !d.red_folder_lock,  d.red_folder_lock ? 'LOCKED' : 'OPEN'),
+      govGate('execution_lock',    'execution lock flag',       !d.execution_lock,   d.execution_lock ? 'LOCKED' : 'OPEN'),
+      govWarn('size_reduction',    'adverse prior outcome',     d.size_reduction_active, d.size_reduction_active ? 'ACTIVE' : ''),
+    ].join('');
+    setHtml('govRiskGates', riskHtml);
+
+    // Position gates
+    const posHtml = [
+      govGate('daily trades',      tradesDay + ' / ' + maxTrades + ' used', tradesDay < maxTrades, tradesDay + '/' + maxTrades),
+      govGate('concurrent positions', openPos + ' / ' + maxPos + ' open', openPos < maxPos, openPos + '/' + maxPos),
+      govGate('daily P&L',         '$' + (d.daily_pnl || 0).toFixed(2), (d.daily_pnl || 0) >= 0, (d.daily_pnl||0) >= 0 ? '+$' + (d.daily_pnl||0).toFixed(2) : '-$' + Math.abs(d.daily_pnl||0).toFixed(2)),
+    ].join('');
+    setHtml('govPositionGates', posHtml);
+
+    // Cooldowns
+    const now = Date.now();
+    const spyCool = d.spy_cooldown_until ? new Date(d.spy_cooldown_until) : null;
+    const qqqCool = d.qqq_cooldown_until ? new Date(d.qqq_cooldown_until) : null;
+    const spyActive = spyCool && spyCool > now;
+    const qqqActive = qqqCool && qqqCool > now;
+    const coolHtml = [
+      govGate('SPY cooldown', spyActive ? 'until ' + spyCool.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'no cooldown', !spyActive, spyActive ? 'ACTIVE' : 'CLEAR'),
+      govGate('QQQ cooldown', qqqActive ? 'until ' + qqqCool.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'no cooldown', !qqqActive, qqqActive ? 'ACTIVE' : 'CLEAR'),
+    ].join('');
+    setHtml('govCooldowns', coolHtml);
+
+    // Lockouts
+    const lockouts = d.risk_lockouts || [];
+    const lockWrap = document.getElementById('govLockoutsWrap');
+    if (lockWrap) {
+      lockWrap.style.display = lockouts.length ? '' : 'none';
+      setHtml('govLockouts', lockouts.slice(-8).reverse().map(l =>
+        '<div class="gov-lockout-item">' + (l.reason||'') + (l.timestamp ? ' · ' + l.timestamp.slice(11,16) + 'Z' : '') + '</div>'
+      ).join(''));
+    }
+
+    // Blocked signals
+    const blocked = d.blocked_signals_today || [];
+    const blkWrap = document.getElementById('govBlockedWrap');
+    if (blkWrap) {
+      blkWrap.style.display = blocked.length ? '' : 'none';
+      setHtml('govBlocked', blocked.map(b =>
+        '<div class="gov-lockout-item">' + (typeof b === 'string' ? b : JSON.stringify(b)) + '</div>'
+      ).join(''));
+    }
+
+    const ts = d.last_updated ? new Date(d.last_updated).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+    setText('govLastUpdated', ts);
+  } catch(e) {
+    console.error('Gov error:', e);
+  }
 }
 
 // ════════ BOOT ════════
@@ -4859,6 +5329,7 @@ document.body.classList.add('donna-first-load');
 document.body.addEventListener('animationend', () => document.body.classList.remove('donna-first-load'), { once: true });
 
 initTileEditors();
+initFeedNotifications();
 refresh();
 setInterval(refresh, 30000);
 refreshJournal();
@@ -4877,6 +5348,11 @@ refreshHarvey();
 setInterval(refreshHarvey, 10000);
 fetchStateEngine();
 setInterval(fetchStateEngine, 15000);
+// Feed auto-refresh every 30s to detect new events and fire browser notifications
+setInterval(refreshFeed, 30000);
+// Market Reality and Governance auto-refresh every 60s in background
+setInterval(refreshMarketReality, 60000);
+setInterval(refreshGovernance, 30000);
 fetchExecutionGate();
 setInterval(fetchExecutionGate, 15000);
 fetchHarveyData();

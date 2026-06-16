@@ -858,6 +858,43 @@ async def grok_intelligence():
     }
 
 
+@app.get('/api/governance')
+async def governance_status():
+    """Aggregated gate status for the Governance UI page."""
+    try:
+        from core.state_engine import state as _st
+        from services.execution_bridge import _load_execution_config
+        st = _st.get_state()
+        active_mode, cfg = _load_execution_config()
+        positions = _st.get_open_positions()
+        return {
+            'execution_mode':          active_mode,
+            'nova_auto_execute':       os.getenv('NOVA_AUTO_EXECUTE', 'false').lower() == 'true',
+            'trade_permission':        st.get('trade_permission', False),
+            'daily_trade_count':       st.get('daily_trade_count', 0),
+            'max_trades':              int(cfg.get('max_trades_per_day', 5)) if cfg else 5,
+            'open_positions':          positions,
+            'open_positions_count':    len(positions),
+            'max_concurrent_positions': int(cfg.get('max_concurrent_positions', 2)) if cfg else 2,
+            'eod_lock':                st.get('eod_lock', False),
+            'macro_lock':              st.get('macro_lock', False),
+            'red_folder_lock':         st.get('red_folder_lock', False),
+            'execution_lock':          st.get('execution_lock', False),
+            'size_reduction_active':   st.get('size_reduction_active', False),
+            'spy_cooldown_until':      st.get('spy_cooldown_until'),
+            'qqq_cooldown_until':      st.get('qqq_cooldown_until'),
+            'blocked_signals_today':   st.get('blocked_signals_today', []),
+            'risk_lockouts':           st.get('risk_lockouts', []),
+            'min_grade':               cfg.get('min_grade', 'B') if cfg else 'N/A',
+            'risk_tier':               cfg.get('risk_tier', 'N/A') if cfg else 'N/A',
+            'daily_pnl':               st.get('daily_pnl', 0.0),
+            'session_state':           st.get('session_state', ''),
+            'last_updated':            st.get('last_updated', ''),
+        }
+    except Exception as exc:
+        return {'error': str(exc)}
+
+
 @app.get('/market-reality')
 async def market_reality_endpoint():
     """Live market reality state. Returns V2 (fact-based) with V1 fields merged as fallback."""
