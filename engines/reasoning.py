@@ -1253,6 +1253,22 @@ BEARISH:        Selling momentum persists at OTE — caution
 STRONG_BEARISH: Sellers accelerating — structural concern
 
 Grade adjustment rules (apply after all other factors):
+
+STEP 1 — Check for full conviction cluster BEFORE applying any MACD adjustment.
+If ALL five of the following are true simultaneously, skip the MACD downgrade rules entirely
+and assign the grade the structure deserves (A if structure is clean). Log MACD as cautionary only.
+  (1) Pre-signal = EXECUTION_READY
+  (2) Indicator confidence contains ELITE (85%+)
+  (3) PROS QUALITY = STRONG
+  (4) PROS CONT = CONFIRMED
+  (5) IB aligned = True (draw resolved, direction confirmed)
+When this cluster is present: grade from structure + IB alignment alone. Do not reduce the grade
+for MACD direction. Add to notes: "MACD not yet curled — entry may be 1-2 bars early.
+Full conviction cluster present; structure takes precedence over momentum lag."
+This cluster check does NOT apply to ORB setups (PROS fields will be absent).
+It does NOT apply when quality=WEAK, phase=BUILDING, confidence is not ELITE, or IB is UNCLEAR.
+
+STEP 2 — If conviction cluster is NOT fully present, apply standard MACD adjustments:
 - LONG setup + STRONG_BULLISH → upgrade one tier if borderline (B→A possible if all else aligns)
 - LONG setup + BEARISH        → downgrade one tier (A→B, B→C)
 - LONG setup + STRONG_BEARISH → downgrade one tier + note active selling at OTE
