@@ -2512,6 +2512,33 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <div class="gov-lockouts" id="govBlocked"></div>
         </div>
       </div>
+
+      <!-- Execution State panel -->
+      <div class="panel" style="padding:16px 20px">
+        <div class="gov-header-row" style="margin-bottom:12px">
+          <div>
+            <div class="gov-page-title" style="font-size:13px">EXECUTION STATE</div>
+            <div class="fd-meta" style="margin-top:2px">Is the bot armed? What would it take for the next trade to fire?</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="fd-meta" id="execStateStatus">—</span>
+          </div>
+        </div>
+        <div id="execStateArmed" style="margin-bottom:12px"></div>
+        <div id="execStateBlockers" style="margin-bottom:12px"></div>
+        <div id="execStatePositions" style="margin-bottom:12px"></div>
+        <div id="execStateConditions"></div>
+      </div>
+
+      <!-- Decision Chain panel -->
+      <div class="panel" style="padding:16px 20px">
+        <div class="gov-header-row" style="margin-bottom:8px">
+          <div class="gov-page-title" style="font-size:13px">DECISION CHAINS</div>
+          <button class="fd-refresh-btn" onclick="refreshDecisionChains()">↻ REFRESH</button>
+        </div>
+        <div class="fd-meta" style="margin-bottom:10px">Per-signal gate audit · every EXECUTION_READY that passed through the bridge</div>
+        <div id="dcChainList"><div class="fd-meta">Loading...</div></div>
+      </div>
     </div>
   </div>
 
@@ -2717,7 +2744,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     if (btn.dataset.page === 'execution') { refreshExecutionTab(); }
     if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); }
     if (btn.dataset.page === 'market-reality') refreshMarketReality();
-    if (btn.dataset.page === 'governance') refreshGovernance();
+    if (btn.dataset.page === 'governance') { refreshGovernance(); refreshExecutionState(); refreshDecisionChains(); }
   });
 });
 
@@ -5043,11 +5070,20 @@ function fdSignal(c) {
     }
   }
 
+  // CHAIN button — links to decision chain lookup on the Governance tab
+  const chainBtn = (c.event_type === 'SIGNAL' || c.event_type === 'EXECUTION_READY')
+    ? '<button class="fd-expand-btn" style="margin-top:5px;margin-right:8px" onclick="fdOpenChain(\'' +
+        encodeURIComponent(c.symbol||'') + '\',\'' +
+        encodeURIComponent(c.grade||'') + '\',\'' +
+        encodeURIComponent(c.direction||'') + '\')">⛓ DECISION CHAIN</button>'
+    : '';
+
   return '<div class="' + cls + '">' +
     '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' + symEl + dirBadge + gradeBadge + subtypeBadge + '</div>' +
     '<div class="fd-row2">' + (chips || '<span class="fd-chip">no context</span>') + (blockBits ? ' ' + blockBits : '') + '</div>' +
     entryRow +
-    ratEl + '</div>';
+    ratEl +
+    (chainBtn || '') + '</div>';
 }
 
 function fdGovernance(c) {
@@ -5317,6 +5353,118 @@ async function refreshGovernance() {
   }
 }
 
+// ════════ EXECUTION STATE ════════
+async function refreshExecutionState() {
+  try {
+    const res = await fetch('/api/execution-state');
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.error) { setHtml('execStateArmed', '<span class="fd-meta">Error: ' + d.error + '</span>'); return; }
+
+    const armed = d.armed;
+    const armedHtml = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">' +
+      '<span class="gov-gate-status ' + (armed ? 'status-pass' : 'status-fail') + '">' +
+        (armed ? '● ARMED' : '○ NOT ARMED') +
+      '</span>' +
+      '<span class="fd-meta">' +
+        (d.execution_mode || 'disabled') + ' · ' +
+        (d.paper_mode ? 'paper' : 'live') + ' · trades ' +
+        (d.trades_today||0) + '/' + (d.max_trades||5) +
+      '</span>' +
+    '</div>';
+    setHtml('execStateArmed', armedHtml);
+
+    // Blockers
+    const blockers = d.blockers_active || [];
+    const blkHtml = blockers.length
+      ? '<div class="gov-section-label" style="font-size:9px;margin-bottom:4px">ACTIVE BLOCKERS</div>' +
+        blockers.map(b => '<div class="gov-lockout-item" style="color:var(--red)">⛔ ' + b + '</div>').join('')
+      : '<div class="gov-lockout-item" style="color:var(--green)">✓ No active blockers</div>';
+    setHtml('execStateBlockers', blkHtml);
+
+    // Open positions
+    const positions = d.positions || [];
+    let posHtml = '<div class="gov-section-label" style="font-size:9px;margin-bottom:4px">OPEN POSITIONS (' + (d.open_count||0) + '/' + (d.max_concurrent||2) + ')</div>';
+    if (!positions.length) {
+      posHtml += '<div class="gov-lockout-item">No open positions</div>';
+    } else {
+      posHtml += positions.map(p =>
+        '<div class="gov-lockout-item">' +
+        '<strong>' + (p.symbol||'?') + '</strong> ' + (p.side||'?') + ' ' + (p.qty||'?') + ' @ ' + (p.entry_ref||'?') +
+        ' · <span class="fd-meta">source: ' + (p.source||'?') + '</span>' +
+        (p.blocks && p.blocks.length ? ' · <span class="fd-meta" style="color:var(--gold)">' + p.blocks.join(', ') + '</span>' : '') +
+        '</div>'
+      ).join('');
+    }
+    setHtml('execStatePositions', posHtml);
+
+    // Conditions for next trade
+    const conds = d.conditions_for_next_trade || [];
+    const condHtml = '<div class="gov-section-label" style="font-size:9px;margin-bottom:4px">CONDITIONS FOR NEXT TRADE</div>' +
+      conds.map(c => '<div class="gov-lockout-item">' + c + '</div>').join('');
+    setHtml('execStateConditions', condHtml);
+
+    setText('execStateStatus', armed ? 'ARMED' : 'NOT ARMED');
+  } catch(e) { console.error('execState error:', e); }
+}
+
+// ════════ DECISION CHAINS ════════
+async function refreshDecisionChains(sym, grade, dir) {
+  setHtml('dcChainList', '<div class="fd-meta">Loading...</div>');
+  try {
+    let url = '/api/decision-chain?limit=15';
+    if (sym)   url += '&symbol='    + encodeURIComponent(sym);
+    if (grade) url += '&grade='     + encodeURIComponent(grade);
+    if (dir)   url += '&direction=' + encodeURIComponent(dir);
+    const res = await fetch(url);
+    if (!res.ok) { setHtml('dcChainList', '<div class="fd-meta">Error fetching chains</div>'); return; }
+    const d = await res.json();
+    const chains = d.chains || [];
+    if (!chains.length) { setHtml('dcChainList', '<div class="fd-meta">No decision chains recorded yet</div>'); return; }
+    setHtml('dcChainList', chains.map(ch => renderDecisionChain(ch)).join(''));
+  } catch(e) { console.error('decision chain error:', e); setHtml('dcChainList', '<div class="fd-meta">Error: ' + e.message + '</div>'); }
+}
+
+function renderDecisionChain(ch) {
+  const ts      = fdTs(ch.timestamp_et);
+  const final   = ch.final_decision || '?';
+  const isFail  = final === 'REJECTED';
+  const gates   = ch.gates || [];
+  const rejGate = ch.rejection_gate || '';
+  const rejReason = ch.rejection_reason || '';
+  const gateHtml = gates.map(g => {
+    const pass = g.result === 'PASS';
+    const skip = g.result === 'SKIP';
+    const icon = pass ? '✓' : skip ? '—' : '✗';
+    const col  = pass ? 'var(--green)' : skip ? 'var(--muted2)' : 'var(--red)';
+    return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:2px">' +
+      '<span style="color:' + col + ';font-size:10px;min-width:12px">' + icon + '</span>' +
+      '<span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">' +
+        '<strong style="color:var(--text)">' + (g.gate||'?') + '</strong>' +
+        (g.layer ? ' <span style="color:var(--muted)">[' + g.layer + ']</span>' : '') +
+        (g.reason ? ' · ' + g.reason.slice(0,100) : '') +
+      '</span></div>';
+  }).join('');
+  return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+      '<span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">' + ts + ' · ' +
+        (ch.symbol||'?') + ' ' + (ch.direction||'?') + ' [' + (ch.grade||'?') + '] ' + (ch.setup_type||'') +
+      '</span>' +
+      '<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + (isFail ? 'var(--red)' : 'var(--green)') + '">' + final + '</span>' +
+    '</div>' +
+    gateHtml +
+    (isFail && rejReason ? '<div style="margin-top:6px;font-family:var(--mono);font-size:9px;color:var(--red);padding-top:6px;border-top:1px solid var(--line)">⛔ ' + rejReason.slice(0,150) + '</div>' : '') +
+  '</div>';
+}
+
+function fdOpenChain(sym, grade, dir) {
+  // Switch to Governance tab and load chain for this signal
+  activateTab('governance');
+  refreshDecisionChains(decodeURIComponent(sym), decodeURIComponent(grade), decodeURIComponent(dir));
+  const el = document.getElementById('dcChainList');
+  if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
 // ════════ BOOT ════════
 function todayDateStr() {
   const t = new Date();
@@ -5353,6 +5501,7 @@ setInterval(refreshFeed, 30000);
 // Market Reality and Governance auto-refresh every 60s in background
 setInterval(refreshMarketReality, 60000);
 setInterval(refreshGovernance, 30000);
+setInterval(refreshExecutionState, 30000);
 fetchExecutionGate();
 setInterval(fetchExecutionGate, 15000);
 fetchHarveyData();

@@ -214,6 +214,68 @@ def log_bridge_rejection(
         print(f'[trace] log_bridge_rejection error: {e}')
 
 
+def log_decision_chain(
+    symbol:           str,
+    direction:        str,
+    grade:            str,
+    setup_type:       str,
+    session:          str,
+    alert_type:       str,
+    gates:            list,
+    final_decision:   str,
+    rejection_gate:   str = '',
+    rejection_reason: str = '',
+) -> str:
+    """
+    Log the complete per-signal execution decision chain.
+
+    One entry per signal that passes through route_to_execution().
+    Each gate is recorded as PASS, FAIL, or SKIP with a human-readable reason.
+    Written before every exit point so every signal has a full audit trail.
+    Returns the entry ID.
+    """
+    try:
+        entry_id = _new_id()
+        evaluated = [g for g in gates if g.get('result') != 'SKIP']
+        entry: dict = {
+            'id':               entry_id,
+            'event_type':       'DECISION_CHAIN',
+            'timestamp_et':     _ts_et(),
+            'symbol':           symbol,
+            'direction':        direction,
+            'grade':            grade,
+            'setup_type':       setup_type,
+            'session':          session,
+            'alert_type':       alert_type,
+            'gates':            gates,
+            'final_decision':   final_decision,
+            'rejection_gate':   rejection_gate,
+            'rejection_reason': rejection_reason,
+            'gates_evaluated':  len(evaluated),
+            'all_pass':         final_decision == 'ACCEPTED',
+        }
+        _append(entry)
+        return entry_id
+    except Exception as e:
+        print(f'[trace] log_decision_chain error: {e}')
+        return ''
+
+
+def get_decision_chains(limit: int = 100, symbol: str = '', direction: str = '', grade: str = '') -> list:
+    """Return recent DECISION_CHAIN entries, optionally filtered."""
+    try:
+        entries = [e for e in _load() if e.get('event_type') == 'DECISION_CHAIN']
+        if symbol:
+            entries = [e for e in entries if e.get('symbol', '').upper() == symbol.upper()]
+        if direction:
+            entries = [e for e in entries if e.get('direction', '').upper() == direction.upper()]
+        if grade:
+            entries = [e for e in entries if e.get('grade', '').upper() == grade.upper()]
+        return entries[:min(limit, MAX_TRACE)]
+    except Exception:
+        return []
+
+
 def get_trace(limit: int = 100) -> list:
     """Return the most recent trace entries (for /execution-trace API endpoint)."""
     try:

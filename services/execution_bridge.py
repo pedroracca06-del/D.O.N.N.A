@@ -431,11 +431,12 @@ def route_to_execution(alert: 'AlertData') -> dict:
     Translate an AlertData object and route it through execute_signal().
 
     Returns dict with keys:
-      status  : 'disabled' | 'skipped' | 'attempted'
-      reason  : why skipped (when status != attempted)
-      code    : rejection code (when status == skipped)
-      signal_id: unique ID (when status == attempted)
-      result  : execute_signal() return dict (when status == attempted)
+      status     : 'disabled' | 'skipped' | 'attempted'
+      reason     : why skipped (when status != attempted)
+      code       : rejection code (when status == skipped)
+      signal_id  : unique ID (when status == attempted)
+      result     : execute_signal() return dict (when status == attempted)
+      chain_id   : DECISION_CHAIN trace entry ID (always present)
     """
     symbol     = getattr(alert, 'symbol',     '')
     alert_type = getattr(alert, 'alert_type', '')
@@ -444,73 +445,109 @@ def route_to_execution(alert: 'AlertData') -> dict:
     setup_type = getattr(alert, 'setup_type', '')
     session    = getattr(alert, 'session',    '')
 
+    # ── Decision chain accumulator ────────────────────────────────────────────────
+    # One entry per gate. Written to execution_trace before every exit so every
+    # signal that passes through this function has a complete audit trail.
+    _ch: list[dict] = []
+
+    def _cg(gate: str, layer: str, result: str, reason: str) -> None:
+        """Append one gate result to the chain."""
+        _ch.append({'gate': gate, 'layer': layer, 'result': result,
+                    'reason': reason, 'blocking': result == 'FAIL'})
+
+    def _write_chain(final: str, rej_gate: str = '', rej_reason: str = '') -> str:
+        try:
+            from services.execution_trace import log_decision_chain
+            return log_decision_chain(
+                symbol=symbol, direction=direction, grade=grade,
+                setup_type=setup_type, session=session, alert_type=alert_type,
+                gates=_ch, final_decision=final,
+                rejection_gate=rej_gate, rejection_reason=rej_reason,
+            )
+        except Exception:
+            return ''
+
+    def _fail_exit(gate: str, layer: str, reason: str, rej_code: str = '') -> str:
+        """Record gate failure, write chain, return chain_id."""
+        _cg(gate, layer, 'FAIL', reason)
+        return _write_chain('REJECTED', gate, rej_code or reason)
+
     # ── Gate 1: Feature flag (checked dynamically — env change takes effect immediately)
     if not _auto_execute_enabled():
         _log(f'DISABLED  {symbol} {direction} {alert_type}  (set NOVA_AUTO_EXECUTE=true to enable)')
-        return {'status': _OFF, 'reason': 'NOVA_AUTO_EXECUTE is false'}
+        cid = _fail_exit('NOVA_AUTO_EXECUTE', 'SYSTEM', 'NOVA_AUTO_EXECUTE is false')
+        return {'status': _OFF, 'reason': 'NOVA_AUTO_EXECUTE is false', 'chain_id': cid}
+    _cg('NOVA_AUTO_EXECUTE', 'SYSTEM', 'PASS', 'enabled')
 
     # ── Gate 2: Paper mode only — hard block on live
     paper = _is_paper()
     if not paper:
         _log(f'BLOCKED  {symbol} — live mode detected, bridge requires paper mode')
-        return {'status': _SKIP, 'reason': 'live mode — bridge is paper-only', 'code': 'NOT_PAPER_MODE'}
+        cid = _fail_exit('PAPER_MODE', 'SYSTEM', 'live mode — bridge is paper-only', 'NOT_PAPER_MODE')
+        return {'status': _SKIP, 'reason': 'live mode — bridge is paper-only', 'code': 'NOT_PAPER_MODE', 'chain_id': cid}
+    _cg('PAPER_MODE', 'SYSTEM', 'PASS', 'Alpaca in paper mode')
 
     # ── Gate 3: EXECUTION_READY only
     if alert_type != 'EXECUTION_READY':
         _log(f'SKIP  {symbol}  alert_type={alert_type}  (not EXECUTION_READY)')
-        return {'status': _SKIP, 'reason': f'alert_type={alert_type}', 'code': 'NOT_EXECUTION_READY'}
+        cid = _fail_exit('ALERT_TYPE', 'QUALITY', f'alert_type={alert_type} — only EXECUTION_READY routes', 'NOT_EXECUTION_READY')
+        return {'status': _SKIP, 'reason': f'alert_type={alert_type}', 'code': 'NOT_EXECUTION_READY', 'chain_id': cid}
+    _cg('ALERT_TYPE', 'QUALITY', 'PASS', 'EXECUTION_READY')
 
     # ── Gate 4: Grade A or B only
     if grade not in ('A', 'B'):
         _log(f'SKIP  {symbol} {direction}  grade={grade}  (not actionable)')
-        return {'status': _SKIP, 'reason': f'grade={grade}', 'code': 'GRADE_NOT_ACTIONABLE'}
+        cid = _fail_exit('GRADE_CHECK', 'QUALITY', f'grade={grade} — only A/B routes', 'GRADE_NOT_ACTIONABLE')
+        return {'status': _SKIP, 'reason': f'grade={grade}', 'code': 'GRADE_NOT_ACTIONABLE', 'chain_id': cid}
+    _cg('GRADE_CHECK', 'QUALITY', 'PASS', f'grade={grade}')
 
     # ── Gate 5: Valid direction
     direction_up = direction.upper()
     if direction_up not in ('LONG', 'SHORT', 'BUY', 'SELL'):
         _log(f'SKIP  {symbol}  direction={direction}  (not tradeable)')
-        return {'status': _SKIP, 'reason': f'direction={direction}', 'code': 'INVALID_DIRECTION'}
+        cid = _fail_exit('DIRECTION', 'QUALITY', f'direction={direction} is not tradeable', 'INVALID_DIRECTION')
+        return {'status': _SKIP, 'reason': f'direction={direction}', 'code': 'INVALID_DIRECTION', 'chain_id': cid}
     signal = 'LONG' if direction_up in ('LONG', 'BUY') else 'SHORT'
+    _cg('DIRECTION', 'QUALITY', 'PASS', signal)
 
     # ── Gate 6: Symbol routing
     key     = _sym_key(symbol)
     routing = _SYMBOL_MAP.get(key)
     if not routing:
         _log(f'SKIP  {symbol}  unmapped symbol (key={key})')
-        return {'status': _SKIP, 'reason': f'unmapped symbol: {symbol}', 'code': 'UNMAPPED_SYMBOL'}
-
+        cid = _fail_exit('SYMBOL_ROUTING', 'QUALITY', f'unmapped symbol: {symbol}', 'UNMAPPED_SYMBOL')
+        return {'status': _SKIP, 'reason': f'unmapped symbol: {symbol}', 'code': 'UNMAPPED_SYMBOL', 'chain_id': cid}
     instrument = routing['instrument']
     ticker     = routing['ticker']
+    _cg('SYMBOL_ROUTING', 'QUALITY', 'PASS', f'{symbol} → {instrument} (routes to {ticker})')
 
     # ── Gate 6b: Dominant directional context ────────────────────────────────────
-    # Two-layer check:
-    #   Layer A — signal log momentum + nova_state (fine-grained, per-instrument)
-    #   Layer B — market reality severity (macro override: HIGH/EXTREME blocks counter-trend)
     ctx = _get_signal_context(key)
     conflict, conflict_reason, conflict_detail = _check_directional_alignment(
         signal, instrument, ctx
     )
     if conflict:
         _log(f'DIRECTIONAL_CONTEXT_CONFLICT  {instrument} {signal}  {conflict_reason}')
+        _cg('DIRECTIONAL_CONTEXT', 'MARKET', 'FAIL', conflict_reason)
+        _write_chain('REJECTED', 'DIRECTIONAL_CONTEXT', 'DIRECTIONAL_CONTEXT_CONFLICT')
         return _bridge_reject(
             'DIRECTIONAL_CONTEXT_CONFLICT',
             conflict_reason,
             key, signal, setup_type, grade, session,
         )
+    _cg('DIRECTIONAL_CONTEXT', 'MARKET', 'PASS', f'no dominant conflict for {signal} {instrument}')
 
-    # Gate 6c: Market Reality directional block — single unified gate, V2-preferred.
-    # V2 uses objective price facts (VWAP, IB, session range, weekly structure).
-    # V1 used only as fallback when V2 file is absent or stale.
-    # One source, one read, one decision. No parallel V1/V2 state drift.
+    # ── Gate 6c: Market Reality directional block — V2-preferred, V1 safety net ──
     try:
         _block_code   = ''
         _block_reason = ''
+        _mr2_detail   = 'unavailable'
 
-        # Prefer V2 — authoritative fact-based block flags
         try:
             from engines.market_reality_v2 import load_market_reality_v2
-            mr2      = load_market_reality_v2()
-            mr2_st   = mr2.get('state', 'NEUTRAL')
+            mr2    = load_market_reality_v2()
+            mr2_st = mr2.get('state', 'NEUTRAL')
+            _mr2_detail = f'state={mr2_st} score={mr2.get("score", 0):+d}'
             if signal == 'LONG' and mr2.get('block_longs'):
                 _block_code   = 'MR2_LONG_BLOCKED'
                 _block_reason = (
@@ -526,9 +563,8 @@ def route_to_execution(alert: 'AlertData') -> dict:
                     f'{mr2.get("block_shorts_reason", mr2_st)}'
                 )
         except Exception:
-            pass  # V2 unavailable — fall through to V1 safety net below
+            pass
 
-        # V1 safety net — only evaluated when V2 produced no block decision
         if not _block_code:
             from engines.market_reality import load_market_reality
             mr  = load_market_reality()
@@ -554,44 +590,58 @@ def route_to_execution(alert: 'AlertData') -> dict:
 
         if _block_code:
             _log(f'MARKET_REALITY_GATE  {_block_code}  {_block_reason}')
+            _cg('MARKET_REALITY', 'MARKET', 'FAIL', _block_reason)
+            _write_chain('REJECTED', 'MARKET_REALITY', _block_code)
             return _bridge_reject(_block_code, _block_reason, key, signal, setup_type, grade, session)
+        _cg('MARKET_REALITY', 'MARKET', 'PASS', f'{_mr2_detail} — {signal} not blocked')
 
     except Exception as exc:
         _log(f'market_reality gate error (non-blocking): {exc}')
+        _cg('MARKET_REALITY', 'MARKET', 'PASS', f'gate error (non-blocking): {exc}')
 
     # ── Gates 7–13: Execution profile governance ─────────────────────────────────
     active_mode, cfg = _load_execution_config()
-    if active_mode != 'disabled' and cfg:
+
+    if active_mode == 'disabled' or not cfg:
+        _cg('EXECUTION_PROFILE', 'PROFILE', 'SKIP', f'mode={active_mode} — profile gates not evaluated')
+    else:
 
         def _reject(code: str, reason: str) -> dict:
+            _cg(code, 'PROFILE', 'FAIL', reason)
+            _write_chain('REJECTED', code, code)
             return _bridge_reject(code, reason, key, signal, setup_type, grade, session)
 
         # Gate 7: Emergency kill switch
         _log(f'MODE  {active_mode}  risk_tier={cfg.get("risk_tier","?")}  max_trades={cfg.get("max_trades_per_day","?")}')
         if cfg.get('kill_switch', False):
             return _reject('KILL_SWITCH_ACTIVE', 'Emergency kill switch is engaged — no executions until cleared')
+        _cg('KILL_SWITCH', 'PROFILE', 'PASS', 'not engaged')
 
         # Gate 8: Instrument filter
         allowed_instruments = [i.upper() for i in cfg.get('allowed_instruments', ['MNQ', 'MES'])]
         if instrument.upper() not in allowed_instruments:
             return _reject('INSTRUMENT_NOT_ALLOWED', f'{instrument} not in allowed list: {allowed_instruments}')
+        _cg('INSTRUMENT_FILTER', 'PROFILE', 'PASS', f'{instrument} in {allowed_instruments}')
 
         # Gate 8b: Minimum grade for this profile
         min_grade = str(cfg.get('min_grade', 'B')).upper()
         grade_order = {'A': 1, 'B': 2, 'C': 3, 'D': 4}
         if grade_order.get(grade.upper(), 99) > grade_order.get(min_grade, 2):
             return _reject('GRADE_BELOW_PROFILE_MIN', f'Grade {grade} below profile minimum {min_grade} for {active_mode}')
+        _cg('GRADE_PROFILE_MIN', 'PROFILE', 'PASS', f'{grade} >= {min_grade} ({active_mode})')
 
         # Gate 9: Strategy filter
         allowed_strategies = [s.upper() for s in cfg.get('allowed_strategies', ['PROS', 'ORB'])]
         strategy_family = setup_type.split('_')[0].upper() if '_' in setup_type else setup_type.upper()
         if strategy_family not in allowed_strategies:
             return _reject('STRATEGY_NOT_ALLOWED', f'{strategy_family} not in allowed list: {allowed_strategies}')
+        _cg('STRATEGY_FILTER', 'PROFILE', 'PASS', f'{strategy_family} in {allowed_strategies}')
 
         # Gate 10: Duplicate signal protection
         sig_dedup_key = f'{instrument}:{signal}:{setup_type}:{grade}'
         if sig_dedup_key in _seen_signal_ids:
             return _reject('DUPLICATE_SIGNAL', f'Signal already routed this session: {sig_dedup_key}')
+        _cg('DUPLICATE_SIGNAL', 'PROFILE', 'PASS', 'new signal — not seen this session')
 
         # Gate 11: Position governance — three layers
         # Fail-safe: if state is unreadable we block rather than pass silently.
@@ -609,16 +659,16 @@ def route_to_execution(alert: 'AlertData') -> dict:
             from core.state_engine import state as _st
             open_positions = _st.get_open_positions()
 
-            # 11a: Direction-aware same-ETF conflict.
-            # One active directional position per routed ETF.
-            # MNQ + MES is OK (different ETFs). SPY SHORT + SPY SHORT is NOT.
+            # 11a: Direction-aware same-ETF conflict
+            _pos_conflict = False
             for pos in open_positions:
                 pos_sym = str(pos.get('symbol', '')).upper()
                 if pos_sym != _routed_etf:
                     continue
                 existing_dir  = _norm_dir(pos.get('side', ''))
-                attempted_dir = signal   # already LONG or SHORT upstream
+                attempted_dir = signal
                 if existing_dir == attempted_dir:
+                    _pos_conflict = True
                     return _reject(
                         'EXISTING_POSITION_CONFLICT',
                         f'{_routed_etf} already {existing_dir} '
@@ -626,17 +676,23 @@ def route_to_execution(alert: 'AlertData') -> dict:
                         f'opened {pos.get("timestamp","?")[:16]}) — '
                         f'attempted {attempted_dir} {setup_type} [{grade}]',
                     )
+            if not _pos_conflict:
+                _cg('EXISTING_POSITION_CONFLICT', 'POSITION', 'PASS',
+                    f'no same-direction {_routed_etf} position open')
 
-            # 11b: Global concurrent cap — default 2, configurable per execution profile.
+            # 11b: Global concurrent cap
             max_concurrent = int(cfg.get('max_concurrent_positions', 2))
             if len(open_positions) >= max_concurrent:
-                return _reject('MAX_CONCURRENT_POSITIONS',
-                               f'Concurrent position cap: {len(open_positions)}/{max_concurrent} open')
+                sources = [p.get('source', '?') for p in open_positions]
+                return _reject(
+                    'MAX_CONCURRENT_POSITIONS',
+                    f'Concurrent cap: {len(open_positions)}/{max_concurrent} open '
+                    f'(sources: {sources})',
+                )
+            _cg('MAX_CONCURRENT_POSITIONS', 'POSITION', 'PASS',
+                f'{len(open_positions)}/{max_concurrent} positions open')
 
-            # 11e: Live-broker correlated ETF check.
-            # Gates 11c/d read the state engine — which can be empty after a restart.
-            # This gate goes directly to Alpaca for the CORRELATED ETF so a ghost
-            # position (ALPACA_RECONCILE, orphaned bracket, manual) cannot slip through.
+            # 11e: Live-broker correlated ETF check (non-blocking on same-dir)
             _corr_etf = 'SPY' if instrument in _NQ_INSTRUMENTS else 'QQQ'
             try:
                 from services.execution import get_positions as _get_live_positions
@@ -667,8 +723,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
             except Exception as _e_err:
                 _log(f'Gate 11e live-broker check error (non-blocking): {_e_err}')
 
-            # 11c: Correlated exposure guard.
-            # MNQ + MES same direction into a hostile market reality compounds risk.
+            # 11c: Correlated exposure guard
             if open_positions:
                 open_etfs = {str(p.get('symbol', '')).upper() for p in open_positions}
                 correlated = (
@@ -678,9 +733,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
                 if correlated:
                     open_sides = {_norm_dir(p.get('side', '')) for p in open_positions}
 
-                    # 11d: Portfolio Direction Coherence.
-                    # NOVA does not grade relative-strength spreads (long one correlated
-                    # instrument, short the other). Block before any market-reality check.
+                    # 11d: Portfolio Direction Coherence
                     _d_opposite = 'SHORT' if signal == 'LONG' else 'LONG'
                     if _d_opposite in open_sides:
                         _d_existing = next(
@@ -699,15 +752,10 @@ def route_to_execution(alert: 'AlertData') -> dict:
                         return _reject('PORTFOLIO_SPREAD_CONFLICT', _d_msg)
 
                     if signal in open_sides:
-                        # Gate 11c: correlated hostile-market check.
-                        # Mirrors Gate 6c exactly: V2-primary, V1 safety net,
-                        # one source per decision, source logged for audit.
                         try:
-                            _c_code   = ''
+                            _c_code = ''
                             _c_reason = ''
                             _c_source = ''
-
-                            # V2-primary — authoritative fact-based block flags
                             try:
                                 from engines.market_reality_v2 import load_market_reality_v2
                                 _mr2c    = load_market_reality_v2()
@@ -731,9 +779,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
                                         f'ES={_mr2c.get("es_pct", 0):+.2f}%'
                                     )
                             except Exception:
-                                pass  # V2 unavailable — fall through to V1 safety net
-
-                            # V1 safety net — only when V2 produced no block decision
+                                pass
                             if not _c_code:
                                 from engines.market_reality import load_market_reality
                                 _mr1c = load_market_reality()
@@ -758,17 +804,22 @@ def route_to_execution(alert: 'AlertData') -> dict:
                                             f'NQ={_mr1c.get("nq_change_pct", 0):+.2f}% '
                                             f'ES={_mr1c.get("es_change_pct", 0):+.2f}%'
                                         )
-
                             if _c_code:
                                 _log(f'CORRELATED_EXPOSURE_GATE  source={_c_source}  {_c_code}  {_c_reason}')
                                 return _reject(_c_code, _c_reason)
                             _log(f'CORRELATED_EXPOSURE  source={_c_source or "MR2"}  {instrument} {signal} + {open_etfs} — market supports direction')
-
+                            _cg('CORRELATED_EXPOSURE', 'POSITION', 'PASS',
+                                f'{instrument} {signal} + correlated {open_etfs} — MR2 supports direction')
                         except Exception as _c_err:
                             _log(f'Gate 11c market_reality error (non-blocking): {_c_err}')
+                            _cg('CORRELATED_EXPOSURE', 'POSITION', 'PASS',
+                                f'MR2 check error (non-blocking) — allowing: {_c_err}')
+                else:
+                    _cg('CORRELATED_EXPOSURE', 'POSITION', 'PASS', 'no correlated exposure')
+            else:
+                _cg('CORRELATED_EXPOSURE', 'POSITION', 'PASS', 'no open positions')
 
         except Exception as _g11_err:
-            # State unreadable — block rather than silently pass.
             _log(f'Gate 11 ERROR (blocking): {_g11_err}')
             return _reject('POSITION_STATE_ERROR',
                            f'Position state unreadable — blocking to prevent duplicate exposure: {_g11_err}')
@@ -779,7 +830,10 @@ def route_to_execution(alert: 'AlertData') -> dict:
         elapsed_minutes = (time.time() - last_ts) / 60.0
         if last_ts > 0 and elapsed_minutes < cooldown_minutes:
             remaining = round(cooldown_minutes - elapsed_minutes, 1)
-            return _reject('COOLDOWN_ACTIVE', f'{instrument} cooldown: {remaining}min remaining (cooldown={cooldown_minutes}min)')
+            return _reject('COOLDOWN_ACTIVE',
+                           f'{instrument} cooldown: {remaining}min remaining (cooldown={cooldown_minutes}min)')
+        _cg('COOLDOWN', 'TIMING', 'PASS',
+            f'{instrument} cooldown clear' if last_ts == 0 else f'{elapsed_minutes:.1f}min elapsed (cooldown={cooldown_minutes}min)')
 
         # Gate 13: Max trades per day
         max_trades = int(cfg.get('max_trades_per_day', 5))
@@ -787,11 +841,13 @@ def route_to_execution(alert: 'AlertData') -> dict:
             from core.state_engine import state as _st2
             trades_today = int(_st2.get('daily_trade_count', 0))
             if trades_today >= max_trades:
-                return _reject('MAX_TRADES_REACHED', f'Daily trade limit reached: {trades_today}/{max_trades}')
+                return _reject('MAX_TRADES_REACHED',
+                               f'Daily trade limit reached: {trades_today}/{max_trades}')
+            _cg('DAILY_TRADES', 'TIMING', 'PASS', f'{trades_today}/{max_trades} trades today')
         except Exception:
-            pass
+            _cg('DAILY_TRADES', 'TIMING', 'PASS', 'count unavailable — proceeding')
 
-    # ── Build execute_signal payload
+    # ── Build execute_signal payload ──────────────────────────────────────────────
     strategy_family = setup_type.split('_')[0] if '_' in setup_type else 'NOVA'
     confidence      = _GRADE_CONFIDENCE.get(grade, '75%')
     signal_id       = f'NOVA_{key}_{signal}_{uuid.uuid4().hex[:8].upper()}'
@@ -839,9 +895,17 @@ def route_to_execution(alert: 'AlertData') -> dict:
     exec_code   = result.get('code') or result.get('reason', '')
     _log(f'RESULT  status={exec_status}  code={exec_code}  id={signal_id}')
 
+    # Record final execution result in chain
+    if exec_status in ('executed', 'ok'):
+        _cg('EXECUTE_SIGNAL', 'EXECUTION', 'PASS', f'order submitted — {exec_code or "confirmed"}')
+        chain_id = _write_chain('ACCEPTED')
+    else:
+        _cg('EXECUTE_SIGNAL', 'EXECUTION', 'FAIL', f'{exec_status}: {exec_code}')
+        chain_id = _write_chain('REJECTED', 'EXECUTE_SIGNAL', exec_code)
+
     _notify_discord(alert, result, paper)
 
-    return {'status': _TRIED, 'signal_id': signal_id, 'result': result}
+    return {'status': _TRIED, 'signal_id': signal_id, 'result': result, 'chain_id': chain_id}
 
 
 # ── Smoke test — run directly to verify pipeline without live signals ─────────────

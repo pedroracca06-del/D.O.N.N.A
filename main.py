@@ -895,6 +895,149 @@ async def governance_status():
         return {'error': str(exc)}
 
 
+@app.get('/api/execution-state')
+async def execution_state():
+    """
+    Full execution arming status — answers 'why won't the next trade fire?'
+    Returns armed flag, active blockers, position attribution, and exact conditions
+    required for the next trade to execute.
+    """
+    try:
+        import os as _os
+        from core.state_engine import state as _st
+        from services.execution_bridge import _load_execution_config, _auto_execute_enabled, _is_paper
+
+        st           = _st.get_state()
+        auto_execute = _auto_execute_enabled()
+        paper        = _is_paper()
+        active_mode, cfg = _load_execution_config()
+
+        # Collect every blocker that would prevent a hypothetical A-grade PROS signal
+        blockers: list[str] = []
+        conditions_met: list[str] = []
+
+        # System gates
+        if not auto_execute:
+            blockers.append('NOVA_AUTO_EXECUTE is false — set to true to arm execution')
+        else:
+            conditions_met.append('NOVA_AUTO_EXECUTE=true')
+
+        if not paper:
+            blockers.append('Alpaca is in LIVE mode — bridge is paper-only')
+        else:
+            conditions_met.append('Alpaca paper mode confirmed')
+
+        # Profile gates
+        if active_mode == 'disabled' or not cfg:
+            blockers.append(f'Execution profile is disabled (mode={active_mode})')
+        else:
+            conditions_met.append(f'Execution profile active: {active_mode}')
+            if cfg.get('kill_switch', False):
+                blockers.append('Kill switch is engaged')
+            else:
+                conditions_met.append('Kill switch off')
+
+        # State engine locks
+        if st.get('eod_lock'):
+            blockers.append('EOD lock active — trading day closed')
+        if st.get('macro_lock'):
+            blockers.append('Macro lock active')
+        if st.get('red_folder_lock'):
+            blockers.append('Red-folder lock active')
+        if st.get('execution_lock'):
+            blockers.append('Execution lock active')
+
+        # Position state
+        positions = _st.get_open_positions()
+        max_concurrent = int(cfg.get('max_concurrent_positions', 2)) if cfg else 2
+        if len(positions) >= max_concurrent:
+            blockers.append(f'Concurrent position cap reached: {len(positions)}/{max_concurrent}')
+        else:
+            conditions_met.append(f'Position slots available: {len(positions)}/{max_concurrent} used')
+
+        # Annotate positions with source + blocking analysis
+        position_detail = []
+        for p in positions:
+            src = p.get('source', 'UNKNOWN')
+            sym = p.get('symbol', '?')
+            side = p.get('side', '?')
+            blocks = []
+            if sym == 'SPY':
+                blocks.append('blocks new MES/ES signals in same direction')
+            elif sym == 'QQQ':
+                blocks.append('blocks new MNQ/NQ signals in same direction')
+            position_detail.append({
+                'symbol':    sym,
+                'side':      side,
+                'qty':       p.get('qty', '?'),
+                'source':    src,
+                'entry_ref': p.get('entry_ref', '?'),
+                'opened':    p.get('timestamp', '?')[:16] if p.get('timestamp') else '?',
+                'blocks':    blocks,
+            })
+
+        # Trades today
+        trades_today = int(st.get('daily_trade_count', 0))
+        max_trades   = int(cfg.get('max_trades_per_day', 5)) if cfg else 5
+        if trades_today >= max_trades:
+            blockers.append(f'Daily trade limit reached: {trades_today}/{max_trades}')
+        else:
+            conditions_met.append(f'Daily trade budget: {trades_today}/{max_trades} used')
+
+        armed = auto_execute and paper and active_mode != 'disabled' and cfg is not None and not blockers
+
+        # Conditions for the next trade to fire
+        conditions_for_next = []
+        for b in blockers:
+            conditions_for_next.append(f'RESOLVE: {b}')
+        if not blockers:
+            conditions_for_next = [
+                'Receive EXECUTION_READY alert with grade A or B',
+                'MR2 must not be blocking the signal direction',
+                'No same-ETF position already open in that direction',
+                'Cooldown window must be clear',
+            ]
+
+        return {
+            'armed':                   armed,
+            'nova_auto_execute':       auto_execute,
+            'paper_mode':              paper,
+            'execution_mode':          active_mode,
+            'risk_tier':               cfg.get('risk_tier', 'N/A') if cfg else 'N/A',
+            'min_grade':               cfg.get('min_grade', 'B') if cfg else 'N/A',
+            'positions':               position_detail,
+            'open_count':              len(positions),
+            'max_concurrent':          max_concurrent,
+            'trades_today':            trades_today,
+            'max_trades':              max_trades,
+            'eod_lock':                st.get('eod_lock', False),
+            'macro_lock':              st.get('macro_lock', False),
+            'red_folder_lock':         st.get('red_folder_lock', False),
+            'execution_lock':          st.get('execution_lock', False),
+            'blockers_active':         blockers,
+            'conditions_met':          conditions_met,
+            'conditions_for_next_trade': conditions_for_next,
+        }
+    except Exception as exc:
+        return {'error': str(exc)}
+
+
+@app.get('/api/decision-chain')
+async def decision_chain(
+    symbol: str = '',
+    grade: str = '',
+    direction: str = '',
+    limit: int = 20,
+):
+    """Recent DECISION_CHAIN entries from the execution trace. Filterable by symbol/grade/direction."""
+    try:
+        from services.execution_trace import get_decision_chains
+        chains = get_decision_chains(limit=limit, symbol=symbol, direction=direction, grade=grade)
+        return {'chains': chains, 'count': len(chains)}
+    except Exception as exc:
+        return {'error': str(exc)}
+
+
 @app.get('/market-reality')
 async def market_reality_endpoint():
     """Live market reality state. Returns V2 (fact-based) with V1 fields merged as fallback."""
