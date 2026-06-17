@@ -23,7 +23,7 @@ from engines.market_reality_shared import fetch_weekly_structure
 _BASE_DIR     = Path(__file__).parent.parent
 _REALITY_FILE = _BASE_DIR / 'data' / 'donna_market_reality.json'
 _RISK_FILE    = _BASE_DIR / 'data' / 'donna_risk_state.json'
-_GROK_FILE    = _BASE_DIR / 'data' / 'donna_grok_intelligence.json'
+from core.config import GROK_INTEL_FILE as _GROK_FILE  # /data/ persistent disk
 
 _NY_TZ = ZoneInfo('America/New_York')
 

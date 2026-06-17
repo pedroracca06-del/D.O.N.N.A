@@ -16,7 +16,7 @@ from core.config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_MODE, FOREX_FACTORY_NOTES_URL,
     FINNHUB_API_KEY, FMP_API_KEY, ALPHA_VANTAGE_API_KEY,
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE, MACRO_EVENTS_FILE,
-    MORNING_BRIEF_FILE, NY_TZ,
+    MORNING_BRIEF_FILE, NY_TZ, GROK_INTEL_FILE,
     CACHE, now_ny, utc_now_iso, session_label, safe_float,
     send_telegram_message,
 )
@@ -160,7 +160,7 @@ app = FastAPI(title='DONNA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
 
 _GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
-_GROK_INTEL_FILE   = Path(__file__).parent / 'data' / 'donna_grok_intelligence.json'
+_GROK_INTEL_FILE   = GROK_INTEL_FILE  # /data/ persistent disk via DONNA_DATA_DIR
 _GROK_INTEL_PROMPT = (
     'You are a financial markets AI with live access to X/Twitter and current news. '
     'Return ONLY valid JSON with these fields:\n'
