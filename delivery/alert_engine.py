@@ -38,8 +38,7 @@ import requests
 _BASE_DIR    = Path(__file__).parent.parent
 _MCP_DIR     = _BASE_DIR / 'mcp' / 'tradingview'
 _SS_DIR      = _MCP_DIR / 'screenshots'
-_STATE_FILE  = _BASE_DIR / 'data' / 'donna_alert_state.json'
-_SIGNAL_LOG  = _BASE_DIR / 'data' / 'donna_signal_log.json'
+from core.config import ALERT_STATE_FILE as _STATE_FILE, SIGNAL_LOG_FILE as _SIGNAL_LOG
 _DISCORD_API = 'https://discord.com/api/v10'
 
 try:

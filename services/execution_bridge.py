@@ -106,10 +106,10 @@ def _load_execution_config() -> tuple[str, dict]:
     """
     try:
         import json as _json
-        p = Path(__file__).parent.parent / 'data' / 'donna_settings.json'
-        if not p.exists():
+        from core.config import SETTINGS_FILE as _sf
+        if not _sf.exists():
             return 'disabled', {}
-        s = _json.loads(p.read_text(encoding='utf-8'))
+        s = _json.loads(_sf.read_text(encoding='utf-8'))
 
         # New structure: execution_mode selector
         mode = str(s.get('execution_mode', 'disabled')).strip().lower()
@@ -306,9 +306,9 @@ def _get_signal_context(symbol: str) -> dict:
     """Return the most recent signal log entry for this symbol today."""
     try:
         from zoneinfo import ZoneInfo as _ZI
+        from core.config import SIGNAL_LOG_FILE as _slf
         today = datetime.now(_ZI('America/New_York')).strftime('%Y-%m-%d')
-        p = Path(__file__).parent.parent / 'data' / 'donna_signal_log.json'
-        raw = _json.loads(p.read_text(encoding='utf-8'))
+        raw = _json.loads(_slf.read_text(encoding='utf-8'))
         entries = raw if isinstance(raw, list) else raw.get('entries', [])
         matches = [e for e in entries if e.get('symbol') == symbol and e.get('date') == today]
         return matches[-1] if matches else {}

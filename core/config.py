@@ -38,8 +38,15 @@ TRACE_FILE             = DATA_DIR / 'donna_execution_trace.json'
 MARKET_MEMORY_FILE     = DATA_DIR / 'donna_market_memory.json'
 REASONING_TRACE_FILE   = DATA_DIR / 'donna_reasoning_trace.json'
 MARKET_REALITY_V2_FILE = DATA_DIR / 'donna_market_reality_v2.json'
-FEED_SYNC_FILE         = DATA_DIR / 'donna_feed_sync.json'
-GROK_INTEL_FILE        = DATA_DIR / 'donna_grok_intelligence.json'
+FEED_SYNC_FILE              = DATA_DIR / 'donna_feed_sync.json'
+GROK_INTEL_FILE             = DATA_DIR / 'donna_grok_intelligence.json'
+STATE_ENGINE_FILE           = DATA_DIR / 'donna_state_engine.json'
+MARKET_REALITY_FILE         = DATA_DIR / 'donna_market_reality.json'
+MACRO_DISCORD_STATE_FILE    = DATA_DIR / 'donna_macro_discord_state.json'
+RISK_ENGINE_FILE            = DATA_DIR / 'donna_risk_engine_state.json'
+SP500_HEATMAP_FILE          = DATA_DIR / 'donna_sp500_heatmap.json'
+NQ_HEATMAP_FILE             = DATA_DIR / 'donna_nq_heatmap.json'
+BTC_VIX_CACHE_FILE          = DATA_DIR / 'donna_btc_vix_cache.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()

@@ -20,10 +20,11 @@ import yfinance as yf
 
 from engines.market_reality_shared import fetch_weekly_structure
 
-_BASE_DIR     = Path(__file__).parent.parent
-_REALITY_FILE = _BASE_DIR / 'data' / 'donna_market_reality.json'
-_RISK_FILE    = _BASE_DIR / 'data' / 'donna_risk_state.json'
-from core.config import GROK_INTEL_FILE as _GROK_FILE  # /data/ persistent disk
+from core.config import (
+    MARKET_REALITY_FILE  as _REALITY_FILE,
+    RISK_STATE_FILE      as _RISK_FILE,
+    GROK_INTEL_FILE      as _GROK_FILE,
+)
 
 _NY_TZ = ZoneInfo('America/New_York')
 

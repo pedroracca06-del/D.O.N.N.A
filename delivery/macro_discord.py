@@ -29,11 +29,12 @@ import requests
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-_BASE_DIR          = Path(__file__).parent.parent
-_MACRO_EVENTS_FILE = _BASE_DIR / 'data' / 'donna_macro_events.json'
-_RISK_STATE_FILE   = _BASE_DIR / 'data' / 'donna_risk_state.json'
-_MACRO_DISC_STATE  = _BASE_DIR / 'data' / 'donna_macro_discord_state.json'
-_DISCORD_API       = 'https://discord.com/api/v10'
+from core.config import (
+    MACRO_EVENTS_FILE        as _MACRO_EVENTS_FILE,
+    RISK_STATE_FILE          as _RISK_STATE_FILE,
+    MACRO_DISCORD_STATE_FILE as _MACRO_DISC_STATE,
+)
+_DISCORD_API = 'https://discord.com/api/v10'
 
 # ── Config imports ─────────────────────────────────────────────────────────────
 

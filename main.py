@@ -590,8 +590,7 @@ async def nq_components():
 
 # ── Stock Heatmaps ─────────────────────────────────────────────
 
-_SP500_HEATMAP_FILE = Path(__file__).parent / 'data' / 'donna_sp500_heatmap.json'
-_NQ_HEATMAP_FILE    = Path(__file__).parent / 'data' / 'donna_nq_heatmap.json'
+from core.config import SP500_HEATMAP_FILE as _SP500_HEATMAP_FILE, NQ_HEATMAP_FILE as _NQ_HEATMAP_FILE
 
 _SP500_SYMBOLS: dict[str, tuple[str, float]] = {
     'XLK':  ('Technology',               31.0),
@@ -685,7 +684,7 @@ async def nq_heatmap():
 
 # ── BTC + VIX live quotes ──────────────────────────────────────
 
-_BTC_VIX_CACHE_FILE = Path(__file__).parent / 'data' / 'donna_btc_vix_cache.json'
+from core.config import BTC_VIX_CACHE_FILE as _BTC_VIX_CACHE_FILE
 
 
 def _finnhub_quote_raw(symbol: str) -> dict | None:
@@ -1895,10 +1894,9 @@ async def journal_data():
 async def journal_signals():
     """Return recent signal log entries for the Journal intelligence feed."""
     import json as _json
-    from pathlib import Path
-    sig_file = Path(__file__).parent / 'data' / 'donna_signal_log.json'
+    from core.config import SIGNAL_LOG_FILE as _sig_file
     try:
-        entries = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
+        entries = _json.loads(_sig_file.read_text(encoding='utf-8')) if _sig_file.exists() else []
     except Exception:
         entries = []
     # Return last 150 entries (newest first — file is already newest-first)
@@ -2030,16 +2028,15 @@ async def journal_trade_detail(request: Request):
     trade = trades[trade_idx]
     ticker = (trade.get('ticker') or '').upper().replace('1!', '')
 
-    sig_file = Path(__file__).parent / 'data' / 'donna_signal_log.json'
+    from core.config import SIGNAL_LOG_FILE as _sig_file2, TRACE_FILE as _trace_file
     try:
-        all_sigs = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
+        all_sigs = _json.loads(_sig_file2.read_text(encoding='utf-8')) if _sig_file2.exists() else []
     except Exception:
         all_sigs = []
     nearby = [s for s in all_sigs if ticker in (s.get('symbol') or '').upper()][:10]
 
-    trace_file = Path(__file__).parent / 'data' / 'donna_execution_trace.json'
     try:
-        all_trace = _json.loads(trace_file.read_text(encoding='utf-8')) if trace_file.exists() else []
+        all_trace = _json.loads(_trace_file.read_text(encoding='utf-8')) if _trace_file.exists() else []
     except Exception:
         all_trace = []
     trace_record = next(
@@ -2073,9 +2070,9 @@ async def journal_analyze(request: Request):
     trade = trades[trade_idx]
 
     # Load nearby signal log entries for context
-    sig_file = Path(__file__).parent / 'data' / 'donna_signal_log.json'
+    from core.config import SIGNAL_LOG_FILE as _sig_file3
     try:
-        all_sigs = _json.loads(sig_file.read_text(encoding='utf-8')) if sig_file.exists() else []
+        all_sigs = _json.loads(_sig_file3.read_text(encoding='utf-8')) if _sig_file3.exists() else []
     except Exception:
         all_sigs = []
 

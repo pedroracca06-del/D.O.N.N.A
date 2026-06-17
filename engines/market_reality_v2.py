@@ -50,9 +50,7 @@ from zoneinfo import ZoneInfo
 
 from engines.market_reality_shared import fetch_weekly_structure
 
-_BASE_DIR  = Path(__file__).parent.parent
-_V2_FILE   = _BASE_DIR / 'data' / 'donna_market_reality_v2.json'
-_RISK_FILE = _BASE_DIR / 'data' / 'donna_risk_state.json'
+from core.config import MARKET_REALITY_V2_FILE as _V2_FILE, RISK_STATE_FILE as _RISK_FILE
 _NY_TZ     = ZoneInfo('America/New_York')
 
 # ── Score thresholds ──────────────────────────────────────────────────────────

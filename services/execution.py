@@ -847,11 +847,10 @@ def _get_context_snapshot(instrument: str) -> dict:
 
     # Layer 1: reasoning trace ------------------------------------------------
     try:
-        from pathlib import Path as _P
-        trace_path = _P(__file__).parent.parent / 'data' / 'donna_reasoning_trace.json'
-        if trace_path.exists():
+        from core.config import REASONING_TRACE_FILE as _rtf
+        if _rtf.exists():
             import json as _j
-            entries = _j.loads(trace_path.read_text(encoding='utf-8'))
+            entries = _j.loads(_rtf.read_text(encoding='utf-8'))
             if not isinstance(entries, list):
                 entries = []
             matches = [e for e in entries if str(e.get('symbol', '')).upper() == norm]
@@ -1217,10 +1216,8 @@ def _load_risk_settings() -> tuple[str, float]:
     try:
         import json as _json
         from pathlib import Path as _Path
-        settings = _json.loads(
-            (_Path(__file__).parent.parent / 'data' / 'donna_settings.json')
-            .read_text(encoding='utf-8')
-        )
+        from core.config import SETTINGS_FILE as _stf
+        settings = _json.loads(_stf.read_text(encoding='utf-8'))
         test_cfg = settings.get('autonomous_test_mode', {})
         tier_name = str(test_cfg.get('risk_tier', 'standard_test'))
         tiers = settings.get('risk_tiers', {})

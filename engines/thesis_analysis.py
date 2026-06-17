@@ -35,8 +35,7 @@ _DATA_BASE     = 'https://data.alpaca.markets'
 # How far past exit to scan for target — ~100 minutes of 1m bars
 _POST_EXIT_SCAN_BARS = 100
 
-# Data dir (relative to this file: engines/ → project root → data/)
-_DATA_DIR = Path(__file__).parent.parent / 'data'
+from core.config import DATA_DIR as _DATA_DIR
 
 
 # ── Alpaca bar fetch ─────────────────────────────────────────────────────────

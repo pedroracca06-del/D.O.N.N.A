@@ -10,9 +10,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 NY_TZ  = ZoneInfo('America/New_York')
-BASE_DIR = Path(__file__).parent.parent
 
-RISK_ENGINE_FILE = BASE_DIR / 'data' / 'donna_risk_engine_state.json'
+from core.config import RISK_ENGINE_FILE
 
 DEFAULT_STATE: dict = {
     'account_size':     25000.0,
