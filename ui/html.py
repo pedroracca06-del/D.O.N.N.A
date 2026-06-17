@@ -1451,12 +1451,11 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <button class="tab-btn active" data-page="dashboard">Dashboard</button>
         <button class="tab-btn" data-page="feed">Feed<span class="signal-dot" id="feedUnreadDot" style="display:none"></span></button>
         <button class="tab-btn" data-page="market-reality">MKT REALITY</button>
-        <button class="tab-btn" data-page="governance">GOVERNANCE</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
         <button class="tab-btn journal-btn" data-page="journal">Journal</button>
-        <button class="tab-btn" data-page="execution">Execution</button>
+        <button class="tab-btn" data-page="execution">EXEC CENTER</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -2216,147 +2215,201 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <span style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);white-space:nowrap" id="novaLastSync">—</span>
       </div>
 
-      <!-- ── SECTION 1: LIVE EXECUTION STATE ── -->
-      <div class="exec-state-grid">
-
-        <!-- Current State -->
-        <div class="panel">
-          <div class="kicker">NOVA EXECUTION STATE</div>
-          <div id="novaPnlHero" class="exec-pnl-hero" style="color:var(--muted2)">—</div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Active Thesis</span>
-            <span class="exec-kv-val" id="novaThesisVal">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Market Regime</span>
-            <span class="exec-kv-val" id="novaRegimeVal">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Session</span>
-            <span class="exec-kv-val" id="novaSessionVal">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Trades Today</span>
-            <span class="exec-kv-val" id="novaTradesVal">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Risk Used</span>
-            <span class="exec-kv-val" id="novaRiskVal">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Open Exposure</span>
-            <span class="exec-kv-val" id="novaExposureVal">FLAT</span>
-          </div>
-        </div>
-
-        <!-- Governance State -->
-        <div class="panel">
-          <div class="kicker">GOVERNANCE STATE</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Active locks and cooldowns constraining execution.</div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Execution Gate</span>
-            <span class="exec-kv-val" id="novaCanExec">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Macro Lock</span>
-            <span class="exec-kv-val" id="novaMacroLock">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Red Folder</span>
-            <span class="exec-kv-val" id="novaRedFolderVal">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">SPY Cooldown</span>
-            <span class="exec-kv-val mono" id="novaSpyCooldown">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">QQQ Cooldown</span>
-            <span class="exec-kv-val mono" id="novaQqqCooldown">—</span>
-          </div>
-          <div class="exec-kv">
-            <span class="exec-kv-lab">Thesis Age</span>
-            <span class="exec-kv-val mono" id="novaThesisAge">—</span>
-          </div>
-        </div>
+      <!-- ── EXECUTION CENTER SUB-NAV ── -->
+      <div class="j-subnav">
+        <button class="j-subnav-btn active" id="ecTab-state" onclick="switchEcTab(\'state\')">STATE</button>
+        <button class="j-subnav-btn" id="ecTab-locks" onclick="switchEcTab(\'locks\')">LOCKS</button>
+        <button class="j-subnav-btn" id="ecTab-audit" onclick="switchEcTab(\'audit\')">AUDIT</button>
       </div>
 
-      <!-- ── SECTION 2: REJECTION INTELLIGENCE ── -->
-      <div class="panel">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px;flex-wrap:wrap">
-          <div>
-            <div class="kicker" style="margin-bottom:4px">REJECTION INTELLIGENCE</div>
-            <div class="section-title">Blocked Signal Flow</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px">Every blocked signal is logged. NOVA is self-aware.</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="font-family:\'Rajdhani\',sans-serif;font-size:36px;font-weight:700;line-height:1;color:var(--text)" id="rejTodayCount">—</div>
-            <div style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-top:2px">blocked today</div>
-          </div>
-        </div>
+      <!-- ── STATE ── -->
+      <div id="ec-section-state">
+        <div class="exec-state-grid">
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
-
-          <!-- Last blocked signal -->
-          <div>
-            <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px">Last Blocked Signal</div>
-            <div id="rejLastCard">
-              <div style="color:var(--muted2);font-size:12px;font-style:italic">No rejections logged yet.</div>
+          <!-- Current State -->
+          <div class="panel">
+            <div class="kicker">NOVA EXECUTION STATE</div>
+            <div id="novaPnlHero" class="exec-pnl-hero" style="color:var(--muted2)">—</div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Active Thesis</span>
+              <span class="exec-kv-val" id="novaThesisVal">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Market Regime</span>
+              <span class="exec-kv-val" id="novaRegimeVal">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Session</span>
+              <span class="exec-kv-val" id="novaSessionVal">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Trades Today</span>
+              <span class="exec-kv-val" id="novaTradesVal">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Risk Used</span>
+              <span class="exec-kv-val" id="novaRiskVal">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Open Exposure</span>
+              <span class="exec-kv-val" id="novaExposureVal">FLAT</span>
             </div>
           </div>
 
-          <!-- Rejection breakdown -->
-          <div>
-            <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px">Top Rejection Reasons</div>
-            <div id="rejBreakdownList">
-              <div style="color:var(--muted2);font-size:12px;font-style:italic">—</div>
+          <!-- Governance State -->
+          <div class="panel">
+            <div class="kicker">GOVERNANCE STATE</div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Active locks and cooldowns constraining execution.</div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Execution Gate</span>
+              <span class="exec-kv-val" id="novaCanExec">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Macro Lock</span>
+              <span class="exec-kv-val" id="novaMacroLock">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Red Folder</span>
+              <span class="exec-kv-val" id="novaRedFolderVal">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">SPY Cooldown</span>
+              <span class="exec-kv-val mono" id="novaSpyCooldown">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">QQQ Cooldown</span>
+              <span class="exec-kv-val mono" id="novaQqqCooldown">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Thesis Age</span>
+              <span class="exec-kv-val mono" id="novaThesisAge">—</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- ── SECTION 3: SESSION SCORECARD ── -->
-      <div class="panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <div>
-            <div class="kicker" style="margin-bottom:4px">SESSION SCORECARD</div>
-            <div class="section-title">Execution Quality</div>
+      <!-- ── LOCKS ── -->
+      <div id="ec-section-locks" style="display:none">
+        <div class="panel" style="padding:16px 20px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div>
+              <div class="kicker" style="margin-bottom:2px">EXECUTION GATES</div>
+              <div style="font-size:12px;color:var(--muted)">All execution gates · live state · no assumptions</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="fd-meta" id="govLastUpdated">—</span>
+              <button class="fd-refresh-btn" onclick="refreshGovernance()">↻ REFRESH</button>
+            </div>
           </div>
-          <span id="novaGrade" style="font-family:\'Rajdhani\',sans-serif;font-size:48px;font-weight:700;line-height:1;color:var(--muted2)">—</span>
+
+          <div class="gov-section-label">SYSTEM GATES</div>
+          <div class="gov-gate-list" id="govSystemGates">
+            <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+          </div>
+
+          <div class="gov-section-label">RISK GATES</div>
+          <div class="gov-gate-list" id="govRiskGates">
+            <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+          </div>
+
+          <div class="gov-section-label">POSITION GATES</div>
+          <div class="gov-gate-list" id="govPositionGates">
+            <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+          </div>
+
+          <div class="gov-section-label">COOLDOWNS</div>
+          <div class="gov-gate-list" id="govCooldowns">
+            <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
+          </div>
+
+          <div id="govLockoutsWrap" style="display:none;margin-top:8px">
+            <div class="gov-section-label">RECENT LOCKOUTS</div>
+            <div class="gov-lockouts" id="govLockouts"></div>
+          </div>
+
+          <div id="govBlockedWrap" style="display:none;margin-top:8px">
+            <div class="gov-section-label">BLOCKED SIGNALS TODAY</div>
+            <div class="gov-lockouts" id="govBlocked"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── AUDIT ── -->
+      <div id="ec-section-audit" style="display:none">
+
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+            <div>
+              <div class="kicker" style="margin-bottom:4px">REJECTION INTELLIGENCE</div>
+              <div class="section-title">Blocked Signal Flow</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px">Every blocked signal is logged. NOVA is self-aware.</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-family:\'Rajdhani\',sans-serif;font-size:36px;font-weight:700;line-height:1;color:var(--text)" id="rejTodayCount">—</div>
+              <div style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-top:2px">blocked today</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+            <div>
+              <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px">Last Blocked Signal</div>
+              <div id="rejLastCard">
+                <div style="color:var(--muted2);font-size:12px;font-style:italic">No rejections logged yet.</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:var(--muted2);text-transform:uppercase;margin-bottom:10px">Top Rejection Reasons</div>
+              <div id="rejBreakdownList">
+                <div style="color:var(--muted2);font-size:12px;font-style:italic">—</div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="sc2-cells">
-          <div class="sc2-cell">
-            <div class="sc2-num" id="sc2Taken" style="color:var(--text)">0</div>
-            <div class="sc2-lab">Taken</div>
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div>
+              <div class="kicker" style="margin-bottom:4px">SESSION SCORECARD</div>
+              <div class="section-title">Execution Quality</div>
+            </div>
+            <span id="novaGrade" style="font-family:\'Rajdhani\',sans-serif;font-size:48px;font-weight:700;line-height:1;color:var(--muted2)">—</span>
           </div>
-          <div class="sc2-cell">
-            <div class="sc2-num" id="sc2Blocked" style="color:var(--muted2)">—</div>
-            <div class="sc2-lab">Blocked Today</div>
+
+          <div class="sc2-cells">
+            <div class="sc2-cell">
+              <div class="sc2-num" id="sc2Taken" style="color:var(--text)">0</div>
+              <div class="sc2-lab">Taken</div>
+            </div>
+            <div class="sc2-cell">
+              <div class="sc2-num" id="sc2Blocked" style="color:var(--muted2)">—</div>
+              <div class="sc2-lab">Blocked Today</div>
+            </div>
+            <div class="sc2-cell">
+              <div class="sc2-num" id="sc2WinRate" style="color:var(--muted2)">—</div>
+              <div class="sc2-lab">Win Rate</div>
+            </div>
+            <div class="sc2-cell">
+              <div class="sc2-num" id="sc2Pnl" style="color:var(--muted2)">—</div>
+              <div class="sc2-lab">P&amp;L Today</div>
+            </div>
           </div>
-          <div class="sc2-cell">
-            <div class="sc2-num" id="sc2WinRate" style="color:var(--muted2)">—</div>
-            <div class="sc2-lab">Win Rate</div>
-          </div>
-          <div class="sc2-cell">
-            <div class="sc2-num" id="sc2Pnl" style="color:var(--muted2)">—</div>
-            <div class="sc2-lab">P&amp;L Today</div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div class="sc2-detail-cell">
+              <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Best Trade</div>
+              <div class="exec-kv-val" id="sc2Best" style="text-align:left">—</div>
+            </div>
+            <div class="sc2-detail-cell">
+              <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Worst Trade</div>
+              <div class="exec-kv-val" id="sc2Worst" style="text-align:left">—</div>
+            </div>
+            <div class="sc2-detail-cell">
+              <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Governance Actions</div>
+              <div class="exec-kv-val mono" id="sc2GovActions" style="text-align:left">—</div>
+            </div>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          <div class="sc2-detail-cell">
-            <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Best Trade</div>
-            <div class="exec-kv-val" id="sc2Best" style="text-align:left">—</div>
-          </div>
-          <div class="sc2-detail-cell">
-            <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Worst Trade</div>
-            <div class="exec-kv-val" id="sc2Worst" style="text-align:left">—</div>
-          </div>
-          <div class="sc2-detail-cell">
-            <div class="exec-kv-lab" style="display:block;margin-bottom:6px">Governance Actions</div>
-            <div class="exec-kv-val mono" id="sc2GovActions" style="text-align:left">—</div>
-          </div>
-        </div>
       </div>
 
     </div>
@@ -2468,53 +2521,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   </div>
 
   <!-- ════════════════════ GOVERNANCE ════════════════════ -->
-  <div class="page" id="page-governance">
-    <div class="vstack">
-      <div class="panel" style="padding:16px 20px">
-        <div class="gov-header-row">
-          <div>
-            <div class="gov-page-title">GOVERNANCE</div>
-            <div class="fd-meta" style="margin-top:3px">All execution gates · live state · no assumptions</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="fd-meta" id="govLastUpdated">—</span>
-            <button class="fd-refresh-btn" onclick="refreshGovernance()">↻ REFRESH</button>
-          </div>
-        </div>
-
-        <div class="gov-section-label">SYSTEM GATES</div>
-        <div class="gov-gate-list" id="govSystemGates">
-          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
-        </div>
-
-        <div class="gov-section-label">RISK GATES</div>
-        <div class="gov-gate-list" id="govRiskGates">
-          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
-        </div>
-
-        <div class="gov-section-label">POSITION GATES</div>
-        <div class="gov-gate-list" id="govPositionGates">
-          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
-        </div>
-
-        <div class="gov-section-label">COOLDOWNS</div>
-        <div class="gov-gate-list" id="govCooldowns">
-          <div class="gov-gate"><span class="gov-gate-name">Loading...</span></div>
-        </div>
-
-        <div id="govLockoutsWrap" style="display:none;margin-top:8px">
-          <div class="gov-section-label">RECENT LOCKOUTS</div>
-          <div class="gov-lockouts" id="govLockouts"></div>
-        </div>
-
-        <div id="govBlockedWrap" style="display:none;margin-top:8px">
-          <div class="gov-section-label">BLOCKED SIGNALS TODAY</div>
-          <div class="gov-lockouts" id="govBlocked"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- FOOTER -->
   <div class="footer">
     <span>NOVA v5.0 // LIVE MARKET CORE</span>
@@ -2714,10 +2720,9 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') refreshJournal();
     if (btn.dataset.page === 'harvey') refreshHarvey();
-    if (btn.dataset.page === 'execution') { refreshExecutionTab(); }
+    if (btn.dataset.page === 'execution') { refreshExecutionTab(); refreshGovernance(); }
     if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); }
     if (btn.dataset.page === 'market-reality') refreshMarketReality();
-    if (btn.dataset.page === 'governance') refreshGovernance();
   });
 });
 
@@ -5315,6 +5320,17 @@ async function refreshGovernance() {
   } catch(e) {
     console.error('Gov error:', e);
   }
+}
+
+// ════════ EXECUTION CENTER SUB-NAV ════════
+function switchEcTab(tab) {
+  ['state','locks','audit'].forEach(function(t) {
+    var btn = document.getElementById('ecTab-' + t);
+    var sec = document.getElementById('ec-section-' + t);
+    if (btn) btn.classList.toggle('active', t === tab);
+    if (sec) sec.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'locks') refreshGovernance();
 }
 
 // ════════ BOOT ════════
