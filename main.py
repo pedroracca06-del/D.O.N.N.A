@@ -1272,14 +1272,16 @@ async def nova_feed_ingest(request: Request):
 
     signal_entry    = body.get('signal')
     reasoning_entry = body.get('reasoning')
+    execution_entry = body.get('execution')
 
-    if not signal_entry and not reasoning_entry:
-        raise HTTPException(status_code=400, detail='Body must contain signal and/or reasoning.')
+    if not signal_entry and not reasoning_entry and not execution_entry:
+        raise HTTPException(status_code=400, detail='Body must contain signal, reasoning, and/or execution.')
 
-    from services.feed import ingest_signal, ingest_reasoning
+    from services.feed import ingest_signal, ingest_reasoning, ingest_execution
 
     signal_id    = ''
     reasoning_id = ''
+    execution_id = ''
 
     if signal_entry and isinstance(signal_entry, dict):
         signal_id = await asyncio.to_thread(ingest_signal, signal_entry)
@@ -1287,10 +1289,14 @@ async def nova_feed_ingest(request: Request):
     if reasoning_entry and isinstance(reasoning_entry, dict):
         reasoning_id = await asyncio.to_thread(ingest_reasoning, reasoning_entry)
 
+    if execution_entry and isinstance(execution_entry, dict):
+        execution_id = await asyncio.to_thread(ingest_execution, execution_entry)
+
     return {
         'ok':           True,
         'signal_id':    signal_id,
         'reasoning_id': reasoning_id,
+        'execution_id': execution_id,
     }
 
 

@@ -608,6 +608,7 @@ def get_feed_stats() -> dict:
 
 _MAX_SIGNAL    = 10_000
 _MAX_REASONING = 300
+_MAX_EXECUTION = 500
 
 
 def _sync_ts() -> str:
@@ -658,6 +659,30 @@ def ingest_signal(entry: dict) -> str:
             print(f'[feed_ingest] signal write error: {e}')
             return ''
     _update_sync_state(signal_id=entry_id)
+    return entry_id
+
+
+def ingest_execution(entry: dict) -> str:
+    """
+    Append one execution_trace entry received from the local monitor.
+    Handles DECISION_CHAIN, BRIDGE_REJECTED, EXECUTED, REJECTED event types.
+    Deduplicates against the 20 most recent entries.
+    Returns the entry ID on success, '' on failure.
+    """
+    entry_id = entry.get('id', '')
+    with _lock:
+        try:
+            data = _read_json(_EXEC_TRACE)
+            if any(e.get('id') == entry_id for e in data[:20]):
+                return entry_id
+            data.insert(0, entry)
+            _EXEC_TRACE.write_text(
+                json.dumps(data[:_MAX_EXECUTION], indent=2, default=str),
+                encoding='utf-8',
+            )
+        except Exception as e:
+            print(f'[feed_ingest] execution write error: {e}')
+            return ''
     return entry_id
 
 

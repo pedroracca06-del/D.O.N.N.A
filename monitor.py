@@ -436,6 +436,22 @@ def main() -> None:
                                         f'BRIDGE [{name}] {alert.symbol} {alert.direction} '
                                         f'grade={grade} → {b_status} {b_detail}'
                                     )
+                                    # Push DECISION_CHAIN entry to Render so dashboard
+                                    # audit trail reflects locally-processed signals
+                                    chain_id = bridge_result.get('chain_id', '')
+                                    if chain_id:
+                                        try:
+                                            from services.execution_trace import get_trace
+                                            from engines.reasoning import _push_execution_entry
+                                            chain_entry = next(
+                                                (e for e in get_trace(10) if e.get('id') == chain_id),
+                                                None,
+                                            )
+                                            if chain_entry:
+                                                _push_execution_entry(chain_entry)
+                                                log.info(f'CHAIN_PUSH [{name}] {chain_id} → Render')
+                                        except Exception as _pe:
+                                            log.warning(f'Chain push error: {_pe}')
                                 except Exception as be:
                                     log.error(f'Bridge error: {be}')
                     else:

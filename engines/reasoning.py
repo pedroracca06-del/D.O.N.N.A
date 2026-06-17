@@ -79,6 +79,30 @@ except Exception:
 
 import threading as _threading
 
+def _push_execution_entry(execution_entry: dict) -> None:
+    """
+    Push one execution_trace entry (DECISION_CHAIN or BRIDGE_REJECTED) to Render.
+    Runs in a daemon thread — never blocks the monitor cycle.
+    """
+    if not execution_entry:
+        return
+    def _do():
+        try:
+            import requests as _req
+            from core.config import NOVA_RENDER_URL, NOVA_INGEST_SECRET
+            if not NOVA_RENDER_URL or not NOVA_INGEST_SECRET:
+                return
+            _req.post(
+                NOVA_RENDER_URL + '/api/feed/ingest',
+                json    = {'execution': execution_entry},
+                headers = {'X-Nova-Ingest-Secret': NOVA_INGEST_SECRET},
+                timeout = 4,
+            )
+        except Exception:
+            pass
+    _threading.Thread(target=_do, daemon=True).start()
+
+
 def _push_feed_entry(signal_entry: dict, reasoning_entry: dict) -> None:
     """
     Push one signal + reasoning entry to Render's /api/feed/ingest.
