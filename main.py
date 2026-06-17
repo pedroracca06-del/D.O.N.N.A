@@ -416,6 +416,28 @@ async def root():
     return {'status': 'Donna is online', 'version': app.version}
 
 
+@app.get('/debug-paths')
+async def debug_paths():
+    import os
+    from core.config import DATA_DIR, JOURNAL_FILE
+    data_dir_str = str(DATA_DIR)
+    journal_str  = str(JOURNAL_FILE)
+    env_var      = os.getenv('DONNA_DATA_DIR', 'NOT_SET')
+    data_dir_exists   = DATA_DIR.exists()
+    journal_exists    = JOURNAL_FILE.exists()
+    journal_bytes     = JOURNAL_FILE.stat().st_size if journal_exists else -1
+    data_dir_contents = sorted([f.name for f in DATA_DIR.iterdir()]) if data_dir_exists else []
+    return {
+        'env_DONNA_DATA_DIR': env_var,
+        'DATA_DIR':           data_dir_str,
+        'JOURNAL_FILE':       journal_str,
+        'data_dir_exists':    data_dir_exists,
+        'journal_exists':     journal_exists,
+        'journal_bytes':      journal_bytes,
+        'data_dir_contents':  data_dir_contents,
+    }
+
+
 @app.head('/')
 async def root_head():
     return Response(status_code=200)
