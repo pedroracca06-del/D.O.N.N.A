@@ -438,6 +438,67 @@ async def debug_paths():
     }
 
 
+@app.get('/debug-grok')
+async def debug_grok():
+    """Trace every stage of the Grok intelligence pipeline."""
+    import requests as _req
+
+    # Stage 1: API key
+    key_set    = bool(_GROK_API_KEY)
+    key_prefix = (_GROK_API_KEY[:8] + '...') if key_set else 'NOT_SET'
+
+    # Stage 2: File
+    file_path    = str(_GROK_INTEL_FILE)
+    file_exists  = _GROK_INTEL_FILE.exists()
+    file_bytes   = _GROK_INTEL_FILE.stat().st_size if file_exists else -1
+    file_contents = None
+    if file_exists:
+        try:
+            file_contents = json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
+        except Exception as _fe:
+            file_contents = f'PARSE_ERROR: {_fe}'
+
+    # Stage 3: Live API probe (only if key is set — single message, minimal cost)
+    api_status  = 'SKIPPED — key not set'
+    api_payload = None
+    if key_set:
+        try:
+            _r = _req.post(
+                'https://api.x.ai/v1/chat/completions',
+                headers={'Authorization': f'Bearer {_GROK_API_KEY}', 'Content-Type': 'application/json'},
+                json={
+                    'model': 'grok-3-mini',
+                    'messages': [
+                        {'role': 'system', 'content': 'You are a test assistant.'},
+                        {'role': 'user',   'content': 'Reply with exactly: {"status":"ok"}'},
+                    ],
+                    'temperature': 0,
+                    'response_format': {'type': 'json_object'},
+                },
+                timeout=15,
+            )
+            api_status  = f'HTTP {_r.status_code}'
+            api_payload = _r.json() if _r.ok else _r.text[:500]
+        except Exception as _ae:
+            api_status  = f'EXCEPTION: {_ae}'
+
+    # Stage 4: Endpoint read
+    endpoint_result = _load_cached_grok()
+
+    return {
+        'stage_1_api_key':      {'set': key_set, 'prefix': key_prefix},
+        'stage_2_file':         {'path': file_path, 'exists': file_exists, 'bytes': file_bytes, 'contents': file_contents},
+        'stage_3_api_probe':    {'status': api_status, 'payload': api_payload},
+        'stage_4_endpoint':     endpoint_result or 'EMPTY — file missing or parse failed',
+        'break_point':          (
+            'STAGE 1 — GROK_API_KEY not set' if not key_set
+            else 'STAGE 2 — file missing (loop not yet run or API failing)' if not file_exists
+            else 'STAGE 4 — endpoint returns empty (file unreadable)' if not endpoint_result
+            else 'NO BREAK DETECTED — pipeline appears healthy'
+        ),
+    }
+
+
 @app.head('/')
 async def root_head():
     return Response(status_code=200)
