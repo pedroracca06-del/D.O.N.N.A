@@ -1450,12 +1450,10 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
       <div class="nav">
         <button class="tab-btn active" data-page="dashboard">Dashboard</button>
         <button class="tab-btn" data-page="feed">Feed<span class="signal-dot" id="feedUnreadDot" style="display:none"></span></button>
-        <button class="tab-btn" data-page="market-reality">MKT REALITY</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
-        <button class="tab-btn journal-btn" data-page="journal">Journal</button>
-        <button class="tab-btn" data-page="execution">EXEC CENTER</button>
+        <button class="tab-btn" data-page="execution">EXECUTION</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -1776,6 +1774,16 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   <div class="page" id="page-harvey">
     <div class="vstack">
 
+      <!-- ── HARVEY SUB-NAV ── -->
+      <div class="j-subnav">
+        <button class="j-subnav-btn active" id="hvTab-harvey" onclick="switchHvSubTab(\'harvey\')">HARVEY</button>
+        <button class="j-subnav-btn" id="hvTab-mr" onclick="switchHvSubTab(\'mr\')">MARKET REALITY</button>
+        <button class="j-subnav-btn" id="hvTab-draws" onclick="switchHvSubTab(\'draws\')">DRAWS</button>
+      </div>
+
+      <!-- ── HARVEY SECTION ── -->
+      <div id="hv-section-harvey">
+
       <!-- Execution status strip -->
       <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:6px 0 2px">
         <div style="font-family:Space Mono,monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase">Bot</div>
@@ -1948,6 +1956,72 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="re-calc-btn" id="reCalcBtn">CALCULATE</button>
         </div>
       </div>
+
+      </div><!-- /hv-section-harvey -->
+
+      <!-- ── MARKET REALITY SECTION ── -->
+      <div id="hv-section-mr" style="display:none">
+      <div class="panel" style="padding:16px 20px">
+        <div class="gov-header-row">
+          <div>
+            <div class="mr-page-title">MARKET REALITY</div>
+            <div class="fd-meta" style="margin-top:3px">Fact-based objective market state · MR2 engine · no narrative</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="fd-meta" id="mrLastUpdated">—</span>
+            <button class="fd-refresh-btn" onclick="refreshMarketReality()">↻ REFRESH</button>
+          </div>
+        </div>
+
+        <!-- State + block flags -->
+        <div style="margin-bottom:14px">
+          <div id="mrStateBadge" class="mr-state-badge mr-state-neutral">—</div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap" id="mrBlockFlags">
+            <span class="mr-block-flag mr-block-clear">LONGS CLEAR</span>
+            <span class="mr-block-flag mr-block-clear">SHORTS CLEAR</span>
+          </div>
+        </div>
+
+        <!-- Price grid -->
+        <div class="mr-grid" id="mrGrid">
+          <div class="mr-cell"><div class="mr-cell-label">NQ PRICE</div><div class="mr-cell-val" id="mrNqPrice">—</div><div class="mr-cell-sub" id="mrNqPct">—</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">ES PRICE</div><div class="mr-cell-val" id="mrEsPrice">—</div><div class="mr-cell-sub" id="mrEsPct">—</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">VIX</div><div class="mr-cell-val" id="mrVix">—</div><div class="mr-cell-sub" id="mrVixSub">volatility index</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">MR2 SCORE</div><div class="mr-cell-val" id="mrScore">—</div><div class="mr-cell-sub">bull − bear points</div><div class="mr-score-bar"><div class="mr-score-fill-bull" id="mrScoreBar" style="width:50%"></div></div></div>
+          <div class="mr-cell"><div class="mr-cell-label">SESSION</div><div class="mr-cell-val" id="mrSession" style="font-size:14px">—</div><div class="mr-cell-sub" id="mrRegime">—</div></div>
+          <div class="mr-cell"><div class="mr-cell-label">WEEKLY STRUCTURE</div><div class="mr-cell-val" id="mrWeekly" style="font-size:14px">—</div><div class="mr-cell-sub" id="mrDisplacement">—</div></div>
+        </div>
+
+        <!-- Fact breakdown -->
+        <div style="margin-top:16px">
+          <div class="fd-meta" style="letter-spacing:2px;margin-bottom:8px">FACT BREAKDOWN</div>
+          <div id="mrFactBreakdown" style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);line-height:2">Loading...</div>
+        </div>
+
+        <!-- Block reason -->
+        <div id="mrBlockReasonWrap" style="display:none;margin-top:12px;padding:10px 14px;border-radius:9px;border:1px solid rgba(255,68,68,.2);background:rgba(255,68,68,.04)">
+          <div class="fd-meta" style="margin-bottom:4px;letter-spacing:1px">BLOCK REASON</div>
+          <div id="mrBlockReason" style="font-size:11px;color:var(--muted);line-height:1.5"></div>
+        </div>
+      </div>
+      </div><!-- /hv-section-mr -->
+
+      <!-- ── DRAWS SECTION ── -->
+      <div id="hv-section-draws" style="display:none">
+        <div class="panel" style="padding:24px">
+          <div class="kicker" style="margin-bottom:8px">DRAW VALIDATION</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.6">
+            Draw validation telemetry is being collected via the signal log
+            (<code style="font-family:\'Space Mono\',monospace;font-size:10px;color:var(--gold)">draw_category</code>,
+            <code style="font-family:\'Space Mono\',monospace;font-size:10px;color:var(--gold)">draw_independent</code>,
+            <code style="font-family:\'Space Mono\',monospace;font-size:10px;color:var(--gold)">draw_tp1_pts</code>).
+            <br><br>
+            Categories tracked: <strong>STRONG</strong> · <strong>CONDITIONAL</strong> · <strong>CIRCULAR</strong><br>
+            <br>
+            Full draw analysis dashboard will be built after observation phase completes.
+          </div>
+        </div>
+      </div><!-- /hv-section-draws -->
 
     </div>
   </div>
@@ -2217,13 +2291,13 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
       <!-- ── EXECUTION CENTER SUB-NAV ── -->
       <div class="j-subnav">
-        <button class="j-subnav-btn active" id="ecTab-state" onclick="switchEcTab(\'state\')">STATE</button>
-        <button class="j-subnav-btn" id="ecTab-locks" onclick="switchEcTab(\'locks\')">LOCKS</button>
+        <button class="j-subnav-btn active" id="ecTab-execution" onclick="switchEcTab(\'execution\')">EXECUTION</button>
+        <button class="j-subnav-btn" id="ecTab-governance" onclick="switchEcTab(\'governance\')">GOVERNANCE</button>
         <button class="j-subnav-btn" id="ecTab-audit" onclick="switchEcTab(\'audit\')">AUDIT</button>
       </div>
 
-      <!-- ── STATE ── -->
-      <div id="ec-section-state">
+      <!-- ── EXECUTION ── -->
+      <div id="ec-section-execution">
         <div class="exec-state-grid">
 
           <!-- Current State -->
@@ -2288,8 +2362,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         </div>
       </div>
 
-      <!-- ── LOCKS ── -->
-      <div id="ec-section-locks" style="display:none">
+      <!-- ── GOVERNANCE ── -->
+      <div id="ec-section-governance" style="display:none">
         <div class="panel" style="padding:16px 20px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <div>
@@ -2418,6 +2492,13 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   <!-- ════════════════════ FEED ════════════════════ -->
   <div class="page" id="page-feed">
     <div class="vstack">
+
+      <!-- ── FEED/JOURNAL SUB-NAV ── -->
+      <div class="j-subnav">
+        <button class="j-subnav-btn active" id="feedTab-feed" onclick="switchFeedTab(\'feed\')">FEED</button>
+        <button class="j-subnav-btn" id="feedTab-journal" onclick="switchFeedTab(\'journal\')">JOURNAL</button>
+      </div>
+
       <div class="panel" style="padding:16px 20px">
 
         <!-- Header -->
@@ -2467,55 +2548,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-load-btn" onclick="loadMoreFeed()">LOAD MORE</button>
         </div>
 
-      </div>
-    </div>
-  </div>
-
-  <!-- ════════════════════ MARKET REALITY ════════════════════ -->
-  <div class="page" id="page-market-reality">
-    <div class="vstack">
-      <div class="panel" style="padding:16px 20px">
-        <div class="gov-header-row">
-          <div>
-            <div class="mr-page-title">MARKET REALITY</div>
-            <div class="fd-meta" style="margin-top:3px">Fact-based objective market state · MR2 engine · no narrative</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="fd-meta" id="mrLastUpdated">—</span>
-            <button class="fd-refresh-btn" onclick="refreshMarketReality()">↻ REFRESH</button>
-          </div>
-        </div>
-
-        <!-- State + block flags -->
-        <div style="margin-bottom:14px">
-          <div id="mrStateBadge" class="mr-state-badge mr-state-neutral">—</div>
-          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap" id="mrBlockFlags">
-            <span class="mr-block-flag mr-block-clear">LONGS CLEAR</span>
-            <span class="mr-block-flag mr-block-clear">SHORTS CLEAR</span>
-          </div>
-        </div>
-
-        <!-- Price grid -->
-        <div class="mr-grid" id="mrGrid">
-          <div class="mr-cell"><div class="mr-cell-label">NQ PRICE</div><div class="mr-cell-val" id="mrNqPrice">—</div><div class="mr-cell-sub" id="mrNqPct">—</div></div>
-          <div class="mr-cell"><div class="mr-cell-label">ES PRICE</div><div class="mr-cell-val" id="mrEsPrice">—</div><div class="mr-cell-sub" id="mrEsPct">—</div></div>
-          <div class="mr-cell"><div class="mr-cell-label">VIX</div><div class="mr-cell-val" id="mrVix">—</div><div class="mr-cell-sub" id="mrVixSub">volatility index</div></div>
-          <div class="mr-cell"><div class="mr-cell-label">MR2 SCORE</div><div class="mr-cell-val" id="mrScore">—</div><div class="mr-cell-sub">bull − bear points</div><div class="mr-score-bar"><div class="mr-score-fill-bull" id="mrScoreBar" style="width:50%"></div></div></div>
-          <div class="mr-cell"><div class="mr-cell-label">SESSION</div><div class="mr-cell-val" id="mrSession" style="font-size:14px">—</div><div class="mr-cell-sub" id="mrRegime">—</div></div>
-          <div class="mr-cell"><div class="mr-cell-label">WEEKLY STRUCTURE</div><div class="mr-cell-val" id="mrWeekly" style="font-size:14px">—</div><div class="mr-cell-sub" id="mrDisplacement">—</div></div>
-        </div>
-
-        <!-- Fact breakdown -->
-        <div style="margin-top:16px">
-          <div class="fd-meta" style="letter-spacing:2px;margin-bottom:8px">FACT BREAKDOWN</div>
-          <div id="mrFactBreakdown" style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2);line-height:2">Loading...</div>
-        </div>
-
-        <!-- Block reason -->
-        <div id="mrBlockReasonWrap" style="display:none;margin-top:12px;padding:10px 14px;border-radius:9px;border:1px solid rgba(255,68,68,.2);background:rgba(255,68,68,.04)">
-          <div class="fd-meta" style="margin-bottom:4px;letter-spacing:1px">BLOCK REASON</div>
-          <div id="mrBlockReason" style="font-size:11px;color:var(--muted);line-height:1.5"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -2718,11 +2750,9 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
-    if (btn.dataset.page === 'journal') refreshJournal();
-    if (btn.dataset.page === 'harvey') refreshHarvey();
+    if (btn.dataset.page === 'harvey') { refreshHarvey(); switchHvSubTab('harvey'); }
     if (btn.dataset.page === 'execution') { refreshExecutionTab(); refreshGovernance(); }
-    if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); }
-    if (btn.dataset.page === 'market-reality') refreshMarketReality();
+    if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); switchFeedTab('feed'); }
   });
 });
 
@@ -5324,13 +5354,40 @@ async function refreshGovernance() {
 
 // ════════ EXECUTION CENTER SUB-NAV ════════
 function switchEcTab(tab) {
-  ['state','locks','audit'].forEach(function(t) {
+  ['execution','governance','audit'].forEach(function(t) {
     var btn = document.getElementById('ecTab-' + t);
     var sec = document.getElementById('ec-section-' + t);
     if (btn) btn.classList.toggle('active', t === tab);
     if (sec) sec.style.display = t === tab ? '' : 'none';
   });
-  if (tab === 'locks') refreshGovernance();
+  if (tab === 'governance') refreshGovernance();
+}
+
+// ════════ HARVEY SUB-NAV ════════
+function switchHvSubTab(tab) {
+  ['harvey','mr','draws'].forEach(function(t) {
+    var btn = document.getElementById('hvTab-' + t);
+    var sec = document.getElementById('hv-section-' + t);
+    if (btn) btn.classList.toggle('active', t === tab);
+    if (sec) sec.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'mr') refreshMarketReality();
+}
+
+// ════════ FEED/JOURNAL SUB-NAV ════════
+// Journal lives as a sibling .page div — we toggle active on it the same way the
+// main nav does, so CSS .page{display:none} / .page.active{display:block} controls visibility.
+function switchFeedTab(tab) {
+  ['feed','journal'].forEach(function(t) {
+    var btn = document.getElementById('feedTab-' + t);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  document.getElementById('page-feed').classList.toggle('active', tab === 'feed');
+  var jPage = document.getElementById('page-journal');
+  if (jPage) {
+    jPage.classList.toggle('active', tab === 'journal');
+    if (tab === 'journal') refreshJournal();
+  }
 }
 
 // ════════ BOOT ════════
