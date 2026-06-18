@@ -23,7 +23,18 @@ UTC_TZ = ZoneInfo('UTC')
 # Set DONNA_DATA_DIR=/data in Render env vars and mount the disk at /data.
 # Locally: falls back to repo/data/ as before.
 DATA_DIR           = Path(os.getenv('DONNA_DATA_DIR', str(BASE_DIR / 'data')))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except PermissionError as _mkdir_err:
+    import sys as _sys
+    _sys.stderr.write(
+        f'\n[CRITICAL] DATA_DIR={DATA_DIR} is not writable. '
+        f'DONNA_DATA_DIR={os.getenv("DONNA_DATA_DIR", "not set")}. '
+        f'If running on Render, ensure the persistent disk is mounted at {DATA_DIR}. '
+        f'Error: {_mkdir_err}\n\n'
+    )
+    # Do NOT fall back to a different path — that would silently write to ephemeral storage.
+    # All subsequent file operations will fail with their own errors, making the issue visible.
 
 RISK_STATE_FILE    = DATA_DIR / 'donna_risk_state.json'
 ALERTS_FILE        = DATA_DIR / 'donna_alert_history.json'
