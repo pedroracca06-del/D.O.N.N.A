@@ -2026,152 +2026,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     </div>
   </div>
 
-  <!-- ════════════════════ JOURNAL ════════════════════ -->
-  <div class="page" id="page-journal">
-    <div class="vstack">
-
-      <!-- HEADER -->
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:4px">
-        <div>
-          <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Operational Intelligence</div>
-          <div style="font-family:\'Rajdhani\',sans-serif;font-size:30px;font-weight:700;letter-spacing:2px;color:var(--text)">JOURNAL</div>
-        </div>
-        <button class="submit-trade-btn" id="jOpenModal" style="width:auto;padding:10px 22px;margin-top:0;font-size:13px;letter-spacing:1.5px">+ LOG TRADE</button>
-      </div>
-
-      <!-- OVERVIEW STRIP -->
-      <div class="j-overview" id="jOverviewStrip">
-        <div class="j-ov-item">
-          <div class="j-ov-lab">Today\'s Trades</div>
-          <div class="j-ov-val" id="jOvTrades" style="color:var(--text)">—</div>
-        </div>
-        <div class="j-ov-div"></div>
-        <div class="j-ov-item">
-          <div class="j-ov-lab">Today\'s P&amp;L</div>
-          <div class="j-ov-val" id="jOvPnl" style="color:var(--muted2)">—</div>
-        </div>
-        <div class="j-ov-div"></div>
-        <div class="j-ov-item">
-          <div class="j-ov-lab">NOVA Evaluations</div>
-          <div class="j-ov-val" id="jOvEvals" style="color:var(--text)">—</div>
-        </div>
-        <div class="j-ov-div"></div>
-        <div class="j-ov-item">
-          <div class="j-ov-lab">Win Rate</div>
-          <div class="j-ov-val" id="jOvWinRate" style="color:var(--muted2)">—</div>
-        </div>
-        <div class="j-ov-div"></div>
-        <div class="j-ov-item">
-          <div class="j-ov-lab">Profit Factor</div>
-          <div class="j-ov-val" id="jOvPF" style="color:var(--muted2)">—</div>
-        </div>
-        <div class="j-ov-div"></div>
-        <div class="j-ov-item">
-          <div class="j-ov-lab">This Week</div>
-          <div class="j-ov-val" id="jOvWeek" style="color:var(--muted2)">—</div>
-        </div>
-      </div>
-
-      <!-- SUB NAVIGATION -->
-      <div class="j-subnav">
-        <button class="j-subnav-btn active" id="jTab-trades" onclick="switchJTab(\'trades\')">Trades<span class="j-subnav-count" id="jTabCount-trades">0</span></button>
-        <button class="j-subnav-btn" id="jTab-signals" onclick="switchJTab(\'signals\')">Signal Feed<span class="j-subnav-count" id="jTabCount-signals">0</span></button>
-        <button class="j-subnav-btn" id="jTab-analytics" onclick="switchJTab(\'analytics\')">Analytics</button>
-      </div>
-
-      <!-- TRADES PANEL -->
-      <div id="jPanel-trades">
-        <div class="j-filter-bar" id="jFilterBar"></div>
-        <div id="journalCardList">
-          <div style="text-align:center;padding:40px;color:var(--muted2);font-size:13px">No trades logged yet.</div>
-        </div>
-      </div>
-
-      <!-- SIGNAL FEED PANEL -->
-      <div id="jPanel-signals" style="display:none">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-          <div style="font-size:12px;color:var(--muted)">NOVA\'s per-cycle evaluation log — every assessment, grade, and reasoning entry.</div>
-          <div class="j-filter-bar" id="jSigFilterBar" style="margin-bottom:0"></div>
-        </div>
-        <div id="jSignalFeedList">
-          <div style="text-align:center;padding:40px;color:var(--muted2);font-size:13px">Loading signal feed...</div>
-        </div>
-      </div>
-
-      <!-- ANALYTICS PANEL -->
-      <div id="jPanel-analytics" style="display:none">
-
-        <!-- KEY METRICS -->
-        <div style="margin-bottom:20px">
-          <div class="kicker">Performance Summary</div>
-          <div class="j-analytics-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
-            <div class="j-stat-card" style="border-color:rgba(184,134,11,.2)">
-              <div class="jsc-lab">Expectancy</div>
-              <div class="jsc-val" id="jaExpectancy" style="font-size:22px">—</div>
-              <div class="jsc-sub">Per trade avg $</div>
-            </div>
-            <div class="j-stat-card"><div class="jsc-lab">Total Trades</div><div class="jsc-val" id="jaTotalTrades">0</div><div class="jsc-sub">All logged</div></div>
-            <div class="j-stat-card"><div class="jsc-lab">Win Rate</div><div class="jsc-val" id="jaWinRate">—</div><div class="jsc-sub" id="jaWRSub">—</div></div>
-            <div class="j-stat-card"><div class="jsc-lab">Profit Factor</div><div class="jsc-val" id="jaPF">—</div><div class="jsc-sub" id="jaAvgWL">—</div></div>
-            <div class="j-stat-card"><div class="jsc-lab">Avg Win</div><div class="jsc-val" id="jaAvgWin" style="color:var(--green)">—</div><div class="jsc-sub" id="jaAvgLoss">Avg L: —</div></div>
-          </div>
-        </div>
-
-        <!-- BREAKDOWN GRID -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start">
-
-          <!-- Setup Type -->
-          <div class="panel">
-            <div class="kicker">By Setup Type</div>
-            <div class="section-title" style="margin-bottom:12px">Setup Performance</div>
-            <div class="regime-breakdown-grid" id="setupTypeGrid">
-              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
-            </div>
-          </div>
-
-          <!-- Session -->
-          <div class="panel">
-            <div class="kicker">By Session</div>
-            <div class="section-title" style="margin-bottom:12px">Session Performance</div>
-            <div class="regime-breakdown-grid" id="sessionBreakdownGrid">
-              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
-            </div>
-          </div>
-
-          <!-- Regime -->
-          <div class="panel">
-            <div class="kicker">By Market Regime</div>
-            <div class="section-title" style="margin-bottom:12px">Regime Performance</div>
-            <div class="regime-breakdown-grid" id="regimeBreakdownGrid">
-              <div class="regime-card"><div class="rc-sub">No trades yet.</div></div>
-            </div>
-          </div>
-
-          <!-- Behavioral -->
-          <div class="panel">
-            <div class="kicker">Behavioral Patterns</div>
-            <div class="section-title" style="margin-bottom:12px">Error Frequency</div>
-            <div id="behavioralAnalyticsGrid">
-              <div style="font-size:12px;color:var(--muted2);padding:12px 0">No behavioral flags recorded yet.</div>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- EMOTIONAL STATE PERFORMANCE -->
-        <div class="panel">
-          <div class="kicker">Emotional Intelligence</div>
-          <div class="section-title" style="margin-bottom:6px">State vs Performance</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Correlation between reported emotional state and trade outcome.</div>
-          <div id="emotionalAnalyticsGrid">
-            <div style="font-size:12px;color:var(--muted2);padding:8px 0">No emotional state data yet. Tag your trades to build this profile.</div>
-          </div>
-        </div>
-
-      </div>
-
-    </div>
-  </div>
 
   <!-- TRADE DETAIL MODAL -->
   <div class="jtd-backdrop" id="jtdBackdrop" style="display:none" onclick="if(event.target===this)closeTradeDetail()">
@@ -2499,6 +2353,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <button class="j-subnav-btn" id="feedTab-journal" onclick="switchFeedTab(\'journal\')">JOURNAL</button>
       </div>
 
+      <!-- ── FEED SECTION ── -->
+      <div id="feed-section-feed">
       <div class="panel" style="padding:16px 20px">
 
         <!-- Header -->
@@ -2549,6 +2405,86 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         </div>
 
       </div>
+      </div><!-- /feed-section-feed -->
+
+      <!-- ── JOURNAL SECTION ── -->
+      <div id="feed-section-journal" style="display:none">
+        <div class="vstack">
+
+      <!-- HEADER -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:4px">
+        <div>
+          <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Operational Intelligence</div>
+          <div style="font-family:\'Rajdhani\',sans-serif;font-size:30px;font-weight:700;letter-spacing:2px;color:var(--text)">JOURNAL</div>
+        </div>
+        <button class="submit-trade-btn" id="jOpenModal" style="width:auto;padding:10px 22px;margin-top:0;font-size:13px;letter-spacing:1.5px">+ LOG TRADE</button>
+      </div>
+
+      <!-- OVERVIEW STRIP -->
+      <div class="j-overview" id="jOverviewStrip">
+        <div class="j-ov-item"><div class="j-ov-lab">Today\'s Trades</div><div class="j-ov-val" id="jOvTrades" style="color:var(--text)">—</div></div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item"><div class="j-ov-lab">Today\'s P&amp;L</div><div class="j-ov-val" id="jOvPnl" style="color:var(--muted2)">—</div></div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item"><div class="j-ov-lab">NOVA Evaluations</div><div class="j-ov-val" id="jOvEvals" style="color:var(--text)">—</div></div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item"><div class="j-ov-lab">Win Rate</div><div class="j-ov-val" id="jOvWinRate" style="color:var(--muted2)">—</div></div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item"><div class="j-ov-lab">Profit Factor</div><div class="j-ov-val" id="jOvPF" style="color:var(--muted2)">—</div></div>
+        <div class="j-ov-div"></div>
+        <div class="j-ov-item"><div class="j-ov-lab">This Week</div><div class="j-ov-val" id="jOvWeek" style="color:var(--muted2)">—</div></div>
+      </div>
+
+      <!-- SUB NAVIGATION -->
+      <div class="j-subnav">
+        <button class="j-subnav-btn active" id="jTab-trades" onclick="switchJTab(\'trades\')">Trades<span class="j-subnav-count" id="jTabCount-trades">0</span></button>
+        <button class="j-subnav-btn" id="jTab-signals" onclick="switchJTab(\'signals\')">Signal Feed<span class="j-subnav-count" id="jTabCount-signals">0</span></button>
+        <button class="j-subnav-btn" id="jTab-analytics" onclick="switchJTab(\'analytics\')">Analytics</button>
+      </div>
+
+      <!-- TRADES PANEL -->
+      <div id="jPanel-trades">
+        <div class="j-filter-bar" id="jFilterBar"></div>
+        <div id="journalCardList">
+          <div style="text-align:center;padding:40px;color:var(--muted2);font-size:13px">No trades logged yet.</div>
+        </div>
+      </div>
+
+      <!-- SIGNAL FEED PANEL -->
+      <div id="jPanel-signals" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;color:var(--muted)">NOVA\'s per-cycle evaluation log — every assessment, grade, and reasoning entry.</div>
+          <div class="j-filter-bar" id="jSigFilterBar" style="margin-bottom:0"></div>
+        </div>
+        <div id="jSignalFeedList">
+          <div style="text-align:center;padding:40px;color:var(--muted2);font-size:13px">Loading signal feed...</div>
+        </div>
+      </div>
+
+      <!-- ANALYTICS PANEL -->
+      <div id="jPanel-analytics" style="display:none">
+        <div style="margin-bottom:20px">
+          <div class="kicker">Performance Summary</div>
+          <div class="j-analytics-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+            <div class="j-stat-card" style="border-color:rgba(184,134,11,.2)"><div class="jsc-lab">Expectancy</div><div class="jsc-val" id="jaExpectancy" style="font-size:22px">—</div><div class="jsc-sub">Per trade avg $</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Total Trades</div><div class="jsc-val" id="jaTotalTrades">0</div><div class="jsc-sub">All logged</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Win Rate</div><div class="jsc-val" id="jaWinRate">—</div><div class="jsc-sub" id="jaWRSub">—</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Profit Factor</div><div class="jsc-val" id="jaPF">—</div><div class="jsc-sub" id="jaAvgWL">—</div></div>
+            <div class="j-stat-card"><div class="jsc-lab">Avg Win</div><div class="jsc-val" id="jaAvgWin" style="color:var(--green)">—</div><div class="jsc-sub" id="jaAvgLoss">Avg L: —</div></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start">
+          <div class="panel"><div class="kicker">By Setup Type</div><div class="section-title" style="margin-bottom:12px">Setup Performance</div><div class="regime-breakdown-grid" id="setupTypeGrid"><div class="regime-card"><div class="rc-sub">No trades yet.</div></div></div></div>
+          <div class="panel"><div class="kicker">By Session</div><div class="section-title" style="margin-bottom:12px">Session Performance</div><div class="regime-breakdown-grid" id="sessionBreakdownGrid"><div class="regime-card"><div class="rc-sub">No trades yet.</div></div></div></div>
+          <div class="panel"><div class="kicker">By Market Regime</div><div class="section-title" style="margin-bottom:12px">Regime Performance</div><div class="regime-breakdown-grid" id="regimeBreakdownGrid"><div class="regime-card"><div class="rc-sub">No trades yet.</div></div></div></div>
+          <div class="panel"><div class="kicker">Behavioral Patterns</div><div class="section-title" style="margin-bottom:12px">Error Frequency</div><div id="behavioralAnalyticsGrid"><div style="font-size:12px;color:var(--muted2);padding:12px 0">No behavioral flags recorded yet.</div></div></div>
+        </div>
+        <div class="panel"><div class="kicker">Emotional Intelligence</div><div class="section-title" style="margin-bottom:6px">State vs Performance</div><div style="font-size:12px;color:var(--muted);margin-bottom:14px">Correlation between reported emotional state and trade outcome.</div><div id="emotionalAnalyticsGrid"><div style="font-size:12px;color:var(--muted2);padding:8px 0">No emotional state data yet.</div></div></div>
+      </div>
+
+        </div><!-- /journal vstack -->
+      </div><!-- /feed-section-journal -->
+
     </div>
   </div>
 
@@ -5375,19 +5311,16 @@ function switchHvSubTab(tab) {
 }
 
 // ════════ FEED/JOURNAL SUB-NAV ════════
-// Journal lives as a sibling .page div — we toggle active on it the same way the
-// main nav does, so CSS .page{display:none} / .page.active{display:block} controls visibility.
 function switchFeedTab(tab) {
   ['feed','journal'].forEach(function(t) {
     var btn = document.getElementById('feedTab-' + t);
     if (btn) btn.classList.toggle('active', t === tab);
   });
-  document.getElementById('page-feed').classList.toggle('active', tab === 'feed');
-  var jPage = document.getElementById('page-journal');
-  if (jPage) {
-    jPage.classList.toggle('active', tab === 'journal');
-    if (tab === 'journal') refreshJournal();
-  }
+  var feedSec    = document.getElementById('feed-section-feed');
+  var journalSec = document.getElementById('feed-section-journal');
+  if (feedSec)    feedSec.style.display    = tab === 'feed'    ? '' : 'none';
+  if (journalSec) journalSec.style.display = tab === 'journal' ? '' : 'none';
+  if (tab === 'journal') refreshJournal();
 }
 
 // ════════ BOOT ════════
