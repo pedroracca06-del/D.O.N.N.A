@@ -190,6 +190,13 @@ def log_cycle(
 
     # Screenshot
     screenshot:      str              = '',
+
+    # Session development telemetry — for PROS maturity audit
+    # ny_open_minutes: minutes since 9:30 ET at signal time; None outside NY sessions
+    # ib_window_closed: True when IB window has passed (10:30 ET)
+    # ib_maturity: derived label — UNCLEAR / FORMING / MATURE / CLOSED_NO_DRAW
+    ny_open_minutes:  Optional[int]   = None,
+    ib_window_closed: bool            = False,
 ) -> dict:
     """
     Write one signal detection record to the log.
@@ -320,6 +327,16 @@ def log_cycle(
 
         # Screenshot
         'screenshot':     screenshot,
+
+        # Session development telemetry
+        'ny_open_minutes':  ny_open_minutes,
+        'ib_window_closed': ib_window_closed,
+        'ib_maturity': (
+            'MATURE'         if ib_window_closed and ib_draw not in ('', 'UNCLEAR') else
+            'CLOSED_NO_DRAW' if ib_window_closed and ib_draw in ('', 'UNCLEAR')    else
+            'FORMING'        if not ib_window_closed and ib_draw not in ('', 'UNCLEAR') else
+            'UNCLEAR'
+        ),
     }
 
     with _lock:
@@ -372,6 +389,16 @@ def get_execution_ready(n: int = 50) -> list:
     with _lock:
         entries = _load()
     return [e for e in entries if e.get('alert_type') == 'EXECUTION_READY'][:n]
+
+
+def get_ny_open_pros(n: int = 500) -> list:
+    """All NY_OPEN PROS signals for session development analysis."""
+    with _lock:
+        entries = _load()
+    return [
+        e for e in entries
+        if e.get('session') == 'NY_OPEN' and e.get('pros_signal')
+    ][:n]
 
 
 def get_stats() -> dict:

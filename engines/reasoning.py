@@ -1725,6 +1725,14 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         ohlcv      = chart_ctx.get('ohlcv', {})
         orb_parsed = nova_state.get('orb', {})
 
+        # Session development telemetry — minutes since 9:30 ET
+        _ny_session = session_ctx.get('session', '')
+        if _ny_session in ('NY_OPEN', 'NY_AM', 'NY_PM', 'NEW_YORK_CASH', 'LUNCH'):
+            _now_log = now_ny()
+            _ny_open_minutes = (_now_log.hour * 60 + _now_log.minute) - (9 * 60 + 30)
+        else:
+            _ny_open_minutes = None
+
         _draw_tel = _classify_draw(
             price          = chart_ctx.get('price'),
             tp1_str        = decision.get('tp1', '') or '',
@@ -1849,6 +1857,10 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
 
             # Screenshot
             screenshot = _screenshot,
+
+            # Session development telemetry
+            ny_open_minutes  = _ny_open_minutes,
+            ib_window_closed = bool(session_ctx.get('ib_window_closed', False)),
         )
         # Push to Render — fire-and-forget, never blocks the monitor cycle
         _push_feed_entry(_signal_entry, _snapshot_entry)

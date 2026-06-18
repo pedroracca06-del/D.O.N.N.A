@@ -1986,6 +1986,49 @@ async def journal_signals():
     return {'status': 'ok', 'signals': entries[:150], 'total': len(entries)}
 
 
+@app.get('/api/signal-log/session-development')
+async def session_development():
+    """
+    PROS session development audit data.
+    Returns all NY_OPEN PROS signals with ib_maturity, ny_open_minutes, ib_window_closed.
+    Use to compare: pre-9:45 vs post-9:45, UNCLEAR vs confirmed IB, grade distribution.
+    """
+    from delivery.signal_log import get_ny_open_pros, get_stats
+    signals = await asyncio.to_thread(get_ny_open_pros, 500)
+
+    # Bucket signals for direct comparison
+    pre_945     = [s for s in signals if s.get('ny_open_minutes') is not None and s['ny_open_minutes'] < 15]
+    post_945    = [s for s in signals if s.get('ny_open_minutes') is not None and s['ny_open_minutes'] >= 15]
+    ib_unclear  = [s for s in signals if s.get('ib_maturity') == 'UNCLEAR']
+    ib_forming  = [s for s in signals if s.get('ib_maturity') == 'FORMING']
+    ib_mature   = [s for s in signals if s.get('ib_maturity') == 'MATURE']
+
+    def _grade_dist(bucket):
+        d = {}
+        for s in bucket:
+            g = s.get('grade', '')
+            if g:
+                d[g] = d.get(g, 0) + 1
+        return d
+
+    def _exec_rate(bucket):
+        if not bucket:
+            return None
+        return round(sum(1 for s in bucket if s.get('alert_type') == 'EXECUTION_READY') / len(bucket), 3)
+
+    return {
+        'total_ny_open_pros': len(signals),
+        'buckets': {
+            'pre_945':    {'count': len(pre_945),   'exec_rate': _exec_rate(pre_945),   'grade_dist': _grade_dist(pre_945)},
+            'post_945':   {'count': len(post_945),  'exec_rate': _exec_rate(post_945),  'grade_dist': _grade_dist(post_945)},
+            'ib_unclear': {'count': len(ib_unclear),'exec_rate': _exec_rate(ib_unclear),'grade_dist': _grade_dist(ib_unclear)},
+            'ib_forming': {'count': len(ib_forming),'exec_rate': _exec_rate(ib_forming),'grade_dist': _grade_dist(ib_forming)},
+            'ib_mature':  {'count': len(ib_mature), 'exec_rate': _exec_rate(ib_mature), 'grade_dist': _grade_dist(ib_mature)},
+        },
+        'signals': signals,
+    }
+
+
 @app.post('/journal/add')
 async def journal_add(request: Request):
     body      = await request.json()
