@@ -342,11 +342,59 @@ def log_cycle(
     with _lock:
         try:
             entries = _load()
+
+            # --- Direction churn telemetry ---
+            # Find the most recent prior entry for the same symbol on the same date.
+            # Used to detect direction flips and IB draw flips at write time so each
+            # entry is self-contained — no post-hoc join required for analysis.
+            _prev = next(
+                (e for e in entries
+                 if e.get('symbol') == symbol
+                 and e.get('date') == entry['date']
+                 and e.get('pros_direction', '') != ''),
+                None,
+            )
+            _prev_dir = _prev.get('pros_direction', '') if _prev else ''
+            _prev_ib  = _prev.get('ib_draw', '')        if _prev else ''
+            _this_dir = pros_direction
+            _this_ib  = ib_draw
+
+            _dir_flip = bool(_prev_dir and _this_dir and _prev_dir != _this_dir)
+            _ib_flip  = bool(_prev_ib  and _this_ib  and _prev_ib  != _this_ib)
+
+            # Minutes since most recent prior direction flip for this symbol today.
+            # 0.0 if this entry IS the flip; None if no prior flip exists.
+            _mins_since_flip: float | None = None
+            if _dir_flip:
+                _mins_since_flip = 0.0
+            else:
+                _last_flip = next(
+                    (e for e in entries
+                     if e.get('symbol') == symbol
+                     and e.get('date') == entry['date']
+                     and e.get('direction_flip')),
+                    None,
+                )
+                if _last_flip:
+                    try:
+                        _t0 = datetime.fromisoformat(_last_flip['timestamp'])
+                        _t1 = datetime.fromisoformat(entry['timestamp'])
+                        _mins_since_flip = round((_t1 - _t0).total_seconds() / 60, 1)
+                    except Exception:
+                        pass
+
+            entry['direction_flip']       = _dir_flip
+            entry['ib_draw_flip']         = _ib_flip
+            entry['prev_direction']       = _prev_dir
+            entry['prev_ib_draw']         = _prev_ib
+            entry['mins_since_last_flip'] = _mins_since_flip
+
             entries.insert(0, entry)          # newest first
             if len(entries) > _MAX_ENTRIES:
                 entries = entries[:_MAX_ENTRIES]
             _save(entries)
-            print(f'[signal_log] {entry_id}  {symbol}  {pre_signal}  grade={grade or "?"}  alert={alert_type or "none"}')
+            _flip_tag = ' FLIP' if _dir_flip else ''
+            print(f'[signal_log] {entry_id}  {symbol}  {pre_signal}  grade={grade or "?"}  alert={alert_type or "none"}{_flip_tag}')
         except Exception as e:
             print(f'[signal_log] write error: {e}')
             return {}
@@ -399,6 +447,117 @@ def get_ny_open_pros(n: int = 500) -> list:
         e for e in entries
         if e.get('session') == 'NY_OPEN' and e.get('pros_signal')
     ][:n]
+
+
+def get_direction_churn(n: int = 500) -> dict:
+    """
+    Direction churn analysis for alert volume investigation.
+
+    For each direction flip in NY sessions, captures:
+      - Whether the IB draw also flipped (IB-driven) or stayed (interpretation-only)
+      - How long the new direction held before the next flip
+      - Session age at flip time
+      - Rapid flip-back rate (flips reversed within 2 minutes)
+
+    The IB-driven vs direction-only split is the primary signal for:
+      "Is this real market structure change or indicator interpretation instability?"
+    """
+    with _lock:
+        entries = _load()
+
+    ny_sessions = {'NY_OPEN', 'NY_AM', 'NY_PM'}
+
+    # Collect all flip events
+    flip_events: list[dict] = []
+    symbols = sorted({e.get('symbol', '') for e in entries if e.get('symbol')})
+    dates   = sorted({e.get('date', '')   for e in entries if e.get('date')})
+
+    for sym in symbols:
+        for date in dates:
+            day = sorted(
+                [e for e in entries
+                 if e.get('symbol') == sym
+                 and e.get('date') == date
+                 and e.get('session') in ny_sessions],
+                key=lambda x: x.get('timestamp', ''),
+            )
+            if not day:
+                continue
+
+            for i, e in enumerate(day):
+                if not e.get('direction_flip'):
+                    continue
+
+                # Duration until the next flip for this symbol+date
+                next_flip = next(
+                    (e2 for e2 in day[i + 1:] if e2.get('direction_flip')),
+                    None,
+                )
+                if next_flip:
+                    try:
+                        t0 = datetime.fromisoformat(e['timestamp'])
+                        t1 = datetime.fromisoformat(next_flip['timestamp'])
+                        held_mins = round((t1 - t0).total_seconds() / 60, 1)
+                    except Exception:
+                        held_mins = None
+                else:
+                    held_mins = None  # direction held until end of observed window
+
+                flip_events.append({
+                    'symbol':                    sym,
+                    'date':                      date,
+                    'timestamp_et':              e.get('timestamp_et', ''),
+                    'session':                   e.get('session', ''),
+                    'ny_open_minutes':           e.get('ny_open_minutes'),
+                    'from_direction':            e.get('prev_direction', ''),
+                    'to_direction':              e.get('pros_direction', ''),
+                    'ib_draw_also_flipped':      e.get('ib_draw_flip', False),
+                    'ib_draw_before':            e.get('prev_ib_draw', ''),
+                    'ib_draw_after':             e.get('ib_draw', ''),
+                    'ib_maturity_at_flip':       e.get('ib_maturity', ''),
+                    'ib_window_closed_at_flip':  e.get('ib_window_closed', False),
+                    'phase_at_flip':             e.get('pros_phase', ''),
+                    'grade_at_flip':             e.get('grade', ''),
+                    'alert_type_at_flip':        e.get('alert_type', ''),
+                    'held_until_next_flip_mins': held_mins,
+                })
+
+    flip_events = flip_events[:n]
+
+    # Summary statistics
+    total = len(flip_events)
+    ib_driven   = [f for f in flip_events if f['ib_draw_also_flipped']]
+    dir_only    = [f for f in flip_events if not f['ib_draw_also_flipped']]
+    rapid_backs = [f for f in flip_events
+                   if f['held_until_next_flip_mins'] is not None
+                   and f['held_until_next_flip_mins'] < 2.0]
+    early_flips = [f for f in flip_events
+                   if f['ny_open_minutes'] is not None
+                   and f['ny_open_minutes'] < 30]
+
+    def _by_symbol(lst):
+        out: dict[str, int] = {}
+        for f in lst:
+            out[f['symbol']] = out.get(f['symbol'], 0) + 1
+        return out
+
+    held_values = [f['held_until_next_flip_mins'] for f in flip_events
+                   if f['held_until_next_flip_mins'] is not None]
+    avg_held = round(sum(held_values) / len(held_values), 1) if held_values else None
+
+    return {
+        'total_flips':              total,
+        'ib_driven_flips':          len(ib_driven),
+        'direction_only_flips':     len(dir_only),
+        'rapid_flip_backs_lt2min':  len(rapid_backs),
+        'early_session_flips_lt30': len(early_flips),
+        'avg_held_mins':            avg_held,
+        'by_symbol':                _by_symbol(flip_events),
+        # Classification: IB-driven flips correlate with real market structure change;
+        # direction-only flips (IB draw unchanged) are the primary instability signal.
+        'instability_ratio': round(len(dir_only) / total, 2) if total else None,
+        'flips': sorted(flip_events, key=lambda x: (x['date'], x['timestamp_et'])),
+    }
 
 
 def get_stats() -> dict:

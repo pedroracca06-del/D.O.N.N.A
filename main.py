@@ -2029,6 +2029,22 @@ async def session_development():
     }
 
 
+@app.get('/api/signal-log/direction-churn')
+async def direction_churn():
+    """
+    Direction churn analysis — answers: real market structure change or indicator instability?
+
+    Key fields per flip:
+      ib_draw_also_flipped: True  → IB draw changed with direction (potentially real structure change)
+      ib_draw_also_flipped: False → direction flipped while IB draw unchanged (interpretation instability candidate)
+      held_until_next_flip_mins: how long the new direction was held before flipping again
+      rapid_flip_backs_lt2min: flips reversed within 2 minutes (strong instability signal)
+      instability_ratio: fraction of flips where IB draw did NOT change (0.0=all real, 1.0=all unstable)
+    """
+    from delivery.signal_log import get_direction_churn as _get_churn
+    return await asyncio.to_thread(_get_churn, 500)
+
+
 @app.post('/journal/add')
 async def journal_add(request: Request):
     body      = await request.json()
