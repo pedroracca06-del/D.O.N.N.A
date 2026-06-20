@@ -234,6 +234,13 @@ def process_finnhub_cycle():
     except Exception as e:
         print(f'[market_structure] compute error: {e}')
 
+    # Liquidity Intelligence — PDH/PDL/ONH/ONL/PWH/PWL sweep status and primary draw
+    try:
+        from engines.liquidity import compute_liquidity
+        compute_liquidity()
+    except Exception as e:
+        print(f'[liquidity] compute error: {e}')
+
     # Liquidity & Participation Intelligence — RVOL, session type, breadth, volume confirmation
     try:
         from engines.participation import compute_participation

@@ -36,6 +36,12 @@ except Exception:
     _load_p = None
     _p_fmt  = None
 
+try:
+    from engines.liquidity import load_liquidity as _load_liq, format_for_assistant as _liq_fmt
+except Exception:
+    _load_liq = None
+    _liq_fmt  = None
+
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
     'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
@@ -97,6 +103,13 @@ def summarize_system_context() -> str:
         except Exception:
             pass
 
+    liq_line = ''
+    if _load_liq and _liq_fmt:
+        try:
+            liq_line = _liq_fmt(_load_liq())
+        except Exception:
+            pass
+
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
@@ -115,10 +128,11 @@ def summarize_system_context() -> str:
         f"Daily Focus: {assistant.get('daily_focus')}"
     )
 
-    cross_line  = f'\n{cm_line}' if cm_line else ''
-    struct_line = f'\n{ms_line}' if ms_line else ''
-    part_line   = f'\n{p_line}'  if p_line  else ''
-    return f"{reality_line}{cross_line}{struct_line}{part_line}\n\n{cached_context}"
+    cross_line  = f'\n{cm_line}'   if cm_line   else ''
+    struct_line = f'\n{ms_line}'   if ms_line   else ''
+    part_line   = f'\n{p_line}'    if p_line    else ''
+    liq_line_s  = f'\n{liq_line}'  if liq_line  else ''
+    return f"{reality_line}{cross_line}{struct_line}{part_line}{liq_line_s}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):

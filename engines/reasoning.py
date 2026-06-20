@@ -93,6 +93,12 @@ except Exception:
     _load_p   = None
     _p_prompt = None
 
+try:
+    from engines.liquidity import load_liquidity as _load_liq, format_for_prompt as _liq_prompt
+except Exception:
+    _load_liq  = None
+    _liq_prompt = None
+
 # ── Feed sync — fire-and-forget push to Render ────────────────────────────────
 
 import threading as _threading
@@ -1424,6 +1430,14 @@ def _build_evaluation_prompt(
     except Exception:
         pass
 
+    # Liquidity intelligence — swept/untapped levels, primary draw
+    _liq_block = ''
+    try:
+        if _load_liq and _liq_prompt:
+            _liq_block = _liq_prompt(_load_liq())
+    except Exception:
+        pass
+
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})
 
@@ -1459,6 +1473,8 @@ def _build_evaluation_prompt(
 {_ms_block}
 
 {_p_block}
+
+{_liq_block}
 
 LIVE MARKET CONTEXT
 Symbol:        {symbol}

@@ -1177,6 +1177,16 @@ async def participation_endpoint():
         return {'error': str(exc), 'session_type': 'UNKNOWN', 'participation_bias': 'UNKNOWN'}
 
 
+@app.get('/liquidity')
+async def liquidity_endpoint():
+    """Liquidity intelligence — swept/untapped levels, nearest targets, primary draw."""
+    try:
+        from engines.liquidity import load_liquidity
+        return load_liquidity()
+    except Exception as exc:
+        return {'error': str(exc), 'nq': {}, 'es': {}}
+
+
 # ── Execution engine ───────────────────────────────────────────
 
 @app.get('/execution-status')
