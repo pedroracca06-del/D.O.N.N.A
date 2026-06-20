@@ -87,6 +87,12 @@ except Exception:
     _load_ms   = None
     _ms_prompt = None
 
+try:
+    from engines.participation import load_participation as _load_p, format_for_prompt as _p_prompt
+except Exception:
+    _load_p   = None
+    _p_prompt = None
+
 # ── Feed sync — fire-and-forget push to Render ────────────────────────────────
 
 import threading as _threading
@@ -1410,6 +1416,14 @@ def _build_evaluation_prompt(
     except Exception:
         pass
 
+    # Liquidity & participation — RVOL, session type, breadth, volume confirmation
+    _p_block = ''
+    try:
+        if _load_p and _p_prompt:
+            _p_block = _p_prompt(_load_p())
+    except Exception:
+        pass
+
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})
 
@@ -1443,6 +1457,8 @@ def _build_evaluation_prompt(
 {_cm_block}
 
 {_ms_block}
+
+{_p_block}
 
 LIVE MARKET CONTEXT
 Symbol:        {symbol}

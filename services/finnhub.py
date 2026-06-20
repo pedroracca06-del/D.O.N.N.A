@@ -233,3 +233,10 @@ def process_finnhub_cycle():
         compute_market_structure()
     except Exception as e:
         print(f'[market_structure] compute error: {e}')
+
+    # Liquidity & Participation Intelligence — RVOL, session type, breadth, volume confirmation
+    try:
+        from engines.participation import compute_participation
+        compute_participation()
+    except Exception as e:
+        print(f'[participation] compute error: {e}')

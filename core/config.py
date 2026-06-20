@@ -60,6 +60,7 @@ NQ_HEATMAP_FILE             = DATA_DIR / 'donna_nq_heatmap.json'
 BTC_VIX_CACHE_FILE          = DATA_DIR / 'donna_btc_vix_cache.json'
 CROSS_MARKET_FILE           = DATA_DIR / 'donna_cross_market.json'
 MARKET_STRUCTURE_FILE       = DATA_DIR / 'donna_market_structure.json'
+PARTICIPATION_FILE          = DATA_DIR / 'donna_participation.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()

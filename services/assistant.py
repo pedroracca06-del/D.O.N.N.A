@@ -30,6 +30,12 @@ except Exception:
     _load_ms = None
     _ms_fmt  = None
 
+try:
+    from engines.participation import load_participation as _load_p, format_for_assistant as _p_fmt
+except Exception:
+    _load_p = None
+    _p_fmt  = None
+
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
     'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
@@ -84,6 +90,13 @@ def summarize_system_context() -> str:
         except Exception:
             pass
 
+    p_line = ''
+    if _load_p and _p_fmt:
+        try:
+            p_line = _p_fmt(_load_p())
+        except Exception:
+            pass
+
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
@@ -104,7 +117,8 @@ def summarize_system_context() -> str:
 
     cross_line  = f'\n{cm_line}' if cm_line else ''
     struct_line = f'\n{ms_line}' if ms_line else ''
-    return f"{reality_line}{cross_line}{struct_line}\n\n{cached_context}"
+    part_line   = f'\n{p_line}'  if p_line  else ''
+    return f"{reality_line}{cross_line}{struct_line}{part_line}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):

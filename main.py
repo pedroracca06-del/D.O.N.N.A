@@ -1167,6 +1167,16 @@ async def market_structure_endpoint():
         return {'error': str(exc), 'nq': {}, 'es': {}}
 
 
+@app.get('/participation')
+async def participation_endpoint():
+    """Liquidity & participation intelligence — RVOL, session type, breadth, volume confirmation."""
+    try:
+        from engines.participation import load_participation
+        return load_participation()
+    except Exception as exc:
+        return {'error': str(exc), 'session_type': 'UNKNOWN', 'participation_bias': 'UNKNOWN'}
+
+
 # ── Execution engine ───────────────────────────────────────────
 
 @app.get('/execution-status')
