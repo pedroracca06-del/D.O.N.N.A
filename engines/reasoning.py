@@ -105,6 +105,12 @@ except Exception:
     _load_syn  = None
     _syn_prompt = None
 
+try:
+    from engines.session_memory import load_session_memory as _load_mem, format_for_prompt as _mem_prompt
+except Exception:
+    _load_mem  = None
+    _mem_prompt = None
+
 # ── Feed sync — fire-and-forget push to Render ────────────────────────────────
 
 import threading as _threading
@@ -1444,6 +1450,14 @@ def _build_evaluation_prompt(
     except Exception:
         pass
 
+    # Session Memory — rolling multi-session narrative context (historical before current)
+    _mem_block = ''
+    try:
+        if _load_mem and _mem_prompt:
+            _mem_block = _mem_prompt(_load_mem())
+    except Exception:
+        pass
+
     # Synthesis — unified market interpretation across all Level 1 intelligence engines
     _syn_block = ''
     try:
@@ -1489,6 +1503,8 @@ def _build_evaluation_prompt(
 {_p_block}
 
 {_liq_block}
+
+{_mem_block}
 
 {_syn_block}
 

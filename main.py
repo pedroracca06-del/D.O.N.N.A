@@ -1197,6 +1197,16 @@ async def synthesis_endpoint():
         return {'error': str(exc), 'market_thesis': 'UNKNOWN', 'confidence': 'LOW'}
 
 
+@app.get('/session-memory')
+async def session_memory_endpoint():
+    """Multi-session memory -- rolling narrative of what the market has been trying to accomplish."""
+    try:
+        from engines.session_memory import load_session_memory
+        return load_session_memory()
+    except Exception as exc:
+        return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
+
+
 # ── Execution engine ───────────────────────────────────────────
 
 @app.get('/execution-status')

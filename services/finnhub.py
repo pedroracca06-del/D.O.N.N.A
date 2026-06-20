@@ -254,3 +254,10 @@ def process_finnhub_cycle():
         compute_synthesis()
     except Exception as e:
         print(f'[synthesis] compute error: {e}')
+
+    # Session Memory — rolling multi-session narrative (runs after synthesis so it reads the latest thesis)
+    try:
+        from engines.session_memory import compute_session_memory
+        compute_session_memory()
+    except Exception as e:
+        print(f'[session_memory] compute error: {e}')
