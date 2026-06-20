@@ -247,3 +247,10 @@ def process_finnhub_cycle():
         compute_participation()
     except Exception as e:
         print(f'[participation] compute error: {e}')
+
+    # Market Synthesis — unified interpretation across all Level 1 intelligence engines
+    try:
+        from engines.synthesis import compute_synthesis
+        compute_synthesis()
+    except Exception as e:
+        print(f'[synthesis] compute error: {e}')

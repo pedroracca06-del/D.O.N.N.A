@@ -1187,6 +1187,16 @@ async def liquidity_endpoint():
         return {'error': str(exc), 'nq': {}, 'es': {}}
 
 
+@app.get('/synthesis')
+async def synthesis_endpoint():
+    """Market synthesis — unified interpretation across all Level 1 intelligence engines."""
+    try:
+        from engines.synthesis import load_synthesis
+        return load_synthesis()
+    except Exception as exc:
+        return {'error': str(exc), 'market_thesis': 'UNKNOWN', 'confidence': 'LOW'}
+
+
 # ── Execution engine ───────────────────────────────────────────
 
 @app.get('/execution-status')

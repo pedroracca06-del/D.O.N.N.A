@@ -42,6 +42,12 @@ except Exception:
     _load_liq = None
     _liq_fmt  = None
 
+try:
+    from engines.synthesis import load_synthesis as _load_syn, format_for_assistant as _syn_fmt
+except Exception:
+    _load_syn = None
+    _syn_fmt  = None
+
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
     'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
@@ -110,6 +116,13 @@ def summarize_system_context() -> str:
         except Exception:
             pass
 
+    syn_line = ''
+    if _load_syn and _syn_fmt:
+        try:
+            syn_line = _syn_fmt(_load_syn())
+        except Exception:
+            pass
+
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
@@ -132,7 +145,8 @@ def summarize_system_context() -> str:
     struct_line = f'\n{ms_line}'   if ms_line   else ''
     part_line   = f'\n{p_line}'    if p_line    else ''
     liq_line_s  = f'\n{liq_line}'  if liq_line  else ''
-    return f"{reality_line}{cross_line}{struct_line}{part_line}{liq_line_s}\n\n{cached_context}"
+    syn_line_s  = f'\n{syn_line}'  if syn_line  else ''
+    return f"{reality_line}{cross_line}{struct_line}{part_line}{liq_line_s}{syn_line_s}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):

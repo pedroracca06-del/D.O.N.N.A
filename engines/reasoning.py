@@ -99,6 +99,12 @@ except Exception:
     _load_liq  = None
     _liq_prompt = None
 
+try:
+    from engines.synthesis import load_synthesis as _load_syn, format_for_prompt as _syn_prompt
+except Exception:
+    _load_syn  = None
+    _syn_prompt = None
+
 # ── Feed sync — fire-and-forget push to Render ────────────────────────────────
 
 import threading as _threading
@@ -1438,6 +1444,14 @@ def _build_evaluation_prompt(
     except Exception:
         pass
 
+    # Synthesis — unified market interpretation across all Level 1 intelligence engines
+    _syn_block = ''
+    try:
+        if _load_syn and _syn_prompt:
+            _syn_block = _syn_prompt(_load_syn())
+    except Exception:
+        pass
+
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})
 
@@ -1475,6 +1489,8 @@ def _build_evaluation_prompt(
 {_p_block}
 
 {_liq_block}
+
+{_syn_block}
 
 LIVE MARKET CONTEXT
 Symbol:        {symbol}
