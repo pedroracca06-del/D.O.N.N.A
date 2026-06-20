@@ -15,6 +15,10 @@ Levels computed per instrument (NQ and ES):
   prev_close           Prior day's settlement close
   gap_signal           GAP_UP / GAP_DOWN / NO_GAP (open vs prior close)
   gap_pct              % gap between today's open and prior close
+  pdh                  Previous Day High — prior session's high (most recent completed day)
+  pdl                  Previous Day Low  — prior session's low
+  price_vs_pdh         ABOVE / AT / BELOW previous day high
+  price_vs_pdl         ABOVE / AT / BELOW previous day low
   pwh                  Prior week high (Mon-Fri of previous calendar week)
   pwl                  Prior week low
   monthly_open         First bar open of the current calendar month
@@ -223,12 +227,16 @@ def _fetch_structure(yf_symbol: str, label: str) -> dict:
                 monthly_open = round(float(month_bars['Open'].iloc[0]), 2)
             result['monthly_open'] = monthly_open
 
-            # Gap: today's open vs prior day's close
+            # Previous day high / low / close (most recent completed session)
             prev_bars  = daily[daily.index.date < today]
-            prev_close = None
+            prev_close = pdh = pdl = None
             if not prev_bars.empty:
                 prev_close = round(float(prev_bars['Close'].iloc[-1]), 2)
+                pdh        = round(float(prev_bars['High'].iloc[-1]),  2)
+                pdl        = round(float(prev_bars['Low'].iloc[-1]),   2)
             result['prev_close'] = prev_close
+            result['pdh']        = pdh
+            result['pdl']        = pdl
 
             daily_open = result.get('daily_open')
             if daily_open and prev_close and prev_close > 0:
@@ -279,6 +287,20 @@ def _build_narrative(nq: dict, es: dict, session_ctx: str) -> str:
         parts.append(f'NQ now above ONH {onh:.2f}')
     elif pvo == 'BELOW_OVERNIGHT_RANGE' and onl:
         parts.append(f'NQ now below ONL {onl:.2f}')
+
+    # Price vs PDH/PDL
+    pdh    = nq.get('pdh')
+    pdl    = nq.get('pdl')
+    vs_pdh = nq.get('price_vs_pdh', 'UNKNOWN')
+    vs_pdl = nq.get('price_vs_pdl', 'UNKNOWN')
+    if vs_pdh == 'ABOVE' and pdh:
+        parts.append(f'NQ above prior day high ({pdh:.2f})')
+    elif vs_pdh == 'AT' and pdh:
+        parts.append(f'NQ testing prior day high ({pdh:.2f})')
+    elif vs_pdl == 'BELOW' and pdl:
+        parts.append(f'NQ below prior day low ({pdl:.2f})')
+    elif vs_pdl == 'AT' and pdl:
+        parts.append(f'NQ testing prior day low ({pdl:.2f})')
 
     # Price vs PWH/PWL
     pwh = nq.get('pwh')
@@ -368,6 +390,8 @@ def compute_market_structure() -> dict:
                 struct['price_vs_overnight'] = _price_vs_overnight(
                     price, struct.get('onh'), struct.get('onl')
                 )
+                struct['price_vs_pdh']     = _vs_level(price, struct.get('pdh'))
+                struct['price_vs_pdl']     = _vs_level(price, struct.get('pdl'))
                 struct['price_vs_pwh']     = _vs_level(price, struct.get('pwh'))
                 struct['price_vs_pwl']     = _vs_level(price, struct.get('pwl'))
                 struct['price_vs_monthly'] = _vs_level(price, struct.get('monthly_open'))
@@ -400,6 +424,7 @@ def compute_market_structure() -> dict:
         print(
             f'[market_structure] {session_ctx} | '
             f'NQ gap={nq_gap} | vs_overnight={nq_ovn} | '
+            f'PDH={nq.get("pdh")} PDL={nq.get("pdl")} | '
             f'PWH={nq.get("pwh")} PWL={nq.get("pwl")} | '
             f'monthly_open={nq.get("monthly_open")} | '
             f'cached={not cache_miss}'
@@ -417,6 +442,8 @@ def _neutral_state() -> dict:
         'open_vs_overnight': 'UNKNOWN', 'price_vs_overnight': 'UNKNOWN',
         'daily_open': None, 'prev_close': None,
         'gap_signal': 'UNKNOWN', 'gap_pct': 0.0,
+        'pdh': None, 'pdl': None,
+        'price_vs_pdh': 'UNKNOWN', 'price_vs_pdl': 'UNKNOWN',
         'pwh': None, 'pwl': None,
         'monthly_open': None,
         'price_vs_onh': 'UNKNOWN', 'price_vs_onl': 'UNKNOWN',
@@ -499,6 +526,16 @@ def format_for_prompt(ms: dict) -> str:
         if gap_sig not in ('UNKNOWN', None):
             lines.append(f'  Gap:          {gap_sig} ({gap_pct:+.2f}%)')
 
+        pdh    = struct.get('pdh')
+        pdl    = struct.get('pdl')
+        vs_pdh = struct.get('price_vs_pdh', '?')
+        vs_pdl = struct.get('price_vs_pdl', '?')
+        if pdh and pdl:
+            lines.append(
+                f'  Prev day:     PDH={_fmt_level(pdh)}  PDL={_fmt_level(pdl)}'
+                f'  | price vs PDH={vs_pdh}  price vs PDL={vs_pdl}'
+            )
+
         if pwh and pwl:
             lines.append(
                 f'  Prior week:   PWH={_fmt_level(pwh)}  PWL={_fmt_level(pwl)}'
@@ -522,23 +559,30 @@ def format_for_assistant(ms: dict) -> str:
 
     gap    = nq.get('gap_signal', '?')
     ovn    = nq.get('price_vs_overnight', '?')
+    vs_pdh = nq.get('price_vs_pdh', '?')
+    vs_pdl = nq.get('price_vs_pdl', '?')
     vs_pwh = nq.get('price_vs_pwh', '?')
     vs_pwl = nq.get('price_vs_pwl', '?')
     vs_mo  = nq.get('price_vs_monthly', '?')
     onh    = nq.get('onh')
     onl    = nq.get('onl')
+    pdh    = nq.get('pdh')
+    pdl    = nq.get('pdl')
     pwh    = nq.get('pwh')
     pwl    = nq.get('pwl')
     mo     = nq.get('monthly_open')
 
     onh_str = f'{onh:.0f}' if onh else '?'
     onl_str = f'{onl:.0f}' if onl else '?'
+    pdh_str = f'{pdh:.0f}' if pdh else '?'
+    pdl_str = f'{pdl:.0f}' if pdl else '?'
     pwh_str = f'{pwh:.0f}' if pwh else '?'
     pwl_str = f'{pwl:.0f}' if pwl else '?'
     mo_str  = f'{mo:.0f}'  if mo  else '?'
 
     return (
         f'STRUCTURE: gap={gap} | ovn={ovn}(ONH={onh_str}/ONL={onl_str}) | '
+        f'vs_PDH={vs_pdh}({pdh_str}) vs_PDL={vs_pdl}({pdl_str}) | '
         f'vs_PWH={vs_pwh}({pwh_str}) vs_PWL={vs_pwl}({pwl_str}) | '
         f'vs_monthly={vs_mo}({mo_str})'
     )
