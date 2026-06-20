@@ -1147,6 +1147,16 @@ async def market_reality_endpoint():
         return {'error': str(exc), 'direction': 'UNKNOWN', 'severity': 'LOW'}
 
 
+@app.get('/cross-market')
+async def cross_market_endpoint():
+    """Cross-market intelligence state — NQ/ES spread, DXY, yields, gold, BTC signals."""
+    try:
+        from engines.cross_market import load_cross_market
+        return load_cross_market()
+    except Exception as exc:
+        return {'error': str(exc), 'cross_market_bias': 'UNKNOWN'}
+
+
 # ── Execution engine ───────────────────────────────────────────
 
 @app.get('/execution-status')

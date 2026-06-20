@@ -58,6 +58,7 @@ RISK_ENGINE_FILE            = DATA_DIR / 'donna_risk_engine_state.json'
 SP500_HEATMAP_FILE          = DATA_DIR / 'donna_sp500_heatmap.json'
 NQ_HEATMAP_FILE             = DATA_DIR / 'donna_nq_heatmap.json'
 BTC_VIX_CACHE_FILE          = DATA_DIR / 'donna_btc_vix_cache.json'
+CROSS_MARKET_FILE           = DATA_DIR / 'donna_cross_market.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()

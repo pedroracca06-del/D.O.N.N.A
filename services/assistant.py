@@ -18,6 +18,11 @@ try:
 except Exception:
     load_market_reality_v2 = None
     _mr2_fmt = None
+try:
+    from engines.cross_market import load_cross_market as _load_cm, format_for_assistant as _cm_fmt
+except Exception:
+    _load_cm = None
+    _cm_fmt  = None
 
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
@@ -59,6 +64,13 @@ def summarize_system_context() -> str:
         mr = load_market_reality()
         reality_line = format_reality_for_assistant(mr)
 
+    cm_line = ''
+    if _load_cm and _cm_fmt:
+        try:
+            cm_line = _cm_fmt(_load_cm())
+        except Exception:
+            pass
+
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
@@ -77,7 +89,8 @@ def summarize_system_context() -> str:
         f"Daily Focus: {assistant.get('daily_focus')}"
     )
 
-    return f"{reality_line}\n\n{cached_context}"
+    cross_line = f'\n{cm_line}' if cm_line else ''
+    return f"{reality_line}{cross_line}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):

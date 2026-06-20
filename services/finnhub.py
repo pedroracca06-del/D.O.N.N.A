@@ -219,3 +219,10 @@ def process_finnhub_cycle():
         compute_market_reality_v2()
     except Exception as e:
         print(f'[market_reality_v2] compute error: {e}')
+
+    # Cross-Market Intelligence — relationships between instruments already in snapshot
+    try:
+        from engines.cross_market import compute_cross_market
+        compute_cross_market()
+    except Exception as e:
+        print(f'[cross_market] compute error: {e}')

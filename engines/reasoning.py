@@ -75,6 +75,12 @@ except Exception:
     _load_mr2    = None
     _mr2_prompt  = None
 
+try:
+    from engines.cross_market import load_cross_market as _load_cm, format_for_prompt as _cm_prompt
+except Exception:
+    _load_cm    = None
+    _cm_prompt  = None
+
 # ── Feed sync — fire-and-forget push to Render ────────────────────────────────
 
 import threading as _threading
@@ -1382,6 +1388,14 @@ def _build_evaluation_prompt(
         except Exception:
             _mr = {}
 
+    # Cross-market intelligence — observation context only, not an execution gate
+    _cm_block = ''
+    try:
+        if _load_cm and _cm_prompt:
+            _cm_block = _cm_prompt(_load_cm())
+    except Exception:
+        pass
+
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})
 
@@ -1411,6 +1425,8 @@ def _build_evaluation_prompt(
     return f"""{_mr2_block}
 
 {_mr_block}
+
+{_cm_block}
 
 LIVE MARKET CONTEXT
 Symbol:        {symbol}
