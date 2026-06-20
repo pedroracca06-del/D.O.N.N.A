@@ -226,3 +226,10 @@ def process_finnhub_cycle():
         compute_cross_market()
     except Exception as e:
         print(f'[cross_market] compute error: {e}')
+
+    # Market Structure Memory — ONH/ONL, PWH/PWL, monthly open, gap detection
+    try:
+        from engines.market_structure import compute_market_structure
+        compute_market_structure()
+    except Exception as e:
+        print(f'[market_structure] compute error: {e}')

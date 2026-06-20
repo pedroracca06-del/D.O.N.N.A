@@ -81,6 +81,12 @@ except Exception:
     _load_cm    = None
     _cm_prompt  = None
 
+try:
+    from engines.market_structure import load_market_structure as _load_ms, format_for_prompt as _ms_prompt
+except Exception:
+    _load_ms   = None
+    _ms_prompt = None
+
 # ── Feed sync — fire-and-forget push to Render ────────────────────────────────
 
 import threading as _threading
@@ -1396,6 +1402,14 @@ def _build_evaluation_prompt(
     except Exception:
         pass
 
+    # Market structure memory — overnight range, prior week levels, gap, monthly open
+    _ms_block = ''
+    try:
+        if _load_ms and _ms_prompt:
+            _ms_block = _ms_prompt(_load_ms())
+    except Exception:
+        pass
+
     main_state = nova_state.get('main', {})
     pros_state = nova_state.get('pros', {})
 
@@ -1427,6 +1441,8 @@ def _build_evaluation_prompt(
 {_mr_block}
 
 {_cm_block}
+
+{_ms_block}
 
 LIVE MARKET CONTEXT
 Symbol:        {symbol}

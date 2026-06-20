@@ -1157,6 +1157,16 @@ async def cross_market_endpoint():
         return {'error': str(exc), 'cross_market_bias': 'UNKNOWN'}
 
 
+@app.get('/market-structure')
+async def market_structure_endpoint():
+    """Market structure memory — overnight range, prior week levels, gap, monthly open."""
+    try:
+        from engines.market_structure import load_market_structure
+        return load_market_structure()
+    except Exception as exc:
+        return {'error': str(exc), 'nq': {}, 'es': {}}
+
+
 # ── Execution engine ───────────────────────────────────────────
 
 @app.get('/execution-status')

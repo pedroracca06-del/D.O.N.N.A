@@ -24,6 +24,12 @@ except Exception:
     _load_cm = None
     _cm_fmt  = None
 
+try:
+    from engines.market_structure import load_market_structure as _load_ms, format_for_assistant as _ms_fmt
+except Exception:
+    _load_ms = None
+    _ms_fmt  = None
+
 ASSISTANT_SYSTEM_PROMPT = (
     'You are Donna, an elite market intelligence assistant. '
     'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
@@ -71,6 +77,13 @@ def summarize_system_context() -> str:
         except Exception:
             pass
 
+    ms_line = ''
+    if _load_ms and _ms_fmt:
+        try:
+            ms_line = _ms_fmt(_load_ms())
+        except Exception:
+            pass
+
     cached_context = (
         f"Session: {risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
@@ -89,8 +102,9 @@ def summarize_system_context() -> str:
         f"Daily Focus: {assistant.get('daily_focus')}"
     )
 
-    cross_line = f'\n{cm_line}' if cm_line else ''
-    return f"{reality_line}{cross_line}\n\n{cached_context}"
+    cross_line  = f'\n{cm_line}' if cm_line else ''
+    struct_line = f'\n{ms_line}' if ms_line else ''
+    return f"{reality_line}{cross_line}{struct_line}\n\n{cached_context}"
 
 
 def apply_assistant_action(action, value):
