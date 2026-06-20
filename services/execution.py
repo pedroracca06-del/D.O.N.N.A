@@ -1308,6 +1308,49 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
     except Exception as _ce:
         print(f'[execution] clock check failed: {_ce}')
 
+    risk_usd = qty * stop_dist
+
+    # ── PRE_ORDER_INTENT — written before submit_order() ──────────────────────
+    # This record proves the trade was intentional and governed even if all
+    # post-order audit writes fail. No Alpaca position should be untraced.
+    _pre_governance: dict = {
+        'signal_id':      data.get('signal_id', ''),
+        'risk_tier':      _get_active_risk_tier(),
+        'session':        session,
+        'setup_type':     data.get('setup_type', ''),
+        'score':          data.get('score', ''),
+        'instrument':     data.get('instrument', ''),
+        'execution_mode': 'unknown',
+        'min_grade':      '',
+        'max_trades_per_day': '',
+    }
+    try:
+        import json as _json
+        from core.config import SETTINGS_FILE as _sf
+        if _sf.exists():
+            _s = _json.loads(_sf.read_text(encoding='utf-8'))
+            _mode = str(_s.get('execution_mode', 'unknown'))
+            _prof = _s.get('execution_profiles', {}).get(_mode, {})
+            _pre_governance['execution_mode']      = _mode
+            _pre_governance['min_grade']           = _prof.get('min_grade', '')
+            _pre_governance['max_trades_per_day']  = _prof.get('max_trades_per_day', '')
+    except Exception:
+        pass
+    _intent_id = _trace.log_pre_order_intent(
+        data,
+        parsed,
+        sizing={
+            'etf':       etf,
+            'qty':       qty,
+            'side':      'buy' if is_long else 'sell',
+            'entry_ref': entry_ref,
+            'stop_px':   stop_px,
+            'target_px': tgt_px,
+            'risk_usd':  risk_usd,
+        },
+        governance=_pre_governance,
+    )
+
     try:
         order = api.submit_order(
             MarketOrderRequest(
@@ -1323,6 +1366,21 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         order_id = str(order.id)
     except Exception as e:
         return {'status': 'error', 'reason': str(e)}
+
+    # ── POST_ORDER_SUBMITTED — written immediately after Alpaca confirms ───────
+    _trace.log_post_order_submitted(
+        intent_id=_intent_id,
+        data=data,
+        order_id=order_id,
+        etf=etf,
+        qty=qty,
+        side='buy' if is_long else 'sell',
+        entry_ref=entry_ref,
+        stop_px=stop_px,
+        target_px=tgt_px,
+        risk_usd=risk_usd,
+        session=session,
+    )
 
     # State engine — primary authority for these fields
     _state.increment_trade_count()
@@ -1357,13 +1415,27 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         print(f'[state_engine] _execute_alpaca_etf cumulative_risk write failed: {_e}')
     _increment_session_trade_count(session)
 
-    _journal_log_trade(
-        data=data, parsed=parsed, symbol=etf,
-        is_long=is_long, qty=qty, entry_ref=entry_ref,
-        stop_px=stop_px, tgt_px=tgt_px, order_id=order_id, session=session,
-    )
-
     direction = 'BUY' if is_long else 'SELL'
+
+    # ── Journal write — wrapped so failure surfaces as audit record, not silence
+    try:
+        _journal_log_trade(
+            data=data, parsed=parsed, symbol=etf,
+            is_long=is_long, qty=qty, entry_ref=entry_ref,
+            stop_px=stop_px, tgt_px=tgt_px, order_id=order_id, session=session,
+        )
+    except Exception as _je:
+        _trace.log_critical_audit_failure(
+            stage='JOURNAL_LOG_TRADE',
+            error=str(_je),
+            order_id=order_id,
+            etf=etf,
+            direction=direction,
+            qty=qty,
+            intent_id=_intent_id,
+        )
+        print(f'[execution] journal write failed for {order_id}: {_je}')
+
     record = {
         'type':         'execution',
         'ticker':       etf,
@@ -1389,9 +1461,7 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
     alerts.insert(0, record)
     save_alert_history(alerts)
 
-    risk_usd = qty * stop_dist
-
-    # ── execution trace ────────────────────────────────────────
+    # ── EXECUTED trace entry — wrapped with audit failure surfacing
     try:
         _trace.log_trade_execution(
             data, parsed,
@@ -1405,10 +1475,20 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
                 'order_id':     order_id,
                 'risk_usd':     risk_usd,
                 'session':      session,
+                'intent_id':    _intent_id,
             }
         )
     except Exception as _te:
-        print(f'[execution] trace error: {_te}')
+        _trace.log_critical_audit_failure(
+            stage='LOG_TRADE_EXECUTION',
+            error=str(_te),
+            order_id=order_id,
+            etf=etf,
+            direction=direction,
+            qty=qty,
+            intent_id=_intent_id,
+        )
+        print(f'[execution] trace write failed for {order_id}: {_te}')
 
     send_telegram_message(
         f'DONNA EXECUTED\n'

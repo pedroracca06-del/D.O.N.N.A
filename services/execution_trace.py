@@ -175,10 +175,143 @@ def log_trade_execution(
             'target_px':    result.get('target_price', 0),
             'order_id':     result.get('order_id', ''),
             'risk_usd':     result.get('risk_usd', 0),
+            'intent_id':    result.get('intent_id', ''),
         }
         _append(entry)
     except Exception as e:
         print(f'[trace] log_trade_execution error: {e}')
+
+
+def log_pre_order_intent(
+    data: dict,
+    parsed: dict,
+    sizing: dict,
+    governance: dict,
+) -> str:
+    """
+    Write a PRE_ORDER_INTENT record BEFORE submit_order() is called.
+
+    Returns the entry ID so POST_ORDER_SUBMITTED can cross-reference it.
+    This record is the minimum proof that an Alpaca position was intentional
+    and authorised — it survives even if all post-order writes fail.
+    """
+    entry_id = _new_id()
+    try:
+        entry: dict = {
+            'id':             entry_id,
+            'event_type':     'PRE_ORDER_INTENT',
+            'timestamp_et':   _ts_et(),
+            'family':         data.get('strategy_family', ''),
+            'setup_type':     data.get('setup_type', ''),
+            'ticker':         data.get('ticker', ''),
+            'instrument':     data.get('instrument', ''),
+            'direction':      str(data.get('signal', '')).upper(),
+            'session':        data.get('session', ''),
+            'score':          data.get('score', ''),
+            'verdict':        parsed.get('verdict', ''),
+            'confidence':     parsed.get('confidence', ''),
+            'signal_id':      data.get('signal_id', ''),
+            'etf':            sizing.get('etf', ''),
+            'qty':            sizing.get('qty', 0),
+            'side':           sizing.get('side', ''),
+            'entry_ref':      sizing.get('entry_ref', 0),
+            'stop_px':        sizing.get('stop_px', 0),
+            'target_px':      sizing.get('target_px', 0),
+            'risk_usd':       sizing.get('risk_usd', 0),
+            'order_type':     'BRACKET_MARKET',
+            'execution_mode': governance.get('execution_mode', ''),
+            'risk_tier':      governance.get('risk_tier', ''),
+            'min_grade':      governance.get('min_grade', ''),
+            'governance':     governance,
+            'status':         'PRE_ORDER_INTENT',
+        }
+        _append(entry)
+    except Exception as e:
+        print(f'[trace] log_pre_order_intent error: {e}')
+    return entry_id
+
+
+def log_post_order_submitted(
+    intent_id: str,
+    data: dict,
+    order_id: str,
+    etf: str,
+    qty: int,
+    side: str,
+    entry_ref: float,
+    stop_px: float,
+    target_px: float,
+    risk_usd: float,
+    session: str,
+) -> None:
+    """
+    Write a POST_ORDER_SUBMITTED record immediately after Alpaca confirms
+    the order. Cross-references the PRE_ORDER_INTENT entry via intent_id.
+    """
+    try:
+        entry: dict = {
+            'id':           _new_id(),
+            'event_type':   'POST_ORDER_SUBMITTED',
+            'timestamp_et': _ts_et(),
+            'intent_id':    intent_id,
+            'family':       data.get('strategy_family', ''),
+            'setup_type':   data.get('setup_type', ''),
+            'ticker':       data.get('ticker', ''),
+            'instrument':   data.get('instrument', ''),
+            'direction':    str(data.get('signal', '')).upper(),
+            'session':      session,
+            'score':        data.get('score', ''),
+            'signal_id':    data.get('signal_id', ''),
+            'etf':          etf,
+            'qty':          qty,
+            'side':         side,
+            'entry_ref':    entry_ref,
+            'stop_px':      stop_px,
+            'target_px':    target_px,
+            'risk_usd':     risk_usd,
+            'order_id':     order_id,
+            'order_type':   'BRACKET_MARKET',
+            'status':       'SUBMITTED',
+        }
+        _append(entry)
+    except Exception as e:
+        print(f'[trace] log_post_order_submitted error: {e}')
+
+
+def log_critical_audit_failure(
+    stage: str,
+    error: str,
+    order_id: str,
+    etf: str,
+    direction: str,
+    qty: int,
+    intent_id: str = '',
+) -> None:
+    """
+    Write a CRITICAL_AUDIT_FAILURE record when a post-order audit write
+    fails. The Alpaca order already exists — this records the audit gap
+    explicitly rather than letting it disappear silently.
+    """
+    try:
+        entry: dict = {
+            'id':           _new_id(),
+            'event_type':   'CRITICAL_AUDIT_FAILURE',
+            'timestamp_et': _ts_et(),
+            'stage':        stage,
+            'error':        str(error),
+            'order_id':     order_id,
+            'etf':          etf,
+            'direction':    direction,
+            'qty':          qty,
+            'intent_id':    intent_id,
+        }
+        _append(entry)
+        print(
+            f'[trace] CRITICAL_AUDIT_FAILURE  stage={stage}  '
+            f'order={order_id}  etf={etf}  qty={qty}  error={error}'
+        )
+    except Exception as e:
+        print(f'[trace] log_critical_audit_failure error: {e}')
 
 
 def log_bridge_rejection(
