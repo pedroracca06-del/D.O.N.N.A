@@ -1,18 +1,19 @@
 """
 nova_feed.py — NOVA Intelligence Feed
 
-Merges signal_log, execution_trace, and computed MR2 state transitions into a
-single chronological feed of structured intelligence events.
+Merges signal_log, execution_trace, computed MR2 state transitions, and the
+intelligence event log into a single chronological feed.
 
 Every card is self-contained: all context needed to understand an event is
 embedded directly. reasoning_trace_id is a pointer for future drill-down.
 
 Event types:
-  SIGNAL     — HEADS_UP | EXECUTION_READY | INVALIDATION | NO_TRADE
-  EXECUTION  — EXECUTED | (SKIPPED — moved to GOVERNANCE)
-  GOVERNANCE — BRIDGE_REJECTED | REJECTED | lock state changes
-  MR2_CHANGE — LONGS_BLOCKED | SHORTS_BLOCKED | LONGS_UNBLOCKED |
-               SHORTS_UNBLOCKED | STATE_CHANGE
+  SIGNAL       — HEADS_UP | EXECUTION_READY | INVALIDATION | NO_TRADE
+  EXECUTION    — EXECUTED | (SKIPPED — moved to GOVERNANCE)
+  GOVERNANCE   — BRIDGE_REJECTED | REJECTED | lock state changes
+  MR2_CHANGE   — LONGS_BLOCKED | SHORTS_BLOCKED | LONGS_UNBLOCKED |
+                 SHORTS_UNBLOCKED | STATE_CHANGE
+  INTELLIGENCE — SYNTHESIS_UPDATE | MORNING_BRIEF
 """
 from __future__ import annotations
 
@@ -23,8 +24,9 @@ from pathlib import Path
 from typing import Optional
 
 from core.config import (
-    SIGNAL_LOG_FILE    as _SIGNAL_LOG,
-    TRACE_FILE         as _EXEC_TRACE,
+    SIGNAL_LOG_FILE       as _SIGNAL_LOG,
+    TRACE_FILE            as _EXEC_TRACE,
+    INTELLIGENCE_LOG_FILE as _INTEL_LOG,
     REASONING_TRACE_FILE,
     FEED_SYNC_FILE,
     NOVA_INGEST_SECRET,
@@ -282,6 +284,99 @@ def _normalize_governance(entry: dict) -> Optional[dict]:
     }
 
 
+# ── Intelligence log → INTELLIGENCE cards ────────────────────────────────────
+
+def _read_intelligence_log() -> list:
+    try:
+        if _INTEL_LOG.exists():
+            data = json.loads(_INTEL_LOG.read_text(encoding='utf-8'))
+            return data if isinstance(data, list) else []
+    except Exception:
+        pass
+    return []
+
+
+def _normalize_intelligence(entry: dict) -> dict:
+    """Normalize one intelligence_log entry into a feed card."""
+    subtype = entry.get('subtype', 'INTELLIGENCE_UPDATE')
+
+    # Human-readable summary line for the feed
+    thesis_state      = entry.get('thesis_state', '')
+    thesis_state_prev = entry.get('thesis_state_prev', '')
+    thesis            = entry.get('thesis', '')
+    confidence        = entry.get('confidence', '')
+
+    if subtype == 'SYNTHESIS_UPDATE':
+        summary = (
+            f'{thesis_state_prev} -> {thesis_state}: {thesis}'
+            if thesis_state_prev else f'{thesis_state}: {thesis}'
+        )
+    elif subtype == 'MORNING_BRIEF':
+        summary = thesis or entry.get('brief_text', '')
+    else:
+        summary = thesis or ''
+
+    return {
+        'id':              f'FEED_INTEL_{entry.get("id", "")}',
+        'timestamp_et':    entry.get('timestamp_et', ''),
+        'event_type':      'INTELLIGENCE',
+        'subtype':         subtype,
+        'alert_fired':     False,
+        'pre_signal':      '',
+
+        'symbol':          entry.get('symbol', 'MARKET'),
+        'direction':       '',
+        'grade':           '',
+        'session':         entry.get('session', ''),
+        'session_quality': '',
+
+        'strategy_family': '',
+        'setup_type':      '',
+
+        'entry_zone': '',
+        'stop':       '',
+        'tp1':        '',
+        'rr':         '',
+
+        'pre_rationale':    '',
+        'claude_rationale': summary,
+
+        # Full intelligence payload — available for detailed card view
+        'intelligence': {
+            'thesis_state':         thesis_state,
+            'thesis_state_prev':    thesis_state_prev,
+            'thesis':               thesis,
+            'confidence':           confidence,
+            'condition':            entry.get('condition', ''),
+            'primary_driver':       entry.get('primary_driver', ''),
+            'confirming_evidence':  entry.get('confirming_evidence', []),
+            'conflicting_evidence': entry.get('conflicting_evidence', []),
+            'bull_score':           entry.get('bull_score'),
+            'bear_score':           entry.get('bear_score'),
+            'major_conflict':       entry.get('major_conflict', False),
+            # Morning brief specific
+            'liquidity_draw':       entry.get('liquidity_draw', ''),
+            'participation':        entry.get('participation', ''),
+            'macro_risk':           entry.get('macro_risk', ''),
+            'session_narrative':    entry.get('session_narrative', ''),
+            'key_question':         entry.get('key_question', ''),
+            'brief_text':           entry.get('brief_text', ''),
+        },
+
+        'mr2':  _empty_mr2(),
+        'dp':   _empty_dp(),
+        'draw': _empty_draw(),
+
+        'rejection_code':   '',
+        'rejection_reason': '',
+        **_empty_exec(),
+
+        'reasoning_trace_id': '',
+        'screenshot':         '',
+        'source_id':          entry.get('id', ''),
+    }
+
+
 # ── MR2 state change detection ────────────────────────────────────────────────
 
 def _detect_mr2_changes(signal_entries: list[dict]) -> list[dict]:
@@ -410,6 +505,7 @@ def build_feed(
     with _lock:
         signal_entries = _read_json(_SIGNAL_LOG)
         exec_entries   = _read_json(_EXEC_TRACE)
+        intel_entries  = _read_intelligence_log()
 
     # ── Build cards ────────────────────────────────────────────────────────────
     signal_cards = [_normalize_signal(e) for e in signal_entries]
@@ -426,10 +522,11 @@ def build_feed(
         if card:
             exec_cards.append(card)
 
-    mr2_cards = _detect_mr2_changes(signal_entries)
+    mr2_cards   = _detect_mr2_changes(signal_entries)
+    intel_cards = [_normalize_intelligence(e) for e in intel_entries]
 
     # ── Merge and sort newest-first ────────────────────────────────────────────
-    all_cards: list[dict] = signal_cards + exec_cards + mr2_cards
+    all_cards: list[dict] = signal_cards + exec_cards + mr2_cards + intel_cards
     all_cards.sort(key=_sort_key, reverse=True)
 
     # ── Filter ────────────────────────────────────────────────────────────────

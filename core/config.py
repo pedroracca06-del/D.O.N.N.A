@@ -64,6 +64,7 @@ PARTICIPATION_FILE          = DATA_DIR / 'donna_participation.json'
 LIQUIDITY_FILE              = DATA_DIR / 'donna_liquidity.json'
 SYNTHESIS_FILE              = DATA_DIR / 'donna_synthesis.json'
 SESSION_MEMORY_FILE         = DATA_DIR / 'donna_session_memory.json'
+INTELLIGENCE_LOG_FILE       = DATA_DIR / 'donna_intelligence_log.json'
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()

@@ -297,6 +297,13 @@ async def morning_brief_loop():
                     print(f'DONNA morning brief: sending for {today_str}')
                     result = await asyncio.to_thread(send_morning_brief)
                     print(f'DONNA morning brief: {result}')
+            # Compact intelligence brief -- fires 9:00-9:25 AM, once per day
+            if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 25:
+                try:
+                    from engines.morning_brief import compute_and_deliver_morning_brief
+                    await asyncio.to_thread(compute_and_deliver_morning_brief)
+                except Exception as _be:
+                    print(f'[morning_brief] compact brief error: {_be}')
         except Exception as e:
             print(f'Morning brief loop error: {e}')
         await asyncio.sleep(60)
@@ -387,6 +394,12 @@ async def startup():
             f'date: {_donna_state.get("state_date")}, '
             f'trades today: {_donna_state.get_trade_count()}'
         )
+    # Execution audit -- detect and repair any ghost trade gaps from prior sessions
+    try:
+        from services.audit import reconcile_execution_audit
+        await asyncio.to_thread(reconcile_execution_audit)
+    except Exception as e:
+        print(f'[startup] audit reconciliation error: {e}')
     await asyncio.to_thread(check_todays_breaking_events)
     try:
         await asyncio.to_thread(process_finnhub_cycle)
@@ -1205,6 +1218,26 @@ async def session_memory_endpoint():
         return load_session_memory()
     except Exception as exc:
         return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
+
+
+@app.get('/morning-brief')
+async def morning_brief_endpoint():
+    """Compact structured morning brief -- thesis, draw, participation, macro, watch."""
+    try:
+        from engines.morning_brief import build_compact_brief
+        return build_compact_brief()
+    except Exception as exc:
+        return {'error': str(exc), 'brief_text': 'Morning brief unavailable.'}
+
+
+@app.get('/audit/execution')
+async def execution_audit_endpoint():
+    """Execution audit -- detect ghost trades and missing journal entries."""
+    try:
+        from services.audit import reconcile_execution_audit
+        return await asyncio.to_thread(reconcile_execution_audit)
+    except Exception as exc:
+        return {'error': str(exc), 'clean': 0, 'reconstructed': 0, 'unresolved': 0}
 
 
 # ── Execution engine ───────────────────────────────────────────

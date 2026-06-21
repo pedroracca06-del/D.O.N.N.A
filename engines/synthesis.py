@@ -47,6 +47,7 @@ from zoneinfo import ZoneInfo
 
 from core.config import (
     SYNTHESIS_FILE         as _SYN_FILE,
+    INTELLIGENCE_LOG_FILE  as _INTEL_FILE,
     MARKET_REALITY_V2_FILE as _MR2_FILE,
     CROSS_MARKET_FILE      as _CM_FILE,
     MARKET_STRUCTURE_FILE  as _MS_FILE,
@@ -55,7 +56,39 @@ from core.config import (
     RISK_STATE_FILE        as _RISK_FILE,
 )
 
-_NY_TZ = ZoneInfo('America/New_York')
+_NY_TZ       = ZoneInfo('America/New_York')
+_INTEL_MAX   = 500
+_INTEL_LOCK  = __import__('threading').Lock()
+
+
+def _emit_intelligence_event(subtype: str, payload: dict) -> None:
+    """
+    Append one event to donna_intelligence_log.json.
+    Called whenever synthesis thesis_state changes, or a morning brief is generated.
+    Thread-safe. Never raises.
+    """
+    import random, time as _time
+    eid = f'INTEL_{int(_time.time() * 1000)}_{random.randint(100, 999)}'
+    try:
+        ny_ts = datetime.now(_NY_TZ).strftime('%Y-%m-%d %H:%M:%S ET')
+        entry = {'id': eid, 'timestamp_et': ny_ts, 'event_type': 'INTELLIGENCE',
+                 'subtype': subtype, **payload}
+        with _INTEL_LOCK:
+            data: list = []
+            try:
+                if _INTEL_FILE.exists():
+                    data = json.loads(_INTEL_FILE.read_text(encoding='utf-8'))
+                    if not isinstance(data, list):
+                        data = []
+            except Exception:
+                data = []
+            data.insert(0, entry)
+            _INTEL_FILE.write_text(
+                json.dumps(data[:_INTEL_MAX], indent=2, default=str),
+                encoding='utf-8',
+            )
+    except Exception as exc:
+        print(f'[synthesis] intel event write error: {exc}')
 
 
 # ── Signal primitive ──────────────────────────────────────────────────────────
@@ -970,7 +1003,48 @@ def compute_synthesis() -> dict:
             'last_updated': _utc_iso(),
         }
 
+        # Detect thesis state change — emit INTELLIGENCE event when state flips
+        prev_state = ''
+        try:
+            if _SYN_FILE.exists():
+                _prev = json.loads(_SYN_FILE.read_text(encoding='utf-8'))
+                prev_state = _prev.get('thesis_state', '')
+        except Exception:
+            pass
+
         _SYN_FILE.write_text(json.dumps(state_obj, indent=2, default=str), encoding='utf-8')
+
+        if state != prev_state and prev_state:
+            try:
+                session = ''
+                try:
+                    from zoneinfo import ZoneInfo as _ZI
+                    from core.config import now_ny as _nny
+                    _h = _nny().hour
+                    if _h < 4:    session = 'ASIA'
+                    elif _h < 9:  session = 'LONDON'
+                    elif _h < 11: session = 'NY_OPEN'
+                    elif _h < 13: session = 'NY_AM'
+                    else:         session = 'NY_PM'
+                except Exception:
+                    pass
+                _emit_intelligence_event('SYNTHESIS_UPDATE', {
+                    'thesis_state':         state,
+                    'thesis_state_prev':    prev_state,
+                    'thesis':               thesis,
+                    'confidence':           confidence,
+                    'condition':            condition,
+                    'primary_driver':       driver,
+                    'confirming_evidence':  confirming,
+                    'conflicting_evidence': conflicting,
+                    'bull_score':           bull_score,
+                    'bear_score':           bear_score,
+                    'major_conflict':       major_conflict,
+                    'session':              session,
+                })
+                print(f'[synthesis] state change: {prev_state} -> {state} (event emitted)')
+            except Exception as _ee:
+                print(f'[synthesis] event emit error: {_ee}')
 
         print(
             f'[synthesis] state={state} | bull={bull_score} bear={bear_score} '
