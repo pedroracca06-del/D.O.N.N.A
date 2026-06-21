@@ -2423,8 +2423,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <div class="fd-sep"></div>
           <span class="fd-meta" style="margin-right:2px">SYM</span>
           <button class="fd-filter-btn active" data-fd-sym="all" onclick="setFdSym(\'all\',this)">ALL</button>
-          <button class="fd-filter-btn" data-fd-sym="MES" onclick="setFdSym(\'MES\',this)">MES</button>
-          <button class="fd-filter-btn" data-fd-sym="MNQ" onclick="setFdSym(\'MNQ\',this)">MNQ</button>
+          <button class="fd-filter-btn" data-fd-sym="ES" onclick="setFdSym(\'ES\',this)">ES</button>
+          <button class="fd-filter-btn" data-fd-sym="NQ" onclick="setFdSym(\'NQ\',this)">NQ</button>
         </div>
 
         <!-- Notification banner (shown when permission not yet granted) -->
@@ -5053,7 +5053,7 @@ function fdIntelligence(c) {
 
 function fdMarketEvent(c) {
   var sub  = (c.subtype || 'MARKET EVENT').replace(/_/g,' ');
-  var sym  = c.symbol || '';
+  var sym  = toMarketSym(c.symbol || '');
   var body = c.claude_rationale || c.description || '';
   var chips = '';
   if (c.level)        chips += fdChip('LEVEL', c.level);
@@ -5093,6 +5093,13 @@ function fdSubClass(st) {
   const m = {EXECUTION_READY:'st-er', HEADS_UP:'st-hu', EVALUATED:'st-ev', INVALIDATION:'st-inv', NO_TRADE:'st-nt'};
   return m[st] || 'st-ev';
 }
+function toMarketSym(sym) {
+  if (!sym) return sym;
+  const s = sym.toUpperCase();
+  if (s === 'MNQ') return 'NQ';
+  if (s === 'MES') return 'ES';
+  return sym;
+}
 
 function fdToggleRationale(id) {
   const el = document.getElementById('fdRat_' + id);
@@ -5123,7 +5130,7 @@ function fdSignal(c) {
   const dirBadge     = dir     ? '<span class="fd-badge ' + fdDirClass(dir) + '">' + dir + '</span>' : '';
   const gradeBadge   = grade   ? '<span class="fd-badge ' + fdGradeClass(grade) + '">' + grade + '</span>' : '';
   const subtypeBadge = subtype ? '<span class="fd-badge ' + fdSubClass(subtype) + '">' + subtype.replace(/_/g,' ') + '</span>' : '';
-  const symEl        = c.symbol ? '<span class="fd-symbol">' + c.symbol + '</span>' : '';
+  const symEl        = c.symbol ? '<span class="fd-symbol">' + toMarketSym(c.symbol) + '</span>' : '';
 
   const dpTxt   = dp.dominance ? dp.dominance + (dp.conviction ? ' ' + dp.conviction : '') : '';
   const drawTxt = draw.name ? draw.name + (draw.category ? ' (' + draw.category + ')' : '') : '';
@@ -5177,7 +5184,7 @@ function fdSignal(c) {
 function fdGovernance(c) {
   const code   = c.rejection_code || 'GOV';
   const reason = c.rejection_reason || '—';
-  const sym    = c.symbol ? '<span class="fd-symbol">' + c.symbol + '</span>' : '';
+  const sym    = c.symbol ? '<span class="fd-symbol">' + toMarketSym(c.symbol) + '</span>' : '';
   const dir    = c.direction ? '<span class="fd-badge ' + fdDirClass(c.direction) + '">' + c.direction.toUpperCase() + '</span>' : '';
   const grade  = c.grade ? '<span class="fd-badge ' + fdGradeClass(c.grade) + '">' + c.grade.toUpperCase() + '</span>' : '';
   return '<div class="fd-card fd-governance">' +
@@ -5211,7 +5218,7 @@ function fdExecution(c) {
 
 function fdMr2Change(c) {
   const mr2 = c.mr2 || {};
-  const sym = c.symbol || '—';
+  const sym = toMarketSym(c.symbol || '—');
   const sub = (c.subtype||'STATE CHANGE').replace(/_/g,' ');
   const scoreVal = mr2.score !== null && mr2.score !== undefined ? (mr2.score >= 0 ? '+' : '') + mr2.score : '';
   return '<div class="fd-card fd-mr2change">' +

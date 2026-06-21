@@ -545,7 +545,14 @@ def build_feed(
 
     if symbol:
         sym = symbol.upper()
-        all_cards = [c for c in all_cards if c['symbol'].upper() == sym]
+        # NQ/ES are market identities; MNQ/MES are execution instruments for the same market.
+        # Filtering by NQ should return NQ intelligence cards AND MNQ signal/execution cards.
+        _sym_variants: set[str] = {sym}
+        if   sym == 'NQ':  _sym_variants.add('MNQ')
+        elif sym == 'MNQ': _sym_variants.add('NQ')
+        elif sym == 'ES':  _sym_variants.add('MES')
+        elif sym == 'MES': _sym_variants.add('ES')
+        all_cards = [c for c in all_cards if c['symbol'].upper() in _sym_variants]
 
     if date:
         all_cards = [c for c in all_cards if c['timestamp_et'].startswith(date)]
