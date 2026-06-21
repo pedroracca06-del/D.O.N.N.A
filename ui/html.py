@@ -1449,7 +1449,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     <div class="top-right">
       <div class="nav">
         <button class="tab-btn active" data-page="dashboard">Dashboard</button>
-        <button class="tab-btn" data-page="feed">Feed<span class="signal-dot" id="feedUnreadDot" style="display:none"></span></button>
+        <button class="tab-btn" data-page="alerts">Alerts<span class="signal-dot" id="feedUnreadDot" style="display:none"></span></button>
+        <button class="tab-btn" data-page="journal">Journal</button>
         <button class="tab-btn" data-page="news">News</button>
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
@@ -2343,25 +2344,16 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     </div>
   </div>
 
-  <!-- ════════════════════ FEED ════════════════════ -->
-  <div class="page" id="page-feed">
+  <!-- ════════════════════ ALERTS ════════════════════ -->
+  <div class="page" id="page-alerts">
     <div class="vstack">
-
-      <!-- ── FEED/JOURNAL SUB-NAV ── -->
-      <div class="j-subnav">
-        <button class="j-subnav-btn active" id="feedTab-feed" onclick="switchFeedTab(\'feed\')">FEED</button>
-        <button class="j-subnav-btn" id="feedTab-journal" onclick="switchFeedTab(\'journal\')">JOURNAL</button>
-      </div>
-
-      <!-- ── FEED SECTION ── -->
-      <div id="feed-section-feed">
       <div class="panel" style="padding:16px 20px">
 
         <!-- Header -->
         <div class="fd-page-header">
           <div>
-            <div class="fd-page-title">INTELLIGENCE FEED</div>
-            <div class="fd-meta" style="margin-top:3px">Signals · Executions · Governance · Reasoning snapshots</div>
+            <div class="fd-page-title">ALERTS</div>
+            <div class="fd-meta" style="margin-top:3px">Intelligence · Executions · Governance · System events</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px">
             <span class="fd-meta" id="fdLastUpdated">—</span>
@@ -2374,7 +2366,17 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <span class="fd-stat" style="color:var(--muted2)">Loading...</span>
         </div>
 
-        <!-- Filter bar -->
+        <!-- Category filter -->
+        <div class="fd-filter-bar">
+          <span class="fd-meta" style="margin-right:2px">CATEGORY</span>
+          <button class="fd-filter-btn active" data-fd-cat="all" onclick="setFdCat(\'all\',this)">ALL</button>
+          <button class="fd-filter-btn" data-fd-cat="intelligence" onclick="setFdCat(\'intelligence\',this)">INTELLIGENCE</button>
+          <button class="fd-filter-btn" data-fd-cat="execution" onclick="setFdCat(\'execution\',this)">EXECUTION</button>
+          <button class="fd-filter-btn" data-fd-cat="system" onclick="setFdCat(\'system\',this)">SYSTEM</button>
+          <button class="fd-filter-btn" style="opacity:.4;cursor:not-allowed" disabled>MARKET</button>
+        </div>
+
+        <!-- Date / symbol filter -->
         <div class="fd-filter-bar">
           <span class="fd-meta" style="margin-right:2px">DATE</span>
           <button class="fd-filter-btn active" data-fd-date="today" onclick="setFdDate(\'today\',this)">TODAY</button>
@@ -2384,8 +2386,6 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-filter-btn active" data-fd-sym="all" onclick="setFdSym(\'all\',this)">ALL</button>
           <button class="fd-filter-btn" data-fd-sym="MES" onclick="setFdSym(\'MES\',this)">MES</button>
           <button class="fd-filter-btn" data-fd-sym="MNQ" onclick="setFdSym(\'MNQ\',this)">MNQ</button>
-          <div class="fd-sep"></div>
-          <button class="fd-filter-btn" id="fdAlertOnlyBtn" onclick="toggleFdAlertOnly()">ALERTS ONLY</button>
         </div>
 
         <!-- Notification banner (shown when permission not yet granted) -->
@@ -2404,12 +2404,13 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-load-btn" onclick="loadMoreFeed()">LOAD MORE</button>
         </div>
 
-      </div>
-      </div><!-- /feed-section-feed -->
+      </div><!-- /panel -->
+    </div><!-- /vstack -->
+  </div><!-- /page-alerts -->
 
-      <!-- ── JOURNAL SECTION ── -->
-      <div id="feed-section-journal" style="display:none">
-        <div class="vstack">
+  <!-- ════════════════════ JOURNAL ════════════════════ -->
+  <div class="page" id="page-journal">
+    <div class="vstack">
 
       <!-- HEADER -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:4px">
@@ -2438,7 +2439,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
       <!-- SUB NAVIGATION -->
       <div class="j-subnav">
         <button class="j-subnav-btn active" id="jTab-trades" onclick="switchJTab(\'trades\')">Trades<span class="j-subnav-count" id="jTabCount-trades">0</span></button>
-        <button class="j-subnav-btn" id="jTab-signals" onclick="switchJTab(\'signals\')">Signal Feed<span class="j-subnav-count" id="jTabCount-signals">0</span></button>
+        <button class="j-subnav-btn" id="jTab-signals" onclick="switchJTab(\'signals\')">Evaluations<span class="j-subnav-count" id="jTabCount-signals">0</span></button>
         <button class="j-subnav-btn" id="jTab-analytics" onclick="switchJTab(\'analytics\')">Analytics</button>
       </div>
 
@@ -2450,7 +2451,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         </div>
       </div>
 
-      <!-- SIGNAL FEED PANEL -->
+      <!-- EVALUATIONS PANEL -->
       <div id="jPanel-signals" style="display:none">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
           <div style="font-size:12px;color:var(--muted)">NOVA\'s per-cycle evaluation log — every assessment, grade, and reasoning entry.</div>
@@ -2482,11 +2483,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div class="panel"><div class="kicker">Emotional Intelligence</div><div class="section-title" style="margin-bottom:6px">State vs Performance</div><div style="font-size:12px;color:var(--muted);margin-bottom:14px">Correlation between reported emotional state and trade outcome.</div><div id="emotionalAnalyticsGrid"><div style="font-size:12px;color:var(--muted2);padding:8px 0">No emotional state data yet.</div></div></div>
       </div>
 
-        </div><!-- /journal vstack -->
-      </div><!-- /feed-section-journal -->
-
-    </div>
-  </div>
+    </div><!-- /journal vstack -->
+  </div><!-- /page-journal -->
 
   <!-- ════════════════════ GOVERNANCE ════════════════════ -->
   <!-- FOOTER -->
@@ -2688,7 +2686,8 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'harvey') { refreshHarvey(); switchHvSubTab('harvey'); }
     if (btn.dataset.page === 'execution') { refreshExecutionTab(); refreshGovernance(); }
-    if (btn.dataset.page === 'feed') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); switchFeedTab('feed'); }
+    if (btn.dataset.page === 'alerts') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); }
+    if (btn.dataset.page === 'journal') { refreshJournal(); switchJTab('trades'); }
   });
 });
 
@@ -4765,12 +4764,17 @@ document.getElementById('jTab-signals').addEventListener('click', () => refreshS
 // ════════ NOVA FEED ════════
 let _fdDate      = 'today';
 let _fdSym       = 'all';
-let _fdAlertOnly = false;
 let _fdOffset    = 0;
 let _fdCards     = [];
 let _fdSeenIds   = new Set();   // tracks IDs seen so far for unread detection
 let _fdUnread    = 0;
 let _fdNotifPerm = false;       // true once Notification.permission === 'granted'
+let _fdCategory  = 'all';
+const CATEGORY_TYPES = {
+  intelligence: ['INTELLIGENCE', 'MR2_CHANGE'],
+  execution:    ['SIGNAL', 'EXECUTION'],
+  system:       ['GOVERNANCE'],
+};
 
 // ── Notification setup ──────────────────────────────────────────────────────
 function initFeedNotifications() {
@@ -4836,11 +4840,11 @@ function setFdSym(val, btn) {
   _fdOffset = 0; _fdCards = [];
   refreshFeed();
 }
-function toggleFdAlertOnly() {
-  _fdAlertOnly = !_fdAlertOnly;
-  document.getElementById('fdAlertOnlyBtn').classList.toggle('active', _fdAlertOnly);
-  _fdOffset = 0; _fdCards = [];
-  refreshFeed();
+function setFdCat(cat, btn) {
+  _fdCategory = cat;
+  document.querySelectorAll('[data-fd-cat]').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderFeed('');
 }
 async function loadMoreFeed() {
   _fdOffset += 50;
@@ -4856,7 +4860,6 @@ async function refreshFeed(append) {
     params.set('date', todayStr);
   }
   if (_fdSym !== 'all') params.set('symbol', _fdSym);
-  if (_fdAlertOnly) params.set('alert_only', 'true');
   try {
     const [feedRes, statsRes] = await Promise.all([
       fetch('/api/feed?' + params),
@@ -4867,7 +4870,7 @@ async function refreshFeed(append) {
     const newCards = data.feed || [];
 
     // Detect genuinely new cards for unread badge + notifications
-    const isOnFeedPage = document.getElementById('page-feed').classList.contains('active');
+    const isOnFeedPage = document.getElementById('page-alerts').classList.contains('active');
     newCards.forEach(c => {
       if (_fdSeenIds.has(c.id)) return;
       if (_fdSeenIds.size > 0) {          // skip first load
@@ -4898,13 +4901,15 @@ async function refreshFeed(append) {
 }
 
 function renderFeed(todayStr) {
-  if (!_fdCards.length) {
+  const cards = _fdCategory === 'all' ? _fdCards : _fdCards.filter(c => (CATEGORY_TYPES[_fdCategory] || []).includes(c.event_type));
+  if (!cards.length) {
     let msg = 'No events for this filter.';
-    if (_fdDate === 'today') msg = 'No signals logged today (' + (todayStr||'') + ').<br>Switch to <strong>ALL TIME</strong> to see history.';
+    if (_fdDate === 'today' && _fdCategory === 'all') msg = 'No events today (' + (todayStr||'') + ').<br>Switch to <strong>ALL TIME</strong> to see history.';
+    if (_fdCategory !== 'all') msg = 'No ' + _fdCategory.toUpperCase() + ' events for this period.';
     setHtml('feedBody', '<div class="fd-empty">' + msg + '</div>');
     return;
   }
-  setHtml('feedBody', _fdCards.map(c => fdCard(c)).join(''));
+  setHtml('feedBody', cards.map(c => fdCard(c)).join(''));
 }
 
 function fdCard(c) {
@@ -5310,18 +5315,6 @@ function switchHvSubTab(tab) {
   if (tab === 'mr') refreshMarketReality();
 }
 
-// ════════ FEED/JOURNAL SUB-NAV ════════
-function switchFeedTab(tab) {
-  ['feed','journal'].forEach(function(t) {
-    var btn = document.getElementById('feedTab-' + t);
-    if (btn) btn.classList.toggle('active', t === tab);
-  });
-  var feedSec    = document.getElementById('feed-section-feed');
-  var journalSec = document.getElementById('feed-section-journal');
-  if (feedSec)    feedSec.style.display    = tab === 'feed'    ? '' : 'none';
-  if (journalSec) journalSec.style.display = tab === 'journal' ? '' : 'none';
-  if (tab === 'journal') refreshJournal();
-}
 
 // ════════ BOOT ════════
 function todayDateStr() {
