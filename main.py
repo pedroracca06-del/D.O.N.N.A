@@ -1460,18 +1460,20 @@ async def nova_feed_ingest(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail='Invalid JSON body.')
 
-    signal_entry    = body.get('signal')
-    reasoning_entry = body.get('reasoning')
-    execution_entry = body.get('execution')
+    signal_entry       = body.get('signal')
+    reasoning_entry    = body.get('reasoning')
+    execution_entry    = body.get('execution')
+    intelligence_entry = body.get('intelligence')
 
-    if not signal_entry and not reasoning_entry and not execution_entry:
-        raise HTTPException(status_code=400, detail='Body must contain signal, reasoning, and/or execution.')
+    if not signal_entry and not reasoning_entry and not execution_entry and not intelligence_entry:
+        raise HTTPException(status_code=400, detail='Body must contain signal, reasoning, execution, and/or intelligence.')
 
-    from services.feed import ingest_signal, ingest_reasoning, ingest_execution
+    from services.feed import ingest_signal, ingest_reasoning, ingest_execution, ingest_intelligence
 
-    signal_id    = ''
-    reasoning_id = ''
-    execution_id = ''
+    signal_id        = ''
+    reasoning_id     = ''
+    execution_id     = ''
+    intelligence_id  = ''
 
     if signal_entry and isinstance(signal_entry, dict):
         signal_id = await asyncio.to_thread(ingest_signal, signal_entry)
@@ -1482,11 +1484,15 @@ async def nova_feed_ingest(request: Request):
     if execution_entry and isinstance(execution_entry, dict):
         execution_id = await asyncio.to_thread(ingest_execution, execution_entry)
 
+    if intelligence_entry and isinstance(intelligence_entry, dict):
+        intelligence_id = await asyncio.to_thread(ingest_intelligence, intelligence_entry)
+
     return {
-        'ok':           True,
-        'signal_id':    signal_id,
-        'reasoning_id': reasoning_id,
-        'execution_id': execution_id,
+        'ok':               True,
+        'signal_id':        signal_id,
+        'reasoning_id':     reasoning_id,
+        'execution_id':     execution_id,
+        'intelligence_id':  intelligence_id,
     }
 
 

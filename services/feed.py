@@ -298,7 +298,8 @@ def _read_intelligence_log() -> list:
 
 def _normalize_intelligence(entry: dict) -> dict:
     """Normalize one intelligence_log entry into a feed card."""
-    subtype = entry.get('subtype', 'INTELLIGENCE_UPDATE')
+    subtype    = entry.get('subtype', 'INTELLIGENCE_UPDATE')
+    event_type = entry.get('event_type', 'INTELLIGENCE')  # preserve LIQUIDITY_EVENT, PARTICIPATION_EVENT, etc.
 
     # Human-readable summary line for the feed
     thesis_state      = entry.get('thesis_state', '')
@@ -313,13 +314,15 @@ def _normalize_intelligence(entry: dict) -> dict:
         )
     elif subtype == 'MORNING_BRIEF':
         summary = thesis or entry.get('brief_text', '')
+    elif event_type in ('LIQUIDITY_EVENT', 'PARTICIPATION_EVENT'):
+        summary = entry.get('description', thesis or '')
     else:
         summary = thesis or ''
 
     return {
         'id':              f'FEED_INTEL_{entry.get("id", "")}',
         'timestamp_et':    entry.get('timestamp_et', ''),
-        'event_type':      'INTELLIGENCE',
+        'event_type':      event_type,
         'subtype':         subtype,
         'alert_fired':     False,
         'pre_signal':      '',
@@ -340,6 +343,12 @@ def _normalize_intelligence(entry: dict) -> dict:
 
         'pre_rationale':    '',
         'claude_rationale': summary,
+
+        # Market event fields (LIQUIDITY_EVENT / PARTICIPATION_EVENT)
+        'level':       entry.get('level', ''),
+        'price':       entry.get('price', ''),
+        'significance': entry.get('significance', ''),
+        'description': entry.get('description', ''),
 
         # Full intelligence payload — available for detailed card view
         'intelligence': {
@@ -703,9 +712,10 @@ def get_feed_stats() -> dict:
 
 # ── Ingest (Render-side replica append) ──────────────────────────────────────
 
-_MAX_SIGNAL    = 10_000
-_MAX_REASONING = 300
-_MAX_EXECUTION = 500
+_MAX_SIGNAL        = 10_000
+_MAX_REASONING     = 300
+_MAX_EXECUTION     = 500
+_MAX_INTELLIGENCE  = 500
 
 
 def _sync_ts() -> str:
@@ -779,6 +789,33 @@ def ingest_execution(entry: dict) -> str:
             )
         except Exception as e:
             print(f'[feed_ingest] execution write error: {e}')
+            return ''
+    return entry_id
+
+
+def ingest_intelligence(entry: dict) -> str:
+    """
+    Append one intelligence_log entry received from the local monitor.
+    Handles INTELLIGENCE, LIQUIDITY_EVENT, PARTICIPATION_EVENT event types.
+    Deduplicates against the 20 most recent entries.
+    Returns the entry ID on success, '' on failure.
+    """
+    entry_id = entry.get('id', '')
+    with _lock:
+        try:
+            data: list = []
+            if _INTEL_LOG.exists():
+                raw = json.loads(_INTEL_LOG.read_text(encoding='utf-8'))
+                data = raw if isinstance(raw, list) else []
+            if any(e.get('id') == entry_id for e in data[:20]):
+                return entry_id
+            data.insert(0, entry)
+            _INTEL_LOG.write_text(
+                json.dumps(data[:_MAX_INTELLIGENCE], indent=2, default=str),
+                encoding='utf-8',
+            )
+        except Exception as e:
+            print(f'[feed_ingest] intelligence write error: {e}')
             return ''
     return entry_id
 

@@ -951,6 +951,10 @@ tr:last-child td{border-bottom:none}
 .fd-badge.ev-gov{color:var(--muted2);background:rgba(160,160,160,.05);border-color:var(--line)}
 .fd-badge.ev-exec{color:var(--blue);background:rgba(96,165,250,.08);border-color:rgba(96,165,250,.2)}
 .fd-badge.ev-mr2{color:var(--blue2);background:rgba(96,165,250,.06);border-color:rgba(96,165,250,.15)}
+.fd-badge.ev-intel{color:var(--gold);background:rgba(184,134,11,.08);border-color:rgba(184,134,11,.2)}
+.fd-badge.ev-market{color:var(--yellow);background:rgba(250,204,21,.06);border-color:rgba(250,204,21,.2)}
+.fd-card.fd-intelligence{border-left:3px solid rgba(184,134,11,.5)}
+.fd-card.fd-market{border-left:3px solid rgba(250,204,21,.4)}
 .fd-row2{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .fd-chip{font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted2);letter-spacing:.3px;white-space:nowrap}
 .fd-chip strong{color:var(--text);font-weight:700}
@@ -5016,11 +5020,53 @@ function renderFeed(todayStr) {
 
 function fdCard(c) {
   const t = c.event_type || '';
-  if (t === 'SIGNAL')     return fdSignal(c);
-  if (t === 'EXECUTION')  return fdExecution(c);
-  if (t === 'GOVERNANCE') return fdGovernance(c);
-  if (t === 'MR2_CHANGE') return fdMr2Change(c);
+  if (t === 'SIGNAL')            return fdSignal(c);
+  if (t === 'EXECUTION')         return fdExecution(c);
+  if (t === 'GOVERNANCE')        return fdGovernance(c);
+  if (t === 'MR2_CHANGE')        return fdMr2Change(c);
+  if (t === 'INTELLIGENCE')      return fdIntelligence(c);
+  if (t === 'LIQUIDITY_EVENT')   return fdMarketEvent(c);
+  if (t === 'PARTICIPATION_EVENT') return fdMarketEvent(c);
   return '';
+}
+
+function fdIntelligence(c) {
+  var intel = c.intelligence || {};
+  var sub   = (c.subtype || 'INTELLIGENCE').replace(/_/g,' ');
+  var body  = c.claude_rationale || intel.brief_text || intel.thesis || '';
+  var kq    = intel.key_question || '';
+  var chips = '';
+  if (intel.liquidity_draw) chips += fdChip('DRAW', intel.liquidity_draw);
+  if (intel.participation)  chips += fdChip('RVOL', intel.participation);
+  if (intel.macro_risk)     chips += fdChip('MACRO', (intel.macro_risk||'').toUpperCase());
+  if (intel.confidence)     chips += fdChip('CONF', intel.confidence);
+  var html = '<div class="fd-card fd-intelligence">';
+  html += '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>';
+  if (c.session) html += fdChip('', c.session);
+  html += '<span class="fd-badge ev-intel">' + sub + '</span></div>';
+  if (body) html += '<div class="fd-rationale-text" style="margin-top:6px;font-size:12px;line-height:1.6">' + body + '</div>';
+  if (chips) html += '<div class="fd-row2" style="margin-top:6px">' + chips + '</div>';
+  if (kq) html += '<div style="margin-top:5px;font-size:11px;color:var(--muted2);font-style:italic">&#9658; ' + kq + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function fdMarketEvent(c) {
+  var sub  = (c.subtype || 'MARKET EVENT').replace(/_/g,' ');
+  var sym  = c.symbol || '';
+  var body = c.claude_rationale || c.description || '';
+  var chips = '';
+  if (c.level)        chips += fdChip('LEVEL', c.level);
+  if (c.price)        chips += fdChip('PRICE', c.price);
+  if (c.significance) chips += fdChip('SIG', c.significance);
+  var html = '<div class="fd-card fd-market">';
+  html += '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>';
+  if (sym) html += '<span class="fd-symbol">' + sym + '</span>';
+  html += '<span class="fd-badge ev-market">' + sub + '</span></div>';
+  if (body) html += '<div class="fd-rationale-text" style="margin-top:5px;font-size:12px">' + body + '</div>';
+  if (chips) html += '<div class="fd-row2" style="margin-top:6px">' + chips + '</div>';
+  html += '</div>';
+  return html;
 }
 
 function fdTs(ts) {
