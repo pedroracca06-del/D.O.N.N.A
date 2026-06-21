@@ -269,8 +269,16 @@ def get_live_futures_macro_pulse():
 
     for label, fallback_key in futures_assets:
         q = get_futures_quote(label)
+        snap_val = fallback.get(fallback_key, {})
+        # NQ and ES futures must be >1000. If get_futures_quote fell through to an
+        # ETF fallback (QQQ ~740 / SPY ~750), prefer the risk_state yfinance value.
+        if label in ('NQ', 'ES', 'MNQ', 'MES'):
+            q_last   = safe_float((q or {}).get('last', 0))
+            snap_last = safe_float(snap_val.get('last', 0))
+            if snap_last > 1000 and q_last < 1000:
+                q = snap_val
         if not q:
-            q = fallback.get(fallback_key, {})
+            q = snap_val
         last = (q or {}).get('last', '-')
         chg  = (q or {}).get('chg', '-')
         pct_raw = (q or {}).get('pct', None)
@@ -1451,6 +1459,33 @@ def build_dashboard_payload():
     cross_asset   = build_cross_asset_intelligence()
     effective_alerts = alerts if alerts else observations
 
+    # Intelligence layer — load from cached JSON files (no network calls)
+    try:
+        from engines.synthesis import load_synthesis
+        intelligence_synthesis = load_synthesis()
+    except Exception:
+        intelligence_synthesis = {}
+    try:
+        from engines.market_reality_v2 import load_market_reality_v2
+        intelligence_mr2 = load_market_reality_v2()
+    except Exception:
+        intelligence_mr2 = {}
+    try:
+        from engines.liquidity import load_liquidity
+        intelligence_liquidity = load_liquidity()
+    except Exception:
+        intelligence_liquidity = {}
+    try:
+        from engines.participation import load_participation
+        intelligence_participation = load_participation()
+    except Exception:
+        intelligence_participation = {}
+    try:
+        from engines.session_memory import load_session_memory
+        intelligence_session_memory = load_session_memory()
+    except Exception:
+        intelligence_session_memory = {}
+
     live_strip = [
         {'label': 'Macro',       'value': str(risk.get('macro_risk', '-')).upper()},
         {'label': 'Headline',    'value': str(risk.get('headline_risk', '-')).upper()},
@@ -1488,6 +1523,13 @@ def build_dashboard_payload():
         'regime':               regime,
         'scenarios':            scenarios,
         'cross_asset_intelligence': cross_asset,
+        'intelligence': {
+            'synthesis':      intelligence_synthesis,
+            'mr2':            intelligence_mr2,
+            'liquidity':      intelligence_liquidity,
+            'participation':  intelligence_participation,
+            'session_memory': intelligence_session_memory,
+        },
     }
 
 

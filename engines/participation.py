@@ -452,6 +452,7 @@ def compute_participation() -> dict:
     global _cache, _cache_ts
 
     try:
+        prev_state = _read_json(_P_FILE)   # snapshot before overwrite
         now_ts     = time.time()
         cache_miss = (now_ts - _cache_ts) > _CACHE_TTL
 
@@ -556,6 +557,9 @@ def compute_participation() -> dict:
 
         _P_FILE.write_text(json.dumps(state, indent=2, default=str), encoding='utf-8')
 
+        if prev_state:
+            _emit_participation_events(prev_state, state)
+
         nq_rvol = nq_data.get('rvol', 0.0)
         print(
             f'[participation] {session_type} | bias={participation_bias} | '
@@ -568,6 +572,56 @@ def compute_participation() -> dict:
     except Exception as exc:
         print(f'[participation] compute error: {exc}')
         return _neutral_state()
+
+
+def _emit_participation_events(prev: dict, curr: dict) -> None:
+    """Emit PARTICIPATION_EVENT when session type or NQ RVOL changes significantly."""
+    try:
+        now_ny = datetime.now(_NY_TZ)
+        m = now_ny.hour * 60 + now_ny.minute
+        if not (9 * 60 + 30 <= m <= 16 * 60):
+            return
+        from engines.synthesis import _emit_intelligence_event
+
+        # Session type transition (ignore UNCERTAIN as origin or destination)
+        prev_type = prev.get('session_type', '')
+        curr_type = curr.get('session_type', '')
+        if (prev_type and curr_type and prev_type != curr_type
+                and 'UNCERTAIN' not in (prev_type, curr_type)):
+            _emit_intelligence_event(
+                'SESSION_TYPE_CHANGE',
+                {
+                    'symbol':      'MARKET',
+                    'session':     'NY',
+                    'from':        prev_type,
+                    'to':          curr_type,
+                    'description': f'Session type shifted: {prev_type} → {curr_type}',
+                },
+                event_type='PARTICIPATION_EVENT',
+            )
+
+        # NQ RVOL threshold crossings
+        try:
+            prev_rvol = float(prev.get('nq', {}).get('rvol', 0) or 0)
+            curr_rvol = float(curr.get('nq', {}).get('rvol', 0) or 0)
+            if prev_rvol > 0 and curr_rvol > 0:
+                for threshold, label in ((2.0, 'HIGH'), (1.5, 'ELEVATED'), (0.7, 'LOW')):
+                    if prev_rvol < threshold <= curr_rvol:
+                        _emit_intelligence_event(
+                            'RVOL_THRESHOLD',
+                            {
+                                'symbol':      'NQ',
+                                'session':     'NY',
+                                'threshold':   threshold,
+                                'description': f'NQ RVOL crossed above {threshold}x ({label}) — {prev_rvol:.2f}x → {curr_rvol:.2f}x',
+                            },
+                            event_type='PARTICIPATION_EVENT',
+                        )
+                        break
+        except Exception:
+            pass
+    except Exception as exc:
+        print(f'[participation] event error: {exc}')
 
 
 def _neutral_state() -> dict:

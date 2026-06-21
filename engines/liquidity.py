@@ -269,6 +269,41 @@ def _build_narrative(nq: dict, es: dict) -> str:
     return ' | '.join(parts)
 
 
+# ── Market event emission ─────────────────────────────────────────────────────
+
+def _emit_sweep_events(prev: dict, curr: dict) -> None:
+    """Emit LIQUIDITY_EVENT to the feed when a level transitions UNTAPPED → SWEPT."""
+    try:
+        now_ny = datetime.now(_NY_TZ)
+        m = now_ny.hour * 60 + now_ny.minute
+        if not (9 * 60 + 30 <= m <= 16 * 60):
+            return  # Regular session only
+        from engines.synthesis import _emit_intelligence_event
+        for inst in ('nq', 'es'):
+            prev_lvls = {lv['label']: lv for lv in (prev.get(inst, {}).get('levels') or [])}
+            curr_lvls = {lv['label']: lv for lv in (curr.get(inst, {}).get('levels') or [])}
+            for label, clv in curr_lvls.items():
+                plv = prev_lvls.get(label, {})
+                if plv.get('status') == 'UNTAPPED' and clv.get('status') == 'SWEPT':
+                    price = clv.get('price', '?')
+                    side  = 'above' if clv.get('side') == 'ABOVE' else 'below'
+                    sig   = clv.get('significance', '')
+                    _emit_intelligence_event(
+                        'LIQUIDITY_SWEEP',
+                        {
+                            'symbol':      inst.upper(),
+                            'session':     'NY',
+                            'level':       label,
+                            'price':       price,
+                            'significance': sig,
+                            'description': f'{inst.upper()} swept {label} ({sig}) at {price} — resting orders cleared {side}',
+                        },
+                        event_type='LIQUIDITY_EVENT',
+                    )
+    except Exception as exc:
+        print(f'[liquidity] sweep event error: {exc}')
+
+
 # ── Main compute ──────────────────────────────────────────────────────────────
 
 def compute_liquidity() -> dict:
@@ -280,6 +315,7 @@ def compute_liquidity() -> dict:
     Never raises — returns neutral state on any failure.
     """
     try:
+        prev_state = _read_json(_LIQ_FILE)   # snapshot before overwrite
         ms_state  = _read_json(_MS_FILE)
         mr2_state = _read_json(_MR2_FILE)
         risk      = _read_json(_RISK_FILE)
@@ -317,6 +353,9 @@ def compute_liquidity() -> dict:
         }
 
         _LIQ_FILE.write_text(json.dumps(state, indent=2, default=str), encoding='utf-8')
+
+        if prev_state:
+            _emit_sweep_events(prev_state, state)
 
         nq_draw = nq_data.get('primary_draw') or {}
         d_pts   = nq_draw.get('distance_pts')

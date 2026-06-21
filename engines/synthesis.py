@@ -61,17 +61,16 @@ _INTEL_MAX   = 500
 _INTEL_LOCK  = __import__('threading').Lock()
 
 
-def _emit_intelligence_event(subtype: str, payload: dict) -> None:
+def _emit_intelligence_event(subtype: str, payload: dict, event_type: str = 'INTELLIGENCE') -> None:
     """
     Append one event to donna_intelligence_log.json.
-    Called whenever synthesis thesis_state changes, or a morning brief is generated.
-    Thread-safe. Never raises.
+    Thread-safe. Never raises. Pass event_type to override the default INTELLIGENCE category.
     """
     import random, time as _time
     eid = f'INTEL_{int(_time.time() * 1000)}_{random.randint(100, 999)}'
     try:
         ny_ts = datetime.now(_NY_TZ).strftime('%Y-%m-%d %H:%M:%S ET')
-        entry = {'id': eid, 'timestamp_et': ny_ts, 'event_type': 'INTELLIGENCE',
+        entry = {'id': eid, 'timestamp_et': ny_ts, 'event_type': event_type,
                  'subtype': subtype, **payload}
         with _INTEL_LOCK:
             data: list = []

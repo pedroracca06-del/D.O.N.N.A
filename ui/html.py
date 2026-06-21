@@ -1364,6 +1364,14 @@ tr:last-child td{border-bottom:none}
 .hv-price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .hv-price-card { padding: 18px 20px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); }
 
+.hv-intel-grid { display: grid; gap: 6px; margin-top: 4px; }
+.hv-intel-row { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: baseline; }
+.hv-intel-label { font-family: "Space Mono", monospace; font-size: 9px; letter-spacing: 1.5px; color: var(--muted2); text-transform: uppercase; padding-top: 2px; }
+.hv-intel-val { font-size: 12px; color: var(--text); line-height: 1.5; }
+.hv-intel-val.bull { color: var(--green); }
+.hv-intel-val.bear { color: var(--red); }
+.hv-intel-val.warn { color: var(--yellow); }
+
 .hv-playbook { padding: 18px 20px; border-radius: var(--radius); border: 1px solid rgba(184,134,11,.25); border-left: 3px solid var(--yellow); background: rgba(184,134,11,.04); }
 .hv-playbook ul { margin: 8px 0 0; padding-left: 18px; }
 .hv-playbook li { font-size: 13px; color: var(--muted); line-height: 1.65; margin-bottom: 4px; }
@@ -1833,7 +1841,34 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             </div>
           </div>
 
-          <!-- 3. DONNA'S PLAYBOOK -->
+          <!-- 3. INTELLIGENCE SUMMARY -->
+          <div class="panel" style="padding:16px 20px">
+            <div class="kicker" style="color:var(--blue);margin-bottom:10px">Intelligence Summary</div>
+            <div class="hv-intel-grid">
+              <div class="hv-intel-row">
+                <span class="hv-intel-label">THESIS</span>
+                <span class="hv-intel-val" id="hvIntelThesis">—</span>
+              </div>
+              <div class="hv-intel-row">
+                <span class="hv-intel-label">DRAW</span>
+                <span class="hv-intel-val" id="hvIntelDraw">—</span>
+              </div>
+              <div class="hv-intel-row">
+                <span class="hv-intel-label">RVOL</span>
+                <span class="hv-intel-val" id="hvIntelRvol">—</span>
+              </div>
+              <div class="hv-intel-row">
+                <span class="hv-intel-label">MR2</span>
+                <span class="hv-intel-val" id="hvIntelMr2">—</span>
+              </div>
+              <div class="hv-intel-row">
+                <span class="hv-intel-label">WATCH</span>
+                <span class="hv-intel-val" id="hvIntelWatch">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. DONNA'S PLAYBOOK -->
           <div class="hv-playbook">
             <div class="kicker" style="margin-bottom:8px;color:var(--yellow)">Donna's Playbook</div>
             <ul id="hvPlaybook">
@@ -2373,7 +2408,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-filter-btn" data-fd-cat="intelligence" onclick="setFdCat(\'intelligence\',this)">INTELLIGENCE</button>
           <button class="fd-filter-btn" data-fd-cat="execution" onclick="setFdCat(\'execution\',this)">EXECUTION</button>
           <button class="fd-filter-btn" data-fd-cat="system" onclick="setFdCat(\'system\',this)">SYSTEM</button>
-          <button class="fd-filter-btn" style="opacity:.4;cursor:not-allowed" disabled>MARKET</button>
+          <button class="fd-filter-btn" data-fd-cat="market" onclick="setFdCat(\'market\',this)">MARKET</button>
         </div>
 
         <!-- Date / symbol filter -->
@@ -3024,6 +3059,71 @@ function renderHarveyNew(d) {
 
   // Risk engine
   if (d.risk_engine) renderRiskEngine(d.risk_engine);
+
+  // Intelligence summary
+  renderIntelligencePanel(d);
+}
+
+function renderIntelligencePanel(d) {
+  const intel = (d.intelligence) || {};
+  const syn  = intel.synthesis    || {};
+  const mr2  = intel.mr2          || {};
+  const liq  = intel.liquidity    || {};
+  const part = intel.participation || {};
+  const mem  = intel.session_memory || {};
+
+  // THESIS — state + confidence + market_thesis (truncated)
+  const thState  = syn.thesis_state || '';
+  const thConf   = syn.confidence   ? ' [' + syn.confidence + ']' : '';
+  const thText   = (syn.market_thesis || '').substring(0, 90);
+  const thSuffix = (syn.market_thesis || '').length > 90 ? '...' : '';
+  const thStr    = thState ? thState + thConf + (thText ? ' — ' + thText + thSuffix : '') : '—';
+  const thEl = document.getElementById('hvIntelThesis');
+  if (thEl) {
+    thEl.textContent = thStr;
+    thEl.className = 'hv-intel-val' + (thState.includes('BULL') ? ' bull' : thState.includes('BEAR') ? ' bear' : '');
+  }
+
+  // DRAW — primary liquidity draw for NQ
+  const liqNq   = (liq.nq || {});
+  const draw    = liqNq.primary_draw || {};
+  const dLabel  = draw.label || '';
+  const dPts    = draw.distance_pts ? Math.round(Math.abs(parseFloat(draw.distance_pts))) + 'pts' : '';
+  const dSide   = draw.side === 'BELOW' ? 'below' : draw.side === 'ABOVE' ? 'above' : '';
+  const uAbove  = liqNq.untapped_above !== undefined ? liqNq.untapped_above : '—';
+  const uBelow  = liqNq.untapped_below !== undefined ? liqNq.untapped_below : '—';
+  const drawStr = dLabel ? dLabel + (dPts ? ' (' + dPts + ' ' + dSide + ')' : '') + ' — ' + uAbove + ' above / ' + uBelow + ' below untapped' : '—';
+  setText('hvIntelDraw', drawStr);
+
+  // RVOL — NQ RVOL + session type + bias
+  const nqPart  = (part.nq || {});
+  const rvolVal = nqPart.rvol ? parseFloat(nqPart.rvol).toFixed(2) + 'x' : '—';
+  const sessT   = part.session_type || '—';
+  const bias    = part.participation_bias || '—';
+  const rvolEl  = document.getElementById('hvIntelRvol');
+  if (rvolEl) {
+    rvolEl.textContent = 'RVOL ' + rvolVal + ' — ' + sessT + ' — ' + bias;
+    const rvolNum = parseFloat(nqPart.rvol || 0);
+    rvolEl.className = 'hv-intel-val' + (rvolNum >= 1.5 ? ' bull' : rvolNum > 0 && rvolNum < 0.7 ? ' bear' : '');
+  }
+
+  // MR2 — state + score + fact counts
+  const mr2State = mr2.state || '—';
+  const mr2Score = mr2.score !== undefined ? mr2.score : '—';
+  const bullF    = mr2.bull_fact_count !== undefined ? mr2.bull_fact_count : '—';
+  const bearF    = mr2.bear_fact_count !== undefined ? mr2.bear_fact_count : '—';
+  const mr2El    = document.getElementById('hvIntelMr2');
+  if (mr2El) {
+    mr2El.textContent = mr2State + ' (score ' + mr2Score + ') — ' + bullF + ' bull / ' + bearF + ' bear facts';
+    mr2El.className = 'hv-intel-val' + (mr2State.includes('BULL') ? ' bull' : mr2State.includes('BEAR') ? ' bear' : mr2State === 'CONFLICTED' ? ' warn' : '');
+  }
+
+  // WATCH — thesis_condition or session narrative
+  const condition = (syn.thesis_condition || '').trim();
+  const narrative = (mem.rolling_narrative || '').trim();
+  const watchRaw  = (condition && !condition.startsWith('Insufficient')) ? condition : (narrative || '—');
+  const watchStr  = watchRaw.substring(0, 140) + (watchRaw.length > 140 ? '...' : '');
+  setText('hvIntelWatch', watchStr);
 }
 
 async function refreshHarvey() {
@@ -4774,6 +4874,7 @@ const CATEGORY_TYPES = {
   intelligence: ['INTELLIGENCE', 'MR2_CHANGE'],
   execution:    ['SIGNAL', 'EXECUTION'],
   system:       ['GOVERNANCE'],
+  market:       ['LIQUIDITY_EVENT', 'PARTICIPATION_EVENT'],
 };
 
 // ── Notification setup ──────────────────────────────────────────────────────
@@ -4905,7 +5006,8 @@ function renderFeed(todayStr) {
   if (!cards.length) {
     let msg = 'No events for this filter.';
     if (_fdDate === 'today' && _fdCategory === 'all') msg = 'No events today (' + (todayStr||'') + ').<br>Switch to <strong>ALL TIME</strong> to see history.';
-    if (_fdCategory !== 'all') msg = 'No ' + _fdCategory.toUpperCase() + ' events for this period.';
+    if (_fdCategory === 'market') msg = 'No MARKET events yet. Events appear when liquidity levels are swept or RVOL shifts significantly during the session.';
+    else if (_fdCategory !== 'all') msg = 'No ' + _fdCategory.toUpperCase() + ' events for this period.';
     setHtml('feedBody', '<div class="fd-empty">' + msg + '</div>');
     return;
   }

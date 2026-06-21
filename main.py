@@ -881,6 +881,21 @@ async def harvey_data():
     if es_last and es_last > 1000:
         payload['es_last'] = es_last
         payload['es_pct']  = es_pct
+    try:
+        from engines.synthesis import load_synthesis
+        from engines.market_reality_v2 import load_market_reality_v2
+        from engines.liquidity import load_liquidity
+        from engines.participation import load_participation
+        from engines.session_memory import load_session_memory
+        payload['intelligence'] = {
+            'synthesis':      load_synthesis(),
+            'mr2':            load_market_reality_v2(),
+            'liquidity':      load_liquidity(),
+            'participation':  load_participation(),
+            'session_memory': load_session_memory(),
+        }
+    except Exception:
+        payload['intelligence'] = {}
     return payload
 
 
