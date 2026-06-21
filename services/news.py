@@ -17,9 +17,10 @@ import re
 import requests
 
 # ── paths & config ──────────────────────────────────────────
-BASE_DIR = Path(__file__).parent.parent
-RISK_STATE_FILE = BASE_DIR / 'data' / 'donna_risk_state.json'
-NY_TZ = ZoneInfo('America/New_York')
+from core.config import RISK_STATE_FILE as _CONFIG_RISK_STATE_FILE
+BASE_DIR        = Path(__file__).parent.parent
+RISK_STATE_FILE = _CONFIG_RISK_STATE_FILE   # respects DONNA_DATA_DIR on Render
+NY_TZ           = ZoneInfo('America/New_York')
 
 FINNHUB_API_KEY   = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY       = os.getenv('FMP_API_KEY', '').strip()

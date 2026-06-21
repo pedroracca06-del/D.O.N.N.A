@@ -17,9 +17,10 @@ import requests
 import yfinance as yf
 
 from core.state_engine import state as _state
+from core.config import RISK_STATE_FILE as _CONFIG_RISK_STATE_FILE
 
 BASE_DIR        = Path(__file__).parent.parent
-RISK_STATE_FILE = BASE_DIR / 'data' / 'donna_risk_state.json'
+RISK_STATE_FILE = _CONFIG_RISK_STATE_FILE   # respects DONNA_DATA_DIR on Render
 NY_TZ           = ZoneInfo('America/New_York')
 
 # Finnhub key kept solely for the news endpoint

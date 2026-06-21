@@ -42,14 +42,31 @@ BASE_DIR  = Path(__file__).parent.parent
 MCP_DIR   = BASE_DIR / 'mcp' / 'tradingview'
 SS_DIR    = MCP_DIR / 'screenshots'
 
-STATE_FILES = {
-    'risk_state':    BASE_DIR / 'data' / 'donna_risk_state.json',
-    'state_engine':  BASE_DIR / 'data' / 'donna_state_engine.json',
-    'risk_engine':   BASE_DIR / 'data' / 'donna_risk_engine_state.json',
-    'alert_state':   BASE_DIR / 'data' / 'donna_alert_state.json',
-    'macro_events':  BASE_DIR / 'data' / 'donna_macro_events.json',
-    'macro_discord': BASE_DIR / 'data' / 'donna_macro_discord_state.json',
-}
+import sys as _sys
+_sys.path.insert(0, str(BASE_DIR))
+try:
+    from core.config import (
+        RISK_STATE_FILE as _RSF, STATE_ENGINE_FILE as _SEF,
+        RISK_ENGINE_FILE as _REF, ALERT_STATE_FILE as _ASF,
+        MACRO_EVENTS_FILE as _MEF, MACRO_DISCORD_STATE_FILE as _MDF,
+    )
+    STATE_FILES = {
+        'risk_state':    _RSF,
+        'state_engine':  _SEF,
+        'risk_engine':   _REF,
+        'alert_state':   _ASF,
+        'macro_events':  _MEF,
+        'macro_discord': _MDF,
+    }
+except Exception:
+    STATE_FILES = {
+        'risk_state':    BASE_DIR / 'data' / 'donna_risk_state.json',
+        'state_engine':  BASE_DIR / 'data' / 'donna_state_engine.json',
+        'risk_engine':   BASE_DIR / 'data' / 'donna_risk_engine_state.json',
+        'alert_state':   BASE_DIR / 'data' / 'donna_alert_state.json',
+        'macro_events':  BASE_DIR / 'data' / 'donna_macro_events.json',
+        'macro_discord': BASE_DIR / 'data' / 'donna_macro_discord_state.json',
+    }
 
 # ── Result primitives ──────────────────────────────────────────────────────────
 
