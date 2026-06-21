@@ -2233,13 +2233,27 @@ async def journal_add(request: Request):
     if realized_pnl_raw is None and (entry is None or exit_ is None):
         raise HTTPException(status_code=400, detail='Provide realized_pnl or both entry_price and exit_price')
 
-    # Compute signed P&L — LONG profits when exit > entry, SHORT when exit < entry
-    if realized_pnl_raw is not None:
-        pnl = round(realized_pnl_raw, 2)
-    else:
-        pnl = round((exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size, 2)  # type: ignore[operator]
+    # Outcome from the form is the source of truth for sign normalization.
+    # Users select WIN/LOSS/BE; the system enforces the correct sign on the stored value.
+    outcome_raw = str(body.get('outcome', '')).upper().strip()
 
-    # Outcome is always derived from the signed P&L — never trust the form value
+    # Compute raw P&L amount before normalization
+    if realized_pnl_raw is not None:
+        raw_pnl = realized_pnl_raw
+    else:
+        raw_pnl = (exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size  # type: ignore[operator]
+
+    # Normalize sign: outcome wins over whatever sign the user typed
+    if outcome_raw == 'WIN':
+        pnl = round(abs(raw_pnl), 2)
+    elif outcome_raw == 'LOSS':
+        pnl = round(-abs(raw_pnl), 2)
+    elif outcome_raw == 'BREAKEVEN':
+        pnl = 0.0
+    else:
+        pnl = round(raw_pnl, 2)
+
+    # Derive stored outcome from normalized pnl — guaranteed consistent
     outcome = 'WIN' if pnl > 0 else ('LOSS' if pnl < 0 else 'BREAKEVEN')
 
     state  = load_risk_state()
