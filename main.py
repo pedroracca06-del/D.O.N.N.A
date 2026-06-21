@@ -1496,6 +1496,47 @@ async def nova_feed_ingest(request: Request):
     }
 
 
+@app.post('/api/test/purge')
+async def purge_test_events(request: Request):
+    """
+    Remove specific event IDs from all feed log files. Test cleanup only.
+    Authenticated via X-Nova-Ingest-Secret.
+    Body: { "ids": ["id1", "id2", ...] }
+    """
+    from core.config import NOVA_INGEST_SECRET, INTELLIGENCE_LOG_FILE, SIGNAL_LOG_FILE, TRACE_FILE
+    secret = request.headers.get('X-Nova-Ingest-Secret', '')
+    if secret != NOVA_INGEST_SECRET:
+        raise HTTPException(status_code=401, detail='Invalid ingest secret.')
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid JSON body.')
+    ids_to_remove = set(body.get('ids', []))
+    if not ids_to_remove:
+        return {'ok': True, 'removed': {}}
+    removed: dict = {}
+    for name, path in [
+        ('intelligence', INTELLIGENCE_LOG_FILE),
+        ('signal',       SIGNAL_LOG_FILE),
+        ('execution',    TRACE_FILE),
+    ]:
+        try:
+            if not path.exists():
+                continue
+            import json as _json
+            data = _json.loads(path.read_text(encoding='utf-8'))
+            if not isinstance(data, list):
+                continue
+            before = len(data)
+            data = [e for e in data if e.get('id') not in ids_to_remove]
+            if len(data) != before:
+                path.write_text(_json.dumps(data, indent=2, default=str), encoding='utf-8')
+            removed[name] = before - len(data)
+        except Exception as exc:
+            removed[name] = f'error: {exc}'
+    return {'ok': True, 'removed': removed}
+
+
 @app.get('/orchestration-status')
 async def orchestration_status():
     from datetime import datetime, timezone
