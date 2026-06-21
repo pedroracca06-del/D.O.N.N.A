@@ -4063,22 +4063,22 @@ function connectSSE() {
     try { msg = JSON.parse(e.data); } catch(_) { return; }
     if (msg.type !== 'signal') return;
 
-    // Alert audio ping — 440 Hz, 100ms, low volume
-    try {
-      const actx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc  = actx.createOscillator();
-      const gain = actx.createGain();
-      osc.connect(gain);
-      gain.connect(actx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = 440;
-      gain.gain.setValueAtTime(0, actx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.07, actx.currentTime + 0.01);
-      gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.1);
-      osc.start(actx.currentTime);
-      osc.stop(actx.currentTime + 0.11);
-      osc.onended = () => actx.close();
-    } catch(_) {}
+    // Route high-priority webhook signals through maybeSendNotif() so they get
+    // the same audio + browser popup treatment as feed-polled alerts.
+    // SSE payload lacks grade, so HEADS_UP goes through unevaluated (grade='').
+    const sseCard = {
+      subtype:         msg.signal || '',
+      grade:           msg.grade  || '',
+      symbol:          msg.ticker || '',
+      direction:       msg.direction || '',
+      strategy_family: msg.strategy_family || '',
+      setup_type:      msg.setup_type || '',
+      entry_zone:      '',
+      rr:              '',
+      mr2:             {},
+      id:              'sse_' + Date.now(),
+    };
+    maybeSendNotif(sseCard);
 
     // Targeted HARVEY update only — never triggers a full page refresh
     refreshHarvey();
@@ -4902,7 +4902,6 @@ function requestFeedNotifPermission() {
 }
 
 function maybeSendNotif(card) {
-  if (!_fdNotifPerm) return;
   const subtype = card.subtype || '';
   const grade   = (card.grade || '').toUpperCase();
   const isHighPri = (
@@ -4910,8 +4909,30 @@ function maybeSendNotif(card) {
     (subtype === 'HEADS_UP' && (grade === 'A' || grade === 'B'))
   );
   if (!isHighPri) return;
+
+  // Audio ping fires unconditionally — no permission needed, no tab-focus condition.
+  // Higher pitch for EXECUTION_READY vs HEADS_UP so they are distinguishable by ear.
   try {
-    const sym  = card.symbol || '';
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = subtype === 'EXECUTION_READY' ? 880 : 660;
+    gain.gain.setValueAtTime(0, actx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.12, actx.currentTime + 0.01);
+    gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.18);
+    osc.start(actx.currentTime);
+    osc.stop(actx.currentTime + 0.19);
+    osc.onended = () => actx.close();
+    if (actx.state === 'suspended') actx.resume();
+  } catch(_) {}
+
+  // Browser popup — requires permission grant.
+  if (!_fdNotifPerm) return;
+  try {
+    const sym  = toMarketSym(card.symbol || '');
     const dir  = card.direction || '';
     const body = [
       card.strategy_family ? card.strategy_family : '',
@@ -4974,12 +4995,16 @@ async function refreshFeed(append) {
     const data = await feedRes.json();
     const newCards = data.feed || [];
 
-    // Detect genuinely new cards for unread badge + notifications
+    // Detect genuinely new cards for unread badge + notifications.
+    // maybeSendNotif() fires for all high-priority cards regardless of which tab is visible —
+    // audio has no permission dependency; browser popup respects granted permission.
+    // Unread badge only increments when not watching the Alerts tab.
     const isOnFeedPage = document.getElementById('page-alerts').classList.contains('active');
     newCards.forEach(c => {
       if (_fdSeenIds.has(c.id)) return;
       if (_fdSeenIds.size > 0) {          // skip first load
-        if (!isOnFeedPage) { _fdUnread++; maybeSendNotif(c); }
+        maybeSendNotif(c);
+        if (!isOnFeedPage) _fdUnread++;
       }
       _fdSeenIds.add(c.id);
     });

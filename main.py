@@ -1935,12 +1935,16 @@ async def webhook(request: Request):
 
     if _sse_clients:
         evt = json.dumps({
-            'type':       'signal',
-            'ticker':     result['data'].get('ticker', ''),
-            'signal':     result['data'].get('signal', ''),
-            'verdict':    result['parsed'].get('verdict', ''),
-            'confidence': result['parsed'].get('confidence', ''),
-            'summary':    result['parsed'].get('summary', ''),
+            'type':            'signal',
+            'ticker':          result['data'].get('ticker', ''),
+            'signal':          result['data'].get('signal', ''),
+            'grade':           result['parsed'].get('grade', ''),
+            'direction':       result['data'].get('direction', ''),
+            'strategy_family': result['data'].get('strategy_family', ''),
+            'setup_type':      result['data'].get('setup_type', ''),
+            'verdict':         result['parsed'].get('verdict', ''),
+            'confidence':      result['parsed'].get('confidence', ''),
+            'summary':         result['parsed'].get('summary', ''),
         })
         for q in list(_sse_clients):
             try:
