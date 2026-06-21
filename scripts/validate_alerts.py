@@ -222,9 +222,11 @@ def validate_event(
                    f'got={match.get("event_type")}')
             _check('subtype correct', match.get('subtype') == subtype_expected,
                    f'got={match.get("subtype")}')
-            _check('summary populated', bool(match.get('claude_rationale') or
-                                             (match.get('intelligence', {}) or {}).get('thesis')),
-                   match.get('claude_rationale', '')[:80])
+            # GOVERNANCE cards render rejection_reason, not claude_rationale
+        text = (match.get('claude_rationale') or
+                match.get('rejection_reason') or
+                (match.get('intelligence', {}) or {}).get('thesis', ''))
+        _check('summary/reason populated', bool(text), text[:80])
         else:
             all_pass = False
     except Exception as ex:
