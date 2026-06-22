@@ -5361,8 +5361,8 @@ async function refreshMarketReality() {
     const fb = document.getElementById('mrFactBreakdown');
     if (fb) {
       const rows = [];
-      if (d.bull_facts_count !== undefined) rows.push('Bull facts: +' + d.bull_facts_count);
-      if (d.bear_facts_count !== undefined) rows.push('Bear facts: −' + d.bear_facts_count);
+      if (d.bull_fact_count !== undefined) rows.push('Bull facts: +' + d.bull_fact_count);
+      if (d.bear_fact_count !== undefined) rows.push('Bear facts: −' + d.bear_fact_count);
       if (d.block_longs_reason)  rows.push('Long block: ' + d.block_longs_reason);
       if (d.block_shorts_reason) rows.push('Short block: ' + d.block_shorts_reason);
       if (d.nq_week_high) rows.push('NQ week hi/lo: ' + d.nq_week_high + ' / ' + (d.nq_week_low||'—'));

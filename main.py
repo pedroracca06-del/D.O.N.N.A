@@ -1197,6 +1197,7 @@ async def market_reality_endpoint():
                 mr2.setdefault('severity',          mr1.get('severity', ''))
             except Exception:
                 pass
+            mr2['session'] = session_label()
             return mr2
     except Exception:
         pass
