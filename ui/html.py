@@ -2427,10 +2427,10 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
           <button class="fd-filter-btn" data-fd-sym="NQ" onclick="setFdSym(\'NQ\',this)">NQ</button>
         </div>
 
-        <!-- Notification banner (shown when permission not yet granted) -->
+        <!-- Notification banner (shown when permission not yet granted or blocked) -->
         <div class="fd-notify-banner" id="fdNotifBanner" style="display:none">
-          <span>Enable browser notifications for EXECUTION_READY and Grade A/B alerts</span>
-          <button class="fd-notify-btn" onclick="requestFeedNotifPermission()">ENABLE NOTIFICATIONS</button>
+          <span id="fdNotifBannerText">Enable browser notifications for EXECUTION_READY and Grade A/B alerts</span>
+          <button class="fd-notify-btn" id="fdNotifBannerBtn" onclick="requestFeedNotifPermission()">ENABLE NOTIFICATIONS</button>
         </div>
 
         <!-- Cards -->
@@ -4885,10 +4885,16 @@ const CATEGORY_TYPES = {
 function initFeedNotifications() {
   if (!('Notification' in window)) return;
   _fdNotifPerm = Notification.permission === 'granted';
+  const banner  = document.getElementById('fdNotifBanner');
+  const bannerTxt = document.getElementById('fdNotifBannerText');
+  const bannerBtn = document.getElementById('fdNotifBannerBtn');
   if (Notification.permission === 'default') {
-    // Show banner in feed asking user to enable
-    const banner = document.getElementById('fdNotifBanner');
     if (banner) banner.style.display = 'flex';
+  } else if (Notification.permission === 'denied') {
+    // Browser-level block — JS cannot re-prompt, must instruct user to reset
+    if (banner) banner.style.display = 'flex';
+    if (bannerTxt) bannerTxt.textContent = 'Notifications blocked by browser. Click the padlock in the address bar → Notifications → Allow, then reload.';
+    if (bannerBtn) bannerBtn.style.display = 'none';
   }
 }
 
