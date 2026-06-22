@@ -908,21 +908,26 @@ async def harvey_data():
     if es_last and es_last > 1000:
         payload['es_last'] = es_last
         payload['es_pct']  = es_pct
-    try:
-        from engines.synthesis import load_synthesis
-        from engines.market_reality_v2 import load_market_reality_v2
-        from engines.liquidity import load_liquidity
-        from engines.participation import load_participation
-        from engines.session_memory import load_session_memory
-        payload['intelligence'] = {
-            'synthesis':      load_synthesis(),
-            'mr2':            load_market_reality_v2(),
-            'liquidity':      load_liquidity(),
-            'participation':  load_participation(),
-            'session_memory': load_session_memory(),
-        }
-    except Exception:
-        payload['intelligence'] = {}
+    from engines.synthesis import load_synthesis
+    from engines.market_reality_v2 import load_market_reality_v2
+    from engines.liquidity import load_liquidity
+    from engines.participation import load_participation
+    from engines.session_memory import load_session_memory
+
+    def _safe_load(fn, name):
+        try:
+            return fn()
+        except Exception as _e:
+            print(f'[harvey-data] {name} load error: {_e}')
+            return {}
+
+    payload['intelligence'] = {
+        'synthesis':      _safe_load(load_synthesis,         'synthesis'),
+        'mr2':            _safe_load(load_market_reality_v2, 'mr2'),
+        'liquidity':      _safe_load(load_liquidity,         'liquidity'),
+        'participation':  _safe_load(load_participation,     'participation'),
+        'session_memory': _safe_load(load_session_memory,    'session_memory'),
+    }
     return payload
 
 
@@ -2289,7 +2294,10 @@ async def journal_add(request: Request):
     outcome = 'WIN' if pnl > 0 else ('LOSS' if pnl < 0 else 'BREAKEVEN')
 
     state  = load_risk_state()
-    harvey = build_harvey_payload()
+    try:
+        harvey = build_harvey_payload()
+    except Exception:
+        harvey = {}
     nq_pts = safe_float(state.get('market_snapshot', {}).get('NQ_SESSION_POINTS', 0))
 
     trade_date_raw = str(body.get('trade_date', '')).strip()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from core.config import (
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE,
@@ -23,8 +24,17 @@ def read_json_file(path, default):
 
 
 def write_json_file(path, data):
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
+    tmp = path.with_suffix('.tmp')
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 # ── Bootstrap ─────────────────────────────────────────────────
