@@ -385,8 +385,35 @@ async def macro_discord_loop():
 
 # ── Startup ────────────────────────────────────────────────────
 
+def _init_settings_from_bundle() -> None:
+    """
+    On Render, DONNA_DATA_DIR=/data so SETTINGS_FILE lives on the persistent disk.
+    The disk may be an old version missing execution_mode / execution_profiles.
+    Copy those fields from the bundled repo copy (data/donna_settings.json next to
+    main.py) so a fresh disk or a disk that pre-dates these fields always arms correctly.
+    """
+    try:
+        from core.config import BASE_DIR
+        bundled = BASE_DIR / 'data' / 'donna_settings.json'
+        if not bundled.exists() or bundled == SETTINGS_FILE:
+            return
+        b = json.loads(bundled.read_text(encoding='utf-8'))
+        disk: dict = json.loads(SETTINGS_FILE.read_text(encoding='utf-8')) if SETTINGS_FILE.exists() else {}
+        changed = False
+        for key in ('execution_mode', 'execution_profiles'):
+            if key not in disk or not disk[key]:
+                disk[key] = b.get(key)
+                changed = True
+        if changed:
+            SETTINGS_FILE.write_text(json.dumps(disk, indent=2, ensure_ascii=False), encoding='utf-8')
+            print(f'[startup] donna_settings.json patched from bundled copy: execution_mode={disk.get("execution_mode")}')
+    except Exception as _e:
+        print(f'[startup] _init_settings_from_bundle error: {_e}')
+
+
 @app.on_event('startup')
 async def startup():
+    _init_settings_from_bundle()
     ensure_files()
     if _STATE_ENGINE_AVAILABLE:
         print(
