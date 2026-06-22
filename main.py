@@ -2141,20 +2141,21 @@ async def journal_data():
     stats     = compute_journal_stats(trades)
     today_str = now_ny().strftime('%Y-%m-%d')
 
+    _closed_outcomes = ('WIN', 'LOSS', 'EOD_CLOSE', 'BREAKEVEN')
     today_pnl = sum(
         float(t.get('realized_pnl', 0) or 0)
         for t in trades
         if t.get('trade_date') == today_str
-        and t.get('outcome') in ('WIN', 'LOSS')
+        and t.get('outcome') in _closed_outcomes
         and t.get('realized_pnl') is not None
+        and t.get('outcome') != 'REJECTED'
     )
 
-    closed_trades = [t for t in trades if t.get('outcome') in ('WIN', 'LOSS')]
-    wins          = len([t for t in closed_trades if t.get('outcome') == 'WIN'])
-    win_rate      = (wins / len(closed_trades) * 100) if closed_trades else 0
+    # win_rate is already computed correctly by compute_journal_stats (EOD_CLOSE
+    # is now classified as WIN/LOSS by pnl sign inside compute_journal_stats).
+    # Drop the endpoint-level override — rely on the backend stat.
 
     stats['today_pnl'] = round(today_pnl, 2)
-    stats['win_rate']  = round(win_rate, 1)
 
     return {'status': 'ok', 'trades': trades, 'stats': stats}
 

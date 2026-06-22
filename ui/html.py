@@ -3265,7 +3265,7 @@ function renderRiskEngine(re) {
   const ddNote = document.getElementById('reDDNote');
   const ddCell = document.getElementById('reDDCell');
   if (ddEl) {
-    ddEl.textContent = dd.daily_pnl != null ? '$' + dd.daily_pnl.toFixed(0) : '—';
+    ddEl.textContent = dd.daily_pnl != null ? _fmtUsd(dd.daily_pnl) : '—';
     const cls = dd.daily_breach || dd.weekly_breach ? 're-invalid' : dd.status === 'WARNING' ? 're-warn' : 're-ok';
     ddEl.className = 're-value ' + cls;
   }
@@ -3714,6 +3714,16 @@ function _fmtUsd(v) {
   const n = parseFloat(v);
   if (v == null || isNaN(n)) return '—';
   return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function _fmtCount(v) {
+  const n = parseInt(v, 10);
+  if (v == null || isNaN(n)) return '—';
+  return n.toLocaleString('en-US');
+}
+function _fmtPrice(v) {
+  const n = parseFloat(v);
+  if (v == null || isNaN(n)) return '—';
+  return n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 function _execGrade(winRate, todayPnl) {
   if (winRate >= 65 && todayPnl > 0) return 'A';
@@ -4229,10 +4239,10 @@ function renderJournal(data) {
   const trades = data.trades || [];
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  // Overview strip
-  const todayTrades = trades.filter(t => t.trade_date === todayStr);
+  // Overview strip — exclude REJECTED (governance-blocked, never executed)
+  const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'REJECTED');
   const todayPnl = todayTrades
-    .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS')
+    .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS' || t.outcome === 'EOD_CLOSE' || t.outcome === 'BREAKEVEN')
     .reduce((s, t) => s + (parseFloat(t.realized_pnl ?? t.pnl ?? 0) || 0), 0);
   const closed = trades.filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS');
   const wins   = closed.filter(t => t.outcome === 'WIN').length;
@@ -4243,7 +4253,7 @@ function renderJournal(data) {
   setText('jOvTrades', todayTrades.length);
   const pnlEl = document.getElementById('jOvPnl');
   if (pnlEl) {
-    pnlEl.textContent = todayPnl >= 0 ? '+$' + todayPnl.toFixed(2) : '-$' + Math.abs(todayPnl).toFixed(2);
+    pnlEl.textContent = _fmtPnl(todayPnl);
     pnlEl.style.color = todayPnl > 0 ? 'var(--green)' : todayPnl < 0 ? 'var(--red)' : 'var(--muted2)';
   }
   const wrEl = document.getElementById('jOvWinRate');
@@ -4259,7 +4269,7 @@ function renderJournal(data) {
   const wkEl = document.getElementById('jOvWeek');
   if (wkEl) {
     const w = parseFloat(weekPnl) || 0;
-    wkEl.textContent = w >= 0 ? '+$' + w.toFixed(2) : '-$' + Math.abs(w).toFixed(2);
+    wkEl.textContent = _fmtPnl(w);
     wkEl.style.color = w > 0 ? 'var(--green)' : w < 0 ? 'var(--red)' : 'var(--muted2)';
   }
 
@@ -4275,19 +4285,19 @@ function renderJournal(data) {
   if (jaPF) { jaPF.textContent = pf > 0 ? pf.toFixed(2) : '—'; jaPF.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : pf > 0 ? 'var(--red)' : 'var(--muted2)'; }
   setText('jaBestRegime', stats.best_regime || '—');
   setText('jaWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
-  setText('jAvgWinLoss', `Avg W: ${stats.avg_win ? '$'+stats.avg_win : '—'} / Avg L: ${stats.avg_loss ? '$'+stats.avg_loss : '—'}`);
+  setText('jAvgWinLoss', `Avg W: ${stats.avg_win ? _fmtUsd(stats.avg_win) : '—'} / Avg L: ${stats.avg_loss ? _fmtUsd(stats.avg_loss) : '—'}`);
 
   // Expectancy
   const exp = stats.expectancy;
   const expEl = document.getElementById('jaExpectancy');
   if (expEl && exp !== undefined) {
-    expEl.textContent = (exp >= 0 ? '+$' : '-$') + Math.abs(exp).toFixed(2);
+    expEl.textContent = _fmtPnl(exp);
     expEl.style.color = exp > 0 ? 'var(--green)' : exp < 0 ? 'var(--red)' : 'var(--muted2)';
   }
   const avgWinEl = document.getElementById('jaAvgWin');
-  if (avgWinEl) { avgWinEl.textContent = stats.avg_win ? '+$'+stats.avg_win : '—'; }
+  if (avgWinEl) { avgWinEl.textContent = stats.avg_win ? _fmtPnl(stats.avg_win) : '—'; }
   const avgLossEl = document.getElementById('jaAvgLoss');
-  if (avgLossEl) { avgLossEl.textContent = 'Avg L: ' + (stats.avg_loss ? '-$'+stats.avg_loss : '—'); }
+  if (avgLossEl) { avgLossEl.textContent = 'Avg L: ' + (stats.avg_loss ? _fmtUsd(stats.avg_loss) : '—'); }
 
   // Helper: render a breakdown grid
   function renderBreakdownGrid(elId, data, colorMap) {
@@ -4297,7 +4307,7 @@ function renderJournal(data) {
       const wrc = v.win_rate >= 55 ? 'var(--green)' : v.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)';
       const borderC = (colorMap && colorMap[key]) || 'var(--line)';
       const total = (v.wins||0) + (v.losses||0) + (v.breakevens||0);
-      const pnlStr = v.pnl !== undefined ? ` · ${v.pnl >= 0 ? '+$'+v.pnl.toFixed(2) : '-$'+Math.abs(v.pnl).toFixed(2)}` : '';
+      const pnlStr = v.pnl !== undefined ? ` · ${_fmtPnl(v.pnl)}` : '';
       return `<div class="regime-card" style="border-color:${borderC}44">
         <div class="rc-name" style="color:${borderC};font-size:13px">${key.replace(/_/g,' ')}</div>
         <div class="rc-wr" style="color:${wrc}">${v.win_rate}%</div>
@@ -4351,7 +4361,7 @@ function renderJournal(data) {
           const wrc = v.win_rate >= 55 ? 'var(--green)' : v.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)';
           const sc  = stateColor[state] || 'var(--muted2)';
           const total = (v.wins||0) + (v.losses||0) + (v.breakevens||0);
-          const pnlStr = v.pnl !== undefined ? (v.pnl >= 0 ? '+$'+v.pnl.toFixed(2) : '-$'+Math.abs(v.pnl).toFixed(2)) : '—';
+          const pnlStr = v.pnl !== undefined ? _fmtPnl(v.pnl) : '—';
           return `<div class="regime-card" style="border-color:${sc}33">
             <div class="rc-name" style="color:${sc};font-size:13px">${state}</div>
             <div class="rc-wr" style="color:${wrc}">${v.win_rate}%</div>
@@ -4405,7 +4415,7 @@ function renderJournal(data) {
         const v = parseFloat(t.realized_pnl ?? t.pnl ?? 0) || 0;
         return (t.outcome === 'WIN' || t.outcome === 'LOSS') ? s + v : s;
       }, 0);
-      const dayPnlStr = dayPnl !== 0 ? `<span style="color:${dayPnl>0?'var(--green)':'var(--red)'};margin-left:10px;font-weight:400">${dayPnl>0?'+$':'-$'}${Math.abs(dayPnl).toFixed(2)}</span>` : '';
+      const dayPnlStr = dayPnl !== 0 ? `<span style="color:${dayPnl>0?'var(--green)':'var(--red)'};margin-left:10px;font-weight:400">${_fmtPnl(dayPnl)}</span>` : '';
       cards += `<div class="j-date-group"><div class="j-date-label">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span>${dayPnlStr}</div>`;
       dayItems.forEach(({t, origIdx}) => {
         const outcome    = (t.outcome || 'OPEN').toUpperCase();
@@ -4414,7 +4424,7 @@ function renderJournal(data) {
         const dirIcon    = dir === 'LONG' ? '▲' : '▼';
         const rawPnl     = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl || 0);
         const pnl        = parseFloat(rawPnl) || 0;
-        const pnlStr     = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        const pnlStr     = _fmtPnl(pnl);
         const pnlColor   = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
         const timeStr    = fmtTimeET(t.timestamp);
         const grade      = (t.grade || t.tier || '').toUpperCase();
@@ -4616,7 +4626,7 @@ function renderTradeDetail(data, idx) {
   const dirIcon  = dir === \'LONG\' ? \'▲\' : \'▼\';
   const dirColor = dir === \'LONG\' ? \'var(--green)\' : \'var(--red)\';
   const pnl      = parseFloat(t.realized_pnl || t.pnl || 0);
-  const pnlStr   = (pnl >= 0 ? \'+$\' : \'-$\') + Math.abs(pnl).toFixed(2);
+  const pnlStr   = _fmtPnl(pnl);
   const pnlColor = pnl > 0 ? \'var(--green)\' : pnl < 0 ? \'var(--red)\' : \'var(--muted)\';
   const grade    = (t.grade || \'\').toUpperCase();
 
@@ -5229,10 +5239,10 @@ function fdExecution(c) {
   const dir    = (c.direction||'').toUpperCase();
   const sym    = c.etf || c.ticker || c.symbol || '—';
   const qty    = c.qty || 0;
-  const entry  = c.entry_ref  ? Number(c.entry_ref).toFixed(2)  : '—';
-  const stop   = c.stop_px    ? Number(c.stop_px).toFixed(2)    : '—';
-  const target = c.target_px  ? Number(c.target_px).toFixed(2)  : '—';
-  const risk   = c.risk_usd   ? '$' + Number(c.risk_usd).toFixed(0) : '—';
+  const entry  = c.entry_ref  ? _fmtPrice(c.entry_ref)  : '—';
+  const stop   = c.stop_px    ? _fmtPrice(c.stop_px)    : '—';
+  const target = c.target_px  ? _fmtPrice(c.target_px)  : '—';
+  const risk   = c.risk_usd   ? _fmtUsd(c.risk_usd) : '—';
   return '<div class="fd-card fd-execution">' +
     '<div class="fd-row1"><span class="fd-ts">' + fdTs(c.timestamp_et) + '</span>' +
     '<span class="fd-symbol">' + sym + '</span>' +
@@ -5436,7 +5446,7 @@ async function refreshGovernance() {
     const posHtml = [
       govGate('daily trades',      tradesDay + ' / ' + maxTrades + ' used', tradesDay < maxTrades, tradesDay + '/' + maxTrades),
       govGate('concurrent positions', openPos + ' / ' + maxPos + ' open', openPos < maxPos, openPos + '/' + maxPos),
-      govGate('daily P&L',         '$' + (d.daily_pnl || 0).toFixed(2), (d.daily_pnl || 0) >= 0, (d.daily_pnl||0) >= 0 ? '+$' + (d.daily_pnl||0).toFixed(2) : '-$' + Math.abs(d.daily_pnl||0).toFixed(2)),
+      govGate('daily P&L',         _fmtUsd(d.daily_pnl || 0), (d.daily_pnl || 0) >= 0, _fmtPnl(d.daily_pnl || 0)),
     ].join('');
     setHtml('govPositionGates', posHtml);
 

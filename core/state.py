@@ -195,6 +195,10 @@ def compute_journal_stats(trades: list) -> dict:
         outcome   = str(t.get('outcome', '')).upper()
         direction = str(t.get('direction', 'LONG')).upper()
 
+        # REJECTED = governance-blocked, never executed — exclude from all metrics
+        if outcome == 'REJECTED':
+            continue
+
         realized = t.get('realized_pnl')
         if realized is not None:
             try:
@@ -209,6 +213,11 @@ def compute_journal_stats(trades: list) -> dict:
             except Exception:
                 entry, exit_, size = 0.0, 0.0, 1.0
             pnl = (exit_ - entry) * size if direction == 'LONG' else (entry - exit_) * size
+
+        # EOD_CLOSE is a real closed position — classify by pnl sign so it
+        # counts toward win rate and profit factor correctly
+        if outcome == 'EOD_CLOSE':
+            outcome = 'WIN' if pnl > 0 else ('LOSS' if pnl < 0 else 'BREAKEVEN')
 
         if outcome == 'WIN':
             wins += 1
@@ -254,7 +263,7 @@ def compute_journal_stats(trades: list) -> dict:
             _bucket_outcome(emotional_buckets, estate, outcome)
             emotional_buckets[estate]['pnl'] = emotional_buckets[estate].get('pnl', 0.0) + pnl
 
-    total          = len(trades)
+    total          = wins + losses + breakevens
     win_rate       = round(wins / total * 100, 1) if total else 0.0
     avg_win        = round(sum(win_pnl) / len(win_pnl), 2) if win_pnl else 0.0
     avg_loss       = round(sum(loss_pnl) / len(loss_pnl), 2) if loss_pnl else 0.0
