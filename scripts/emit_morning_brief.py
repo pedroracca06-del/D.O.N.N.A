@@ -7,6 +7,7 @@ Usage:
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import random
@@ -15,6 +16,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# Force UTF-8 stdout so em-dashes, arrows, etc. print cleanly on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent.parent

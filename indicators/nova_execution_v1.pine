@@ -113,8 +113,6 @@ var array<box>   histLondonBoxes = array.new<box>()
 var array<box>   histNYBoxes     = array.new<box>()
 
 //================ IB VARS ================
-var float ibHigh      = na
-var float ibLow       = na
 var int   ibLockBar   = na
 var int   ibStartBar  = na
 var line  ibHighLine  = na
@@ -160,8 +158,6 @@ if newDay
     orbHighLine := na
     orbLowLine  := na
     orbMidLine  := na
-    ibHigh      := na
-    ibLow       := na
     ibLockBar   := na
     ibStartBar  := na
     if not na(ibHighLine)
@@ -192,17 +188,58 @@ if isOrbEndBar and not na(orbStartBar)
     orbEndBar := bar_index
 
 //================ IB TRACKING ================
-isIBWindow = (hourNow > 9 or (hourNow == 9 and minuteNow >= 30)) and
-             (hourNow < 10 or (hourNow == 10 and minuteNow < 30))
-isIBClose  = hourNow == 10 and minuteNow == 30
+// ══════════════════════════════════════════════════════════════
+// IB ENGINE — 1-minute ground truth, any chart timeframe
+// ══════════════════════════════════════════════════════════════
+// IB High/Low are computed exclusively from 1-minute bars whose
+// open timestamp falls within [9:30:00, 10:30:00) ET on the same
+// calendar date.  Resets on calendar-day change in ET (midnight),
+// not on CME session boundary — immune to holiday-gap and
+// overnight contamination that breaks the newDay-based approach.
+// ──────────────────────────────────────────────────────────────
+_f_ib_high() =>
+    var float _h      = na
+    var int   _prevD  = na
+    _d   = dayofmonth(time, "America/New_York")
+    _y   = year(time,       "America/New_York")
+    _mo  = month(time,      "America/New_York")
+    _s   = timestamp("America/New_York", _y, _mo, _d, 9, 30, 0)
+    _e   = timestamp("America/New_York", _y, _mo, _d, 10, 30, 0)
+    if not na(_prevD) and _d != _prevD
+        _h := na
+    _prevD := _d
+    if time >= _s and time < _e
+        _h := na(_h) ? high : math.max(_h, high)
+    _h
 
-if isIBWindow
-    if na(ibStartBar)
-        ibStartBar := bar_index
-    ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
-    ibLow  := na(ibLow)  ? low  : math.min(ibLow,  low)
+_f_ib_low() =>
+    var float _l      = na
+    var int   _prevD  = na
+    _d   = dayofmonth(time, "America/New_York")
+    _y   = year(time,       "America/New_York")
+    _mo  = month(time,      "America/New_York")
+    _s   = timestamp("America/New_York", _y, _mo, _d, 9, 30, 0)
+    _e   = timestamp("America/New_York", _y, _mo, _d, 10, 30, 0)
+    if not na(_prevD) and _d != _prevD
+        _l := na
+    _prevD := _d
+    if time >= _s and time < _e
+        _l := na(_l) ? low : math.min(_l, low)
+    _l
 
-if isIBClose and na(ibLockBar)
+ibHigh = request.security(syminfo.tickerid, "1", _f_ib_high(), gaps=barmerge.gaps_off)
+ibLow  = request.security(syminfo.tickerid, "1", _f_ib_low(),  gaps=barmerge.gaps_off)
+
+// ibStartBar / ibLockBar track bar_index in the chart's own timeframe for rendering.
+// Uses time-based window: first bar whose open is at or after 9:30 ET on today's date.
+_ibWinStart = timestamp("America/New_York", year(time, "America/New_York"), month(time, "America/New_York"), dayofmonth(time, "America/New_York"), 9, 30, 0)
+_ibWinEnd   = timestamp("America/New_York", year(time, "America/New_York"), month(time, "America/New_York"), dayofmonth(time, "America/New_York"), 10, 30, 0)
+isIBWindow  = time >= _ibWinStart and time < _ibWinEnd
+isIBClose   = time >= _ibWinEnd   and time < (_ibWinEnd + 60 * 1000)
+
+if isIBWindow and na(ibStartBar)
+    ibStartBar := bar_index
+if time >= _ibWinEnd and na(ibLockBar) and not na(ibHigh)
     ibLockBar := bar_index
 
 //================ ORB REFINEMENT V3 ================
@@ -412,8 +449,7 @@ ibLabelColor = color.new(#40C4FF, 0)
 // Lines draw from the actual 9:30 open bar (ibStartBar) during the building phase,
 // then anchor to the 10:30 lock bar once IB is confirmed.
 ibVisible   = not na(ibHigh) and not na(ibLow) and
-              (hourNow > 9 or (hourNow == 9 and minuteNow >= 30)) and
-              hourNow < 12
+              time >= _ibWinStart and hourNow < 12
 
 if ibVisible and barstate.islast
     _ibStart = not na(ibLockBar) ? ibLockBar : (not na(ibStartBar) ? ibStartBar : bar_index - 50)
