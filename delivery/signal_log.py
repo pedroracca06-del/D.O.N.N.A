@@ -124,6 +124,7 @@ def log_cycle(
     ib_draw:         str              = '',
     ib_aligned:      Optional[bool]   = None,
     ib_tight:        bool             = False,
+    ib_source:       str              = 'pros_table',
 
     # Invalidation
     invalidated:     bool             = False,
@@ -261,6 +262,7 @@ def log_cycle(
         'ib_draw':        ib_draw,
         'ib_aligned':     ib_aligned,
         'ib_tight':       ib_tight,
+        'ib_source':      ib_source,
 
         # Invalidation
         'invalidated':    invalidated,

@@ -801,17 +801,73 @@ def _evaluate_orb_phase(main_state: dict, chart_ctx: dict, session_ctx: dict, or
     }
 
 
+# ── IB cross-validator ────────────────────────────────────────────────────────
+# Keyed by ISO date string; populated after 10:30 AM so the window is complete.
+_ib_yf_cache: dict = {}
+
+def _compute_ib_from_yfinance() -> dict:
+    """
+    Derive IB High/Low from yfinance 1-minute NQ=F data for today's RTH session.
+    Only uses bars timestamped 9:30–10:29 AM ET — never pre-market or overnight.
+    Returns {'ib_high': float, 'ib_low': float, 'forming': bool} or {} on failure.
+    Caches once the IB window closes (10:30 AM ET).
+    """
+    global _ib_yf_cache
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        import yfinance as _yf
+
+        tz  = ZoneInfo('America/New_York')
+        now = datetime.now(tz)
+        mins = now.hour * 60 + now.minute
+        if mins < 9 * 60 + 30:
+            return {}
+
+        cache_key = now.date().isoformat()
+        if cache_key in _ib_yf_cache:
+            return _ib_yf_cache[cache_key]
+
+        hist = _yf.Ticker('NQ=F').history(period='1d', interval='1m', prepost=True)
+        if hist.empty:
+            return {}
+        hist.index = hist.index.tz_convert(tz)
+        today_bars = hist[hist.index.date == now.date()]
+        ib_bars    = today_bars.between_time('09:30', '10:29')
+        if ib_bars.empty:
+            return {}
+
+        result = {
+            'ib_high': float(ib_bars['High'].max()),
+            'ib_low':  float(ib_bars['Low'].min()),
+            'forming': mins < 10 * 60 + 30,
+        }
+        if mins >= 10 * 60 + 30:
+            _ib_yf_cache[cache_key] = result
+        return result
+    except Exception:
+        return {}
+
+# Max allowed deviation (NQ points) between PROS table IB and yfinance IB
+# before the PROS table value is considered stale and overridden.
+_IB_STALE_THRESHOLD = 75.0
+
+
 def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict | None = None) -> dict:
     """
     Assess IB draw alignment.
     IB levels come from PROS table rows IB H / IB L (preferred — added in Pine v1.x+) or
     fall back to NOVA labels/lines. CMD gives the directional bias.
+
+    Cross-validates all PROS table values against a live yfinance 1m computation.
+    If the deviation exceeds _IB_STALE_THRESHOLD the PROS table value is treated as
+    stale (chart crash / state corruption) and the yfinance value is used instead.
     """
     labels = chart_ctx.get('nova_labels', [])
     levels = chart_ctx.get('nova_levels', [])
     price  = chart_ctx.get('price')
 
-    # Prefer table-exported values — reliable bridge, no label parsing risk
+    # Primary: PROS table (reliable bridge, no label-parsing risk)
     ib_high: float | None = None
     ib_low:  float | None = None
     if pros_state:
@@ -824,11 +880,34 @@ def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict |
         except (ValueError, TypeError):
             pass
 
-    # Fall back to label extraction for older Pine builds
+    # Secondary: label extraction for older Pine builds
     if not ib_high:
         ib_high = _extract_level(labels, levels, 'IB HIGH') or _extract_level(labels, levels, 'IB_HIGH')
     if not ib_low:
         ib_low  = _extract_level(labels, levels, 'IB LOW')  or _extract_level(labels, levels, 'IB_LOW')
+
+    # Cross-validate against independently computed yfinance IB.
+    # Stale chart state (crash, holiday gap, contract roll) can produce wildly wrong
+    # PROS table values — yfinance gives us ground truth from actual 1m RTH bars.
+    _ib_source = 'pros_table'
+    yf_ib = _compute_ib_from_yfinance()
+    if yf_ib:
+        yf_h, yf_l = yf_ib.get('ib_high'), yf_ib.get('ib_low')
+        if ib_high and yf_h and abs(ib_high - yf_h) > _IB_STALE_THRESHOLD:
+            print(f'[IB-GUARD] PROS IB_H {ib_high} deviates {abs(ib_high-yf_h):.1f}pts from yfinance {yf_h:.2f} — using yfinance')
+            ib_high = yf_h
+            _ib_source = 'yfinance_override'
+        if ib_low and yf_l and abs(ib_low - yf_l) > _IB_STALE_THRESHOLD:
+            print(f'[IB-GUARD] PROS IB_L {ib_low} deviates {abs(ib_low-yf_l):.1f}pts from yfinance {yf_l:.2f} — using yfinance')
+            ib_low = yf_l
+            _ib_source = 'yfinance_override'
+        # Use yfinance as sole source when PROS table returned nothing
+        if not ib_high and yf_h:
+            ib_high    = yf_h
+            _ib_source = 'yfinance_primary'
+        if not ib_low and yf_l:
+            ib_low     = yf_l
+            _ib_source = 'yfinance_primary'
 
     cmd_up = main_state.get('CMD', '').upper()
 
@@ -877,6 +956,7 @@ def _evaluate_ib_alignment(main_state: dict, chart_ctx: dict, pros_state: dict |
         'ib_range':    ib_range,
         'aligned':     aligned,
         'ib_tight':    ib_range is not None and ib_range < 5,
+        'ib_source':   _ib_source,
     }
 
 
@@ -1887,6 +1967,7 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             ib_draw    = ib_eval.get('draw', ''),
             ib_aligned = ib_eval.get('aligned'),
             ib_tight   = bool(ib_eval.get('ib_tight')),
+            ib_source  = ib_eval.get('ib_source', 'pros_table'),
 
             # Invalidation
             invalidated = bool(inv_eval.get('invalidated')),
