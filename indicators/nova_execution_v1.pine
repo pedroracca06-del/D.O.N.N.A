@@ -446,13 +446,13 @@ if barstate.islast and showHistORB
 ibLineColor = color.new(#40C4FF, 0)    // bright sky blue — visible against dark background
 ibLabelColor = color.new(#40C4FF, 0)
 // IB visible from 9:30 through end of NY AM (11:59) — full session visibility.
-// Lines draw from the actual 9:30 open bar (ibStartBar) during the building phase,
-// then anchor to the 10:30 lock bar once IB is confirmed.
+// Lines draw from the 9:30 open bar (ibStartBar) and extend to current bar.
+// Visible for the full NY session (until 4 PM ET).
 ibVisible   = not na(ibHigh) and not na(ibLow) and
-              time >= _ibWinStart and hourNow < 12
+              time >= _ibWinStart and hourNow < 16
 
 if ibVisible and barstate.islast
-    _ibStart = not na(ibLockBar) ? ibLockBar : (not na(ibStartBar) ? ibStartBar : bar_index - 50)
+    _ibStart = not na(ibStartBar) ? ibStartBar : (not na(ibLockBar) ? ibLockBar : bar_index - 50)
 
     if na(ibHighLine)
         ibHighLine := line.new(_ibStart, ibHigh, bar_index, ibHigh,
