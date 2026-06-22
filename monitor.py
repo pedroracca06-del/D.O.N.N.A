@@ -152,8 +152,12 @@ def _run_premarket_check() -> None:
     except Exception:
         pass
 
-    if status_data and status_data.get('success') is not False:
-        # Quick quote for live price confirmation
+    # api_available=False means CDP is connected but TradingView is on a crash/error page.
+    # That is NOT healthy — chart data would be stale or unavailable.
+    _tv_api_ok = bool(status_data and status_data.get('api_available', False))
+    _tv_sym_ok = status_data and status_data.get('chart_symbol', 'unknown') not in ('', 'unknown', None)
+
+    if _tv_api_ok and _tv_sym_ok:
         try:
             qr = subprocess.run(
                 ['node', 'src/cli/index.js', 'quote'],
@@ -161,10 +165,16 @@ def _run_premarket_check() -> None:
             )
             quote = _json.loads(qr.stdout.strip()) if qr.stdout.strip() else {}
             price = quote.get('last') or quote.get('close') or '?'
-            sym   = status_data.get('symbol', '?')
+            sym   = status_data.get('chart_symbol', '?')
             lines.append(f'**TradingView MCP**   ✅  CDP live  ·  {sym} @ {price}')
         except Exception:
             lines.append('**TradingView MCP**   ✅  CDP live')
+    elif status_data and status_data.get('cdp_connected') and not _tv_api_ok:
+        # CDP is up but TradingView is on a crash/error page — chart API unavailable
+        crash_url = status_data.get('target_url', '')
+        crash_hint = 'crash page' if 'crash' in crash_url.lower() or 'error' in crash_url.lower() else 'chart API unavailable'
+        lines.append(f'**TradingView MCP**   🔴  CDP connected but **{crash_hint}** — chart data is stale')
+        issues.append(f'TradingView {crash_hint}')
     else:
         lines.append('**TradingView MCP**   ❌  CDP offline — TradingView not running')
         issues.append('MCP offline')
@@ -384,28 +394,50 @@ def main() -> None:
                 name    = sess['name']
 
                 # ── MCP health check ──────────────────────────────────────
-                mcp_ok = bool(_run_mcp('symbol'))
+                # Use `status` (not `symbol`) — status explicitly reports api_available,
+                # which catches crash pages where CDP is connected but the chart is dead.
+                _status = _run_mcp('status')
+                _api_ok = bool(
+                    _status and
+                    _status.get('api_available', False) and
+                    _status.get('chart_symbol', 'unknown') not in ('', 'unknown', None)
+                )
+                mcp_ok = _api_ok
 
                 if not mcp_ok:
                     _mcp_fail_count += 1
-                    log.warning(f'{_time_et()} [{name}] MCP unreachable ({_mcp_fail_count}/{_MCP_FAIL_THRESHOLD}) — TradingView CDP down?')
-                    if _mcp_fail_count >= _MCP_FAIL_THRESHOLD and not _mcp_down_alerted:
-                        _send_health_alert(
-                            '🔴 NOVA SCANNER DOWN',
+                    # Distinguish crash page from full CDP loss for clearer log messages
+                    _crash_page = bool(
+                        _status and _status.get('cdp_connected') and not _status.get('api_available', True)
+                    )
+                    _reason = 'TradingView on crash/error page — chart API unavailable' if _crash_page else 'TradingView CDP down?'
+                    log.warning(f'{_time_et()} [{name}] MCP unhealthy ({_mcp_fail_count}/{_MCP_FAIL_THRESHOLD}) — {_reason}')
+
+                    # Crash page is an immediate alert — no threshold wait.
+                    # A crashed chart gives stale/absent data every cycle; there is no grace period.
+                    _immediate = _crash_page and not _mcp_down_alerted
+                    if (_mcp_fail_count >= _MCP_FAIL_THRESHOLD or _immediate) and not _mcp_down_alerted:
+                        _alert_title = '🔴 TRADINGVIEW CRASHED' if _crash_page else '🔴 NOVA SCANNER DOWN'
+                        _alert_body  = (
+                            f'TradingView is on its **crash/error page**. CDP is connected but the chart API is dead.\n'
+                            f'Chart data is unavailable — **you are running blind.**\n\n'
+                            f'Fix: close and relaunch TradingView with CDP flag.\n'
+                            f'`powershell -ExecutionPolicy Bypass -File scripts/start_trading_session.ps1`'
+                        ) if _crash_page else (
                             f'TradingView CDP connection lost for {_mcp_fail_count} cycles.\n'
                             f'Chart scanning paused — **you are running blind.**\n\n'
-                            f'Fix: relaunch TradingView with CDP flag via `launch_tradingview_cdp.ps1`',
-                            0xFF0000,
+                            f'Fix: relaunch TradingView with CDP flag via `launch_tradingview_cdp.ps1`'
                         )
+                        _send_health_alert(_alert_title, _alert_body, 0xFF0000)
                         _mcp_down_alerted = True
-                        log.warning('Discord health alert sent — MCP down')
+                        log.warning(f'Discord health alert sent — {_alert_title}')
                 else:
                     if _mcp_down_alerted:
                         _mcp_fail_count   = 0
                         _mcp_down_alerted = False
                         _send_health_alert(
                             '🟢 NOVA SCANNER RECOVERED',
-                            'TradingView CDP connection restored. Chart scanning resumed.',
+                            'TradingView chart API restored. Chart scanning resumed.',
                             0x00C851,
                         )
                         log.info('Discord health alert sent — MCP recovered')
