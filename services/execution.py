@@ -29,6 +29,15 @@ BROKER_MODE = "ALPACA_ETF"
 # first-trade-outcome) must treat both the same way.
 AUTONOMOUS_JOURNAL_SOURCES = ('DONNA_AUTO', 'DONNA_AUTO_RECONSTRUCTED')
 
+# Why a position's exit happened. Always set on close so a future audit can
+# tell an autonomous bracket fill apart from a manual button click without
+# guessing from free-text notes.
+CLOSE_REASON_MANUAL       = 'MANUAL'        # closed via NOVA UI/API, not the broker bracket
+CLOSE_REASON_EOD          = 'EOD'           # forced flat at the 3:45pm ET sweep
+CLOSE_REASON_AUTO_TARGET  = 'AUTO_TARGET'   # bracket take-profit leg filled
+CLOSE_REASON_AUTO_STOP    = 'AUTO_STOP'     # bracket stop-loss leg filled
+CLOSE_REASON_AUTO_UNKNOWN = 'AUTO_UNKNOWN'  # bracket leg filled, leg type unavailable
+
 # ── Alpaca setup ───────────────────────────────────────────────
 
 ALPACA_API_KEY    = os.getenv('ALPACA_API_KEY', '').strip()
@@ -619,16 +628,120 @@ def get_positions() -> list:
         raise
 
 
+def _cancel_pending_orders_for_symbol(api, symbol: str) -> None:
+    """Cancel any open bracket legs (stop/target) for symbol before closing it.
+    Without this, close_position() can be rejected ('held for orders')."""
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        pending = api.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol]))
+        for o in (pending or []):
+            try:
+                api.cancel_order_by_id(o.id)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _close_symbol_and_sync(api, symbol: str, snapshot: dict, close_reason: str, closed_via: str) -> dict:
+    """
+    Close one Alpaca position and keep broker/journal/analytics in sync in a
+    single call. Shared by close_position() and close_all_positions() so
+    there is exactly one place that knows how to do this correctly.
+
+    snapshot: one entry from get_positions() for this symbol, captured BEFORE
+    the close call -- Alpaca stops returning a closed position, so this is
+    the only place to read its final avg_entry/market_value/unrealized_pnl.
+
+    The journal is only ever touched after a CONFIRMED broker close. If the
+    Alpaca call fails, this returns an error and the journal is untouched --
+    a journal entry must never claim a position closed that the broker still
+    holds open.
+    """
+    qty_signed = int(snapshot.get('qty', 0))
+    avg_entry  = float(snapshot.get('avg_entry', 0) or 0)
+    unreal     = float(snapshot.get('unrealized_pnl', 0) or 0)
+    mkt_val    = float(snapshot.get('market_value', 0) or 0)
+    is_long    = qty_signed > 0 or 'long' in str(snapshot.get('side', '')).lower()
+
+    _cancel_pending_orders_for_symbol(api, symbol)
+    try:
+        api.close_position(symbol)
+        _state.remove_position(symbol)
+    except Exception as e:
+        return {'status': 'error', 'symbol': symbol, 'error': str(e)}
+
+    exit_price   = _eod_exit_price(mkt_val, qty_signed, avg_entry)
+    realized_pnl = round(unreal, 2)
+    outcome      = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
+    exit_time    = now_ny().strftime('%H:%M:%S ET')
+    close_note   = f'Closed via {closed_via} (reason={close_reason}) @ {exit_price}'
+
+    trades  = load_journal()
+    matched = False
+    for i, t in enumerate(trades):
+        if (t.get('ticker') == symbol
+                and str(t.get('outcome', '')).upper() == 'OPEN'
+                and t.get('source') in AUTONOMOUS_JOURNAL_SOURCES):
+            trades[i] = {
+                **t,
+                'exit_price':   exit_price,
+                'exit_time':    exit_time,
+                'realized_pnl': realized_pnl,
+                'pnl':          realized_pnl,
+                'outcome':      outcome,
+                'close_reason': close_reason,
+                'closed_via':   closed_via,
+                'notes': (
+                    (t.get('notes') or '').rstrip(' |')
+                    + f' | {close_note}'
+                ),
+            }
+            matched = True
+            break
+
+    if not matched:
+        trades.append({
+            'source':       'DONNA_EOD',
+            'ticker':       symbol,
+            'direction':    'LONG' if is_long else 'SHORT',
+            'trade_date':   now_ny().strftime('%Y-%m-%d'),
+            'time':         exit_time,
+            'entry_price':  avg_entry,
+            'exit_price':   exit_price,
+            'exit_time':    exit_time,
+            'size':         abs(qty_signed),
+            'realized_pnl': realized_pnl,
+            'pnl':          realized_pnl,
+            'outcome':      outcome,
+            'session':      session_label(),
+            'broker_mode':  BROKER_MODE,
+            'close_reason': close_reason,
+            'closed_via':   closed_via,
+            'notes':        f'{close_note}. No matching OPEN journal entry found.',
+            'timestamp':    utc_now_iso(),
+        })
+
+    save_journal(trades)
+    return {'status': 'ok', 'symbol': symbol, 'realized_pnl': realized_pnl, 'outcome': outcome}
+
+
 def close_position(symbol: str) -> dict:
     api = _client()
     if not api:
         return {'status': 'error', 'error': 'Alpaca not configured'}
     try:
-        api.close_position(symbol)
-        _state.remove_position(symbol)
-        return {'status': 'ok', 'symbol': symbol}
+        positions = get_positions()
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
+    snapshot = next((p for p in positions if p.get('symbol') == symbol), None)
+    if not snapshot:
+        return {'status': 'error', 'error': f'No open position for {symbol}'}
+    return _close_symbol_and_sync(
+        api, symbol, snapshot,
+        close_reason=CLOSE_REASON_MANUAL, closed_via='NOVA_EXECUTION_TAB',
+    )
 
 
 def close_all_positions() -> dict:
@@ -636,10 +749,21 @@ def close_all_positions() -> dict:
     if not api:
         return {'status': 'error', 'error': 'Alpaca not configured'}
     try:
-        api.close_all_positions(cancel_orders=True)
-        return {'status': 'ok'}
+        positions = get_positions()
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
+    if not positions:
+        return {'status': 'ok', 'closed': 0, 'results': []}
+
+    results = [
+        _close_symbol_and_sync(
+            api, p['symbol'], p,
+            close_reason=CLOSE_REASON_MANUAL, closed_via='NOVA_EXECUTION_TAB',
+        )
+        for p in positions
+    ]
+    closed = sum(1 for r in results if r.get('status') == 'ok')
+    return {'status': 'ok', 'closed': closed, 'results': results}
 
 
 def cancel_all_orders() -> dict:
@@ -746,6 +870,8 @@ def close_all_positions_eod() -> int:
                     'realized_pnl': realized_pnl,
                     'pnl':          realized_pnl,
                     'outcome':      'EOD_CLOSE',
+                    'close_reason': CLOSE_REASON_EOD,
+                    'closed_via':   'EOD_SCHEDULER',
                     'notes':        (
                         (t.get('notes') or '').rstrip(' |')
                         + f' | EOD forced close @ {exit_price}'
@@ -770,6 +896,8 @@ def close_all_positions_eod() -> int:
                 'outcome':      'EOD_CLOSE',
                 'session':      'NEW_YORK_CLOSE',
                 'broker_mode':  BROKER_MODE,
+                'close_reason': CLOSE_REASON_EOD,
+                'closed_via':   'EOD_SCHEDULER',
                 'notes':        f'EOD forced close @ {exit_price}',
                 'timestamp':    utc_now_iso(),
             })
@@ -1077,6 +1205,7 @@ def check_position_outcomes() -> int:
 
         exit_price: float | None = None
         exit_time_str = now_ny().strftime('%H:%M:%S ET')
+        exit_order_type: str | None = None  # 'limit' (target) or 'stop' (stop-loss), from the filled leg
 
         # Try 1: match bracket parent by order_id → find filled exit leg
         parent = orders_by_id.get(order_id)
@@ -1094,6 +1223,7 @@ def check_position_outcomes() -> int:
                     raw = leg.get('filled_avg_price')
                     if raw:
                         exit_price = float(raw)
+                    exit_order_type = str(leg.get('type', '')).lower() or None
                     fa = leg.get('filled_at', '')
                     if fa:
                         exit_time_str = _parse_time(fa)
@@ -1108,6 +1238,7 @@ def check_position_outcomes() -> int:
                 raw = o.get('filled_avg_price')
                 if raw:
                     exit_price = float(raw)
+                exit_order_type = str(o.get('type', '')).lower() or None
                 fa = o.get('filled_at', '')
                 if fa:
                     exit_time_str = _parse_time(fa)
@@ -1124,6 +1255,16 @@ def check_position_outcomes() -> int:
         realized_pnl = round(raw_pnl, 2)
         outcome      = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
 
+        # Bracket take-profit legs are always 'limit' orders, stop-loss legs
+        # are always 'stop' -- map directly rather than inferring from outcome
+        # (a stop can still close at breakeven/small win on a tight trail).
+        if exit_order_type == 'limit':
+            close_reason = CLOSE_REASON_AUTO_TARGET
+        elif exit_order_type == 'stop':
+            close_reason = CLOSE_REASON_AUTO_STOP
+        else:
+            close_reason = CLOSE_REASON_AUTO_UNKNOWN
+
         closed_trade = {
             **trade,
             'entry_price':  entry_px,
@@ -1132,6 +1273,8 @@ def check_position_outcomes() -> int:
             'realized_pnl': realized_pnl,
             'pnl':          realized_pnl,
             'outcome':      outcome,
+            'close_reason': close_reason,
+            'closed_via':   'ALPACA_BRACKET',
         }
 
         # Thesis analysis — runs synchronously; Alpaca bar fetch (~2s per trade)
