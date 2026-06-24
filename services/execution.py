@@ -663,6 +663,20 @@ def cancel_all_orders() -> dict:
         return {'status': 'error', 'error': str(e), 'cancelled': 0}
 
 
+def _eod_exit_price(market_value: float, qty_signed: int, avg_entry: float) -> float:
+    """
+    Approximate exit price from an Alpaca position's market_value at EOD close.
+
+    market_value carries the same sign as the position (negative for shorts),
+    so dividing by the SIGNED qty -- not abs(qty) -- is required for the signs
+    to cancel into a positive price for both longs and shorts. Falls back to
+    avg_entry if qty_signed is 0 (shouldn't happen for an open position).
+    """
+    if qty_signed == 0:
+        return avg_entry
+    return round(market_value / qty_signed, 2)
+
+
 def close_all_positions_eod() -> int:
     """
     Force-close all open positions at 3:45 PM ET.
@@ -682,15 +696,15 @@ def close_all_positions_eod() -> int:
     closed  = 0
 
     for pos in positions:
-        symbol    = pos['symbol']
-        qty       = abs(int(pos['qty']))
-        is_long   = int(pos['qty']) > 0 or 'long' in str(pos.get('side', '')).lower()
-        avg_entry = float(pos['avg_entry'])
-        unreal    = float(pos['unrealized_pnl'])
-        mkt_val   = float(pos['market_value'])
+        symbol     = pos['symbol']
+        qty_signed = int(pos['qty'])
+        qty        = abs(qty_signed)
+        is_long    = qty_signed > 0 or 'long' in str(pos.get('side', '')).lower()
+        avg_entry  = float(pos['avg_entry'])
+        unreal     = float(pos['unrealized_pnl'])
+        mkt_val    = float(pos['market_value'])
 
-        # Approximate exit price from market value
-        exit_price = round(mkt_val / qty, 2) if qty > 0 else avg_entry
+        exit_price = _eod_exit_price(mkt_val, qty_signed, avg_entry)
 
         try:
             # Cancel any pending bracket legs (take-profit / stop-loss) first.

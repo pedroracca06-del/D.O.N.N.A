@@ -180,6 +180,18 @@ def reconcile_execution_audit() -> dict:
     # merge above — flagged here so any future recurrence is never silent).
     unlinked_eod_closes = find_unlinked_reconstructed_closes(journal_trades)
 
+    # Repair: a stored exit_price that is negative. Equity prices are never
+    # negative -- this is the signature of the EOD short-position sign bug in
+    # the old _eod_exit_price() formula (fixed going forward in execution.py).
+    # Sign-flip is unambiguous and safe to apply directly.
+    fixed_exit_price_signs = fix_negative_short_exit_prices(journal_trades)
+    if fixed_exit_price_signs:
+        try:
+            save_journal(journal_trades)
+            print(f'[audit] Fixed {len(fixed_exit_price_signs)} negative exit_price sign(s): {fixed_exit_price_signs}')
+        except Exception as e:
+            print(f'[audit] journal save error during exit_price sign fix: {e}')
+
     result = {
         'clean':                   clean,
         'reconstructed':           len(reconstructed_order_ids),
@@ -187,22 +199,26 @@ def reconcile_execution_audit() -> dict:
         'audit_failures':          len(crit_fails),
         'unresolved_records':      unresolved,
         'reconstructed_order_ids': reconstructed_order_ids,
+        'fixed_exit_price_signs':  fixed_exit_price_signs,
         'merged_eod_closes':       merged_eod_closes,
         'unlinked_eod_closes':     unlinked_eod_closes,
         'last_run':                _utc_iso(),
     }
 
     # Summary print
-    if unresolved or reconstructed_order_ids or crit_fails or unlinked_eod_closes:
+    if unresolved or reconstructed_order_ids or crit_fails or unlinked_eod_closes or fixed_exit_price_signs:
         print(
             f'[audit] ATTENTION -- clean={clean} reconstructed={len(reconstructed_order_ids)} '
             f'unresolved={len(unresolved)} audit_failures={len(crit_fails)} '
-            f'unlinked_eod_closes={len(unlinked_eod_closes)}'
+            f'unlinked_eod_closes={len(unlinked_eod_closes)} '
+            f'fixed_exit_price_signs={len(fixed_exit_price_signs)}'
         )
         for u in unresolved:
             print(f'[audit] UNRESOLVED: {u}')
         for u in unlinked_eod_closes:
             print(f'[audit] UNLINKED_EOD_CLOSE: {u}')
+        for u in fixed_exit_price_signs:
+            print(f'[audit] FIXED_EXIT_PRICE_SIGN: {u}')
     else:
         print(f'[audit] All {clean} trade(s) fully auditable. No gaps detected.')
 
@@ -401,3 +417,51 @@ def find_unlinked_reconstructed_closes(journal_trades: list) -> list[dict]:
                 ),
             })
     return flags
+
+
+# ── EOD short-exit-price sign repair ─────────────────────────────────────────
+#
+# Bug class: close_all_positions_eod() computed exit_price as
+# market_value / abs(qty). market_value carries the position's sign
+# (negative for shorts), so dividing by an already-abs()'d qty left the sign
+# on the result -- every SHORT EOD close was journaled with a negative
+# exit_price. Fixed going forward in execution.py's _eod_exit_price(), which
+# divides by the signed qty instead. This repairs any pre-existing record.
+#
+# realized_pnl/outcome for these trades were never derived from exit_price --
+# they come straight from Alpaca's own unrealized_pnl at close time -- so this
+# bug never corrupted stored P&L or win/loss classification. It only
+# corrupted the exit_price field itself, which is read directly (no outcome
+# filter) by compute_journal_stats()'s entry/exit fallback, engines/
+# analytics.py's validate_trade(), and dashboard display -- any of which
+# would either show a negative price or mis-flag the trade once its outcome
+# is normalized away from EOD_CLOSE (as the journal-split merge above does).
+
+def fix_negative_short_exit_prices(journal_trades: list) -> list[dict]:
+    """
+    Sign-flip any stored exit_price that is negative. A real equity price is
+    never negative, so this is unambiguous and safe to apply directly without
+    recomputing anything else on the trade. Mutates journal_trades in place.
+    Returns a list of what was fixed.
+    """
+    fixed: list[dict] = []
+    for t in journal_trades:
+        raw = t.get('exit_price')
+        if raw is None:
+            continue
+        try:
+            ep = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if ep >= 0:
+            continue
+        new_ep = round(abs(ep), 4)
+        t['exit_price'] = new_ep
+        fixed.append({
+            'order_id':       t.get('order_id', ''),
+            'ticker':         t.get('ticker', ''),
+            'trade_date':     t.get('trade_date', ''),
+            'old_exit_price': ep,
+            'new_exit_price': new_ep,
+        })
+    return fixed
