@@ -4431,7 +4431,7 @@ function renderJournal(data) {
         const gradeClass = grade === 'A' ? 'b-grade-a' : grade === 'B' ? 'b-grade-b' : 'b-grade-c';
         const sessLabel  = (t.session || '').replace(/_/g, ' ');
         const setupLabel = t.setup_type || '';
-        const isAuto     = t.source === 'DONNA_AUTO';
+        const isAuto     = t.source === 'DONNA_AUTO' || t.source === 'DONNA_AUTO_RECONSTRUCTED';
 
         // Badges
         let badges = '';

@@ -22,6 +22,13 @@ import services.execution_trace as _trace
 # Options: ALPACA_ETF | TRADOVATE | RITHMIC
 BROKER_MODE = "ALPACA_ETF"
 
+# Journal sources that represent a NOVA autonomous trade. DONNA_AUTO_RECONSTRUCTED
+# is the same trade class as DONNA_AUTO — it just arrived via audit.py recovery
+# instead of the live execution path. Every matcher that links an OPEN
+# autonomous entry to its close (EOD sweep, check_position_outcomes, daily
+# first-trade-outcome) must treat both the same way.
+AUTONOMOUS_JOURNAL_SOURCES = ('DONNA_AUTO', 'DONNA_AUTO_RECONSTRUCTED')
+
 # ── Alpaca setup ───────────────────────────────────────────────
 
 ALPACA_API_KEY    = os.getenv('ALPACA_API_KEY', '').strip()
@@ -635,6 +642,27 @@ def close_all_positions() -> dict:
         return {'status': 'error', 'error': str(e)}
 
 
+def cancel_all_orders() -> dict:
+    """Cancel every open bracket/limit order on Alpaca without closing positions."""
+    api = _client()
+    if not api:
+        return {'status': 'error', 'error': 'Alpaca not configured', 'cancelled': 0}
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        orders = api.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        count = 0
+        for o in (orders or []):
+            try:
+                api.cancel_order_by_id(o.id)
+                count += 1
+            except Exception:
+                pass
+        return {'status': 'ok', 'cancelled': count}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e), 'cancelled': 0}
+
+
 def close_all_positions_eod() -> int:
     """
     Force-close all open positions at 3:45 PM ET.
@@ -696,7 +724,7 @@ def close_all_positions_eod() -> int:
         for i, t in enumerate(trades):
             if (t.get('ticker') == symbol
                     and str(t.get('outcome', '')).upper() == 'OPEN'
-                    and t.get('source') == 'DONNA_AUTO'):
+                    and t.get('source') in AUTONOMOUS_JOURNAL_SOURCES):
                 trades[i] = {
                     **t,
                     'exit_price':   exit_price,
@@ -978,7 +1006,7 @@ def check_position_outcomes() -> int:
     trades    = load_journal()
     open_auto = [
         (i, t) for i, t in enumerate(trades)
-        if t.get('source') == 'DONNA_AUTO'
+        if t.get('source') in AUTONOMOUS_JOURNAL_SOURCES
         and str(t.get('outcome', '')).upper() == 'OPEN'
     ]
     if not open_auto:
@@ -1129,7 +1157,7 @@ def check_position_outcomes() -> int:
         if risk.get('daily_trades_date') == today_str and not risk.get('first_trade_outcome'):
             closed_today = sorted(
                 [t for t in trades
-                 if t.get('source') == 'DONNA_AUTO'
+                 if t.get('source') in AUTONOMOUS_JOURNAL_SOURCES
                  and t.get('trade_date') == today_str
                  and str(t.get('outcome', '')).upper() in ('WIN', 'LOSS', 'BREAKEVEN')],
                 key=lambda t_: t_.get('time', ''),

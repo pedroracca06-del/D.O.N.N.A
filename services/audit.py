@@ -35,6 +35,7 @@ from pathlib import Path
 
 from core.config import TRACE_FILE, DATA_DIR
 from core.state import load_journal, save_journal
+from services.execution import AUTONOMOUS_JOURNAL_SOURCES
 
 
 # ── I/O ───────────────────────────────────────────────────────────────────────
@@ -162,6 +163,23 @@ def reconcile_execution_audit() -> dict:
         except Exception as e:
             print(f'[audit] journal save error during reconstruction: {e}')
 
+    # Repair journal splits: an autonomous OPEN entry (DONNA_AUTO or
+    # DONNA_AUTO_RECONSTRUCTED) whose EOD close landed as a separate orphaned
+    # DONNA_EOD row instead of being linked back to it (pre-existing source-class
+    # mismatch in the EOD/outcome matchers, fixed going forward in execution.py).
+    merged_eod_closes = _merge_orphaned_eod_closes(journal_trades)
+    if merged_eod_closes:
+        try:
+            save_journal(journal_trades)
+            print(f'[audit] Merged {len(merged_eod_closes)} orphaned EOD close(s): {merged_eod_closes}')
+        except Exception as e:
+            print(f'[audit] journal save error during EOD-close merge: {e}')
+
+    # Regression check: any autonomous OPEN entry that still has an unlinked
+    # standalone DONNA_EOD close sitting next to it (should be empty after the
+    # merge above — flagged here so any future recurrence is never silent).
+    unlinked_eod_closes = find_unlinked_reconstructed_closes(journal_trades)
+
     result = {
         'clean':                   clean,
         'reconstructed':           len(reconstructed_order_ids),
@@ -169,17 +187,22 @@ def reconcile_execution_audit() -> dict:
         'audit_failures':          len(crit_fails),
         'unresolved_records':      unresolved,
         'reconstructed_order_ids': reconstructed_order_ids,
+        'merged_eod_closes':       merged_eod_closes,
+        'unlinked_eod_closes':     unlinked_eod_closes,
         'last_run':                _utc_iso(),
     }
 
     # Summary print
-    if unresolved or reconstructed_order_ids or crit_fails:
+    if unresolved or reconstructed_order_ids or crit_fails or unlinked_eod_closes:
         print(
             f'[audit] ATTENTION -- clean={clean} reconstructed={len(reconstructed_order_ids)} '
-            f'unresolved={len(unresolved)} audit_failures={len(crit_fails)}'
+            f'unresolved={len(unresolved)} audit_failures={len(crit_fails)} '
+            f'unlinked_eod_closes={len(unlinked_eod_closes)}'
         )
         for u in unresolved:
             print(f'[audit] UNRESOLVED: {u}')
+        for u in unlinked_eod_closes:
+            print(f'[audit] UNLINKED_EOD_CLOSE: {u}')
     else:
         print(f'[audit] All {clean} trade(s) fully auditable. No gaps detected.')
 
@@ -249,3 +272,132 @@ def _reconstruct_journal_entry(
         'timestamp': _utc_iso(),
     }
     journal_trades.append(entry)
+
+
+# ── EOD-close split repair ───────────────────────────────────────────────────
+#
+# Bug class: the EOD-close matcher and check_position_outcomes() used to filter
+# strictly on source == 'DONNA_AUTO'. A DONNA_AUTO_RECONSTRUCTED entry (the same
+# trade, just recovered by audit.py above) would never match, so its real EOD
+# close landed as a brand-new, unlinked 'DONNA_EOD' row instead of updating the
+# original entry. Net effect: one real trade shows up as two journal records —
+# an OPEN entry that never closes, plus an orphaned close with no order_id.
+#
+# execution.py now matches on AUTONOMOUS_JOURNAL_SOURCES going forward, so this
+# split cannot occur again for new trades. The functions below repair any
+# pre-existing split and flag anything they can't safely repair.
+
+def _find_orphan_eod_match(journal_trades: list, open_entry: dict, skip: set[int]) -> int | None:
+    """Find the index of a standalone DONNA_EOD row matching open_entry, or None."""
+    for j, t in enumerate(journal_trades):
+        if j in skip:
+            continue
+        if (t.get('source') == 'DONNA_EOD'
+                and not t.get('order_id')
+                and t.get('ticker') == open_entry.get('ticker')
+                and t.get('direction') == open_entry.get('direction')
+                and t.get('trade_date') == open_entry.get('trade_date')):
+            return j
+    return None
+
+
+def _merge_orphaned_eod_closes(journal_trades: list) -> list[dict]:
+    """
+    Merge any orphaned standalone DONNA_EOD close row into the autonomous OPEN
+    entry it actually belongs to (same ticker + direction + trade_date),
+    mutating journal_trades in place. Returns a list of merge summaries.
+    """
+    merged: list[dict] = []
+    consumed: set[int] = set()
+
+    open_indices = [
+        i for i, t in enumerate(journal_trades)
+        if t.get('source') in AUTONOMOUS_JOURNAL_SOURCES
+        and str(t.get('outcome', '')).upper() == 'OPEN'
+    ]
+
+    for idx in open_indices:
+        open_entry = journal_trades[idx]
+        match_idx = _find_orphan_eod_match(journal_trades, open_entry, consumed | {idx})
+        if match_idx is None:
+            continue
+
+        close_row = journal_trades[match_idx]
+        try:
+            realized_pnl = round(float(close_row.get('realized_pnl') or 0), 2)
+        except (TypeError, ValueError):
+            realized_pnl = 0.0
+
+        # Recompute exit_price from realized_pnl rather than trusting
+        # close_row['exit_price'] directly — the EOD short-position exit-price
+        # calc has a known sign bug; entry_price +/- pnl-per-share is reliable.
+        exit_price = close_row.get('exit_price')
+        try:
+            entry_price = float(open_entry.get('entry_price'))
+            size        = float(open_entry.get('size') or 1)
+            per_share   = realized_pnl / size if size else 0.0
+            exit_price  = round(
+                entry_price + per_share if str(open_entry.get('direction', '')).upper() == 'LONG'
+                else entry_price - per_share,
+                4,
+            )
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+        outcome = 'WIN' if realized_pnl > 0 else ('LOSS' if realized_pnl < 0 else 'BREAKEVEN')
+        merge_note = (
+            f' | Merged orphaned EOD close (source-class mismatch, separate DONNA_EOD row) '
+            f'during journal-split repair on {_utc_iso()}.'
+        )
+
+        journal_trades[idx] = {
+            **open_entry,
+            'exit_price':   exit_price,
+            'exit_time':    close_row.get('exit_time') or open_entry.get('exit_time'),
+            'realized_pnl': realized_pnl,
+            'pnl':          realized_pnl,
+            'outcome':      outcome,
+            'notes':        (open_entry.get('notes') or '') + merge_note,
+            'repaired_at':  _utc_iso(),
+        }
+        consumed.add(match_idx)
+        merged.append({
+            'order_id':     open_entry.get('order_id', ''),
+            'ticker':       open_entry.get('ticker', ''),
+            'trade_date':   open_entry.get('trade_date', ''),
+            'realized_pnl': realized_pnl,
+            'outcome':      outcome,
+        })
+
+    for j in sorted(consumed, reverse=True):
+        journal_trades.pop(j)
+
+    return merged
+
+
+def find_unlinked_reconstructed_closes(journal_trades: list) -> list[dict]:
+    """
+    Regression check: flag any autonomous OPEN entry (DONNA_AUTO or
+    DONNA_AUTO_RECONSTRUCTED) that still has a matching standalone DONNA_EOD
+    close row sitting unlinked next to it. Should always return [] after
+    _merge_orphaned_eod_closes() runs — a non-empty result means a new variant
+    of the split has appeared and needs investigation, not silent data loss.
+    """
+    flags: list[dict] = []
+    open_entries = [
+        t for t in journal_trades
+        if t.get('source') in AUTONOMOUS_JOURNAL_SOURCES
+        and str(t.get('outcome', '')).upper() == 'OPEN'
+    ]
+    for open_entry in open_entries:
+        if _find_orphan_eod_match(journal_trades, open_entry, set()) is not None:
+            flags.append({
+                'order_id':   open_entry.get('order_id', ''),
+                'ticker':     open_entry.get('ticker', ''),
+                'trade_date': open_entry.get('trade_date', ''),
+                'note': (
+                    'OPEN autonomous entry has an unlinked standalone DONNA_EOD '
+                    'close row — journal split detected.'
+                ),
+            })
+    return flags
