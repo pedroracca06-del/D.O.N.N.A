@@ -2257,8 +2257,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
         <!-- ── OPEN POSITIONS — broker reality first ── -->
         <div class="panel" style="margin-top:16px">
-          <div class="kicker">OPEN POSITIONS</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Live Alpaca broker state — every open position, matched against NOVA's journal. A position can exist here with no journal entry; that gap is shown, never hidden.</div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div>
+              <div class="kicker">OPEN POSITIONS</div>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Live Alpaca broker state — every open position, matched against NOVA's journal. A position can exist here with no journal entry; that gap is shown, never hidden.</div>
+            </div>
+            <div id="novaCloseAllWrap" style="display:none">
+              <button class="submit-trade-btn" id="novaCloseAllBtn" style="width:auto;padding:8px 18px;font-size:11px;margin:0;background:var(--red);border-color:var(--red);color:#fff" onclick="closeAllPositionsConfirm()">CLOSE ALL POSITIONS</button>
+            </div>
+          </div>
           <div id="novaPositionsList">
             <div style="color:var(--muted2);font-size:12px;font-style:italic">Loading...</div>
           </div>
@@ -3875,11 +3882,15 @@ function _renderGovernanceState(orch, exec) {
 
 // Broker reality first: renders every Alpaca position NOVA reports, including
 // ones with no matching journal entry -- those get a visible warning instead
-// of being silently absent. Close button stays disabled until Phase 2.
+// of being silently absent. Close Position / Close All wired to the
+// journal-synced backend in Phase 2 -- both confirm before sending.
 function _renderPositionsTable(pos) {
-  const wrap = document.getElementById('novaPositionsList');
+  const wrap     = document.getElementById('novaPositionsList');
+  const allWrap  = document.getElementById('novaCloseAllWrap');
   if (!wrap) return;
   const positions = pos?.positions || [];
+
+  if (allWrap) allWrap.style.display = positions.length ? '' : 'none';
 
   if (!positions.length) {
     wrap.innerHTML = '<div style="color:var(--muted2);font-size:12px;font-style:italic">No open positions. Flat.</div>';
@@ -3905,7 +3916,7 @@ function _renderPositionsTable(pos) {
           '<span class="itc-badge" style="color:' + sideColor + ';border-color:' + sideColor + '">' + (p.side || '—') + '</span>' +
           '<span class="itc-badge ' + statusCls + '" style="' + statusSty + '">' + (p.status || 'OPEN') + '</span>' +
           '<div style="flex:1"></div>' +
-          '<button class="submit-trade-btn" style="width:auto;padding:6px 16px;font-size:11px;margin:0" disabled title="Close controls are enabled in Phase 2">CLOSE POSITION</button>' +
+          '<button class="submit-trade-btn nova-close-pos-btn" style="width:auto;padding:6px 16px;font-size:11px;margin:0" data-symbol="' + (p.symbol || '') + '" onclick="closePositionConfirm(this)">CLOSE POSITION</button>' +
         '</div>' +
         '<div class="itc-exec" style="margin:0;border:none;padding:0">' +
           '<div class="itc-exec-item"><div class="itc-exec-lab">Qty</div><div class="itc-exec-val">' + (p.qty != null ? p.qty : '—') + '</div></div>' +
@@ -3917,6 +3928,64 @@ function _renderPositionsTable(pos) {
       '</div>'
     );
   }).join('');
+}
+
+// Phase 2: real, irreversible broker actions -- both confirm first, disable
+// the button during the request, and refresh the table from whatever the
+// backend actually reports afterward rather than assuming success.
+async function closePositionConfirm(btn) {
+  const symbol = btn.dataset.symbol;
+  if (!symbol) return;
+  if (!confirm('Close ' + symbol + ' position? This sends a real order to Alpaca.')) return;
+
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'CLOSING...';
+  try {
+    const res = await fetch('/execution/close', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol: symbol}),
+    });
+    const data = await res.json();
+    if (data.status !== 'ok') {
+      alert('Close failed for ' + symbol + ': ' + (data.error || data.reason || 'unknown error'));
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
+  } catch (e) {
+    alert('Close request failed for ' + symbol + ': ' + e);
+    btn.disabled = false;
+    btn.textContent = origText;
+    return;
+  }
+  await refreshExecutionTab();
+}
+
+async function closeAllPositionsConfirm() {
+  const btn = document.getElementById('novaCloseAllBtn');
+  if (!confirm('Close ALL open positions? This sends real orders to Alpaca for every open position.')) return;
+
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'CLOSING ALL...'; }
+  try {
+    const res = await fetch('/execution/close-all', {method: 'POST'});
+    const data = await res.json();
+    if (data.status !== 'ok') {
+      alert('Close-all failed: ' + (data.error || data.reason || 'unknown error'));
+    } else {
+      const failed = (data.results || []).filter(r => r.status !== 'ok');
+      if (failed.length) {
+        alert('Closed ' + data.closed + ' of ' + (data.results || []).length + ' positions. Failed: ' +
+              failed.map(r => r.symbol + ' (' + r.error + ')').join(', '));
+      }
+    }
+  } catch (e) {
+    alert('Close-all request failed: ' + e);
+  }
+  if (btn) { btn.disabled = false; btn.textContent = origText; }
+  await refreshExecutionTab();
 }
 
 function _renderRejections(rej) {
