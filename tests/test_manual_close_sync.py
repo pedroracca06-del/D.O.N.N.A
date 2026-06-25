@@ -141,6 +141,18 @@ def test_no_matching_open_entry_creates_tagged_fallback_row():
     assert journal[0]['outcome'] == 'WIN'
 
 
+def test_has_open_journal_match_true_for_matching_open_entry():
+    ex.save_journal([_open_journal_entry()])
+    assert ex.has_open_journal_match('SPY') is True
+
+
+def test_has_open_journal_match_false_when_no_match():
+    ex.save_journal([])
+    assert ex.has_open_journal_match('SPY') is False
+    ex.save_journal([{**_open_journal_entry(), 'outcome': 'WIN'}])  # closed, not OPEN
+    assert ex.has_open_journal_match('SPY') is False
+
+
 def test_close_all_positions_syncs_each_symbol_independently(monkeypatch):
     spy_entry = _open_journal_entry()
     qqq_entry = {**_open_journal_entry(), 'ticker': 'QQQ', 'order_id': 'qqq-order-1'}

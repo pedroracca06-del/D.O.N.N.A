@@ -57,6 +57,7 @@ try:
         execute_signal,
         get_account, get_positions,
         close_position, close_all_positions, close_all_positions_eod,
+        cancel_all_orders, has_open_journal_match,
         get_today_trade_count,
         get_execution_status,
         check_position_outcomes,
@@ -72,6 +73,8 @@ except Exception:
     def execute_signal(r):                  return {'status': 'unavailable'}
     def get_account():                      return {'available': False}
     def get_positions():                    return []
+    def cancel_all_orders():                return {'status': 'unavailable', 'cancelled': 0}
+    def has_open_journal_match(symbol):     return False
     def close_position(s):                  return {'status': 'unavailable'}
     def close_all_positions():              return {'status': 'unavailable'}
     def close_all_positions_eod():          return 0
@@ -1028,6 +1031,7 @@ async def governance_status():
             'blocked_signals_today':   st.get('blocked_signals_today', []),
             'risk_lockouts':           st.get('risk_lockouts', []),
             'min_grade':               cfg.get('min_grade', 'B') if cfg else 'N/A',
+            'cooldown_minutes':        int(cfg.get('trade_cooldown_minutes', 20)) if cfg else 20,
             'risk_tier':               cfg.get('risk_tier', 'N/A') if cfg else 'N/A',
             'daily_pnl':               st.get('daily_pnl', 0.0),
             'session_state':           st.get('session_state', ''),
@@ -1710,6 +1714,97 @@ async def execution_close(request: Request):
 @app.post('/execution/close-all')
 async def execution_close_all():
     return await asyncio.to_thread(close_all_positions)
+
+
+@app.get('/execution/positions')
+async def execution_positions_endpoint():
+    """
+    Live Alpaca positions cleaned for UI display, plus account summary.
+
+    Broker reality first: every position Alpaca reports is included
+    regardless of whether NOVA's journal knows about it. journal_matched
+    is false for a broker position with no matching OPEN autonomous journal
+    entry -- the same gap the QQQ orphan position exposed -- so the UI can
+    surface it instead of leaving it invisible.
+    """
+    positions_raw = await asyncio.to_thread(get_positions) if _EXECUTION_AVAILABLE else []
+    account_raw   = await asyncio.to_thread(get_account)   if _EXECUTION_AVAILABLE else {}
+    positions = []
+    for p in (positions_raw or []):
+        qty      = float(p.get('qty') or 0)
+        mval     = float(p.get('market_value') or 0)
+        side_raw = str(p.get('side', '')).upper()
+        side     = 'SHORT' if 'SHORT' in side_raw else 'LONG'
+        cur_price = round(abs(mval) / abs(qty), 4) if qty != 0 else None
+        symbol    = p.get('symbol', '')
+        matched   = await asyncio.to_thread(has_open_journal_match, symbol) if _EXECUTION_AVAILABLE else False
+        positions.append({
+            'symbol':         symbol,
+            'side':           side,
+            'qty':            int(abs(qty)),
+            'entry_price':    round(float(p.get('avg_entry') or 0), 4),
+            'current_price':  cur_price,
+            'unrealized_pnl': round(float(p.get('unrealized_pnl') or 0), 2),
+            'status':         'OPEN',
+            'journal_matched': matched,
+            'warning': (
+                None if matched else
+                'Broker position detected with no matching NOVA journal entry.'
+            ),
+        })
+    acct = {}
+    if account_raw:
+        acct = {
+            'equity':       round(float(account_raw.get('equity')       or 0), 2),
+            'pnl_today':    round(float(account_raw.get('pnl_today')    or 0), 2),
+            'buying_power': round(float(account_raw.get('buying_power') or 0), 2),
+            'available':    account_raw.get('available', False),
+        }
+    return {'positions': positions, 'account': acct}
+
+
+@app.post('/execution/cancel-orders')
+async def execution_cancel_orders():
+    """Cancel all open orders on Alpaca without closing positions."""
+    if not _EXECUTION_AVAILABLE:
+        raise HTTPException(status_code=503, detail='execution not loaded')
+    return await asyncio.to_thread(cancel_all_orders)
+
+
+@app.post('/execution/settings')
+async def execution_settings_update(request: Request):
+    """Update execution mode and active profile parameters (min_grade, max_trades, cooldown)."""
+    body = await request.json()
+    settings = load_settings()
+
+    new_mode = str(body.get('execution_mode', '')).strip()
+    valid_modes = ('paper', 'paper_validation', 'autonomous_test', 'prop_firm', 'live_personal')
+    if new_mode and new_mode in valid_modes:
+        settings['execution_mode'] = new_mode
+
+    active_mode = settings.get('execution_mode', 'paper_validation')
+    profiles = settings.get('execution_profiles', {})
+    profile = dict(profiles.get(active_mode, {}))
+
+    if 'min_grade' in body:
+        g = str(body['min_grade']).strip().upper()
+        if g in ('A+', 'A', 'B', 'C'):
+            profile['min_grade'] = g
+    if 'max_trades_per_day' in body:
+        try:
+            profile['max_trades_per_day'] = max(1, int(body['max_trades_per_day']))
+        except (TypeError, ValueError):
+            pass
+    if 'cooldown_minutes' in body:
+        try:
+            profile['trade_cooldown_minutes'] = max(0, int(body['cooldown_minutes']))
+        except (TypeError, ValueError):
+            pass
+
+    profiles[active_mode] = profile
+    settings['execution_profiles'] = profiles
+    write_json_file(SETTINGS_FILE, settings)
+    return {'status': 'ok', 'execution_mode': settings['execution_mode'], 'profile': profile}
 
 
 @app.get('/close-all')

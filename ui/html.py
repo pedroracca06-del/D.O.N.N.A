@@ -2254,6 +2254,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             </div>
           </div>
         </div>
+
+        <!-- ── OPEN POSITIONS — broker reality first ── -->
+        <div class="panel" style="margin-top:16px">
+          <div class="kicker">OPEN POSITIONS</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Live Alpaca broker state — every open position, matched against NOVA's journal. A position can exist here with no journal entry; that gap is shown, never hidden.</div>
+          <div id="novaPositionsList">
+            <div style="color:var(--muted2);font-size:12px;font-style:italic">Loading...</div>
+          </div>
+        </div>
       </div>
 
       <!-- ── GOVERNANCE ── -->
@@ -3746,24 +3755,27 @@ function _setKv(id, text, color) {
 
 async function refreshExecutionTab() {
   try {
-    // Parallel fetch: orchestration + execution-status + rejections + journal
-    const [orchRes, execRes, rejRes, jRes] = await Promise.all([
+    // Parallel fetch: orchestration + execution-status + rejections + journal + positions
+    const [orchRes, execRes, rejRes, jRes, posRes] = await Promise.all([
       fetch('/orchestration-status'),
       fetch('/execution-status'),
       fetch('/execution/rejections?limit=50'),
       fetch('/journal/data'),
+      fetch('/execution/positions'),
     ]);
 
     const orch = orchRes.ok  ? await orchRes.json() : null;
     const exec = execRes.ok  ? await execRes.json() : null;
     const rej  = rejRes.ok   ? await rejRes.json()  : null;
     const j    = jRes.ok     ? await jRes.json()    : null;
+    const pos  = posRes.ok   ? await posRes.json()  : null;
 
     _renderHeartbeat(orch, exec);
     _renderExecutionState(orch, exec);
     _renderGovernanceState(orch, exec);
     _renderRejections(rej);
     _renderSessionScorecard(j, rej);
+    _renderPositionsTable(pos);
 
     const syncEl = document.getElementById('novaLastSync');
     if (syncEl) syncEl.textContent = 'Synced ' + new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true}) + ' ET';
@@ -3859,6 +3871,52 @@ function _renderGovernanceState(orch, exec) {
 
   const thesisAge = orch?.thesis_age_minutes;
   _setKv('novaThesisAge', thesisAge != null ? Math.round(thesisAge) + ' min ago' : '—');
+}
+
+// Broker reality first: renders every Alpaca position NOVA reports, including
+// ones with no matching journal entry -- those get a visible warning instead
+// of being silently absent. Close button stays disabled until Phase 2.
+function _renderPositionsTable(pos) {
+  const wrap = document.getElementById('novaPositionsList');
+  if (!wrap) return;
+  const positions = pos?.positions || [];
+
+  if (!positions.length) {
+    wrap.innerHTML = '<div style="color:var(--muted2);font-size:12px;font-style:italic">No open positions. Flat.</div>';
+    return;
+  }
+
+  wrap.innerHTML = positions.map(function(p) {
+    const sideColor = p.side === 'LONG' ? 'var(--green)' : 'var(--red)';
+    const pnl       = parseFloat(p.unrealized_pnl);
+    const pnlColor  = isNaN(pnl) ? 'var(--muted2)' : pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
+    const statusCls = p.journal_matched ? 'b-session-a' : '';
+    const statusSty = p.journal_matched ? '' : 'color:var(--yellow);border-color:rgba(251,191,36,.4)';
+    const curPrice  = p.current_price != null ? parseFloat(p.current_price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+    const entPrice  = parseFloat(p.entry_price || 0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const warnHtml  = p.warning
+      ? '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.06);color:var(--yellow);font-size:11px;font-family:Space Mono,monospace">⚠ ' + p.warning + '</div>'
+      : '';
+
+    return (
+      '<div class="gov-gate" style="flex-direction:column;align-items:stretch;gap:8px;height:auto;padding:12px 14px;margin-bottom:8px">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<span class="itc-badge b-nova">' + (p.symbol || '?') + '</span>' +
+          '<span class="itc-badge" style="color:' + sideColor + ';border-color:' + sideColor + '">' + (p.side || '—') + '</span>' +
+          '<span class="itc-badge ' + statusCls + '" style="' + statusSty + '">' + (p.status || 'OPEN') + '</span>' +
+          '<div style="flex:1"></div>' +
+          '<button class="submit-trade-btn" style="width:auto;padding:6px 16px;font-size:11px;margin:0" disabled title="Close controls are enabled in Phase 2">CLOSE POSITION</button>' +
+        '</div>' +
+        '<div class="itc-exec" style="margin:0;border:none;padding:0">' +
+          '<div class="itc-exec-item"><div class="itc-exec-lab">Qty</div><div class="itc-exec-val">' + (p.qty != null ? p.qty : '—') + '</div></div>' +
+          '<div class="itc-exec-item"><div class="itc-exec-lab">Entry</div><div class="itc-exec-val">' + entPrice + '</div></div>' +
+          '<div class="itc-exec-item"><div class="itc-exec-lab">Current</div><div class="itc-exec-val">' + curPrice + '</div></div>' +
+          '<div class="itc-exec-item"><div class="itc-exec-lab">Unrealized P&L</div><div class="itc-exec-val" style="color:' + pnlColor + '">' + _fmtPnl(pnl) + '</div></div>' +
+        '</div>' +
+        warnHtml +
+      '</div>'
+    );
+  }).join('');
 }
 
 function _renderRejections(rej) {

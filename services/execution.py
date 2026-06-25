@@ -644,6 +644,28 @@ def _cancel_pending_orders_for_symbol(api, symbol: str) -> None:
         pass
 
 
+def _find_open_journal_index(trades: list, symbol: str) -> int | None:
+    """
+    Index of the OPEN autonomous journal entry for symbol, or None.
+
+    Single source of truth for this match rule -- used by
+    _close_symbol_and_sync() (to update the right entry on close) and by the
+    positions table's broker/journal reconciliation (to flag a broker
+    position that has no matching NOVA journal entry).
+    """
+    for i, t in enumerate(trades):
+        if (t.get('ticker') == symbol
+                and str(t.get('outcome', '')).upper() == 'OPEN'
+                and t.get('source') in AUTONOMOUS_JOURNAL_SOURCES):
+            return i
+    return None
+
+
+def has_open_journal_match(symbol: str) -> bool:
+    """True if symbol currently has a matching OPEN autonomous journal entry."""
+    return _find_open_journal_index(load_journal(), symbol) is not None
+
+
 def _close_symbol_and_sync(api, symbol: str, snapshot: dict, close_reason: str, closed_via: str) -> dict:
     """
     Close one Alpaca position and keep broker/journal/analytics in sync in a
@@ -678,30 +700,26 @@ def _close_symbol_and_sync(api, symbol: str, snapshot: dict, close_reason: str, 
     exit_time    = now_ny().strftime('%H:%M:%S ET')
     close_note   = f'Closed via {closed_via} (reason={close_reason}) @ {exit_price}'
 
-    trades  = load_journal()
-    matched = False
-    for i, t in enumerate(trades):
-        if (t.get('ticker') == symbol
-                and str(t.get('outcome', '')).upper() == 'OPEN'
-                and t.get('source') in AUTONOMOUS_JOURNAL_SOURCES):
-            trades[i] = {
-                **t,
-                'exit_price':   exit_price,
-                'exit_time':    exit_time,
-                'realized_pnl': realized_pnl,
-                'pnl':          realized_pnl,
-                'outcome':      outcome,
-                'close_reason': close_reason,
-                'closed_via':   closed_via,
-                'notes': (
-                    (t.get('notes') or '').rstrip(' |')
-                    + f' | {close_note}'
-                ),
-            }
-            matched = True
-            break
+    trades    = load_journal()
+    match_idx = _find_open_journal_index(trades, symbol)
 
-    if not matched:
+    if match_idx is not None:
+        t = trades[match_idx]
+        trades[match_idx] = {
+            **t,
+            'exit_price':   exit_price,
+            'exit_time':    exit_time,
+            'realized_pnl': realized_pnl,
+            'pnl':          realized_pnl,
+            'outcome':      outcome,
+            'close_reason': close_reason,
+            'closed_via':   closed_via,
+            'notes': (
+                (t.get('notes') or '').rstrip(' |')
+                + f' | {close_note}'
+            ),
+        }
+    else:
         trades.append({
             'source':       'DONNA_EOD',
             'ticker':       symbol,
@@ -767,24 +785,46 @@ def close_all_positions() -> dict:
 
 
 def cancel_all_orders() -> dict:
-    """Cancel every open bracket/limit order on Alpaca without closing positions."""
+    """
+    Cancel open orders on Alpaca, EXCEPT protective bracket legs (stop/target)
+    belonging to a currently open position. Cancelling those would leave a
+    live position with no stop-loss or take-profit attached -- this never
+    happens silently. Protected legs are skipped and reported, not cancelled.
+    """
     api = _client()
     if not api:
-        return {'status': 'error', 'error': 'Alpaca not configured', 'cancelled': 0}
+        return {'status': 'error', 'error': 'Alpaca not configured', 'cancelled': 0, 'protected_skipped': []}
     try:
+        protected_symbols = {p['symbol'] for p in get_positions()}
+
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
         orders = api.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
-        count = 0
+
+        cancelled         = 0
+        protected_skipped = []
         for o in (orders or []):
+            symbol         = str(getattr(o, 'symbol', ''))
+            order_class    = str(getattr(o, 'order_class', '')).lower()
+            is_bracket_leg = 'bracket' in order_class
+
+            if symbol in protected_symbols and is_bracket_leg:
+                protected_skipped.append({
+                    'order_id': str(getattr(o, 'id', '')),
+                    'symbol':   symbol,
+                    'reason':   'protective bracket leg on an open position -- not cancelled',
+                })
+                continue
+
             try:
                 api.cancel_order_by_id(o.id)
-                count += 1
+                cancelled += 1
             except Exception:
                 pass
-        return {'status': 'ok', 'cancelled': count}
+
+        return {'status': 'ok', 'cancelled': cancelled, 'protected_skipped': protected_skipped}
     except Exception as e:
-        return {'status': 'error', 'error': str(e), 'cancelled': 0}
+        return {'status': 'error', 'error': str(e), 'cancelled': 0, 'protected_skipped': []}
 
 
 def _eod_exit_price(market_value: float, qty_signed: int, avg_entry: float) -> float:
