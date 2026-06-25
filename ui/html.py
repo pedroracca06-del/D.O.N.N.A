@@ -2395,6 +2395,32 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <span class="exec-kv-lab">Last Execution</span>
             <span class="exec-kv-val" id="novaLesLastExecution">—</span>
           </div>
+
+          <div class="gov-section-label">EXECUTION HEALTH</div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Strategy Governance</span>
+            <span class="exec-kv-val" id="novaEhStrategy">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Instrument Governance</span>
+            <span class="exec-kv-val" id="novaEhInstrument">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Grade Governance</span>
+            <span class="exec-kv-val" id="novaEhGrade">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Max Trades Enforcement</span>
+            <span class="exec-kv-val" id="novaEhMaxTrades">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Cooldown Enforcement</span>
+            <span class="exec-kv-val" id="novaEhCooldown">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Execution Path</span>
+            <span class="exec-kv-val" id="novaEhPath">—</span>
+          </div>
         </div>
       </div>
 
@@ -3913,7 +3939,7 @@ async function refreshExecutionTab() {
     _renderRejections(rej);
     _renderSessionScorecard(j, rej);
     _renderPositionsTable(pos);
-    _renderLiveExecutionStatus(gov, orch, trace);
+    _renderLiveExecutionStatus(gov, orch, trace, exec);
     _renderExecutionControls(gov, exec, pos, orch);
 
     const syncEl = document.getElementById('novaLastSync');
@@ -4196,7 +4222,7 @@ function _renderExecutionControls(gov, exec, pos, orch) {
 // signal actually carries a nonzero score. This shows that honestly instead
 // of implying grade filtering is active when, for the strategies running
 // today, it structurally cannot be yet.
-function _renderLiveExecutionStatus(gov, orch, trace) {
+function _renderLiveExecutionStatus(gov, orch, trace, exec) {
   const entries = trace?.entries || [];
   const lastOfType = (type) => entries.find(e => e.event_type === type) || null;
 
@@ -4205,10 +4231,11 @@ function _renderLiveExecutionStatus(gov, orch, trace) {
   const lastExecuted = lastOfType('EXECUTED');
 
   // Min Grade enforcement state, based on the most recent signal's score
+  const lastScore     = lastSignal ? parseFloat(lastSignal.score) : NaN;
+  const gradeIsActive  = lastSignal && !isNaN(lastScore) && lastScore > 0;
   const gradeEl = document.getElementById('novaGradeEnforceVal');
   if (gradeEl) {
-    const lastScore = lastSignal ? parseFloat(lastSignal.score) : NaN;
-    if (lastSignal && !isNaN(lastScore) && lastScore > 0) {
+    if (gradeIsActive) {
       gradeEl.textContent = 'ENFORCED — last signal scored ' + lastScore;
       gradeEl.style.color = 'var(--green)';
     } else {
@@ -4216,6 +4243,22 @@ function _renderLiveExecutionStatus(gov, orch, trace) {
       gradeEl.style.color = 'var(--yellow)';
     }
   }
+
+  // Execution Health: every governance check is code-level, always-on
+  // *unless* the execution module itself failed to load (exec.available
+  // false means services/execution.py never imported -- main.py's webhook
+  // falls back to stub functions that reject everything). Grade is the one
+  // exception with a real third state, reusing the exact same signal as
+  // the Min Grade enforcement line above so the two can never disagree.
+  const pathHealthy = exec?.available === true;
+  _setKv('novaEhStrategy',  pathHealthy ? 'ACTIVE' : 'INACTIVE', pathHealthy ? 'var(--green)' : 'var(--red)');
+  _setKv('novaEhInstrument', pathHealthy ? 'ACTIVE' : 'INACTIVE', pathHealthy ? 'var(--green)' : 'var(--red)');
+  _setKv('novaEhGrade',
+    !pathHealthy ? 'INACTIVE' : gradeIsActive ? 'ACTIVE' : 'WAITING_FOR_INDICATOR_DATA',
+    !pathHealthy ? 'var(--red)' : gradeIsActive ? 'var(--green)' : 'var(--yellow)');
+  _setKv('novaEhMaxTrades', pathHealthy ? 'ACTIVE' : 'INACTIVE', pathHealthy ? 'var(--green)' : 'var(--red)');
+  _setKv('novaEhCooldown',  pathHealthy ? 'ACTIVE' : 'INACTIVE', pathHealthy ? 'var(--green)' : 'var(--red)');
+  _setKv('novaEhPath',      pathHealthy ? 'HEALTHY' : 'ERROR',  pathHealthy ? 'var(--green)' : 'var(--red)');
 
   const tradePerm = gov?.trade_permission === true;
   _setKv('novaLesTradePerm', tradePerm ? 'OPEN' : 'CLOSED', tradePerm ? 'var(--green)' : 'var(--red)');
