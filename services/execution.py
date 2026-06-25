@@ -13,6 +13,7 @@ from core.state import (
     load_alert_history, save_alert_history,
     load_macro_events,
     load_journal, save_journal,
+    load_settings,
 )
 from core.state_engine import state as _state
 import services.execution_trace as _trace
@@ -306,6 +307,89 @@ def get_rejections(limit: int = 50) -> list:
         return load_rejections()[:limit]
     except Exception:
         return []
+
+
+# ── Strategy / instrument governance gate ───────────────────────────────────
+#
+# The single check every broker-reaching path must pass: is this strategy
+# family and instrument explicitly allowed by the active execution profile?
+# Lives here -- inside execute_signal(), the one function every order-placing
+# path (webhook, execution_bridge.py, anything future) calls before routing
+# to a broker -- so no path can bypass it. main.py's /webhook also calls this
+# directly before even attempting execute_signal(), as an earlier, redundant
+# check using the exact same source of truth (no second list to drift).
+#
+# Mirrors execution_bridge.py's gates 8/9 (instrument filter, strategy
+# filter) against the same donna_settings.json profile. That bridge is only
+# ever invoked by monitor.py running locally -- this gate is what makes the
+# policy hold even when monitor.py isn't running and a signal reaches the
+# public webhook directly.
+
+def _active_execution_profile() -> dict:
+    """Active execution_profiles entry from donna_settings.json, or the
+    legacy autonomous_test_mode block as a fallback. {} if none active."""
+    settings = load_settings()
+    mode = str(settings.get('execution_mode', 'disabled')).strip().lower()
+    profile = settings.get('execution_profiles', {}).get(mode, {})
+    if profile:
+        return profile
+    legacy = settings.get('autonomous_test_mode', {})
+    if legacy.get('enabled', False):
+        return legacy
+    return {}
+
+
+def check_strategy_and_instrument_allowed(strategy_family: str, instrument: str) -> dict:
+    """
+    Returns {'allowed': True} or {'allowed': False, 'code': ..., 'reason': ...}.
+
+    A strategy family or instrument not explicitly listed in the active
+    profile's allowed_strategies / allowed_instruments is rejected -- this is
+    an allowlist, not a blocklist. New strategies (ICT, FAILED_AUCTION,
+    MOMENTUM, or anything else the indicator ever adds) are rejected by
+    default until someone deliberately adds them to the profile.
+    """
+    profile = _active_execution_profile()
+    allowed_strategies  = [s.upper() for s in profile.get('allowed_strategies',  ['PROS', 'ORB'])]
+    allowed_instruments = [i.upper() for i in profile.get('allowed_instruments', ['MNQ', 'MES'])]
+
+    family = str(strategy_family or '').upper()
+    instr  = str(instrument or '').upper()
+
+    if family not in allowed_strategies:
+        return {
+            'allowed': False,
+            'code':    'STRATEGY_NOT_ALLOWED',
+            'reason':  f'{family or "UNKNOWN"} not in allowed list: {allowed_strategies}',
+        }
+    if instr not in allowed_instruments:
+        return {
+            'allowed': False,
+            'code':    'INSTRUMENT_NOT_ALLOWED',
+            'reason':  f'{instr or "UNKNOWN"} not in allowed list: {allowed_instruments}',
+        }
+    return {'allowed': True, 'code': '', 'reason': ''}
+
+
+def log_governance_rejection(code: str, reason: str, data: dict, parsed: dict | None = None) -> None:
+    """
+    Log a STRATEGY_NOT_ALLOWED / INSTRUMENT_NOT_ALLOWED rejection through the
+    exact same pipeline every other execute_signal() rejection uses (trace +
+    rejections feed), plus a Telegram notification -- these two codes mean a
+    signal that would otherwise have executed got blocked by policy, which is
+    worth a push notification the same way an actual execution is.
+    """
+    _log_rejection(_rejection_context(code, reason, data, parsed or {}))
+    try:
+        send_telegram_message(
+            f'GOVERNANCE BLOCKED\n'
+            f'{code}\n'
+            f'{data.get("ticker", "?")} {str(data.get("signal", "")).upper()} '
+            f'| setup={data.get("setup_type", "?")} | family={data.get("strategy_family", "?")}\n'
+            f'{reason}'
+        )
+    except Exception as _e:
+        print(f'[governance_rejection] telegram error: {_e}')
 
 
 # ── Daily state helpers ────────────────────────────────────────
@@ -1808,6 +1892,16 @@ def execute_signal(signal_result: dict) -> dict:
         return {'status': 'skipped', 'reason': f'Unknown instrument: {instrument}', 'code': 'UNKNOWN_INSTRUMENT'}
 
     print(f'[execute_signal] Signal routed: {instrument} -> {routed_etf}')
+
+    # ── Rule 0.5: Strategy / instrument governance — allowlist, not blocklist.
+    # No broker-reaching path may skip this: a strategy family or instrument
+    # not explicitly permitted by the active execution profile is rejected,
+    # even if every other rule below would have allowed the trade.
+    gate = check_strategy_and_instrument_allowed(data.get('strategy_family', ''), instrument)
+    if not gate['allowed']:
+        print(f'[execute_signal] BLOCKED — {gate["code"]}: {gate["reason"]}')
+        log_governance_rejection(gate['code'], gate['reason'], data, parsed)
+        return {'status': 'skipped', 'reason': gate['reason'], 'code': gate['code']}
 
     # Generate or use provided signal_id; check and store for dedup
     signal_id      = data.get('signal_id') or f"{ticker}_{now_ny().strftime('%Y%m%d_%H%M%S')}"
