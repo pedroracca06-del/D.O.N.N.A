@@ -402,6 +402,118 @@ def check_strategy_and_instrument_allowed(strategy_family: str, instrument: str)
     return {'allowed': True, 'code': '', 'reason': ''}
 
 
+_GRADE_ORDER = {'A+': 0, 'A': 1, 'B': 2, 'C': 3, 'D': 4}
+
+
+def _derive_signal_grade(score) -> str | None:
+    """
+    Map a signal's numeric score to a letter grade, using the same
+    thresholds pre_verdict_engine() already uses for its own quality
+    buckets (score>=80/70/60/50). Returns None when no real grade signal
+    is available.
+
+    The TradingView indicator's analytics_score field is currently always
+    "0" for real PROS/ORB alerts -- a Pine-side bug (buySignal/sellSignal
+    are reassigned AFTER the alert() calls fire, so analytics_score reads
+    stale state at alert time). Confirmed against production trace data:
+    every real PROS_CONTINUATION/ORB execution this session carried
+    score=0 and still reached a TAKE verdict via pre_verdict_engine()'s
+    point-system fallback, which does not require score at all.
+
+    None means "no data to grade against," not "grade D" -- min_grade
+    enforcement must never silently block 100% of real trading because of
+    a measurement gap on the indicator side. Enforcement activates
+    automatically once the indicator starts sending a real nonzero score.
+    """
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return None
+    if s <= 0:
+        return None
+    if s >= 80: return 'A'
+    if s >= 70: return 'B'
+    if s >= 60: return 'C'
+    return 'D'
+
+
+def check_grade_allowed(score) -> dict:
+    """
+    {'allowed': True} if the signal's derived grade meets the active
+    profile's min_grade, OR if no real grade data is available yet (see
+    _derive_signal_grade) -- in which case this check is a deliberate no-op,
+    not a silent pass disguised as one.
+    """
+    grade = _derive_signal_grade(score)
+    if grade is None:
+        return {'allowed': True, 'code': '', 'reason': ''}
+
+    profile   = _active_execution_profile()
+    min_grade = str(profile.get('min_grade', 'B')).upper()
+    if _GRADE_ORDER.get(grade, 99) > _GRADE_ORDER.get(min_grade, 2):
+        return {
+            'allowed': False,
+            'code':    'GRADE_BELOW_MIN',
+            'reason':  f'Signal grade {grade} (score={score}) below profile minimum {min_grade}',
+        }
+    return {'allowed': True, 'code': '', 'reason': ''}
+
+
+def check_daily_trade_limit() -> dict:
+    """
+    {'allowed': False, code='DAILY_TRADE_LIMIT_EXCEEDED', reason} once
+    today's trade count has reached the active profile's max_trades_per_day.
+    This is distinct from _SESSION_MAX_TRADES (a separate, per-session-window
+    cap) -- both apply, neither replaces the other.
+    """
+    profile      = _active_execution_profile()
+    max_trades   = int(profile.get('max_trades_per_day', 5))
+    trades_today = _state.get('daily_trade_count', 0)
+    if trades_today >= max_trades:
+        return {
+            'allowed': False,
+            'code':    'DAILY_TRADE_LIMIT_EXCEEDED',
+            'reason':  f'{trades_today}/{max_trades} trades already taken today (profile limit)',
+        }
+    return {'allowed': True, 'code': '', 'reason': ''}
+
+
+def _cooldown_minutes_for_active_profile() -> int:
+    """Trade cooldown duration from the active profile, default 30 minutes."""
+    profile = _active_execution_profile()
+    try:
+        return int(profile.get('trade_cooldown_minutes', 30))
+    except (TypeError, ValueError):
+        return 30
+
+
+def check_execution_governance(data: dict, parsed: dict, instrument: str) -> dict:
+    """
+    Single governance gate every broker-reaching path must pass: strategy
+    family, instrument, grade, and today's trade count against the active
+    execution profile. Returns the first failing check, or
+    {'allowed': True} once every check passes.
+
+    Both main.py's /webhook (before even attempting execute_signal()) and
+    execute_signal() itself (the backstop for every other caller) call this
+    exact function -- no second copy of the rule set to drift.
+    """
+    strategy_gate = check_strategy_and_instrument_allowed(
+        data.get('strategy_family', ''), instrument)
+    if not strategy_gate['allowed']:
+        return strategy_gate
+
+    grade_gate = check_grade_allowed(data.get('score', 0))
+    if not grade_gate['allowed']:
+        return grade_gate
+
+    trades_gate = check_daily_trade_limit()
+    if not trades_gate['allowed']:
+        return trades_gate
+
+    return {'allowed': True, 'code': '', 'reason': ''}
+
+
 def log_governance_rejection(code: str, reason: str, data: dict, parsed: dict | None = None) -> None:
     """
     Log a STRATEGY_NOT_ALLOWED / INSTRUMENT_NOT_ALLOWED rejection through the
@@ -1735,7 +1847,7 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         'timestamp': utc_now_iso(),
     })
     # Set thesis and cooldown after execution
-    _state.set_cooldown(etf, minutes=30)
+    _state.set_cooldown(etf, minutes=_cooldown_minutes_for_active_profile())
     _direction_str = 'LONG' if is_long else 'SHORT'
     _new_thesis = 'RISK_ON_BULL' if is_long else 'RISK_OFF_BEAR'
     _state.set_thesis(_new_thesis, _direction_str)
@@ -1924,11 +2036,10 @@ def execute_signal(signal_result: dict) -> dict:
 
     print(f'[execute_signal] Signal routed: {instrument} -> {routed_etf}')
 
-    # ── Rule 0.5: Strategy / instrument governance — allowlist, not blocklist.
-    # No broker-reaching path may skip this: a strategy family or instrument
-    # not explicitly permitted by the active execution profile is rejected,
-    # even if every other rule below would have allowed the trade.
-    gate = check_strategy_and_instrument_allowed(data.get('strategy_family', ''), instrument)
+    # ── Rule 0.5: Execution governance — strategy, instrument, grade, daily
+    # trade limit. Allowlist, not blocklist. No broker-reaching path may
+    # skip this, even if every other rule below would have allowed the trade.
+    gate = check_execution_governance(data, parsed, instrument)
     if not gate['allowed']:
         print(f'[execute_signal] BLOCKED — {gate["code"]}: {gate["reason"]}')
         log_governance_rejection(gate['code'], gate['reason'], data, parsed)

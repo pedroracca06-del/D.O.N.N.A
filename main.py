@@ -58,7 +58,7 @@ try:
         get_account, get_positions,
         close_position, close_all_positions, close_all_positions_eod,
         cancel_all_orders, has_open_journal_match,
-        check_strategy_and_instrument_allowed, log_governance_rejection,
+        check_execution_governance, log_governance_rejection,
         get_today_trade_count,
         get_execution_status,
         check_position_outcomes,
@@ -76,7 +76,7 @@ except Exception:
     def get_positions():                    return []
     def cancel_all_orders():                return {'status': 'unavailable', 'cancelled': 0}
     def has_open_journal_match(symbol):     return False
-    def check_strategy_and_instrument_allowed(f, i): return {'allowed': False, 'code': 'EXECUTION_UNAVAILABLE', 'reason': 'execution not loaded'}
+    def check_execution_governance(d, p, i): return {'allowed': False, 'code': 'EXECUTION_UNAVAILABLE', 'reason': 'execution not loaded'}
     def log_governance_rejection(c, r, d, p=None): pass
     def close_position(s):                  return {'status': 'unavailable'}
     def close_all_positions():              return {'status': 'unavailable'}
@@ -2014,16 +2014,16 @@ async def webhook(request: Request):
     if result.get('status') != 'ok':
         raise HTTPException(status_code=500, detail=result.get('error', 'Signal processing failed'))
 
-    # ── Governance gate: enforce allowed_strategies / allowed_instruments
-    # BEFORE calling execute_signal() at all. This is the public, internet-
-    # facing entry point -- it must never rely solely on what's inside
-    # execute_signal() to keep a disallowed strategy off the broker.
+    # ── Governance gate: enforce strategy, instrument, grade, and daily trade
+    # limit BEFORE calling execute_signal() at all. This is the public,
+    # internet-facing entry point -- it must never rely solely on what's
+    # inside execute_signal() to keep a disallowed signal off the broker.
     # execute_signal() enforces the exact same check internally too (the
     # backstop for every other caller), so this can never be the only gate.
     _sig_data = result['data']
     _gate = await asyncio.to_thread(
-        check_strategy_and_instrument_allowed,
-        _sig_data.get('strategy_family', ''), _sig_data.get('instrument', ''),
+        check_execution_governance,
+        _sig_data, result.get('parsed', {}), _sig_data.get('instrument', ''),
     )
 
     execution: dict = {}
