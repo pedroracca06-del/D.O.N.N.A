@@ -2270,6 +2270,83 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <div style="color:var(--muted2);font-size:12px;font-style:italic">Loading...</div>
           </div>
         </div>
+
+        <!-- ── EXECUTION CONTROLS ── -->
+        <div class="exec-state-grid" style="margin-top:16px">
+          <div class="panel">
+            <div class="kicker">EXECUTION CONTROLS</div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Runtime governance. Trade Permission and the settings below apply instantly — no redeploy.</div>
+
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Auto Execute</span>
+              <span class="exec-kv-val" id="novaAutoExecVal">—</span>
+            </div>
+            <div style="font-size:10px;color:var(--muted2);margin:-4px 0 12px 0">Render environment variable · restart required to change</div>
+
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Trade Permission</span>
+              <span style="display:flex;gap:6px">
+                <button class="submit-trade-btn" id="novaTPOpenBtn" style="width:auto;padding:5px 14px;font-size:10px;margin:0" onclick="setTradePermission(true)">OPEN</button>
+                <button class="submit-trade-btn" id="novaTPClosedBtn" style="width:auto;padding:5px 14px;font-size:10px;margin:0;background:var(--panel2);color:var(--text)" onclick="setTradePermission(false)">CLOSED</button>
+              </span>
+            </div>
+
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Execution Mode</span>
+              <span class="exec-kv-val" id="novaExecModeVal2">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Broker</span>
+              <span class="exec-kv-val" id="novaPaperLiveVal">—</span>
+            </div>
+
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Minimum Grade</span>
+              <select class="trade-select" id="novaMinGradeInput" style="width:80px;padding:5px 8px;font-size:11px">
+                <option value="A+">A+</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </select>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Max Trades / Day</span>
+              <input class="trade-input" id="novaMaxTradesInput" type="number" min="1" max="20" style="width:80px;padding:5px 8px;font-size:11px">
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Cooldown (minutes)</span>
+              <input class="trade-input" id="novaCooldownInput" type="number" min="0" max="240" style="width:80px;padding:5px 8px;font-size:11px">
+            </div>
+            <button class="submit-trade-btn" id="novaSaveSettingsBtn" style="margin-top:8px" onclick="saveExecutionSettings()">SAVE SETTINGS</button>
+            <div id="novaSettingsMsg" style="font-size:11px;margin-top:8px;display:none"></div>
+          </div>
+
+          <!-- ── ACCOUNT SUMMARY ── -->
+          <div class="panel">
+            <div class="kicker">ACCOUNT SUMMARY</div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Live Alpaca account state.</div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Equity</span>
+              <span class="exec-kv-val" id="novaAcctEquity">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Buying Power</span>
+              <span class="exec-kv-val" id="novaAcctBP">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Today's P&L</span>
+              <span class="exec-kv-val" id="novaAcctPnlToday">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Risk Used Today</span>
+              <span class="exec-kv-val" id="novaAcctOpenRisk">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Open Positions</span>
+              <span class="exec-kv-val" id="novaAcctOpenPos">—</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- ── GOVERNANCE ── -->
@@ -3762,13 +3839,14 @@ function _setKv(id, text, color) {
 
 async function refreshExecutionTab() {
   try {
-    // Parallel fetch: orchestration + execution-status + rejections + journal + positions
-    const [orchRes, execRes, rejRes, jRes, posRes] = await Promise.all([
+    // Parallel fetch: orchestration + execution-status + rejections + journal + positions + governance
+    const [orchRes, execRes, rejRes, jRes, posRes, govRes] = await Promise.all([
       fetch('/orchestration-status'),
       fetch('/execution-status'),
       fetch('/execution/rejections?limit=50'),
       fetch('/journal/data'),
       fetch('/execution/positions'),
+      fetch('/api/governance'),
     ]);
 
     const orch = orchRes.ok  ? await orchRes.json() : null;
@@ -3776,6 +3854,7 @@ async function refreshExecutionTab() {
     const rej  = rejRes.ok   ? await rejRes.json()  : null;
     const j    = jRes.ok     ? await jRes.json()    : null;
     const pos  = posRes.ok   ? await posRes.json()  : null;
+    const gov  = govRes.ok   ? await govRes.json()  : null;
 
     _renderHeartbeat(orch, exec);
     _renderExecutionState(orch, exec);
@@ -3783,6 +3862,7 @@ async function refreshExecutionTab() {
     _renderRejections(rej);
     _renderSessionScorecard(j, rej);
     _renderPositionsTable(pos);
+    _renderExecutionControls(gov, exec, pos);
 
     const syncEl = document.getElementById('novaLastSync');
     if (syncEl) syncEl.textContent = 'Synced ' + new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true}) + ' ET';
@@ -3985,6 +4065,109 @@ async function closeAllPositionsConfirm() {
     alert('Close-all request failed: ' + e);
   }
   if (btn) { btn.disabled = false; btn.textContent = origText; }
+  await refreshExecutionTab();
+}
+
+// Execution Controls + Account Summary. Auto Execute is display-only on
+// purpose -- it's a Render env var with no live toggle (would need a
+// redeploy, which is a deployment action, not a trading control). Settings
+// inputs are only repopulated from the server when the user isn't actively
+// typing in them, so a 30s background refresh never clobbers an edit in
+// progress.
+function _renderExecutionControls(gov, exec, pos) {
+  const autoExec = gov?.nova_auto_execute === true;
+  _setKv('novaAutoExecVal', autoExec ? 'ON' : 'OFF', autoExec ? 'var(--green)' : 'var(--red)');
+
+  const tradePerm = gov?.trade_permission === true;
+  const openBtn   = document.getElementById('novaTPOpenBtn');
+  const closedBtn = document.getElementById('novaTPClosedBtn');
+  if (openBtn && closedBtn) {
+    openBtn.style.background   = tradePerm ? 'var(--green)' : 'var(--panel2)';
+    openBtn.style.borderColor  = tradePerm ? 'var(--green)' : 'var(--line)';
+    openBtn.style.color        = tradePerm ? '#fff' : 'var(--text)';
+    closedBtn.style.background = !tradePerm ? 'var(--red)' : 'var(--panel2)';
+    closedBtn.style.borderColor= !tradePerm ? 'var(--red)' : 'var(--line)';
+    closedBtn.style.color      = !tradePerm ? '#fff' : 'var(--text)';
+  }
+
+  const mode = gov?.execution_mode || '—';
+  _setKv('novaExecModeVal2', mode === 'disabled' ? 'DISABLED' : mode.toUpperCase());
+
+  const paper = gov?.paper_mode === true;
+  _setKv('novaPaperLiveVal', paper ? 'PAPER' : 'LIVE', paper ? 'var(--blue)' : 'var(--red)');
+
+  // Settings inputs -- skip whichever the user currently has focus in.
+  const gradeEl    = document.getElementById('novaMinGradeInput');
+  const tradesEl   = document.getElementById('novaMaxTradesInput');
+  const cooldownEl = document.getElementById('novaCooldownInput');
+  if (gradeEl    && document.activeElement !== gradeEl)    gradeEl.value    = gov?.min_grade || 'B';
+  if (tradesEl   && document.activeElement !== tradesEl)   tradesEl.value  = gov?.max_trades != null ? gov.max_trades : '';
+  if (cooldownEl && document.activeElement !== cooldownEl) cooldownEl.value = gov?.cooldown_minutes != null ? gov.cooldown_minutes : '';
+
+  // Account summary
+  const acct = pos?.account || {};
+  _setKv('novaAcctEquity',   acct.equity       != null ? _fmtUsd(acct.equity)       : '—');
+  _setKv('novaAcctBP',       acct.buying_power != null ? _fmtUsd(acct.buying_power) : '—');
+  const pnlToday = acct.pnl_today;
+  _setKv('novaAcctPnlToday', pnlToday != null ? _fmtPnl(pnlToday) : '—',
+         pnlToday > 0 ? 'var(--green)' : pnlToday < 0 ? 'var(--red)' : 'var(--muted2)');
+  _setKv('novaAcctOpenRisk', exec?.cumulative_risk_today != null ? _fmtUsd(exec.cumulative_risk_today) : '—');
+  _setKv('novaAcctOpenPos',  (pos?.positions || []).length);
+}
+
+async function setTradePermission(active) {
+  const label = active ? 'OPEN' : 'CLOSED';
+  if (!confirm('Set Trade Permission to ' + label + '?')) return;
+  try {
+    const res = await fetch('/execution/trade-permission', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({active: active, reason: 'manual via Execution tab'}),
+    });
+    const data = await res.json();
+    if (data.status !== 'ok') {
+      alert('Failed to set trade permission: ' + (data.error || data.reason || 'unknown error'));
+    }
+  } catch (e) {
+    alert('Trade permission request failed: ' + e);
+  }
+  await refreshExecutionTab();
+}
+
+async function saveExecutionSettings() {
+  const minGrade = document.getElementById('novaMinGradeInput')?.value;
+  const maxTrades = parseInt(document.getElementById('novaMaxTradesInput')?.value, 10);
+  const cooldown  = parseInt(document.getElementById('novaCooldownInput')?.value, 10);
+  const msgEl = document.getElementById('novaSettingsMsg');
+
+  const body = {};
+  if (minGrade) body.min_grade = minGrade;
+  if (!isNaN(maxTrades)) body.max_trades_per_day = maxTrades;
+  if (!isNaN(cooldown))  body.cooldown_minutes = cooldown;
+
+  const btn = document.getElementById('novaSaveSettingsBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'SAVING...'; }
+  try {
+    const res = await fetch('/execution/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (msgEl) {
+      msgEl.style.display = '';
+      if (data.status === 'ok') {
+        msgEl.style.color = 'var(--green)';
+        msgEl.textContent = 'Saved.';
+      } else {
+        msgEl.style.color = 'var(--red)';
+        msgEl.textContent = 'Save failed: ' + (data.error || data.reason || 'unknown error');
+      }
+    }
+  } catch (e) {
+    if (msgEl) { msgEl.style.display = ''; msgEl.style.color = 'var(--red)'; msgEl.textContent = 'Save request failed: ' + e; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'SAVE SETTINGS'; }
   await refreshExecutionTab();
 }
 

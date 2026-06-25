@@ -1011,12 +1011,13 @@ async def governance_status():
     """Aggregated gate status for the Governance UI page."""
     try:
         from core.state_engine import state as _st
-        from services.execution_bridge import _load_execution_config
+        from services.execution_bridge import _load_execution_config, _is_paper
         st = _st.get_state()
         active_mode, cfg = _load_execution_config()
         positions = _st.get_open_positions()
         return {
             'execution_mode':          active_mode,
+            'paper_mode':              _is_paper(),
             'nova_auto_execute':       os.getenv('NOVA_AUTO_EXECUTE', 'false').lower() == 'true',
             'trade_permission':        st.get('trade_permission', False),
             'daily_trade_count':       st.get('daily_trade_count', 0),
