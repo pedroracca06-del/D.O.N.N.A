@@ -2309,14 +2309,20 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
                 <option value="C">C</option>
               </select>
             </div>
+            <div style="font-size:10px;margin:-4px 0 12px 0" id="novaGradeEnforceVal">—</div>
+
             <div class="exec-kv">
               <span class="exec-kv-lab">Max Trades / Day</span>
               <input class="trade-input" id="novaMaxTradesInput" type="number" min="1" max="20" style="width:80px;padding:5px 8px;font-size:11px">
             </div>
+            <div style="font-size:10px;color:var(--muted2);margin:-4px 0 12px 0" id="novaTradesTodayVal">—</div>
+
             <div class="exec-kv">
               <span class="exec-kv-lab">Cooldown (minutes)</span>
               <input class="trade-input" id="novaCooldownInput" type="number" min="0" max="240" style="width:80px;padding:5px 8px;font-size:11px">
             </div>
+            <div style="font-size:10px;color:var(--muted2);margin:-4px 0 12px 0" id="novaCooldownRemainingVal">—</div>
+
             <button class="submit-trade-btn" id="novaSaveSettingsBtn" style="margin-top:8px" onclick="saveExecutionSettings()">SAVE SETTINGS</button>
             <div id="novaSettingsMsg" style="font-size:11px;margin-top:8px;display:none"></div>
           </div>
@@ -2338,13 +2344,56 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
               <span class="exec-kv-val" id="novaAcctPnlToday">—</span>
             </div>
             <div class="exec-kv">
-              <span class="exec-kv-lab">Risk Used Today</span>
+              <span class="exec-kv-lab">Unrealized P&L</span>
+              <span class="exec-kv-val" id="novaAcctUnrealPnl">—</span>
+            </div>
+            <div class="exec-kv">
+              <span class="exec-kv-lab">Open Risk</span>
               <span class="exec-kv-val" id="novaAcctOpenRisk">—</span>
             </div>
+            <div style="font-size:10px;color:var(--muted2);margin:-4px 0 12px 0">Cumulative risk allocated today — does not decrease when a position closes</div>
             <div class="exec-kv">
               <span class="exec-kv-lab">Open Positions</span>
               <span class="exec-kv-val" id="novaAcctOpenPos">—</span>
             </div>
+          </div>
+        </div>
+
+        <!-- ── LIVE EXECUTION STATUS ── -->
+        <div class="panel" style="margin-top:16px">
+          <div class="kicker">LIVE EXECUTION STATUS</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">One glance: everything governing the next signal, and the last three things that actually happened.</div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Trade Permission</span>
+            <span class="exec-kv-val" id="novaLesTradePerm">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Auto Execute</span>
+            <span class="exec-kv-val" id="novaLesAutoExec">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Profile</span>
+            <span class="exec-kv-val" id="novaLesProfile">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Trades Today</span>
+            <span class="exec-kv-val" id="novaLesTradesToday">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Cooldown</span>
+            <span class="exec-kv-val" id="novaLesCooldown">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Last Signal</span>
+            <span class="exec-kv-val" id="novaLesLastSignal">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Last Decision</span>
+            <span class="exec-kv-val" id="novaLesLastDecision">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Last Execution</span>
+            <span class="exec-kv-val" id="novaLesLastExecution">—</span>
           </div>
         </div>
       </div>
@@ -3839,22 +3888,24 @@ function _setKv(id, text, color) {
 
 async function refreshExecutionTab() {
   try {
-    // Parallel fetch: orchestration + execution-status + rejections + journal + positions + governance
-    const [orchRes, execRes, rejRes, jRes, posRes, govRes] = await Promise.all([
+    // Parallel fetch: orchestration + execution-status + rejections + journal + positions + governance + trace
+    const [orchRes, execRes, rejRes, jRes, posRes, govRes, traceRes] = await Promise.all([
       fetch('/orchestration-status'),
       fetch('/execution-status'),
       fetch('/execution/rejections?limit=50'),
       fetch('/journal/data'),
       fetch('/execution/positions'),
       fetch('/api/governance'),
+      fetch('/execution/trace?limit=100'),
     ]);
 
-    const orch = orchRes.ok  ? await orchRes.json() : null;
-    const exec = execRes.ok  ? await execRes.json() : null;
-    const rej  = rejRes.ok   ? await rejRes.json()  : null;
-    const j    = jRes.ok     ? await jRes.json()    : null;
-    const pos  = posRes.ok   ? await posRes.json()  : null;
-    const gov  = govRes.ok   ? await govRes.json()  : null;
+    const orch  = orchRes.ok  ? await orchRes.json()  : null;
+    const exec  = execRes.ok  ? await execRes.json()  : null;
+    const rej   = rejRes.ok   ? await rejRes.json()   : null;
+    const j     = jRes.ok     ? await jRes.json()     : null;
+    const pos   = posRes.ok   ? await posRes.json()   : null;
+    const gov   = govRes.ok   ? await govRes.json()   : null;
+    const trace = traceRes.ok ? await traceRes.json() : null;
 
     _renderHeartbeat(orch, exec);
     _renderExecutionState(orch, exec);
@@ -3862,7 +3913,8 @@ async function refreshExecutionTab() {
     _renderRejections(rej);
     _renderSessionScorecard(j, rej);
     _renderPositionsTable(pos);
-    _renderExecutionControls(gov, exec, pos);
+    _renderLiveExecutionStatus(gov, orch, trace);
+    _renderExecutionControls(gov, exec, pos, orch);
 
     const syncEl = document.getElementById('novaLastSync');
     if (syncEl) syncEl.textContent = 'Synced ' + new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true}) + ' ET';
@@ -4074,7 +4126,7 @@ async function closeAllPositionsConfirm() {
 // inputs are only repopulated from the server when the user isn't actively
 // typing in them, so a 30s background refresh never clobbers an edit in
 // progress.
-function _renderExecutionControls(gov, exec, pos) {
+function _renderExecutionControls(gov, exec, pos, orch) {
   const autoExec = gov?.nova_auto_execute === true;
   _setKv('novaAutoExecVal', autoExec ? 'ON' : 'OFF', autoExec ? 'var(--green)' : 'var(--red)');
 
@@ -4104,6 +4156,25 @@ function _renderExecutionControls(gov, exec, pos) {
   if (tradesEl   && document.activeElement !== tradesEl)   tradesEl.value  = gov?.max_trades != null ? gov.max_trades : '';
   if (cooldownEl && document.activeElement !== cooldownEl) cooldownEl.value = gov?.cooldown_minutes != null ? gov.cooldown_minutes : '';
 
+  // Max Trades / Day: current count against the configured limit
+  const tradesToday = gov?.daily_trade_count;
+  const maxTrades    = gov?.max_trades;
+  _setKv('novaTradesTodayVal',
+    tradesToday != null && maxTrades != null ? tradesToday + ' / ' + maxTrades + ' used today' : '—',
+    tradesToday != null && maxTrades != null && tradesToday >= maxTrades ? 'var(--red)' : 'var(--muted2)');
+
+  // Cooldown: remaining time per ETF, if any
+  const spyMins = orch?.spy_cooldown_remaining_minutes;
+  const qqqMins = orch?.qqq_cooldown_remaining_minutes;
+  const coolParts = [];
+  if (spyMins > 0) coolParts.push('SPY ' + spyMins + 'm');
+  if (qqqMins > 0) coolParts.push('QQQ ' + qqqMins + 'm');
+  const coolEl = document.getElementById('novaCooldownRemainingVal');
+  if (coolEl) {
+    coolEl.textContent = coolParts.length ? coolParts.join(' · ') + ' remaining' : 'Clear — no active cooldown';
+    coolEl.style.color = coolParts.length ? 'var(--gold)' : 'var(--muted2)';
+  }
+
   // Account summary
   const acct = pos?.account || {};
   _setKv('novaAcctEquity',   acct.equity       != null ? _fmtUsd(acct.equity)       : '—');
@@ -4111,8 +4182,74 @@ function _renderExecutionControls(gov, exec, pos) {
   const pnlToday = acct.pnl_today;
   _setKv('novaAcctPnlToday', pnlToday != null ? _fmtPnl(pnlToday) : '—',
          pnlToday > 0 ? 'var(--green)' : pnlToday < 0 ? 'var(--red)' : 'var(--muted2)');
+  const unrealTotal = (pos?.positions || []).reduce((sum, p) => sum + (parseFloat(p.unrealized_pnl) || 0), 0);
+  _setKv('novaAcctUnrealPnl', (pos?.positions || []).length ? _fmtPnl(unrealTotal) : '—',
+         unrealTotal > 0 ? 'var(--green)' : unrealTotal < 0 ? 'var(--red)' : 'var(--muted2)');
   _setKv('novaAcctOpenRisk', exec?.cumulative_risk_today != null ? _fmtUsd(exec.cumulative_risk_today) : '—');
   _setKv('novaAcctOpenPos',  (pos?.positions || []).length);
+}
+
+// Min Grade enforcement state + Live Execution Status panel. Both derived
+// from the execution trace -- real PROS/ORB signals currently always carry
+// score=0 (a Pine-side bug in the indicator, see services/execution.py's
+// _derive_signal_grade()), so min_grade is a real, live gate only once a
+// signal actually carries a nonzero score. This shows that honestly instead
+// of implying grade filtering is active when, for the strategies running
+// today, it structurally cannot be yet.
+function _renderLiveExecutionStatus(gov, orch, trace) {
+  const entries = trace?.entries || [];
+  const lastOfType = (type) => entries.find(e => e.event_type === type) || null;
+
+  const lastSignal   = lastOfType('SIGNAL_RECEIVED');
+  const lastVerdict  = lastOfType('VERDICT');
+  const lastExecuted = lastOfType('EXECUTED');
+
+  // Min Grade enforcement state, based on the most recent signal's score
+  const gradeEl = document.getElementById('novaGradeEnforceVal');
+  if (gradeEl) {
+    const lastScore = lastSignal ? parseFloat(lastSignal.score) : NaN;
+    if (lastSignal && !isNaN(lastScore) && lastScore > 0) {
+      gradeEl.textContent = 'ENFORCED — last signal scored ' + lastScore;
+      gradeEl.style.color = 'var(--green)';
+    } else {
+      gradeEl.textContent = 'NOT ENFORCED — indicator is not sending a real score yet (score=0)';
+      gradeEl.style.color = 'var(--yellow)';
+    }
+  }
+
+  const tradePerm = gov?.trade_permission === true;
+  _setKv('novaLesTradePerm', tradePerm ? 'OPEN' : 'CLOSED', tradePerm ? 'var(--green)' : 'var(--red)');
+
+  const autoExec = gov?.nova_auto_execute === true;
+  _setKv('novaLesAutoExec', autoExec ? 'ON' : 'OFF', autoExec ? 'var(--green)' : 'var(--red)');
+
+  const mode = gov?.execution_mode || '—';
+  _setKv('novaLesProfile', mode === 'disabled' ? 'DISABLED' : mode.toUpperCase());
+
+  const tradesToday = gov?.daily_trade_count;
+  const maxTrades    = gov?.max_trades;
+  _setKv('novaLesTradesToday', tradesToday != null && maxTrades != null ? tradesToday + ' / ' + maxTrades : '—');
+
+  const spyMins = orch?.spy_cooldown_remaining_minutes;
+  const qqqMins = orch?.qqq_cooldown_remaining_minutes;
+  const lesCoolParts = [];
+  if (spyMins > 0) lesCoolParts.push('SPY ' + spyMins + 'm');
+  if (qqqMins > 0) lesCoolParts.push('QQQ ' + qqqMins + 'm');
+  _setKv('novaLesCooldown', lesCoolParts.length ? lesCoolParts.join(' · ') : 'Clear',
+         lesCoolParts.length ? 'var(--gold)' : 'var(--green)');
+
+  _setKv('novaLesLastSignal', lastSignal
+    ? (lastSignal.ticker || '?') + ' ' + (lastSignal.setup_type || '') + ' · ' + (lastSignal.timestamp_et || '')
+    : 'No recent signal');
+
+  _setKv('novaLesLastDecision', lastVerdict
+    ? (lastVerdict.verdict || '?') + ' (' + (lastVerdict.confidence || '—') + ') · ' + (lastVerdict.timestamp_et || '')
+    : 'No recent decision');
+
+  _setKv('novaLesLastExecution', lastExecuted
+    ? (lastExecuted.direction || '') + ' ' + (lastExecuted.qty || '') + ' ' + (lastExecuted.etf || '') +
+      ' · ' + (lastExecuted.timestamp_et || '')
+    : 'No execution today');
 }
 
 async function setTradePermission(active) {
