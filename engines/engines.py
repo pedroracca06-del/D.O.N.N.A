@@ -596,7 +596,7 @@ def build_what_matters_now(risk=None):
     us10y_pct = pct('US10Y')
 
     headline           = 'Balanced conditions'
-    summary            = 'Donna does not yet see one dominant cross-asset force.'
+    summary            = 'NOVA does not yet see one dominant cross-asset force.'
     watch              = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER']
     mode               = 'balanced'
     risk_to_conviction = 'Normal'
@@ -651,7 +651,7 @@ def build_what_matters_now(risk=None):
         watch              = ['NQ', 'ES', 'OIL', 'GOLD', 'SILVER']
         mode               = 'balanced'
         risk_to_conviction = 'Normal'
-        focus_reason       = 'Donna sees a tradable environment, but not one overwhelming cross-asset driver.'
+        focus_reason       = 'NOVA sees a tradable environment, but not one overwhelming cross-asset driver.'
 
     return {
         'headline': headline,
@@ -1049,7 +1049,7 @@ def build_donna_observations(risk=None):
         observations.append({'type': 'observation', 'title': f"Macro timing matters: {state.get('next_event', 'Scheduled event')}", 'summary': 'Event risk is close enough that price action may not be clean. Respect timing over impulse.', 'priority': 'high', 'timestamp': utc_now_iso()})
 
     if not observations:
-        observations.append({'type': 'observation', 'title': driver.get('dominant_driver', 'Balanced conditions'), 'summary': morning.get('first_read', 'Donna does not see a dominant threat beyond normal market rotation.'), 'priority': 'low', 'timestamp': utc_now_iso()})
+        observations.append({'type': 'observation', 'title': driver.get('dominant_driver', 'Balanced conditions'), 'summary': morning.get('first_read', 'NOVA does not see a dominant threat beyond normal market rotation.'), 'priority': 'low', 'timestamp': utc_now_iso()})
 
     return observations[:6]
 
@@ -1151,7 +1151,7 @@ def build_scenario_engine(force: bool = False) -> dict:
     )
 
     system = (
-        "You are DONNA's scenario planning engine. Generate exactly 3 to 5 if/then playbook scenarios "
+        "You are NOVA's scenario planning engine. Generate exactly 3 to 5 if/then playbook scenarios "
         "for today's trading session based on the context provided. "
         "Return ONLY valid JSON — an array of scenario objects, nothing else. "
         "Each object must have exactly these string keys: "
@@ -1314,7 +1314,7 @@ def build_performance_memory() -> dict:
                            f"Setup: {setup_lines}. Streak: {streak_count} {streak_type}.")
                 resp = client.messages.create(
                     model=ANTHROPIC_MODEL,
-                    system=("You are DONNA's edge analyst. Given a trader's performance stats, "
+                    system=("You are NOVA's edge analyst. Given a trader's performance stats, "
                             "write exactly ONE sentence (under 30 words) identifying their clearest "
                             "statistical edge. Be specific, direct, and data-driven. No markdown."),
                     messages=[{'role': 'user', 'content': context}],
@@ -1581,7 +1581,7 @@ def generate_morning_brief() -> str:
     )
 
     system = (
-        "You are DONNA's morning desk analyst. Write a concise pre-market brief for a professional futures trader. "
+        "You are NOVA's morning desk analyst. Write a concise pre-market brief for a professional futures trader. "
         "Rules: greet with date and day, summarize overnight moves for NQ/ES and key assets, list today's macro events with times, "
         "state risk levels plainly, name the dominant market driver, list 3-4 instruments to watch first, "
         "end with one sentence of execution guidance. "

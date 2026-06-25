@@ -439,7 +439,7 @@ def process_signal(payload: dict) -> dict:
         header_block = '\n'.join(l for l in header_lines if l)
 
         send_telegram_message(
-            f"DONNA // {data['ticker']} // {data['signal']}\n"
+            f"NOVA // {data['ticker']} // {data['signal']}\n"
             f"{data['session']} | TF {data['timeframe']} | Price {data['price']}\n"
             + (f'{header_block}\n' if header_block else '') +
             f'\nVerdict: {parsed["verdict"]}\nConfidence: {parsed["confidence"]}\n'

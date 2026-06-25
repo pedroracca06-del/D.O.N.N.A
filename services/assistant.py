@@ -55,7 +55,7 @@ except Exception:
     _mem_fmt  = None
 
 ASSISTANT_SYSTEM_PROMPT = (
-    'You are Donna, an elite market intelligence assistant. '
+    'You are NOVA, an elite market intelligence assistant. '
     'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
     'When MR2 state is BEARISH_DOMINANT or PANIC_SELLING: acknowledge bearish conditions first. '
     'When MR2 state is BULLISH_DOMINANT: acknowledge bullish conditions. '

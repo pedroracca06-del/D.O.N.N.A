@@ -162,7 +162,7 @@ except Exception as _se_err:
         def get_trade_count(self): return 0
     _donna_state = _FallbackState()  # type: ignore[assignment]
 
-app = FastAPI(title='DONNA v5.0 Live Market Core', version='5.0')
+app = FastAPI(title='NOVA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
 
 _GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
@@ -459,7 +459,7 @@ async def startup():
 
 @app.get('/')
 async def root():
-    return {'status': 'Donna is online', 'version': app.version}
+    return {'status': 'NOVA is online', 'version': app.version}
 
 
 @app.get('/debug-paths')
@@ -593,7 +593,7 @@ async def system_health():
 
 @app.get('/test-telegram')
 async def test_telegram():
-    return send_telegram_message('DONNA TEST MESSAGE')
+    return send_telegram_message('NOVA TEST MESSAGE')
 
 
 @app.get('/breaking-check')
@@ -2244,7 +2244,7 @@ async def assistant_chat(request: Request):
         elif 'significant' in msg_lower or 'real' in msg_lower:
             reply = sig['summary']
         else:
-            reply = f"Donna fallback: Bias is {morning['today_bias']}. Focus is {morning['focus']}."
+            reply = f"NOVA fallback: Bias is {morning['today_bias']}. Focus is {morning['focus']}."
         return {'status': 'ok', 'action': 'none', 'value': '', 'reply': reply, 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
 
     try:

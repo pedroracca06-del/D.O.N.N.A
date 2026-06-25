@@ -251,7 +251,7 @@ def _get_next_event_from_file() -> tuple[str, int | None]:
 
 # ── LLM headline classifier via Grok ─────────────────────────
 _GROK_SYSTEM = (
-    "You are DONNA's market news classifier. You have real-time awareness of current "
+    "You are NOVA's market news classifier. You have real-time awareness of current "
     "market events. Today CPI printed 3.8% annually - highest since May 2023. Markets "
     "are selling off. Factor this into your risk classification. Return only valid JSON."
 )

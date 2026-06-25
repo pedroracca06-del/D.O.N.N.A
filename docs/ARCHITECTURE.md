@@ -2,7 +2,7 @@
 
 ## Overview
 
-DONNA/NOVA is built around a strict separation between three concerns:
+NOVA is built around a strict separation between three concerns:
 
 1. **Data acquisition** — reading live chart state from TradingView via CDP/MCP
 2. **Intelligence** — deterministic rule evaluation followed by AI grading

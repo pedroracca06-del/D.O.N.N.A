@@ -1651,11 +1651,11 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <!-- ─── LEFT COLUMN ─── -->
         <div class="vstack" style="gap:14px">
 
-          <!-- 1. DONNA'S MARKET READ -->
+          <!-- 1. NOVA'S MARKET READ -->
           <div class="grok-card">
             <div class="grok-card-header">
               <div class="grok-pulse-dot"></div>
-              <div class="grok-card-title">DONNA&#39;s Market Read</div>
+              <div class="grok-card-title">NOVA&#39;s Market Read</div>
               <div class="grok-powered-badge">Powered by Grok</div>
               <div id="grokSentimentBadge" class="grok-sentiment-badge sentiment-NEUTRAL">NEUTRAL</div>
             </div>
@@ -1757,14 +1757,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <div style="padding:16px">
           <div class="chat-terminal" id="assistantOutput">
             <div class="msg assistant">
-              <span class="role">DONNA</span>
+              <span class="role">NOVA</span>
               Command interface ready. I am monitoring macro conditions, market structure, and risk levels. Ask me anything or use a quick command below.
               <div><span class="msg-tag ANALYSIS">ANALYSIS</span></div>
             </div>
             <div class="msg-clearfix"></div>
           </div>
           <div class="typing-indicator" id="typingIndicator">
-            <span class="typing-dots"><span></span><span></span><span></span></span>&nbsp;&nbsp;DONNA is thinking...
+            <span class="typing-dots"><span></span><span></span><span></span></span>&nbsp;&nbsp;NOVA is thinking...
           </div>
           <div class="quick-cmds">
             <button class="quick-cmd-btn" data-cmd="What matters now">What matters now</button>
@@ -1872,9 +1872,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             </div>
           </div>
 
-          <!-- 4. DONNA'S PLAYBOOK -->
+          <!-- 4. NOVA'S PLAYBOOK -->
           <div class="hv-playbook">
-            <div class="kicker" style="margin-bottom:8px;color:var(--yellow)">Donna's Playbook</div>
+            <div class="kicker" style="margin-bottom:8px;color:var(--yellow)">NOVA's Playbook</div>
             <ul id="hvPlaybook">
               <li>Loading playbook rules...</li>
             </ul>
@@ -3080,7 +3080,7 @@ function renderDashboard() {
   const _hvEt = lastSig && lastSig.timestamp ? new Date(lastSig.timestamp).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'America/New_York'}) : '';
   setText('dbHvLastSig', lastSig ? `${lastSig.ticker || '—'} · ${_hvEt}` : 'No recent signals');
 
-  // ── DONNA SAYS ──
+  // ── NOVA SAYS ──
   let donnaSays = hv.donna_read || '';
   if (!donnaSays) {
     if (!canExec && macro === 'high') donnaSays = 'Macro conditions elevated. No entries until risk clears. Respect the lock.';
@@ -3226,7 +3226,7 @@ function renderHarveyNew(d) {
   setText('hvOrbStatus', d.orb_status || '—');
   setText('hvOrbNote',   d.orb_note   || '—');
 
-  // Donna says
+  // NOVA says
   setText('hvDonnaSays', wm.focus_reason || wm.summary || d.verdict_reason || '—');
 
   // Risk engine
@@ -3867,7 +3867,7 @@ function renderNews(d) {
   setText('sidebarEventPhase', risk.event_phase || '—');
   setText('sidebarNextEvent',  risk.next_event  || 'No upcoming events');
 
-  // DONNA SAYS — market guidance text
+  // NOVA SAYS — market guidance text
   const donnaSays = risk.last_market_guidance || risk.headline_guidance || risk.last_headline || '';
   if (donnaSays) setText('donnaSaysText', donnaSays);
 }
@@ -4482,7 +4482,7 @@ async function refresh() {
     try { renderDashboard(); } catch(e) { console.error('renderDashboard failed:', e); }
     try { renderNews(d); } catch(e) { console.error('renderNews failed:', e); }
   } catch(err) {
-    console.error('Donna refresh error:', err);
+    console.error('NOVA refresh error:', err);
     setText('lastUpdated', 'Sync error — retrying...');
   }
 }
@@ -4509,7 +4509,7 @@ function appendMsg(role, text, tag) {
   el.className = 'msg ' + role;
   if (role === 'assistant') {
     const resolvedTag = tag || inferResponseTag(text);
-    el.innerHTML = `<span class="role">DONNA</span>${text}<div><span class="msg-tag ${resolvedTag}">${resolvedTag}</span></div>`;
+    el.innerHTML = `<span class="role">NOVA</span>${text}<div><span class="msg-tag ${resolvedTag}">${resolvedTag}</span></div>`;
   } else {
     el.innerHTML = `<span class="role">YOU</span>${text}`;
   }

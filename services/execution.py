@@ -1173,7 +1173,7 @@ def close_all_positions_eod() -> int:
 
         pnl_str = f'+${realized_pnl:.2f}' if realized_pnl >= 0 else f'-${abs(realized_pnl):.2f}'
         send_telegram_message(
-            f'DONNA EOD CLOSE\n'
+            f'NOVA EOD CLOSE\n'
             f'{symbol} {qty} shares ({"LONG" if is_long else "SHORT"}) closed @ {exit_price}\n'
             f'P&L: {pnl_str}'
         )
@@ -1396,7 +1396,7 @@ def _journal_log_trade(
         'context_snapshot':  ctx_snap,     # market state at entry — used by thesis_analysis
         'thesis_analysis':   None,         # populated by check_position_outcomes after close
         'notes': (
-            f'DONNA autonomous trade. {setup} on {symbol}. '
+            f'NOVA autonomous trade. {setup} on {symbol}. '
             f'Regime: {regime}. Confidence: {conf}. Broker: {BROKER_MODE}.'
         ),
         'timestamp': utc_now_iso(),
@@ -1943,7 +1943,7 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
         print(f'[execution] trace write failed for {order_id}: {_te}')
 
     send_telegram_message(
-        f'DONNA EXECUTED\n'
+        f'NOVA EXECUTED\n'
         f'{direction} {qty} shares {etf} @ {entry_ref}\n'
         f'Stop: {stop_px} ({stop_dist:.2f}/share) | Target: {tgt_px}\n'
         f'Risk: ${risk_usd:.0f} | Session: {session}\n'
@@ -1981,7 +1981,7 @@ def close_qqq_positions() -> dict:
         ts_et   = now_ny().strftime('%Y-%m-%d %H:%M:%S ET')
         print(f'[close_qqq] {ts_et} — closed QQQ ({count} lot(s))')
         send_telegram_message(
-            f'DONNA EMERGENCY CLOSE\n'
+            f'NOVA EMERGENCY CLOSE\n'
             f'Closed {count} QQQ position(s) — Asia-session rule violation cleanup\n'
             f'Time: {ts_et}'
         )

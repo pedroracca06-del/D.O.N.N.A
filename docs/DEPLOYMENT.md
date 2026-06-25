@@ -1,6 +1,6 @@
 # Deployment
 
-DONNA runs across two environments simultaneously. Understanding the split is critical — the cloud backend and the local monitor serve different purposes and neither can fully substitute for the other.
+NOVA runs across two environments simultaneously. Understanding the split is critical — the cloud backend and the local monitor serve different purposes and neither can fully substitute for the other.
 
 ---
 
