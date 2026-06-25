@@ -205,8 +205,14 @@ def compute_journal_stats(trades: list) -> dict:
         outcome   = str(t.get('outcome', '')).upper()
         direction = str(t.get('direction', 'LONG')).upper()
 
-        # REJECTED = governance-blocked, never executed — exclude from all metrics
-        if outcome == 'REJECTED':
+        # REJECTED = governance-blocked, never executed. OPEN = no realized
+        # outcome yet -- estimating P&L from entry/exit (or worse, from
+        # entry_price * size when exit_price is null, i.e. notional/exposure
+        # value, not P&L) contaminates every realized metric. Both are
+        # excluded from every metric this function computes -- total,
+        # win_rate, profit_factor, daily_pnl, and the regime/session/setup
+        # breakdowns alike -- not just daily_pnl specifically.
+        if outcome in ('REJECTED', 'OPEN'):
             continue
 
         realized = t.get('realized_pnl')

@@ -123,15 +123,21 @@ def test_merge_is_a_noop_when_nothing_is_split():
 
 def test_stats_are_correct_after_merge_not_double_counted():
     """
-    Regression for the actual production symptom: before the merge, the
-    unlinked OPEN entry fell into compute_journal_stats()'s breakeven branch
-    with a phantom P&L derived from a null exit_price, corrupting weekly P&L
-    and diluting win rate. After the merge there must be exactly one WIN.
+    Regression for the actual production symptom: the unlinked OPEN entry
+    used to fall into compute_journal_stats()'s breakeven branch with a
+    phantom P&L derived from a null exit_price, corrupting weekly P&L and
+    diluting win rate. compute_journal_stats() now excludes OPEN trades
+    entirely (see tests/test_open_trade_pnl_exclusion.py), so the OPEN
+    entry already contributes 0 even before the merge runs -- the merge's
+    job is collapsing the two journal *rows* into one, not fixing the
+    stats, which are correct either way now.
     """
     trades = _split_trade_fixture()
 
     stats_before = compute_journal_stats(trades)
-    assert stats_before['total'] == 2          # the trade is double-counted
+    assert stats_before['total'] == 1          # OPEN entry excluded, only EOD_CLOSE counts
+    assert stats_before['wins'] == 1
+    assert stats_before['daily_pnl']['this_week'] == 514.91
 
     _merge_orphaned_eod_closes(trades)
     stats_after = compute_journal_stats(trades)
