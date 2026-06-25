@@ -77,13 +77,59 @@ def test_orb_is_allowed_when_configured(monkeypatch):
     assert gate['allowed'] is True
 
 
-def test_disallowed_instrument_is_rejected_even_for_an_allowed_strategy(monkeypatch):
-    """ES/SPY isn't literally 'MES' -- every profile's allowed_instruments
-    is ['MNQ','MES'], so even a PROS signal on ES must be rejected here."""
+def test_pros_on_es_is_allowed_via_market_identity(monkeypatch):
+    """
+    The investigation finding: TradingView's indicator always emits market
+    identity ("ES"/"NQ"), never the execution contract ("MES"/"MNQ"). A
+    profile configured with allowed_instruments=["MNQ","MES"] must still
+    allow a real PROS signal on ES -- ES and MES are the same market,
+    just different execution vehicles for governance purposes.
+    """
     monkeypatch.setattr(ex, '_active_execution_profile', lambda: _profile())
     gate = ex.check_strategy_and_instrument_allowed('PROS', 'ES')
-    assert gate['allowed'] is False
-    assert gate['code'] == 'INSTRUMENT_NOT_ALLOWED'
+    assert gate['allowed'] is True
+
+
+def test_pros_on_nq_is_allowed_when_mnq_is_configured(monkeypatch):
+    monkeypatch.setattr(ex, '_active_execution_profile', lambda: _profile())
+    gate = ex.check_strategy_and_instrument_allowed('PROS', 'NQ')
+    assert gate['allowed'] is True
+
+
+def test_orb_on_es_is_allowed_via_market_identity(monkeypatch):
+    monkeypatch.setattr(ex, '_active_execution_profile', lambda: _profile())
+    gate = ex.check_strategy_and_instrument_allowed('ORB', 'ES')
+    assert gate['allowed'] is True
+
+
+def test_ict_on_es_or_nq_is_still_rejected_by_strategy_not_instrument(monkeypatch):
+    """Market-identity normalization must not accidentally relax the
+    strategy gate -- ICT on either market form is rejected on strategy,
+    same as before this change."""
+    monkeypatch.setattr(ex, '_active_execution_profile', lambda: _profile())
+    for instrument in ('ES', 'NQ', 'MES', 'MNQ'):
+        gate = ex.check_strategy_and_instrument_allowed('ICT', instrument)
+        assert gate['allowed'] is False
+        assert gate['code'] == 'STRATEGY_NOT_ALLOWED'
+
+
+def test_disallowed_markets_still_rejected(monkeypatch):
+    """GC, CL, RTY, YM, BTC have no market-identity equivalence entry --
+    normalization must not widen the allowlist to cover them."""
+    monkeypatch.setattr(ex, '_active_execution_profile', lambda: _profile())
+    for market in ('GC', 'CL', 'RTY', 'YM', 'BTC'):
+        gate = ex.check_strategy_and_instrument_allowed('PROS', market)
+        assert gate['allowed'] is False, f'{market} must still be rejected'
+        assert gate['code'] == 'INSTRUMENT_NOT_ALLOWED'
+
+
+def test_market_identity_helper_maps_correctly():
+    assert ex._market_identity('ES')  == 'ES'
+    assert ex._market_identity('MES') == 'ES'
+    assert ex._market_identity('NQ')  == 'NQ'
+    assert ex._market_identity('MNQ') == 'NQ'
+    assert ex._market_identity('GC')  == 'GC'   # no equivalence -- maps to itself
+    assert ex._market_identity('')    == ''
 
 
 def test_all_six_legacy_strategy_strings_are_rejected_by_default(monkeypatch):
@@ -149,6 +195,68 @@ def test_execute_signal_rejects_ict_before_reaching_alpaca(monkeypatch):
 
     assert result['status'] == 'skipped'
     assert result['code'] == 'STRATEGY_NOT_ALLOWED'
+
+
+def test_gc_is_rejected_before_alpaca_by_the_etf_routing_step(monkeypatch):
+    """
+    GC (or CL, RTY, YM, BTC) never even reaches the new governance gate --
+    execute_signal()'s pre-existing ETF-routing step only recognizes
+    ES/MES/NQ/MNQ and rejects anything else with UNKNOWN_INSTRUMENT before
+    Rule 0.5 runs at all. Still satisfies requirement 6 (no Alpaca order),
+    just via an earlier, separate mechanism -- worth confirming explicitly
+    so the two gates aren't confused with each other.
+    """
+    def _explode():
+        raise AssertionError('Alpaca client must never be constructed for an unroutable instrument')
+
+    monkeypatch.setattr(ex, '_client', _explode)
+    monkeypatch.setattr(ex, '_active_execution_profile', lambda: _profile())
+    monkeypatch.setattr(ex._state, 'can_execute', lambda: True)
+
+    signal_result = {
+        'data': {
+            'ticker': 'GC1!', 'instrument': 'GC', 'signal': 'LONG',
+            'setup_type': 'PROS_CONTINUATION', 'strategy_family': 'PROS',
+            'signal_id': 'test-gc-signal-1',
+        },
+        'parsed': {'verdict': 'TAKE', 'confidence': '85.0%'},
+    }
+
+    result = ex.execute_signal(signal_result)
+
+    assert result['status'] == 'skipped'
+    assert result['code'] == 'UNKNOWN_INSTRUMENT'
+
+
+def test_execute_signal_rejects_disallowed_market_via_new_gate_before_alpaca(monkeypatch):
+    """
+    Requirement 6, exercised through the actual new gate (not the earlier
+    routing step): a profile that only allows the NQ market (MNQ) must
+    reject a real, correctly-graded PROS signal on ES before _client() is
+    ever constructed -- ES is routable (passes the ETF-routing step) but
+    is the wrong market for this profile.
+    """
+    def _explode():
+        raise AssertionError('Alpaca client must never be constructed for a disallowed market')
+
+    monkeypatch.setattr(ex, '_client', _explode)
+    monkeypatch.setattr(ex, '_active_execution_profile',
+                         lambda: _profile(allowed_instruments=('MNQ',)))
+    monkeypatch.setattr(ex._state, 'can_execute', lambda: True)
+
+    signal_result = {
+        'data': {
+            'ticker': 'ES1!', 'instrument': 'ES', 'signal': 'LONG',
+            'setup_type': 'PROS_CONTINUATION', 'strategy_family': 'PROS',
+            'signal_id': 'test-es-wrong-market-signal-1',
+        },
+        'parsed': {'verdict': 'TAKE', 'confidence': '85.0%'},
+    }
+
+    result = ex.execute_signal(signal_result)
+
+    assert result['status'] == 'skipped'
+    assert result['code'] == 'INSTRUMENT_NOT_ALLOWED'
 
 
 if __name__ == '__main__':

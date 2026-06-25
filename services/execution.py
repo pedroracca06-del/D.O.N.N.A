@@ -339,6 +339,26 @@ def _active_execution_profile() -> dict:
     return {}
 
 
+# Market identity equivalence: ES and MES are the same underlying market
+# (S&P 500), NQ and MNQ are the same market (Nasdaq-100) -- the full-size
+# contract and its micro are not different markets for governance purposes,
+# only different execution vehicles. The TradingView indicator's webhook
+# alerts always emit the market-identity form ("ES"/"NQ"); the local
+# monitor.py -> execution_bridge.py path emits whichever literal chart
+# symbol it's reading ("MES"/"MNQ"). Both must satisfy the same allowlist.
+# Anything with no listed equivalent (GC, CL, RTY, YM, BTC, ...) maps to
+# itself, so it is rejected unless explicitly added to allowed_instruments.
+_MARKET_IDENTITY = {
+    'ES': 'ES', 'MES': 'ES',
+    'NQ': 'NQ', 'MNQ': 'NQ',
+}
+
+
+def _market_identity(instrument: str) -> str:
+    """Collapse an execution-contract string to its market identity."""
+    return _MARKET_IDENTITY.get(str(instrument or '').upper(), str(instrument or '').upper())
+
+
 def check_strategy_and_instrument_allowed(strategy_family: str, instrument: str) -> dict:
     """
     Returns {'allowed': True} or {'allowed': False, 'code': ..., 'reason': ...}.
@@ -348,10 +368,18 @@ def check_strategy_and_instrument_allowed(strategy_family: str, instrument: str)
     an allowlist, not a blocklist. New strategies (ICT, FAILED_AUCTION,
     MOMENTUM, or anything else the indicator ever adds) are rejected by
     default until someone deliberately adds them to the profile.
+
+    Instrument comparison happens at market-identity, not literal-string,
+    level: a profile configured with allowed_instruments=["MNQ","MES"]
+    (the execution vehicle) also accepts "NQ"/"ES" (the same markets, as
+    emitted by the TradingView indicator) -- and vice versa. This does not
+    widen the allowlist: GC, CL, RTY, YM, BTC, etc. have no equivalence
+    entry and are still rejected unless explicitly added.
     """
     profile = _active_execution_profile()
     allowed_strategies  = [s.upper() for s in profile.get('allowed_strategies',  ['PROS', 'ORB'])]
     allowed_instruments = [i.upper() for i in profile.get('allowed_instruments', ['MNQ', 'MES'])]
+    allowed_markets      = {_market_identity(i) for i in allowed_instruments}
 
     family = str(strategy_family or '').upper()
     instr  = str(instrument or '').upper()
@@ -362,11 +390,14 @@ def check_strategy_and_instrument_allowed(strategy_family: str, instrument: str)
             'code':    'STRATEGY_NOT_ALLOWED',
             'reason':  f'{family or "UNKNOWN"} not in allowed list: {allowed_strategies}',
         }
-    if instr not in allowed_instruments:
+    if _market_identity(instr) not in allowed_markets:
         return {
             'allowed': False,
             'code':    'INSTRUMENT_NOT_ALLOWED',
-            'reason':  f'{instr or "UNKNOWN"} not in allowed list: {allowed_instruments}',
+            'reason':  (
+                f'{instr or "UNKNOWN"} (market: {_market_identity(instr)}) not in allowed '
+                f'markets: {sorted(allowed_markets)} (from configured instruments {allowed_instruments})'
+            ),
         }
     return {'allowed': True, 'code': '', 'reason': ''}
 
