@@ -1381,53 +1381,6 @@ if showSessionBoxes
         box.set_top(nyBox, nyHigh)
         box.set_bottom(nyBox, nyLow)
 
-//================ OB VISUAL REDESIGN ================
-showOBZones = input.bool(true, "Show OB Zones")
-
-var box   bullOBBox     = na
-var box   bearOBBox     = na
-var line  bullOBTopLine = na
-var line  bearOBTopLine = na
-var label bullOBLabel   = na
-var label bearOBLabel   = na
-
-bullOBColor     = color.new(color.lime, 82)
-bullOBBorder    = color.new(color.lime, 20)
-bullOBLineColor = color.new(color.lime, 10)
-bearOBColor     = color.new(color.red,  82)
-bearOBBorder    = color.new(color.red,  20)
-bearOBLineColor = color.new(color.red,  10)
-obLookback  = 6
-obLabelSize = size.small
-
-if showOBZones and barstate.islast
-    if not na(bullOBBox)
-        box.delete(bullOBBox)
-    if not na(bearOBBox)
-        box.delete(bearOBBox)
-    if not na(bullOBTopLine)
-        line.delete(bullOBTopLine)
-    if not na(bearOBTopLine)
-        line.delete(bearOBTopLine)
-    if not na(bullOBLabel)
-        label.delete(bullOBLabel)
-    if not na(bearOBLabel)
-        label.delete(bearOBLabel)
-    bullOBBox     := na
-    bearOBBox     := na
-    bullOBTopLine := na
-    bearOBTopLine := na
-    bullOBLabel   := na
-    bearOBLabel   := na
-    if not na(bullOBHigh) and not na(bullOBLow)
-        bullOBBox     := box.new(bar_index - obLookback, bullOBHigh, bar_index + 6, bullOBLow, bgcolor=bullOBColor, border_color=bullOBBorder, border_width=1)
-        bullOBTopLine := line.new(bar_index - obLookback, bullOBHigh, bar_index + 6, bullOBHigh, color=bullOBLineColor, width=2)
-        bullOBLabel   := label.new(bar_index + 7, bullOBHigh, "BULL OB\n" + str.tostring(math.round(bullOBHigh, 2)) + "\n" + str.tostring(math.round(bullOBLow, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=bullOBLineColor, size=obLabelSize)
-    if not na(bearOBHigh) and not na(bearOBLow)
-        bearOBBox     := box.new(bar_index - obLookback, bearOBHigh, bar_index + 6, bearOBLow, bgcolor=bearOBColor, border_color=bearOBBorder, border_width=1)
-        bearOBTopLine := line.new(bar_index - obLookback, bearOBHigh, bar_index + 6, bearOBHigh, color=bearOBLineColor, width=2)
-        bearOBLabel   := label.new(bar_index + 7, bearOBHigh, "BEAR OB\n" + str.tostring(math.round(bearOBHigh, 2)) + "\n" + str.tostring(math.round(bearOBLow, 2)), style=label.style_label_left, color=color.new(color.black, 0), textcolor=bearOBLineColor, size=obLabelSize)
-
 //================ SESSION BOX LABELS ================
 var label asiaLabel   = na
 var label londonLabel = na
@@ -2259,48 +2212,6 @@ riskText := orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
      isLunch                          ? "LUNCH CONDITIONS"   :
      inAsia                           ? "ASIA CONDITIONS"    : "NORMAL"
          
-//================ SIGNAL LABELS ================
-var label buyLabel  = na
-var label sellLabel = na
-labelExpiry = 6
-
-buyLabelText =
-     orbBuySignal and orbMidRejectLong  ? "ORB MID REJECT LONG"  :
-     orbBuySignal and orbRetestBull     ? "ORB RETEST LONG"       :
-     orbBuySignal and orbValidBreakBull ? "ORB BREAKOUT LONG"     :
-     orbBuySignal                       ? "ORB BUY"               :
-     ictBuySignal and step3LongElite    ? "CONT ELITE LONG"       :
-     ictBuySignal and ictSMTLong        ? "CONT SMT LONG"         :
-     ictBuySignal                       ? "CONT LONG"             : "BUY"
-
-sellLabelText =
-     orbSellSignal and orbMidRejectShort  ? "ORB MID REJECT SHORT" :
-     orbSellSignal and orbRetestBear      ? "ORB RETEST SHORT"      :
-     orbSellSignal and orbValidBreakBear  ? "ORB BREAKOUT SHORT"    :
-     orbSellSignal                        ? "ORB SELL"              :
-     ictSellSignal and step3ShortElite    ? "CONT ELITE SHORT"      :
-     ictSellSignal and ictSMTShort        ? "CONT SMT SHORT"        :
-     ictSellSignal                        ? "CONT SHORT"            : "SELL"
-
-if buySignal and not buySignal[1]
-    if not na(buyLabel)
-        label.delete(buyLabel)
-    buyLabel := label.new(bar_index, low - atrValue * 0.18, buyLabelText,
-         style=label.style_label_up, color=bullColor, textcolor=color.white, size=size.small)
-
-if sellSignal and not sellSignal[1]
-    if not na(sellLabel)
-        label.delete(sellLabel)
-    sellLabel := label.new(bar_index, high + atrValue * 0.18, sellLabelText,
-         style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
-
-if not na(buyLabel) and bar_index - label.get_x(buyLabel) > labelExpiry
-    label.delete(buyLabel)
-    buyLabel := na
-if not na(sellLabel) and bar_index - label.get_x(sellLabel) > labelExpiry
-    label.delete(sellLabel)
-    sellLabel := na
-
 //================ ALERTS ================
 alertcondition(orbBuySignal,   "ORB BUY",   "ORB buy signal")
 alertcondition(orbSellSignal,  "ORB SELL",  "ORB sell signal")
@@ -2644,12 +2555,10 @@ dashSessionBg =
      inLondon    ? color.new(color.teal,   22) :
      inAsia      ? color.new(color.purple, 22) : panelRowNeutral
 
-// NOVA TABLE — all charts, right side (8 rows: execution + PROS + context)
-var table dash2 = table.new(position.top_right, 2, 8, border_width=1)
-// ORB TABLE — ES/MES only, bottom right
-var table orbDash = table.new(position.bottom_right, 2, 11, border_width=1)
-// PROS TABLE — dedicated continuation intelligence, bottom left
-var table prosDash = table.new(position.bottom_left, 2, 10, border_width=1)
+// NOVA PANEL — compact human UI (Layer 1)
+var table novaPanel  = table.new(position.top_right,    2, 7,  border_width=1, border_color=color.new(color.gray, 70), frame_width=1, frame_color=color.new(color.gray, 60))
+// NOVA BRIDGE — permanent machine-readable automation interface (Layer 2)
+var table novaBridge = table.new(position.bottom_right, 2, 21, border_width=0)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2899,142 +2808,118 @@ obFvgBg =
      atBullFVG or atBullOB ? color.new(color.lime, 20) :
      atBearFVG or atBearOB ? color.new(color.red,  20) : ictCellColor
 
-// ================ ORB TABLE RENDER (ES/MES ONLY) ================
-if showDashboard and barstate.islast and isESChart
-    table.cell(orbDash, 0, 0, "ORB CONSOLE",  text_color=colWarn,  bgcolor=orbHdrColor, text_size=size.small)
-    table.cell(orbDash, 1, 0, "",              text_color=colWarn,  bgcolor=orbHdrColor, text_size=size.small)
-    table.cell(orbDash, 0, 1, "STATE",         text_color=colMuted, bgcolor=orbHdrColor, text_size=size.small)
-    table.cell(orbDash, 1, 1, orbStateMachine,
-         text_color=
-                 orbStateMachine == "ORB_FAILED"        ? colBear  :
-                 orbStateMachine == "ORB_EXPIRED"       ? colMuted :
-                 orbStateMachine == "ORB_ACCEPTED_BULL" ? colBull  :
-                 orbStateMachine == "ORB_ACCEPTED_BEAR" ? colBear  :
-                 orbStateMachine == "ORB_EXPANDING"     ? colWarn  :
-                 orbStateMachine == "ORB_RETESTING"     ? colWarn  :
-                 orbStateMachine == "ORB_READY"         ? colBull  :
-                 colMuted,
-         bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 2, "BIAS",          text_color=colMuted, bgcolor=orbHdrColor, text_size=size.small)
-    table.cell(orbDash, 1, 2, orbBiasText,
-         text_color=orbBullBias ? colBull : orbBearBias ? colBear : colMuted,
-         bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 3, "TYPE",          text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 3, orbTypeText,      text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 4, "REJ Q",         text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 4, orbRejQualText,   text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 5, "EXPAN",         text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 5, orbExpText,
-         text_color=(orbLive and not na(orbHigh) and close > orbHigh) ? colBull :
-                    (orbLive and not na(orbLow)  and close < orbLow)  ? colBear : colWhite,
-         bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 6, "LIQ",           text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 6, orbLiqIntText,    text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 7, "HIGH",          text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 7, orbHighText,      text_color=colWhite, bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 8, "MID",           text_color=colMuted, bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 8, orbMidText,       text_color=colWarn,  bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 9,  "LOW",      text_color=colMuted,    bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 9,  orbLowText, text_color=colWhite,    bgcolor=orbCellColor, text_size=size.small)
-    table.cell(orbDash, 0, 10, "CTX",      text_color=colMuted,    bgcolor=orbHdrColor,  text_size=size.small)
-    table.cell(orbDash, 1, 10, orbCtxText, text_color=orbCtxColor, bgcolor=orbCellColor, text_size=size.small)
+// ================ NOVA COMPACT PANEL — LAYER 1 (HUMAN UI) ================
 
-// ================ NOVA TABLE RENDER (ALL CHARTS) ================
+novaBiasText =
+     localBullBias and buyScore > sellScore + 5  ? "LONG"    :
+     localBearBias and sellScore > buyScore + 5  ? "SHORT"   : "NEUTRAL"
+
+novaSetupText =
+     prosContinuationBull or prosContinuationBear or
+     prosRejectionBull    or prosRejectionBear    or
+     prosLegValidBull     or prosLegValidBear      ? "PROS" :
+     orbIsActive and isESChart                     ? "ORB"  : "NONE"
+
+novaStateText =
+     donnaTrapRisk or orbFailBull or orbFailBear                           ? "LOCKED"          :
+     buySignal or sellSignal                                               ? "EXECUTION_READY" :
+     dashCommandText == "WATCH LONG" or dashCommandText == "WATCH SHORT"  ? "HEADS_UP"        : "WAIT"
+
+novaIBText =
+     isIBWindow                        ? "FORMING" :
+     not na(ibHigh) and close > ibHigh ? "ABOVE"   :
+     not na(ibLow)  and close < ibLow  ? "BELOW"   :
+     not na(ibHigh) and not na(ibLow)  ? "INSIDE"  : "—"
+
+novaRiskText = donnaTrapRisk or orbFailBull or orbFailBear ? "LOCKED" : "CLEAR"
+
+novaBiasCol  = novaBiasText  == "LONG"            ? colBull :
+               novaBiasText  == "SHORT"            ? colBear : colMuted
+novaSetupCol = novaSetupText == "PROS"             ? colTeal :
+               novaSetupText == "ORB"              ? color.new(color.aqua, 0) : colMuted
+novaStateCol = novaStateText == "EXECUTION_READY"  ? colBull :
+               novaStateText == "HEADS_UP"         ? colWarn :
+               novaStateText == "LOCKED"           ? colBear : colMuted
+novaStateBg  = novaStateText == "EXECUTION_READY"  ? color.new(color.lime,   10) :
+               novaStateText == "HEADS_UP"         ? color.new(color.orange, 25) :
+               novaStateText == "LOCKED"           ? color.new(color.red,    15) : ictCellColor
+novaGradeCol = activeGrade == "A" ? colBull :
+               activeGrade == "B" ? colTeal :
+               activeGrade == "C" ? colWarn : colMuted
+novaIBCol    = novaIBText == "ABOVE"   ? colBull :
+               novaIBText == "BELOW"   ? colBear :
+               novaIBText == "FORMING" ? colWarn : colWhite
+novaRiskCol  = novaRiskText == "LOCKED" ? colBear : color.new(color.green, 30)
+
 if showDashboard and barstate.islast
-    // ── HEADER ──────────────────────────────────────
-    table.cell(dash2, 0, 0, "NOVA ENGINE",      text_color=colWarn,  bgcolor=novLabelBg,  text_size=size.small)
-    table.cell(dash2, 1, 0, "",                 text_color=colWarn,  bgcolor=novLabelBg,  text_size=size.small)
+    table.cell(novaPanel, 0, 0, "NOVA",          text_color=colWarn,     bgcolor=novLabelBg,  text_size=size.small)
+    table.cell(novaPanel, 1, 0, "",              text_color=colWarn,     bgcolor=novLabelBg,  text_size=size.small)
+    table.cell(novaPanel, 0, 1, "BIAS",          text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(novaPanel, 1, 1, novaBiasText,    text_color=novaBiasCol,  bgcolor=ictCellColor, text_size=size.small)
+    table.cell(novaPanel, 0, 2, "SETUP",         text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(novaPanel, 1, 2, novaSetupText,   text_color=novaSetupCol, bgcolor=ictCellColor, text_size=size.small)
+    table.cell(novaPanel, 0, 3, "STATE",         text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(novaPanel, 1, 3, novaStateText,   text_color=novaStateCol, bgcolor=novaStateBg,  text_size=size.small)
+    table.cell(novaPanel, 0, 4, "GRADE",         text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(novaPanel, 1, 4, activeGrade != "NA" ? activeGrade : "—", text_color=novaGradeCol, bgcolor=ictCellColor, text_size=size.small)
+    table.cell(novaPanel, 0, 5, "IB",            text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(novaPanel, 1, 5, novaIBText,      text_color=novaIBCol,   bgcolor=ictCellColor, text_size=size.small)
+    table.cell(novaPanel, 0, 6, "RISK",          text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
+    table.cell(novaPanel, 1, 6, novaRiskText,    text_color=novaRiskCol,  bgcolor=ictCellColor, text_size=size.small)
 
-    // ── EXECUTION GROUP — dominant ───────────────────
-    table.cell(dash2, 0, 1, "CMD",              text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(dash2, 1, 1, dashCommandText,
-         text_color=buySignal ? colBull : sellSignal ? colBear : colWarn,
-         bgcolor=novExecBg, text_size=size.normal)
-    table.cell(dash2, 0, 2, "SCORE",            text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(dash2, 1, 2, dashScoreText,       text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
-    table.cell(dash2, 0, 3, "STATE",            text_color=colDim,   bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(dash2, 1, 3, donnaScenario,       text_color=colWhite, bgcolor=ictCellColor, text_size=size.small)
+// ================ NOVA BRIDGE — LAYER 2 (AUTOMATION INTERFACE) ================
+// Permanent machine-readable contract between Pine Script, MCP, and Python.
+// Parsed by parse_nova_tables() in engines/reasoning.py.
+// Visual layout (Layer 1) may change freely. Field keys here must not change
+// without a corresponding update to the Python parser.
 
-    // ── PROS SUMMARY — links to dedicated PROS dashboard ──────
-    table.cell(dash2, 0, 4, "PROS",             text_color=colTeal,  bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(dash2, 1, 4, prosEngineState,
-         text_color=prosEngineCol, bgcolor=novProsBg, text_size=size.small)
+_brBg  = color.new(color.black, 85)
+_brKey = color.new(color.gray,  75)
+_brVal = color.new(color.gray,  60)
 
-    // ── CONTEXT GROUP — recessive ────────────────────
-    table.cell(dash2, 0, 5, "TGT",             text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
-    table.cell(dash2, 1, 5, smartTargetDisplay, text_color=colWarn, bgcolor=ictCellColor, text_size=size.tiny)
-    table.cell(dash2, 0, 6, "SESS",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
-    table.cell(dash2, 1, 6, dashSessionText,
-         text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
-         bgcolor=dashSessionBg, text_size=size.tiny)
-    table.cell(dash2, 0, 7, "CONF",            text_color=colDim, bgcolor=novLabelBg,   text_size=size.tiny)
-    table.cell(dash2, 1, 7, donnaConfText,
-         text_color=donnaConfScore >= 65 ? colBull :
-                    donnaConfScore >= 35 ? colWarn : colBear,
-         bgcolor=ictCellColor, text_size=size.tiny)
-
-// ================ PROS TABLE RENDER ================
-if showDashboard and barstate.islast
-    // ── HEADER ──────────────────────────────────────
-    table.cell(prosDash, 0, 0, "PROS ENGINE",
-         text_color=colTeal, bgcolor=novLabelBg, text_size=size.small)
-    table.cell(prosDash, 1, 0, prosEngineState,
-         text_color=prosEngineCol, bgcolor=prosEngineBg, text_size=size.small)
-
-    // ── DISPLACEMENT ─────────────────────────────────
-    table.cell(prosDash, 0, 1, "DISPL",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 1, prosDisplText,
-         text_color=prosDisplCol, bgcolor=ictCellColor, text_size=size.small)
-
-    // ── RETRACEMENT DEPTH (current) ──────────────────
-    table.cell(prosDash, 0, 2, "RETRACE",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 2, prosRetraceText,
-         text_color=prosRetraceCol, bgcolor=ictCellColor, text_size=size.small)
-
-    // ── OTE CONTEXT (deepest reached) ────────────────
-    table.cell(prosDash, 0, 3, "OTE",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 3, prosOteText,
-         text_color=prosOteCol, bgcolor=ictCellColor, text_size=size.small)
-
-    // ── CONTINUATION (dominant row) ──────────────────
-    table.cell(prosDash, 0, 4, "CONT",
-         text_color=colTeal, bgcolor=novLabelBg, text_size=size.small)
-    table.cell(prosDash, 1, 4, prosContText,
-         text_color=prosEngineCol, bgcolor=prosEngineBg, text_size=size.small)
-
-    // ── QUALITY ──────────────────────────────────────
-    table.cell(prosDash, 0, 5, "QUALITY",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 5, prosQualText,
-         text_color=prosQualCol, bgcolor=ictCellColor, text_size=size.small)
-
-    // ── STDV CONTEXT ─────────────────────────────────
-    table.cell(prosDash, 0, 6, "STDV",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 6, prosStdvText,
-         text_color=prosStdvCol, bgcolor=ictCellColor, text_size=size.tiny)
-
-    // ── SESSION ──────────────────────────────────────
-    table.cell(prosDash, 0, 7, "SESS",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 7, dashSessionText,
-         text_color=isNYOpen ? colWarn : inNYCash ? colBull : colWhite,
-         bgcolor=dashSessionBg, text_size=size.tiny)
-
-    // ── IB LEVELS (exported for Python parser reliability) ───────────
-    prosIbHighText = not na(ibHigh) ? str.tostring(ibHigh, "#.##") : "—"
-    prosIbLowText  = not na(ibLow)  ? str.tostring(ibLow,  "#.##") : "—"
-    table.cell(prosDash, 0, 8, "IB H",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 8, prosIbHighText,
-         text_color=colWhite, bgcolor=ictCellColor, text_size=size.tiny)
-    table.cell(prosDash, 0, 9, "IB L",
-         text_color=colDim, bgcolor=novLabelBg, text_size=size.tiny)
-    table.cell(prosDash, 1, 9, prosIbLowText,
-         text_color=colWhite, bgcolor=ictCellColor, text_size=size.tiny)
+if barstate.islast
+    table.cell(novaBridge, 0, 0,  "NOVA BRIDGE", text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 0,  "",             text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 1,  "CMD",          text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 1,  dashCommandText,text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 2,  "SYS_STATE",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 2,  donnaScenario,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 3,  "SCORE",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 3,  dashScoreText,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 4,  "CONF",         text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 4,  donnaConfText,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 5,  "PROS_ENG",     text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 5,  prosEngineState,text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 6,  "P_DISPL",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 6,  prosDisplText,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 7,  "P_RETRACE",    text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 7,  prosRetraceText,text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 8,  "P_OTE",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 8,  prosOteText,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 9,  "P_CONT",       text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 9,  prosContText,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 10, "P_QUALITY",    text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 10, prosQualText,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 11, "P_STDV",       text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 11, prosStdvText,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 12, "IB H",         text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 12, not na(ibHigh) ? str.tostring(ibHigh, "#.##") : "—", text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 13, "IB L",         text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 13, not na(ibLow)  ? str.tostring(ibLow,  "#.##") : "—", text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 14, "O_STATE",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 14, orbStateMachine,text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 15, "O_BIAS",       text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 15, orbBiasText,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 16, "O_TYPE",       text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 16, orbTypeText,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 17, "O_REJ_Q",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 17, orbRejQualText, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 18, "O_HIGH",       text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 18, orbHighText,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 19, "O_MID",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 19, orbMidText,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 20, "O_LOW",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 20, orbLowText,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE

@@ -314,10 +314,13 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     """
     Parse NOVA indicator table rows into structured dicts.
 
-    ES/MES has 3 tables: NOVA ENGINE, ORB CONSOLE, PROS ENGINE.
-    NQ/other has 2 tables: NOVA ENGINE, PROS ENGINE.
-    Tables are identified by header key, not index — index-based fails on ES/MES
-    because raw_tables[1] is ORB CONSOLE, not PROS ENGINE.
+    Priority 1: NOVA BRIDGE (permanent automation interface, single table).
+      Identified by 'NOVA BRIDGE' header row. Maps prefixed keys to the
+      same main/pros/orb sub-dicts that downstream evaluators expect.
+
+    Priority 2: Legacy three-table layout (backward-compat fallback).
+      NOVA ENGINE → main, PROS ENGINE → pros, ORB CONSOLE → orb.
+      Kept until all charts are confirmed on the new Pine Script.
     """
     parsed = {}
 
@@ -329,6 +332,44 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
                 result[key.strip()] = val.strip()
         return result
 
+    # ── Priority 1: NOVA BRIDGE ───────────────────────────────────────────────
+    for table_rows in raw_tables:
+        if not table_rows:
+            continue
+        d = _parse_rows(table_rows)
+        if 'NOVA BRIDGE' not in d:
+            continue
+
+        parsed['main'] = {
+            'CMD':   d.get('CMD',       ''),
+            'STATE': d.get('SYS_STATE', ''),
+            'SCORE': d.get('SCORE',     ''),
+            'CONF':  d.get('CONF',      ''),
+            'PROS':  d.get('PROS_ENG',  ''),
+        }
+        parsed['pros'] = {
+            'PROS ENGINE': d.get('PROS_ENG',  ''),
+            'DISPL':       d.get('P_DISPL',   ''),
+            'RETRACE':     d.get('P_RETRACE', ''),
+            'OTE':         d.get('P_OTE',     ''),
+            'CONT':        d.get('P_CONT',    ''),
+            'QUALITY':     d.get('P_QUALITY', ''),
+            'STDV':        d.get('P_STDV',    ''),
+            'IB H':        d.get('IB H',      ''),
+            'IB L':        d.get('IB L',      ''),
+        }
+        parsed['orb'] = {
+            'STATE': d.get('O_STATE',  ''),
+            'BIAS':  d.get('O_BIAS',   ''),
+            'TYPE':  d.get('O_TYPE',   ''),
+            'REJ Q': d.get('O_REJ_Q',  ''),
+            'HIGH':  d.get('O_HIGH',   ''),
+            'MID':   d.get('O_MID',    ''),
+            'LOW':   d.get('O_LOW',    ''),
+        }
+        return parsed  # NOVA BRIDGE found — skip legacy detection
+
+    # ── Priority 2: Legacy three-table fallback ───────────────────────────────
     for table_rows in raw_tables:
         if not table_rows:
             continue
@@ -340,7 +381,7 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
         elif 'ORB CONSOLE' in d:
             parsed['orb'] = d
 
-    # Fallback to index order if header detection found nothing
+    # Index-based fallback if header detection found nothing
     if 'main' not in parsed and len(raw_tables) >= 1:
         parsed['main'] = _parse_rows(raw_tables[0])
     if 'pros' not in parsed and len(raw_tables) >= 2:
