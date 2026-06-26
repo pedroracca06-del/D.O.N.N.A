@@ -333,12 +333,14 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
         return result
 
     # ── Priority 1: NOVA BRIDGE ───────────────────────────────────────────────
+    # Header row is a single cell with no ' | ', so it's never in the parsed
+    # dict — check the raw rows list directly instead.
     for table_rows in raw_tables:
         if not table_rows:
             continue
-        d = _parse_rows(table_rows)
-        if 'NOVA BRIDGE' not in d:
+        if table_rows[0].strip() != 'NOVA BRIDGE':
             continue
+        d = _parse_rows(table_rows)
 
         parsed['main'] = {
             'CMD':   d.get('CMD',       ''),
@@ -373,12 +375,13 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     for table_rows in raw_tables:
         if not table_rows:
             continue
+        header = table_rows[0].strip()
         d = _parse_rows(table_rows)
-        if 'NOVA ENGINE' in d:
+        if header == 'NOVA ENGINE':
             parsed['main'] = d
-        elif 'PROS ENGINE' in d:
+        elif header == 'PROS ENGINE':
             parsed['pros'] = d
-        elif 'ORB CONSOLE' in d:
+        elif header == 'ORB CONSOLE':
             parsed['orb'] = d
 
     # Index-based fallback if header detection found nothing
