@@ -23,6 +23,7 @@ showDashboard = input.bool(true,  "Show Dashboard")
 showORB       = input.bool(true,  "Show ORB")
 showSessions  = input.bool(true,  "Show Session Background")
 showSignals   = input.bool(true,  "Show Signals")
+showBridge    = input.bool(false, "Show NOVA Bridge (debug)")
 
 showHistBoxes = input.bool(true, "Show Historical Session Boxes", group="Historical Memory")
 showHistORB   = input.bool(true, "Show Historical ORB Boxes",     group="Historical Memory")
@@ -2555,10 +2556,10 @@ dashSessionBg =
      inLondon    ? color.new(color.teal,   22) :
      inAsia      ? color.new(color.purple, 22) : panelRowNeutral
 
-// NOVA PANEL — compact human UI (Layer 1)
-var table novaPanel  = table.new(position.top_right,    2, 7,  border_width=1, border_color=color.new(color.gray, 70), frame_width=1, frame_color=color.new(color.gray, 60))
+// NOVA STATUS STRIP — minimal one-row status (Layer 1)
+var table novaStrip  = table.new(position.top_right,   7, 1, border_width=0, frame_width=0)
 // NOVA BRIDGE — permanent machine-readable automation interface (Layer 2)
-var table novaBridge = table.new(position.bottom_right, 2, 21, border_width=0)
+var table novaBridge = table.new(position.bottom_left, 2, 21, border_width=0)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2851,31 +2852,32 @@ novaIBCol    = novaIBText == "ABOVE"   ? colBull :
                novaIBText == "FORMING" ? colWarn : colWhite
 novaRiskCol  = novaRiskText == "LOCKED" ? colBear : color.new(color.green, 30)
 
+// One-row status strip — no box, no borders, text only
+_stripBg      = color.new(color.black, 100)  // fully transparent — no box
+_stripStateBg =
+     novaStateText == "EXECUTION_READY" ? color.new(color.lime,   20) :
+     novaStateText == "HEADS_UP"        ? color.new(color.orange, 35) :
+     novaStateText == "LOCKED"          ? color.new(color.red,    20) :
+     color.new(color.black, 100)
+
 if showDashboard and barstate.islast
-    table.cell(novaPanel, 0, 0, "NOVA",          text_color=colWarn,     bgcolor=novLabelBg,  text_size=size.small)
-    table.cell(novaPanel, 1, 0, "",              text_color=colWarn,     bgcolor=novLabelBg,  text_size=size.small)
-    table.cell(novaPanel, 0, 1, "BIAS",          text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(novaPanel, 1, 1, novaBiasText,    text_color=novaBiasCol,  bgcolor=ictCellColor, text_size=size.small)
-    table.cell(novaPanel, 0, 2, "SETUP",         text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(novaPanel, 1, 2, novaSetupText,   text_color=novaSetupCol, bgcolor=ictCellColor, text_size=size.small)
-    table.cell(novaPanel, 0, 3, "STATE",         text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(novaPanel, 1, 3, novaStateText,   text_color=novaStateCol, bgcolor=novaStateBg,  text_size=size.small)
-    table.cell(novaPanel, 0, 4, "GRADE",         text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(novaPanel, 1, 4, activeGrade != "NA" ? activeGrade : "—", text_color=novaGradeCol, bgcolor=ictCellColor, text_size=size.small)
-    table.cell(novaPanel, 0, 5, "IB",            text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(novaPanel, 1, 5, novaIBText,      text_color=novaIBCol,   bgcolor=ictCellColor, text_size=size.small)
-    table.cell(novaPanel, 0, 6, "RISK",          text_color=colDim,      bgcolor=novLabelBg,  text_size=size.tiny)
-    table.cell(novaPanel, 1, 6, novaRiskText,    text_color=novaRiskCol,  bgcolor=ictCellColor, text_size=size.small)
+    table.cell(novaStrip, 0, 0, "NOVA",                             text_color=colWarn,     bgcolor=_stripBg,      text_size=size.tiny)
+    table.cell(novaStrip, 1, 0, novaBiasText,                       text_color=novaBiasCol,  bgcolor=_stripBg,      text_size=size.tiny)
+    table.cell(novaStrip, 2, 0, novaSetupText,                      text_color=novaSetupCol, bgcolor=_stripBg,      text_size=size.tiny)
+    table.cell(novaStrip, 3, 0, novaStateText,                      text_color=novaStateCol, bgcolor=_stripStateBg, text_size=size.tiny)
+    table.cell(novaStrip, 4, 0, activeGrade != "NA" ? activeGrade : "—", text_color=novaGradeCol, bgcolor=_stripBg, text_size=size.tiny)
+    table.cell(novaStrip, 5, 0, "IB " + novaIBText,                text_color=novaIBCol,    bgcolor=_stripBg,      text_size=size.tiny)
+    table.cell(novaStrip, 6, 0, novaRiskText,                       text_color=novaRiskCol,  bgcolor=_stripBg,      text_size=size.tiny)
 
 // ================ NOVA BRIDGE — LAYER 2 (AUTOMATION INTERFACE) ================
 // Permanent machine-readable contract between Pine Script, MCP, and Python.
 // Parsed by parse_nova_tables() in engines/reasoning.py.
-// Visual layout (Layer 1) may change freely. Field keys here must not change
-// without a corresponding update to the Python parser.
+// Field keys must not change without updating the Python parser.
+// showBridge (default false) makes it visible for debug — MCP reads it either way.
 
-_brBg  = color.new(color.black, 85)
-_brKey = color.new(color.gray,  75)
-_brVal = color.new(color.gray,  60)
+_brBg  = showBridge ? color.new(color.black, 82) : color.new(color.black, 99)
+_brKey = showBridge ? color.new(color.gray,  55) : color.new(color.black, 99)
+_brVal = showBridge ? color.new(color.gray,  35) : color.new(color.black, 99)
 
 if barstate.islast
     table.cell(novaBridge, 0, 0,  "NOVA BRIDGE", text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
