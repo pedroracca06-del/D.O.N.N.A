@@ -26,7 +26,10 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault('DONNA_DATA_DIR', str(ROOT / 'data'))
+# Support both NOVA_DATA_DIR (canonical) and DONNA_DATA_DIR (legacy).
+_script_data_dir = os.getenv('NOVA_DATA_DIR') or os.getenv('DONNA_DATA_DIR') or str(ROOT / 'data')
+os.environ.setdefault('NOVA_DATA_DIR',  _script_data_dir)
+os.environ.setdefault('DONNA_DATA_DIR', _script_data_dir)
 
 try:
     from dotenv import load_dotenv

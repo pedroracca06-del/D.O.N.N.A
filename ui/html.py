@@ -2958,7 +2958,7 @@ function renderDashboard() {
 
   // ── Live strip + session (shared topbar)
   if (_lastDashData) {
-    setText('sessionVal', risk.donna_session || '—');
+    setText('sessionVal', risk.nova_session || risk.donna_session || '—');
     updateStrip((_lastDashData.live_strip) || []);
   }
   const stripEl = document.querySelector('.ticker-wrap');
@@ -2972,7 +2972,7 @@ function renderDashboard() {
   // ── HERO ──
   const regime = se.market_regime || 'UNKNOWN';
   const macro  = (se.macro_risk || risk.macro_risk || 'low').toLowerCase();
-  const session = se.session_state || risk.donna_session || '';
+  const session = se.session_state || risk.nova_session || risk.donna_session || '';
   const regimeEl = document.getElementById('dbRegimeText');
   if (regimeEl) {
     regimeEl.textContent = regime;
@@ -3214,7 +3214,7 @@ function renderHarveyNew(d) {
 
   // Session stats
   const ctx = d.session_context || {};
-  setText('hvSession',      ctx.session      || d.donna_session || '—');
+  setText('hvSession',      ctx.session      || d.nova_session || d.donna_session || '—');
   setText('hvDay',          ctx.day          || '—');
   setText('hvSessionLabel', (d.session_significance || {}).label || '—');
   setHtml('hvMacroRisk',    riskBadge(d.macro_risk));
@@ -3967,7 +3967,7 @@ function _renderHeartbeat(orch, exec) {
   if (labelEl) { labelEl.textContent = labelText; labelEl.style.color = pulseClass === 'active' ? 'var(--green)' : pulseClass === 'blocked' ? 'var(--red)' : pulseClass === 'paused' ? 'var(--gold)' : 'var(--muted2)'; }
 
   // Session chip
-  const session = exec?.session || orch?.session || (_lastDashData?.risk?.donna_session) || '';
+  const session = exec?.session || orch?.session || (_lastDashData?.risk?.nova_session) || (_lastDashData?.risk?.donna_session) || '';
   const sessMap = {NEW_YORK_CASH:'NY CASH',LONDON:'LONDON',ASIA:'ASIA',OFF_HOURS:'OFF HOURS'};
   const sessColMap = {NEW_YORK_CASH:'green',LONDON:'blue',ASIA:'yellow',OFF_HOURS:''};
   _setChip('novaSessionChip', sessMap[session] || session || 'SESSION', sessColMap[session] || '');
@@ -4002,7 +4002,7 @@ function _renderExecutionState(orch, exec) {
   const rCol = {TRENDING_UP:'var(--green)',TRENDING_DOWN:'var(--red)',RANGING:'var(--yellow)',VOLATILE:'var(--red)',EVENT_DRIVEN:'var(--gold)',UNKNOWN:'var(--muted2)'};
   _setKv('novaRegimeVal', regime.replace(/_/g,' '), rCol[regime] || 'var(--text)');
 
-  const session = exec?.session || (_lastDashData?.risk?.donna_session) || '';
+  const session = exec?.session || (_lastDashData?.risk?.nova_session) || (_lastDashData?.risk?.donna_session) || '';
   const sessMap = {NEW_YORK_CASH:'NY CASH',LONDON:'LONDON',ASIA:'ASIA',OFF_HOURS:'OFF HOURS'};
   _setKv('novaSessionVal', sessMap[session] || session || '—');
 
@@ -4921,7 +4921,7 @@ function renderJournal(data) {
         const gradeClass = grade === 'A' ? 'b-grade-a' : grade === 'B' ? 'b-grade-b' : 'b-grade-c';
         const sessLabel  = (t.session || '').replace(/_/g, ' ');
         const setupLabel = t.setup_type || '';
-        const isAuto     = t.source === 'DONNA_AUTO' || t.source === 'DONNA_AUTO_RECONSTRUCTED';
+        const isAuto     = ['NOVA_AUTO','DONNA_AUTO','NOVA_AUTO_RECONSTRUCTED','DONNA_AUTO_RECONSTRUCTED'].includes(t.source);
 
         // Badges
         let badges = '';

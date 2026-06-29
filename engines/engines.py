@@ -470,7 +470,7 @@ def build_session_significance(risk=None):
         summary = 'The session is active, but not extraordinary.'
     if es_label in {'MAJOR', 'NOTABLE'}:
         summary += ' ES participation confirms broad index support.'
-    if state.get('donna_session') == 'NEW_YORK_CASH':
+    if (state.get('nova_session') or state.get('donna_session')) == 'NEW_YORK_CASH':
         summary += ' Because this happened in New York cash hours, the move matters more.'
 
     return {
@@ -803,7 +803,7 @@ def build_harvey_payload(risk=None):
     sell_threshold = 100 - bias_threshold
 
     # ── ORB status ───────────────────────────────────────────────
-    session        = str(state.get('donna_session', '')).upper()
+    session        = str(state.get('nova_session') or state.get('donna_session') or '').upper()
     now_ny_obj     = now_ny()
     market_open_mins = (now_ny_obj.hour * 60 + now_ny_obj.minute) - (9 * 60 + 30)
 
@@ -916,8 +916,8 @@ def build_harvey_payload(risk=None):
 
     session_context = {
         'session':       session,
-        'time_ny':       state.get('donna_time_ny', ''),
-        'day':           state.get('donna_day', ''),
+        'time_ny':       state.get('nova_time_ny') or state.get('donna_time_ny') or '',
+        'day':           state.get('nova_day') or state.get('donna_day') or '',
         'next_event':    state.get('next_event', ''),
         'event_phase':   event_phase,
         'mins_to_event': state.get('minutes_to_event'),
@@ -1056,7 +1056,7 @@ def build_donna_observations(risk=None):
 
 def build_session_playbook(risk=None):
     state    = risk or load_risk_state()
-    session  = str(state.get('donna_session', 'OFF_HOURS'))
+    session  = str(state.get('nova_session') or state.get('donna_session') or 'OFF_HOURS')
     macro    = str(state.get('macro_risk', 'medium')).lower()
     headline = str(state.get('headline_risk', 'medium')).lower()
     driver   = build_market_driver_engine(state)
@@ -1135,7 +1135,7 @@ def build_scenario_engine(force: bool = False) -> dict:
 
     context = (
         f"Date: {now_ny().strftime('%A, %B %-d, %Y')}\n"
-        f"Session: {risk.get('donna_session', '—')}\n"
+        f"Session: {risk.get('nova_session') or risk.get('donna_session') or '—'}\n"
         f"Regime: {regime_data.get('regime', '—')} | HARVEY Mode: {regime_data.get('harvey_mode', '—')}\n"
         f"Macro Risk: {risk.get('macro_risk', 'medium').upper()} | Event Phase: {risk.get('event_phase', '—').upper()}\n"
         f"Next Event: {risk.get('next_event', 'none')}\n\n"
@@ -1147,7 +1147,7 @@ def build_scenario_engine(force: bool = False) -> dict:
         f"ES price reference: {es_last}\n"
         f"Session significance: {sig.get('label', '—')} — NQ ~{int(sig.get('nq_points', 0))} pts\n"
         f"Last headline: {risk.get('last_headline', '')}\n"
-        f"Dominant driver: {risk.get('donna_session', '')}, macro={risk.get('macro_risk', '')}"
+        f"Dominant driver: {risk.get('nova_session') or risk.get('donna_session') or ''}, macro={risk.get('macro_risk', '')}"
     )
 
     system = (
@@ -1493,7 +1493,7 @@ def build_dashboard_payload():
         {'label': 'Driver',      'value': driver['dominant_driver']},
         {'label': 'Threat',      'value': morning['main_threat']},
         {'label': 'Open Quality','value': morning['open_quality']},
-        {'label': 'Session',     'value': risk.get('donna_session', session_label())},
+        {'label': 'Session',     'value': risk.get('nova_session') or risk.get('donna_session') or session_label()},
         {'label': 'Headline',    'value': risk.get('last_headline', '')},
     ]
 

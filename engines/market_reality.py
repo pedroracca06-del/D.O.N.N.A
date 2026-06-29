@@ -159,7 +159,7 @@ def compute_market_reality() -> dict:
     es_price = _safe_float((snapshot.get('ES') or {}).get('last'))
     vix      = _safe_float((snapshot.get('VIX') or {}).get('last'))
     regime   = risk.get('market_regime', 'UNKNOWN')
-    session  = risk.get('donna_session', 'UNKNOWN')
+    session  = risk.get('nova_session') or risk.get('donna_session') or 'UNKNOWN'
 
     direction    = _compute_direction(nq_pct, es_pct)
     severity     = _compute_severity(nq_pct, es_pct)

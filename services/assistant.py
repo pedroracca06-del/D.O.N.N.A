@@ -137,7 +137,7 @@ def summarize_system_context() -> str:
             pass
 
     cached_context = (
-        f"Session: {risk.get('donna_session')}\n"
+        f"Session: {risk.get('nova_session') or risk.get('donna_session')}\n"
         f"Macro Risk: {risk.get('macro_risk')}\n"
         f"Headline Risk: {risk.get('headline_risk')}\n"
         f"Market Risk: {risk.get('market_news_risk')}\n"

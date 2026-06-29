@@ -136,7 +136,7 @@ def test_no_matching_open_entry_creates_tagged_fallback_row():
     assert result['status'] == 'ok'
     journal = ex.load_journal()
     assert len(journal) == 1
-    assert journal[0]['source'] == 'DONNA_EOD', 'reuses existing fallback taxonomy the audit already understands'
+    assert journal[0]['source'] == 'NOVA_EOD', 'new writes use NOVA_EOD; audit matches both NOVA_EOD and DONNA_EOD'
     assert journal[0]['close_reason'] == 'MANUAL'
     assert journal[0]['outcome'] == 'WIN'
 

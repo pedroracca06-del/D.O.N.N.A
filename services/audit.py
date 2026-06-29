@@ -233,7 +233,7 @@ def _reconstruct_journal_entry(
     """
     Write a minimal reconstructed journal entry from trace data.
     Appended in-place to journal_trades (caller handles save).
-    Marked source='DONNA_AUTO_RECONSTRUCTED' so it is distinguishable.
+    Marked source='NOVA_AUTO_RECONSTRUCTED' so it is distinguishable.
     """
     order_id  = str(executed_record.get('order_id', ''))
     etf       = executed_record.get('etf', '') or intent_record.get('etf', '')
@@ -253,7 +253,7 @@ def _reconstruct_journal_entry(
         pass
 
     entry = {
-        'source':           'DONNA_AUTO_RECONSTRUCTED',
+        'source':           'NOVA_AUTO_RECONSTRUCTED',
         'order_id':         order_id,
         'ticker':           etf,
         'instrument':       intent_record.get('instrument', ''),
@@ -304,11 +304,11 @@ def _reconstruct_journal_entry(
 # pre-existing split and flag anything they can't safely repair.
 
 def _find_orphan_eod_match(journal_trades: list, open_entry: dict, skip: set[int]) -> int | None:
-    """Find the index of a standalone DONNA_EOD row matching open_entry, or None."""
+    """Find the index of a standalone NOVA_EOD/DONNA_EOD row matching open_entry, or None."""
     for j, t in enumerate(journal_trades):
         if j in skip:
             continue
-        if (t.get('source') == 'DONNA_EOD'
+        if (t.get('source') in ('NOVA_EOD', 'DONNA_EOD')
                 and not t.get('order_id')
                 and t.get('ticker') == open_entry.get('ticker')
                 and t.get('direction') == open_entry.get('direction')
@@ -393,11 +393,12 @@ def _merge_orphaned_eod_closes(journal_trades: list) -> list[dict]:
 
 def find_unlinked_reconstructed_closes(journal_trades: list) -> list[dict]:
     """
-    Regression check: flag any autonomous OPEN entry (DONNA_AUTO or
-    DONNA_AUTO_RECONSTRUCTED) that still has a matching standalone DONNA_EOD
-    close row sitting unlinked next to it. Should always return [] after
-    _merge_orphaned_eod_closes() runs — a non-empty result means a new variant
-    of the split has appeared and needs investigation, not silent data loss.
+    Regression check: flag any autonomous OPEN entry (NOVA_AUTO / DONNA_AUTO or
+    NOVA_AUTO_RECONSTRUCTED / DONNA_AUTO_RECONSTRUCTED) that still has a
+    matching standalone NOVA_EOD/DONNA_EOD close row sitting unlinked next to
+    it. Should always return [] after _merge_orphaned_eod_closes() runs — a
+    non-empty result means a new variant of the split has appeared and needs
+    investigation, not silent data loss.
     """
     flags: list[dict] = []
     open_entries = [
@@ -412,7 +413,7 @@ def find_unlinked_reconstructed_closes(journal_trades: list) -> list[dict]:
                 'ticker':     open_entry.get('ticker', ''),
                 'trade_date': open_entry.get('trade_date', ''),
                 'note': (
-                    'OPEN autonomous entry has an unlinked standalone DONNA_EOD '
+                    'OPEN autonomous entry has an unlinked standalone NOVA_EOD/DONNA_EOD '
                     'close row — journal split detected.'
                 ),
             })

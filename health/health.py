@@ -59,13 +59,21 @@ try:
         'macro_discord': _MDF,
     }
 except Exception:
+    # Config import failed — resolve paths manually with the same nova→donna fallback.
+    import os as _os
+    _data_dir = Path(_os.getenv('NOVA_DATA_DIR') or _os.getenv('DONNA_DATA_DIR') or str(BASE_DIR / 'data'))
+
+    def _hf(nova, donna):
+        n, d = _data_dir / nova, _data_dir / donna
+        return d if d.exists() and not n.exists() else n
+
     STATE_FILES = {
-        'risk_state':    BASE_DIR / 'data' / 'donna_risk_state.json',
-        'state_engine':  BASE_DIR / 'data' / 'donna_state_engine.json',
-        'risk_engine':   BASE_DIR / 'data' / 'donna_risk_engine_state.json',
-        'alert_state':   BASE_DIR / 'data' / 'donna_alert_state.json',
-        'macro_events':  BASE_DIR / 'data' / 'donna_macro_events.json',
-        'macro_discord': BASE_DIR / 'data' / 'donna_macro_discord_state.json',
+        'risk_state':    _hf('nova_risk_state.json',        'donna_risk_state.json'),
+        'state_engine':  _hf('nova_state_engine.json',      'donna_state_engine.json'),
+        'risk_engine':   _hf('nova_risk_engine_state.json', 'donna_risk_engine_state.json'),
+        'alert_state':   _hf('nova_alert_state.json',       'donna_alert_state.json'),
+        'macro_events':  _hf('nova_macro_events.json',      'donna_macro_events.json'),
+        'macro_discord': _hf('nova_macro_discord_state.json','donna_macro_discord_state.json'),
     }
 
 # ── Result primitives ──────────────────────────────────────────────────────────
@@ -262,6 +270,7 @@ def _check_state_files() -> list[dict]:
 def _check_render_backend() -> list[dict]:
     url = (os.getenv('RENDER_EXTERNAL_URL') or
            os.getenv('RENDER_URL') or
+           os.getenv('NOVA_BACKEND_URL') or
            os.getenv('DONNA_BACKEND_URL') or '').strip().rstrip('/')
     if not url:
         return [_r(WARNING, 'RENDER_EXTERNAL_URL not set  —  backend reachability not verified')]
@@ -457,7 +466,8 @@ def _blocked_signals_today() -> tuple[int, list[str]]:
     """Read execution trace; return (count, grade_list) for STATE_GATE_BLOCKED today."""
     try:
         today = datetime.now().strftime('%Y-%m-%d')
-        path  = BASE_DIR / 'data' / 'donna_execution_trace.json'
+        from core.config import TRACE_FILE as _TRACE_FILE
+        path  = _TRACE_FILE
         raw   = json.loads(path.read_text(encoding='utf-8'))
         entries = raw if isinstance(raw, list) else raw.get('entries', [raw])
         blocked, grades = [], []

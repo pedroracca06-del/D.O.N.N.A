@@ -1,4 +1,4 @@
-"""donna_config.py — constants, env vars, file paths, time helpers, cache, Anthropic client."""
+"""nova_config.py — constants, env vars, file paths, time helpers, cache, Anthropic client."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,16 +19,19 @@ NY_TZ  = ZoneInfo('America/New_York')
 UTC_TZ = ZoneInfo('UTC')
 
 # ── File paths ────────────────────────────────────────────────
-# DONNA_DATA_DIR lets Render's persistent disk override the default path.
-# Set DONNA_DATA_DIR=/data in Render env vars and mount the disk at /data.
-# Locally: falls back to repo/data/ as before.
-DATA_DIR           = Path(os.getenv('DONNA_DATA_DIR', str(BASE_DIR / 'data')))
+# NOVA_DATA_DIR is the canonical env var (preferred).
+# DONNA_DATA_DIR is the legacy name — still accepted as a fallback so existing
+# Render deployments keep working until the env var is updated.
+# Set either to /data in Render env vars and mount the persistent disk there.
+# Locally: falls back to repo/data/ if neither is set.
+DATA_DIR = Path(os.getenv('NOVA_DATA_DIR') or os.getenv('DONNA_DATA_DIR') or str(BASE_DIR / 'data'))
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 except PermissionError as _mkdir_err:
     import sys as _sys
     _sys.stderr.write(
         f'\n[CRITICAL] DATA_DIR={DATA_DIR} is not writable. '
+        f'NOVA_DATA_DIR={os.getenv("NOVA_DATA_DIR", "not set")}  '
         f'DONNA_DATA_DIR={os.getenv("DONNA_DATA_DIR", "not set")}. '
         f'If running on Render, ensure the persistent disk is mounted at {DATA_DIR}. '
         f'Error: {_mkdir_err}\n\n'
@@ -36,35 +39,49 @@ except PermissionError as _mkdir_err:
     # Do NOT fall back to a different path — that would silently write to ephemeral storage.
     # All subsequent file operations will fail with their own errors, making the issue visible.
 
-RISK_STATE_FILE    = DATA_DIR / 'donna_risk_state.json'
-ALERTS_FILE        = DATA_DIR / 'donna_alert_history.json'
-ASSISTANT_FILE     = DATA_DIR / 'donna_assistant_state.json'
-SETTINGS_FILE      = DATA_DIR / 'donna_settings.json'
-MACRO_EVENTS_FILE  = DATA_DIR / 'donna_macro_events.json'
-MORNING_BRIEF_FILE = DATA_DIR / 'donna_morning_brief_state.json'
-JOURNAL_FILE       = DATA_DIR / 'donna_journal.json'
-REJECTIONS_FILE    = DATA_DIR / 'donna_rejections.json'
-SIGNAL_LOG_FILE        = DATA_DIR / 'donna_signal_log.json'
-TRACE_FILE             = DATA_DIR / 'donna_execution_trace.json'
-MARKET_MEMORY_FILE     = DATA_DIR / 'donna_market_memory.json'
-REASONING_TRACE_FILE   = DATA_DIR / 'donna_reasoning_trace.json'
-MARKET_REALITY_V2_FILE = DATA_DIR / 'donna_market_reality_v2.json'
-FEED_SYNC_FILE              = DATA_DIR / 'donna_feed_sync.json'
-GROK_INTEL_FILE             = DATA_DIR / 'donna_grok_intelligence.json'
-STATE_ENGINE_FILE           = DATA_DIR / 'donna_state_engine.json'
-MARKET_REALITY_FILE         = DATA_DIR / 'donna_market_reality.json'
-MACRO_DISCORD_STATE_FILE    = DATA_DIR / 'donna_macro_discord_state.json'
-RISK_ENGINE_FILE            = DATA_DIR / 'donna_risk_engine_state.json'
-SP500_HEATMAP_FILE          = DATA_DIR / 'donna_sp500_heatmap.json'
-NQ_HEATMAP_FILE             = DATA_DIR / 'donna_nq_heatmap.json'
-BTC_VIX_CACHE_FILE          = DATA_DIR / 'donna_btc_vix_cache.json'
-CROSS_MARKET_FILE           = DATA_DIR / 'donna_cross_market.json'
-MARKET_STRUCTURE_FILE       = DATA_DIR / 'donna_market_structure.json'
-PARTICIPATION_FILE          = DATA_DIR / 'donna_participation.json'
-LIQUIDITY_FILE              = DATA_DIR / 'donna_liquidity.json'
-SYNTHESIS_FILE              = DATA_DIR / 'donna_synthesis.json'
-SESSION_MEMORY_FILE         = DATA_DIR / 'donna_session_memory.json'
-INTELLIGENCE_LOG_FILE       = DATA_DIR / 'donna_intelligence_log.json'
+
+def _data_file(nova_name: str, donna_name: str) -> Path:
+    """Prefer nova_*.json; transparently fall back to donna_*.json during migration.
+
+    At import time: if nova_*.json does not exist yet but donna_*.json does, the
+    existing donna file is used — no production data is lost or skipped.
+    Once nova_*.json is created (Phase 2 writes or Phase 3 copy), it takes over
+    automatically on the next restart.
+    """
+    nova_path  = DATA_DIR / nova_name
+    donna_path = DATA_DIR / donna_name
+    return donna_path if donna_path.exists() and not nova_path.exists() else nova_path
+
+
+RISK_STATE_FILE    = _data_file('nova_risk_state.json',           'donna_risk_state.json')
+ALERTS_FILE        = _data_file('nova_alert_history.json',        'donna_alert_history.json')
+ASSISTANT_FILE     = _data_file('nova_assistant_state.json',      'donna_assistant_state.json')
+SETTINGS_FILE      = _data_file('nova_settings.json',             'donna_settings.json')
+MACRO_EVENTS_FILE  = _data_file('nova_macro_events.json',         'donna_macro_events.json')
+MORNING_BRIEF_FILE = _data_file('nova_morning_brief_state.json',  'donna_morning_brief_state.json')
+JOURNAL_FILE       = _data_file('nova_journal.json',              'donna_journal.json')
+REJECTIONS_FILE    = _data_file('nova_rejections.json',           'donna_rejections.json')
+SIGNAL_LOG_FILE        = _data_file('nova_signal_log.json',           'donna_signal_log.json')
+TRACE_FILE             = _data_file('nova_execution_trace.json',       'donna_execution_trace.json')
+MARKET_MEMORY_FILE     = _data_file('nova_market_memory.json',         'donna_market_memory.json')
+REASONING_TRACE_FILE   = _data_file('nova_reasoning_trace.json',       'donna_reasoning_trace.json')
+MARKET_REALITY_V2_FILE = _data_file('nova_market_reality_v2.json',     'donna_market_reality_v2.json')
+FEED_SYNC_FILE              = _data_file('nova_feed_sync.json',              'donna_feed_sync.json')
+GROK_INTEL_FILE             = _data_file('nova_grok_intelligence.json',      'donna_grok_intelligence.json')
+STATE_ENGINE_FILE           = _data_file('nova_state_engine.json',           'donna_state_engine.json')
+MARKET_REALITY_FILE         = _data_file('nova_market_reality.json',         'donna_market_reality.json')
+MACRO_DISCORD_STATE_FILE    = _data_file('nova_macro_discord_state.json',    'donna_macro_discord_state.json')
+RISK_ENGINE_FILE            = _data_file('nova_risk_engine_state.json',      'donna_risk_engine_state.json')
+SP500_HEATMAP_FILE          = _data_file('nova_sp500_heatmap.json',          'donna_sp500_heatmap.json')
+NQ_HEATMAP_FILE             = _data_file('nova_nq_heatmap.json',             'donna_nq_heatmap.json')
+BTC_VIX_CACHE_FILE          = _data_file('nova_btc_vix_cache.json',          'donna_btc_vix_cache.json')
+CROSS_MARKET_FILE           = _data_file('nova_cross_market.json',           'donna_cross_market.json')
+MARKET_STRUCTURE_FILE       = _data_file('nova_market_structure.json',       'donna_market_structure.json')
+PARTICIPATION_FILE          = _data_file('nova_participation.json',          'donna_participation.json')
+LIQUIDITY_FILE              = _data_file('nova_liquidity.json',              'donna_liquidity.json')
+SYNTHESIS_FILE              = _data_file('nova_synthesis.json',              'donna_synthesis.json')
+SESSION_MEMORY_FILE         = _data_file('nova_session_memory.json',         'donna_session_memory.json')
+INTELLIGENCE_LOG_FILE       = _data_file('nova_intelligence_log.json',       'donna_intelligence_log.json')
 
 # ── API keys ──────────────────────────────────────────────────
 ANTHROPIC_API_KEY       = os.getenv('ANTHROPIC_API_KEY', '').strip()
@@ -92,7 +109,7 @@ DISCORD_CHANNEL_SYSTEM_HEALTH  = os.getenv('DISCORD_CHANNEL_SYSTEM_HEALTH', '').
 ALERT_SCREENSHOT       = os.getenv('ALERT_SCREENSHOT', 'true').strip().lower() == 'true'
 ALERT_COOLDOWN_MINUTES = int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
 ALERT_DAILY_MAX        = int(os.getenv('ALERT_DAILY_MAX', '20'))
-ALERT_STATE_FILE       = DATA_DIR / 'donna_alert_state.json'
+ALERT_STATE_FILE       = _data_file('nova_alert_state.json', 'donna_alert_state.json')
 
 # ── Feed sync (local → Render replication) ────────────────────
 # NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)

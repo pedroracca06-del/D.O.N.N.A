@@ -122,7 +122,7 @@ def pre_verdict_engine(data: dict, risk=None) -> str:
     elif context == 'moderate' and score_provided: points += 1
     elif context not in ('strong', 'moderate'):    points -= 1
 
-    session = str(state.get('donna_session', data.get('session', ''))).upper()
+    session = str(state.get('nova_session') or state.get('donna_session') or data.get('session') or '').upper()
     ny      = now_ny()
     ny_mins = ny.hour * 60 + ny.minute
     if session == 'NEW_YORK_CASH':
@@ -159,7 +159,7 @@ def pre_verdict_engine(data: dict, risk=None) -> str:
 
 
 def _compute_signal_confidence(data: dict, risk: dict, sig: dict) -> float:
-    session     = str(risk.get('donna_session', '')).upper()
+    session     = str(risk.get('nova_session') or risk.get('donna_session') or '').upper()
     macro       = str(risk.get('macro_risk', 'medium')).lower()
     event_phase = str(risk.get('event_phase', '')).upper()
 
@@ -224,7 +224,7 @@ def _generate_signal_summary(data: dict, risk: dict, sig: dict, driver: dict) ->
     liq_state   = str(data.get('liq_state', ''))
     brain_state = str(data.get('brain_state', ''))
     kill_zone   = str(data.get('kill_zone', ''))
-    session_raw = str(risk.get('donna_session', data.get('session', ''))).upper()
+    session_raw = str(risk.get('nova_session') or risk.get('donna_session') or data.get('session') or '').upper()
     macro       = str(risk.get('macro_risk', 'medium')).lower()
     event_phase = str(risk.get('event_phase', '')).upper()
     next_event  = risk.get('next_event', 'no major event scheduled')
@@ -358,7 +358,7 @@ def process_signal(payload: dict) -> dict:
 
     macro       = str(risk.get('macro_risk', 'medium')).lower()
     event_phase = str(risk.get('event_phase', '')).upper()
-    session     = str(risk.get('donna_session', '')).upper()
+    session     = str(risk.get('nova_session') or risk.get('donna_session') or '').upper()
     snap        = risk.get('market_snapshot', {})
     nas_pct     = safe_float(snap.get('NASDAQ', {}).get('pct', 0))
     signal      = str(data['signal']).upper()

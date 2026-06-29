@@ -468,13 +468,15 @@ async def debug_paths():
     from core.config import DATA_DIR, JOURNAL_FILE
     data_dir_str = str(DATA_DIR)
     journal_str  = str(JOURNAL_FILE)
-    env_var      = os.getenv('DONNA_DATA_DIR', 'NOT_SET')
+    env_nova      = os.getenv('NOVA_DATA_DIR', 'NOT_SET')
+    env_donna     = os.getenv('DONNA_DATA_DIR', 'NOT_SET')
     data_dir_exists   = DATA_DIR.exists()
     journal_exists    = JOURNAL_FILE.exists()
     journal_bytes     = JOURNAL_FILE.stat().st_size if journal_exists else -1
     data_dir_contents = sorted([f.name for f in DATA_DIR.iterdir()]) if data_dir_exists else []
     return {
-        'env_DONNA_DATA_DIR': env_var,
+        'env_NOVA_DATA_DIR':  env_nova,
+        'env_DONNA_DATA_DIR': env_donna,
         'DATA_DIR':           data_dir_str,
         'JOURNAL_FILE':       journal_str,
         'data_dir_exists':    data_dir_exists,
@@ -2073,7 +2075,7 @@ async def webhook(request: Request):
                 'ict_step':        _sig.get('ict_step', ''),
                 'kill_zone':       _sig.get('kill_zone', ''),
                 'notes':           'auto-logged on execution',
-                'source':          'DONNA_AUTO',
+                'source':          'NOVA_AUTO',
                 'order_id':        execution.get('order_id', ''),
             }
             _trades = load_journal()

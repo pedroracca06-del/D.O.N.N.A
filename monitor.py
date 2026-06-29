@@ -202,8 +202,8 @@ def _run_premarket_check() -> None:
     # ── Execution ─────────────────────────────────────────────────────────────
     try:
         import json as _json2
-        from pathlib import Path as _Path
-        se_path = _Path(__file__).parent / 'data' / 'donna_state_engine.json'
+        from core.config import STATE_ENGINE_FILE as _SEF
+        se_path = _SEF
         se = _json2.loads(se_path.read_text(encoding='utf-8')) if se_path.exists() else {}
     except Exception:
         se = {}
@@ -322,8 +322,7 @@ def main() -> None:
     # updated before the reset fires. This guard catches that race condition.
     try:
         import json as _json
-        from pathlib import Path as _Path
-        _se_path = _Path(__file__).parent / 'data' / 'donna_state_engine.json'
+        from core.config import STATE_ENGINE_FILE as _se_path
         _se = _json.loads(_se_path.read_text(encoding='utf-8')) if _se_path.exists() else {}
         if (
             not _se.get('trade_permission', True)

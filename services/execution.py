@@ -23,12 +23,17 @@ import services.execution_trace as _trace
 # Options: ALPACA_ETF | TRADOVATE | RITHMIC
 BROKER_MODE = "ALPACA_ETF"
 
-# Journal sources that represent a NOVA autonomous trade. DONNA_AUTO_RECONSTRUCTED
-# is the same trade class as DONNA_AUTO — it just arrived via audit.py recovery
-# instead of the live execution path. Every matcher that links an OPEN
-# autonomous entry to its close (EOD sweep, check_position_outcomes, daily
-# first-trade-outcome) must treat both the same way.
-AUTONOMOUS_JOURNAL_SOURCES = ('DONNA_AUTO', 'DONNA_AUTO_RECONSTRUCTED')
+# Journal sources that represent a NOVA autonomous trade.
+# NOVA_AUTO / NOVA_EOD are the canonical names going forward.
+# DONNA_AUTO / DONNA_EOD / DONNA_AUTO_RECONSTRUCTED are retained here so that
+# historical journal entries (written before the NOVA rename) continue to match
+# in every reconciliation, EOD sweep, outcome matcher, and analytics query.
+# Do not remove the DONNA_* variants until all historical records are confirmed
+# migrated and no reader depends on them.
+AUTONOMOUS_JOURNAL_SOURCES = (
+    'NOVA_AUTO', 'DONNA_AUTO',
+    'NOVA_AUTO_RECONSTRUCTED', 'DONNA_AUTO_RECONSTRUCTED',
+)
 
 # Why a position's exit happened. Always set on close so a future audit can
 # tell an autonomous bracket fill apart from a manual button click without
@@ -948,7 +953,7 @@ def _close_symbol_and_sync(api, symbol: str, snapshot: dict, close_reason: str, 
         }
     else:
         trades.append({
-            'source':       'DONNA_EOD',
+            'source':       'NOVA_EOD',
             'ticker':       symbol,
             'direction':    'LONG' if is_long else 'SHORT',
             'trade_date':   now_ny().strftime('%Y-%m-%d'),
@@ -1149,7 +1154,7 @@ def close_all_positions_eod() -> int:
 
         if not matched:
             trades.append({
-                'source':       'DONNA_EOD',
+                'source':       'NOVA_EOD',
                 'ticker':       symbol,
                 'direction':    'LONG' if is_long else 'SHORT',
                 'trade_date':   ny.strftime('%Y-%m-%d'),
@@ -1368,7 +1373,7 @@ def _journal_log_trade(
     ctx_snap = _get_context_snapshot(instrument) if instrument else {}
 
     entry = {
-        'source':            'DONNA_AUTO',
+        'source':            'NOVA_AUTO',
         'order_id':          order_id,
         'ticker':            symbol,       # routed ETF (SPY / QQQ)
         'instrument':        instrument,   # futures root (MNQ / MES)
