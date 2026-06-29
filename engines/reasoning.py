@@ -317,6 +317,8 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     Priority 1: NOVA BRIDGE (permanent automation interface, single table).
       Identified by 'NOVA BRIDGE' header row. Maps prefixed keys to the
       same main/pros/orb sub-dicts that downstream evaluators expect.
+      BRIDGE_VER >= 2: also extracts rows 21-33 into bridge_v2 + bridge_meta.
+      Observation only — bridge_meta does not affect execution.
 
     Priority 2: Legacy three-table layout (backward-compat fallback).
       NOVA ENGINE → main, PROS ENGINE → pros, ORB CONSOLE → orb.
@@ -369,6 +371,86 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
             'MID':   d.get('O_MID',    ''),
             'LOW':   d.get('O_LOW',    ''),
         }
+
+        # ── BRIDGE v2 extension fields (rows 21-33) ───────────────────────────
+        # Observation/health only — nothing here gates execution.
+        # If BRIDGE_VER is absent the chart is running v1; skip v2 extraction.
+        _V2_KEYS = [
+            'BRIDGE_VER', 'TICKER', 'TF', 'IB_STATUS', 'SESSION',
+            'ORB_ACTIVE', 'PROS_ACTIVE', 'COOLDOWN', 'TRAP',
+            'ICT_STEP', 'PEER_ALIGN', 'DRAW_TARGET', 'DRAW_DIR',
+        ]
+
+        def _vbool(val: str):
+            v = val.strip()
+            return True if v == '1' else (False if v == '0' else None)
+
+        def _vint(val: str):
+            v = val.strip()
+            return int(v) if v.lstrip('-').isdigit() else None
+
+        def _vfloat(val: str):
+            v = val.strip()
+            if v in ('', '—', 'na', 'NA'):
+                return None
+            try:
+                return float(v)
+            except ValueError:
+                return None
+
+        bridge_ver_raw = d.get('BRIDGE_VER', '').strip()
+        bridge_ver     = int(bridge_ver_raw) if bridge_ver_raw.isdigit() else 1
+        v2_detected    = bridge_ver >= 2
+
+        present = [k for k in _V2_KEYS if d.get(k, '').strip() not in ('', '—')]
+        missing = [k for k in _V2_KEYS if d.get(k, '').strip()     in ('', '—')]
+
+        bridge_v2 = {
+            'bridge_ver':  bridge_ver,
+            'ticker':      d.get('TICKER',     '').strip() or None,
+            'timeframe':   d.get('TF',         '').strip() or None,
+            'ib_status':   d.get('IB_STATUS',  '').strip() or None,
+            'session':     d.get('SESSION',    '').strip() or None,
+            'orb_active':  _vbool(d.get('ORB_ACTIVE',  '')),
+            'pros_active': _vbool(d.get('PROS_ACTIVE', '')),
+            'cooldown':    _vbool(d.get('COOLDOWN',    '')),
+            'trap':        _vbool(d.get('TRAP',        '')),
+            'ict_step':    _vint( d.get('ICT_STEP',    '')),
+            'peer_align':  d.get('PEER_ALIGN', '').strip() or None,
+            'draw_target': _vfloat(d.get('DRAW_TARGET', '')),
+            'draw_dir':    d.get('DRAW_DIR',   '').strip() or None,
+        }
+        bridge_meta = {
+            'bridge_version':        bridge_ver,
+            'bridge_v2_detected':    v2_detected,
+            'parsed_ticker':         bridge_v2['ticker'],
+            'parsed_timeframe':      bridge_v2['timeframe'],
+            'parsed_session':        bridge_v2['session'],
+            'bridge_fields_present': len(present),
+            'bridge_fields_missing': missing,
+        }
+
+        parsed['bridge_v2']   = bridge_v2
+        parsed['bridge_meta'] = bridge_meta
+
+        if v2_detected:
+            _miss_str = ','.join(missing) if missing else 'none'
+            print(
+                f'[nova-bridge-v2]'
+                f' ver={bridge_ver}'
+                f' ticker={bridge_v2["ticker"]}'
+                f' tf={bridge_v2["timeframe"]}'
+                f' session={bridge_v2["session"]}'
+                f' ib={bridge_v2["ib_status"]}'
+                f' orb={bridge_v2["orb_active"]}'
+                f' pros={bridge_v2["pros_active"]}'
+                f' trap={bridge_v2["trap"]}'
+                f' ict={bridge_v2["ict_step"]}'
+                f' peer={bridge_v2["peer_align"]}'
+                f' fields={len(present)}/{len(_V2_KEYS)}'
+                f' missing={_miss_str}'
+            )
+
         return parsed  # NOVA BRIDGE found — skip legacy detection
 
     # ── Priority 2: Legacy three-table fallback ───────────────────────────────
@@ -2346,6 +2428,8 @@ def analyze_now(verbose: bool = False) -> dict:
         'session':        session_ctx['session'],
         'nova_main':      nova_state.get('main', {}),
         'nova_pros':      nova_state.get('pros', {}),
+        'bridge_v2':      nova_state.get('bridge_v2',   {}),
+        'bridge_meta':    nova_state.get('bridge_meta', {}),
         'pre_signal':     signal_type,
         'pre_setup':      setup_type,
         'pre_rationale':  rationale,
