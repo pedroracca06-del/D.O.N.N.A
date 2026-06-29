@@ -2008,16 +2008,12 @@ def execute_signal(signal_result: dict) -> dict:
     parsed = signal_result.get('parsed', {})
 
     # ── Rule 0: State engine gate — must pass before any other logic
-    if not _state.can_execute():
-        lockouts = _state.get('risk_lockouts') or []
-        reason = (
-            ', '.join(l['reason'] if isinstance(l, dict) else l for l in lockouts)
-            if lockouts else 'execution_lock or trade_permission disabled'
-        )
-        print(f'[execute_signal] BLOCKED — {reason}')
+    _block = _state.block_reason()
+    if _block is not None:
+        print(f'[execute_signal] BLOCKED — {_block}')
         _log_rejection(_rejection_context(
-            'STATE_GATE_BLOCKED', f'Execution blocked: {reason}', data, parsed))
-        return {'status': 'skipped', 'reason': f'Execution blocked: {reason}', 'code': 'STATE_GATE_BLOCKED'}
+            'STATE_GATE_BLOCKED', f'Execution blocked: {_block}', data, parsed))
+        return {'status': 'skipped', 'reason': f'Execution blocked: {_block}', 'code': 'STATE_GATE_BLOCKED'}
 
     # ── Determine routed instrument from signal
     instrument = data.get('instrument', '').upper()

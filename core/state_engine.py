@@ -175,6 +175,10 @@ class DonnaStateEngine:
 
     def can_execute(self) -> bool:
         """True only when all execution gates are open."""
+        return self.block_reason() is None
+
+    def block_reason(self) -> str | None:
+        """Return a human-readable reason string if execution is blocked, else None."""
         with self._lock:
             self._maybe_reset_daily_unlocked()
             s = self._state
@@ -185,14 +189,18 @@ class DonnaStateEngine:
             _all_sessions = os.getenv('NOVA_ALL_SESSIONS', '').strip().lower() == 'true'
             if not _all_sessions:
                 if _h < 9 or (_h == 9 and _m < 30) or _h >= 16:
-                    return False
-            return (
-                not s.get('execution_lock', False)
-                and bool(s.get('trade_permission', True))
-                and (not s.get('eod_lock', False) or _all_sessions)
-                and not s.get('macro_lock', False)
-                and not s.get('red_folder_lock', False)
-            )
+                    return f'outside NY session hours — {_ny.strftime("%H:%M")} ET (window: 09:30–16:00)'
+            if s.get('execution_lock', False):
+                return 'execution_lock is set'
+            if not bool(s.get('trade_permission', True)):
+                return 'trade_permission disabled'
+            if s.get('eod_lock', False) and not _all_sessions:
+                return 'eod_lock is set'
+            if s.get('macro_lock', False):
+                return 'macro_lock is set'
+            if s.get('red_folder_lock', False):
+                return 'red_folder_lock is set'
+            return None
 
     def get_trade_count(self) -> int:
         """Return today's trade count."""
