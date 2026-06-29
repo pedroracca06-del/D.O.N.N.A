@@ -2559,7 +2559,7 @@ dashSessionBg =
 // NOVA STATUS STRIP — minimal one-row status (Layer 1)
 var table novaStrip  = table.new(position.top_right,   7, 1, border_width=0, frame_width=0)
 // NOVA BRIDGE — permanent machine-readable automation interface (Layer 2)
-var table novaBridge = table.new(position.bottom_left, 2, 21, border_width=0)
+var table novaBridge = table.new(position.bottom_left, 2, 34, border_width=0)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2869,6 +2869,23 @@ if showDashboard and barstate.islast
     table.cell(novaStrip, 5, 0, "IB " + novaIBText,                text_color=novaIBCol,    bgcolor=_stripBg,      text_size=size.tiny)
     table.cell(novaStrip, 6, 0, novaRiskText,                       text_color=novaRiskCol,  bgcolor=_stripBg,      text_size=size.tiny)
 
+// ── NOVA BRIDGE v2 helper values (rows 21-33) ─────────────────────────────────
+_brIBStatus   = isIBWindow ? "FORMING" : not na(ibLockBar) and not na(ibHigh) ? "COMPLETE" : time >= _ibWinEnd ? "STALE" : "PRE"
+_brSession    = isNYOpen ? "NY_OPEN" : isLunch ? "LUNCH" : isPowerHour ? "POWER" : inNYCash ? "NY_CASH" : inNYPre ? "NY_PRE" : inLondon ? "LONDON" : inAsia ? "ASIA" : "OFF"
+_brOrbActive  = orbIsActive ? "1" : "0"
+_brProsActive = (prosLegValidBull or prosLegValidBear) ? "1" : "0"
+_brCooldown   = (not canSmartBuy and not canSmartSell) ? "1" : "0"
+_brTrap       = donnaTrapRisk ? "1" : "0"
+_brIctStep    = step3LongElite  or step3ShortElite  ? "6" :
+                ictLongReady    or ictShortReady    ? "5" :
+                step3LongReady  or step3ShortReady  ? "4" :
+                ictEntryZoneLong or ictEntryZoneShort ? "3" :
+                step2BullActive or step2BearActive  ? "2" :
+                sweepLowFresh   or sweepHighFresh   ? "1" : "0"
+_brPeerAlign  = crossBullAligned or crossBearAligned ? "CONFIRM" : crossConflict ? "CONFLICT" : "NEUTRAL"
+_brDrawTarget = not na(smartTargetPrice) ? str.tostring(math.round(smartTargetPrice, 2)) : "—"
+_brDrawDir    = not na(smartTargetPrice) and smartTargetPrice > close ? "UP" : not na(smartTargetPrice) and smartTargetPrice < close ? "DOWN" : "NONE"
+
 // ================ NOVA BRIDGE — LAYER 2 (AUTOMATION INTERFACE) ================
 // Permanent machine-readable contract between Pine Script, MCP, and Python.
 // Parsed by parse_nova_tables() in engines/reasoning.py.
@@ -2922,6 +2939,33 @@ if barstate.islast
     table.cell(novaBridge, 1, 19, orbMidText,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 20, "O_LOW",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 1, 20, orbLowText,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    // ── v2 rows (rows 21-33) — observation/health fields, no execution gates ──
+    table.cell(novaBridge, 0, 21, "BRIDGE_VER",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 21, "2",             text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 22, "TICKER",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 22, syminfo.ticker,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 23, "TF",            text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 23, timeframe.period, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 24, "IB_STATUS",     text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 24, _brIBStatus,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 25, "SESSION",       text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 25, _brSession,      text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 26, "ORB_ACTIVE",    text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 26, _brOrbActive,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 27, "PROS_ACTIVE",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 27, _brProsActive,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 28, "COOLDOWN",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 28, _brCooldown,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 29, "TRAP",          text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 29, _brTrap,         text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 30, "ICT_STEP",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 30, _brIctStep,      text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 31, "PEER_ALIGN",    text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 31, _brPeerAlign,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 32, "DRAW_TARGET",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 32, _brDrawTarget,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 33, "DRAW_DIR",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 33, _brDrawDir,      text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE
