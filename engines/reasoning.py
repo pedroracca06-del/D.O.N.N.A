@@ -475,6 +475,133 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     return parsed
 
 
+# ── MCP health scoring ─────────────────────────────────────────────────────────
+# Required v2 BRIDGE fields for a HEALTHY read.
+# Absence of any required field degrades the confidence score.
+# Optional fields: present = 100, absent = 85 (not BROKEN).
+_MCP_REQUIRED_V2: frozenset = frozenset({
+    'TICKER', 'TF', 'IB_STATUS', 'SESSION',
+    'ORB_ACTIVE', 'PROS_ACTIVE', 'COOLDOWN', 'TRAP',
+    'ICT_STEP', 'PEER_ALIGN',
+})
+_MCP_OPTIONAL_V2: frozenset = frozenset({'DRAW_TARGET', 'DRAW_DIR'})
+
+
+def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
+    """
+    Compute a structured health/confidence score for the current MCP read.
+
+    Observation only — the returned score does NOT gate execution.
+    Score sources: bridge_meta (from parse_nova_tables) + chart_ctx connectivity.
+
+    Score bands:
+      100 = v2 BRIDGE, all required + optional fields present
+       85 = v2 BRIDGE, all required present, optional missing
+       70 = v2 BRIDGE, one required field missing
+      60+ = v2 BRIDGE, 2 required missing (degrades toward 30)
+       50 = legacy v1 BRIDGE or no BRIDGE_VER
+       30 = connected but NOVA BRIDGE not found (indicator may be missing)
+        0 = TradingView not reachable
+
+    Status:
+      HEALTHY  80–100
+      DEGRADED 50–79
+      BROKEN   0–49
+    """
+    warnings: list = []
+    errors:   list = []
+
+    def _result(confidence: int, *, ticker=None, timeframe=None, session=None,
+                fields_present: int = 0, fields_missing: list = None,
+                bridge_ver: int = 1, v2: bool = False) -> dict:
+        confidence = max(0, min(100, confidence))
+        status = ('HEALTHY'  if confidence >= 80 else
+                  'DEGRADED' if confidence >= 50 else 'BROKEN')
+        return {
+            'status':             status,
+            'confidence':         confidence,
+            'bridge_version':     bridge_ver,
+            'bridge_v2_detected': v2,
+            'ticker':             ticker,
+            'timeframe':          timeframe,
+            'session':            session,
+            'fields_present':     fields_present,
+            'fields_missing':     fields_missing or [],
+            'warnings':           list(warnings),
+            'errors':             list(errors),
+        }
+
+    # Case 0: TradingView not reachable ───────────────────────────────────────
+    if not chart_ctx.get('connected'):
+        errors.append('TradingView not reachable')
+        return _result(0)
+
+    bridge_meta  = nova_state.get('bridge_meta', {})
+    nova_tables  = chart_ctx.get('nova_tables',  [])
+    bridge_found = 'bridge_meta' in nova_state
+
+    # Case 1: connected, NOVA BRIDGE absent ───────────────────────────────────
+    if not bridge_found:
+        if not nova_tables:
+            errors.append('NOVA tables absent — indicator may be missing from chart')
+        else:
+            errors.append('NOVA BRIDGE header not found in any table')
+        return _result(30)
+
+    bridge_ver  = bridge_meta.get('bridge_version',     1)
+    v2_detected = bridge_meta.get('bridge_v2_detected', False)
+
+    # Case 2: BRIDGE found but v1 (no BRIDGE_VER or < 2) ─────────────────────
+    if not v2_detected:
+        warnings.append(
+            f'Legacy BRIDGE v{bridge_ver} detected — '
+            're-save NOVA EXECUTION V1 to activate v2 fields'
+        )
+        return _result(50, bridge_ver=bridge_ver)
+
+    # Case 3: v2 BRIDGE — evaluate field completeness ─────────────────────────
+    all_missing = bridge_meta.get('bridge_fields_missing', [])
+    missing_req = [f for f in all_missing if f in _MCP_REQUIRED_V2]
+    missing_opt = [f for f in all_missing if f in _MCP_OPTIONAL_V2]
+
+    for f in missing_req:
+        warnings.append(f'Required v2 field absent: {f}')
+    for f in missing_opt:
+        warnings.append(f'Optional v2 field absent: {f}')
+
+    n_req = len(missing_req)
+    if n_req == 0:
+        confidence = 85 if missing_opt else 100
+    elif n_req == 1:
+        confidence = 70
+    else:
+        # 2+ missing required: degrade from 65 toward 30
+        confidence = max(30, 65 - (n_req - 1) * 10)
+
+    # Identity check: TICKER from BRIDGE must match chart symbol ──────────────
+    ticker    = bridge_meta.get('parsed_ticker')
+    timeframe = bridge_meta.get('parsed_timeframe')
+    session   = bridge_meta.get('parsed_session')
+    chart_sym = chart_ctx.get('symbol', '')
+
+    if ticker and chart_sym:
+        def _norm(s: str) -> str:
+            return s.replace('CME_MINI:', '').replace('CME:', '').replace('1!', '').strip().upper()
+        if _norm(ticker) != _norm(chart_sym):
+            errors.append(
+                f'Symbol mismatch: BRIDGE TICKER={ticker}, chart symbol={chart_sym}'
+            )
+            confidence = min(confidence, 30)
+
+    return _result(
+        confidence,
+        ticker=ticker, timeframe=timeframe, session=session,
+        fields_present=bridge_meta.get('bridge_fields_present', 0),
+        fields_missing=all_missing,
+        bridge_ver=bridge_ver, v2=True,
+    )
+
+
 # ── Session context evaluator (fast, deterministic) ────────────────────────────
 
 def _session_info(mins: int, weekday: int) -> dict:
@@ -1861,6 +1988,21 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     pros_state_data = nova_state.get('pros', {})
     orb_table       = nova_state.get('orb', {})
 
+    # MCP health — observation only, does not affect execution path below
+    _mcp_health = compute_mcp_health(chart_ctx, nova_state)
+    _h = _mcp_health
+    print(
+        f'[mcp-health]'
+        f' status={_h["status"]}'
+        f' confidence={_h["confidence"]}'
+        f' bridge={_h["bridge_version"]}'
+        f' ticker={_h["ticker"]}'
+        f' tf={_h["timeframe"]}'
+        f' session={_h["session"]}'
+        f' warnings={len(_h["warnings"])}'
+        f' errors={len(_h["errors"])}'
+    )
+
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
     ib_eval         = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
@@ -2319,6 +2461,8 @@ def analyze_now(verbose: bool = False) -> dict:
     pros_state_data = nova_state.get('pros', {})
     orb_table       = nova_state.get('orb', {})
 
+    mcp_health = compute_mcp_health(chart_ctx, nova_state)
+
     # Run all deterministic evaluators
     pros_eval      = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval       = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
@@ -2430,6 +2574,7 @@ def analyze_now(verbose: bool = False) -> dict:
         'nova_pros':      nova_state.get('pros', {}),
         'bridge_v2':      nova_state.get('bridge_v2',   {}),
         'bridge_meta':    nova_state.get('bridge_meta', {}),
+        'mcp_health':     mcp_health,
         'pre_signal':     signal_type,
         'pre_setup':      setup_type,
         'pre_rationale':  rationale,
