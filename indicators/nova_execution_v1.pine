@@ -2876,12 +2876,7 @@ _brOrbActive  = orbIsActive ? "1" : "0"
 _brProsActive = (prosLegValidBull or prosLegValidBear) ? "1" : "0"
 _brCooldown   = (not canSmartBuy and not canSmartSell) ? "1" : "0"
 _brTrap       = donnaTrapRisk ? "1" : "0"
-_brIctStep    = step3LongElite  or step3ShortElite  ? "6" :
-                ictLongReady    or ictShortReady    ? "5" :
-                step3LongReady  or step3ShortReady  ? "4" :
-                ictEntryZoneLong or ictEntryZoneShort ? "3" :
-                step2BullActive or step2BearActive  ? "2" :
-                sweepLowFresh   or sweepHighFresh   ? "1" : "0"
+_brIctStep    = step3LongElite or step3ShortElite ? "6" : ictLongReady or ictShortReady ? "5" : step3LongReady or step3ShortReady ? "4" : ictEntryZoneLong or ictEntryZoneShort ? "3" : step2BullActive or step2BearActive ? "2" : sweepLowFresh or sweepHighFresh ? "1" : "0"
 _brPeerAlign  = crossBullAligned or crossBearAligned ? "CONFIRM" : crossConflict ? "CONFLICT" : "NEUTRAL"
 _brDrawTarget = not na(smartTargetPrice) ? str.tostring(math.round(smartTargetPrice, 2)) : "—"
 _brDrawDir    = not na(smartTargetPrice) and smartTargetPrice > close ? "UP" : not na(smartTargetPrice) and smartTargetPrice < close ? "DOWN" : "NONE"
