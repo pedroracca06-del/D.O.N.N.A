@@ -1447,6 +1447,30 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .db-badge-card{padding:14px 16px}
 .db-badge-label{font-size:9px;font-family:Space Mono,monospace;letter-spacing:1.2px;color:var(--muted2);margin-bottom:6px}
 .db-badge-value{font-size:16px;font-weight:700;font-family:Rajdhani,sans-serif}
+/* ── NOVA REPLAY TAB ── */
+.rp-card{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px}
+.rp-section-lbl{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:8px;border-bottom:1px solid rgba(184,134,11,.18);padding-bottom:4px}
+.rp-concl{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:5px;display:inline-block}
+.rp-concl-good{color:var(--green);background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.3)}
+.rp-concl-bad{color:var(--yellow);background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3)}
+.rp-concl-skip{color:var(--blue);background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.3)}
+.rp-concl-missed{color:var(--red);background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
+.rp-concl-insuf{color:var(--muted2);background:rgba(100,116,139,.06);border:1px solid var(--line)}
+.rp-field{display:flex;flex-direction:column;gap:2px;min-width:70px}
+.rp-field-lab{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--muted2);text-transform:uppercase}
+.rp-field-val{font-size:13px;font-weight:600;color:var(--text);font-family:'Rajdhani',sans-serif}
+.rp-lesson{background:rgba(184,134,11,.04);border:1px solid rgba(184,134,11,.12);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--muted);font-style:italic;line-height:1.6;margin-top:8px}
+.rp-tbl{width:100%;border-collapse:collapse}
+.rp-tbl th{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+.rp-tbl td{padding:8px 10px;border-bottom:1px solid rgba(100,116,139,.1);vertical-align:middle;font-family:'Space Mono',monospace;font-size:10px;color:var(--text)}
+.rp-tbl tr:last-child td{border-bottom:none}
+.rp-tbl tr:hover td{background:rgba(100,116,139,.04)}
+.rp-sim-card{border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-bottom:8px;background:var(--panel2)}
+.rp-badge{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.8px;padding:2px 7px;border-radius:4px;border:1px solid var(--line);color:var(--muted2);display:inline-block;margin-right:3px;margin-bottom:2px}
+.rp-select{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.8px;padding:5px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--muted2);cursor:pointer;min-width:120px}
+.rp-btn{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:none;color:var(--muted2);cursor:pointer;text-transform:uppercase}
+.rp-btn:hover{color:var(--text);border-color:var(--muted2)}
+.rp-empty{text-align:center;padding:32px;color:var(--muted2);font-size:13px}
 </style>
 </head>
 <body>
@@ -1467,6 +1491,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <button class="tab-btn" data-page="assistant">Assistant</button>
         <button class="tab-btn harvey-btn" data-page="harvey">H.A.R.V.E.Y<span class="signal-dot" id="harveySignalDot"></span></button>
         <button class="tab-btn" data-page="execution">EXECUTION</button>
+        <button class="tab-btn" data-page="replay">NOVA REPLAY</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
     </div>
@@ -2727,6 +2752,70 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
     </div><!-- /journal vstack -->
   </div><!-- /page-journal -->
 
+  <!-- ════════════════════ NOVA REPLAY ════════════════════ -->
+  <div class="page" id="page-replay">
+    <div class="vstack">
+
+      <!-- HEADER + FILTERS -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:4px">
+        <div>
+          <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Decision Audit &amp; Pattern Review</div>
+          <div style="font-family:'Rajdhani',sans-serif;font-size:30px;font-weight:700;letter-spacing:2px;color:var(--text)">NOVA REPLAY</div>
+        </div>
+        <div style="align-self:flex-end;display:flex;gap:8px;flex-wrap:wrap">
+          <select class="rp-select" id="rpfSymbol" onchange="rpApplyFilters()">
+            <option value="">All Symbols</option>
+            <option value="CME_MINI:MES1!">MES</option>
+            <option value="CME_MINI:MNQ1!">MNQ</option>
+          </select>
+          <select class="rp-select" id="rpfConclusion" onchange="rpApplyFilters()">
+            <option value="">All Conclusions</option>
+            <option value="GOOD_READ_GOOD_DECISION">Good Read</option>
+            <option value="GOOD_READ_BAD_DECISION">Good Read / Bad Dec</option>
+            <option value="NO_TRADE_REVIEW_ONLY">Skipped (Review)</option>
+            <option value="NO_TRADE_CONFIRMED_CORRECT">Skip Confirmed</option>
+            <option value="MISSED_OPPORTUNITY">Missed Opp</option>
+            <option value="INSUFFICIENT_DATA">Insuf. Data</option>
+          </select>
+          <select class="rp-select" id="rpfConfidence" onchange="rpApplyFilters()">
+            <option value="">All Confidence</option>
+            <option value="HIGH">HIGH</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="LOW">LOW</option>
+            <option value="NONE">NONE</option>
+          </select>
+          <button class="rp-btn" onclick="refreshReplay()">REFRESH</button>
+        </div>
+      </div>
+
+      <!-- LATEST DECISION CARD -->
+      <div id="rpLatestCard" class="rp-card">
+        <div class="rp-empty">Click REFRESH to load replay data.</div>
+      </div>
+
+      <!-- SIMILAR SETUPS -->
+      <div class="panel">
+        <div class="kicker">Similar Historical Setups</div>
+        <div class="section-title" style="margin-bottom:12px">Setups matching latest decision fingerprint</div>
+        <div id="rpSimilarPanel"><div class="rp-empty">—</div></div>
+      </div>
+
+      <!-- DECISIONS TABLE -->
+      <div class="panel">
+        <div class="kicker">Recent Decisions</div>
+        <div class="section-title" style="margin-bottom:12px">All decision snapshots with outcome links and review conclusions</div>
+        <div style="overflow-x:auto">
+          <table class="rp-tbl">
+            <thead id="rpTblHead"></thead>
+            <tbody id="rpTblBody"></tbody>
+          </table>
+        </div>
+        <div id="rpTableEmpty" class="rp-empty" style="display:none">No replay data yet. Run a monitor cycle to generate decision snapshots.</div>
+      </div>
+
+    </div><!-- /replay vstack -->
+  </div><!-- /page-replay -->
+
   <!-- ════════════════════ GOVERNANCE ════════════════════ -->
   <!-- FOOTER -->
   <div class="footer">
@@ -2929,6 +3018,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     if (btn.dataset.page === 'execution') { refreshExecutionTab(); refreshGovernance(); }
     if (btn.dataset.page === 'alerts') { _fdOffset = 0; _fdCards = []; clearFeedUnread(); refreshFeed(); }
     if (btn.dataset.page === 'journal') { refreshJournal(); switchJTab('trades'); }
+    if (btn.dataset.page === 'replay') { refreshReplay(); }
   });
 });
 
@@ -6113,6 +6203,247 @@ setInterval(refreshHvExec, 20000);
 refreshHvSectors();
 setInterval(refreshHvSectors, 60000);
 connectSSE();
+
+// ════════ NOVA REPLAY ════════
+let _rpReviews = [];
+let _rpSimilar = {};
+
+async function refreshReplay() {
+  try {
+    const [reviews, similar] = await Promise.all([
+      fetch('/api/mcp-replay/post-trade-reviews?limit=50').then(r => r.json()),
+      fetch('/api/mcp-replay/similar-with-outcomes?limit=10').then(r => r.json()),
+    ]);
+    _rpReviews = Array.isArray(reviews) ? reviews : [];
+    _rpSimilar = (similar && typeof similar === 'object' && !Array.isArray(similar)) ? similar : {};
+    rpApplyFilters();
+  } catch(e) {
+    console.error('refreshReplay failed:', e);
+    setHtml('rpLatestCard', '<div class="rp-card"><div class="rp-empty">Unable to load replay data. Check server logs.</div></div>');
+    setHtml('rpSimilarPanel', '<div class="rp-empty">—</div>');
+    setHtml('rpTblBody', '');
+  }
+}
+
+function rpApplyFilters() {
+  const fSym  = (document.getElementById('rpfSymbol')    || {}).value || '';
+  const fCon  = (document.getElementById('rpfConclusion')|| {}).value || '';
+  const fConf = (document.getElementById('rpfConfidence')|| {}).value || '';
+  const filtered = _rpReviews.filter(r => {
+    if (fSym  && r.symbol     !== fSym)  return false;
+    if (fCon  && r.conclusion !== fCon)  return false;
+    if (fConf && r.match_confidence !== fConf) return false;
+    return true;
+  });
+  _rpRenderLatestCard(_rpReviews);
+  _rpRenderTable(filtered);
+  _rpRenderSimilar(_rpSimilar);
+}
+
+// ── Label + colour helpers ─────────────────────────────────────────────────
+function _rpConclLabel(c) {
+  const m = {
+    'GOOD_READ_GOOD_DECISION':    'GOOD READ',
+    'GOOD_READ_BAD_DECISION':     'GOOD READ/BAD DEC',
+    'NO_TRADE_REVIEW_ONLY':       'SKIPPED',
+    'NO_TRADE_CONFIRMED_CORRECT': 'SKIP CONFIRMED',
+    'MISSED_OPPORTUNITY':         'MISSED OPP',
+    'BAD_READ_DECISION_UNRELIABLE':'BAD READ',
+    'INSUFFICIENT_DATA':          'INSUF. DATA',
+  };
+  return m[c] || c || '—';
+}
+function _rpConclClass(c) {
+  if (c === 'GOOD_READ_GOOD_DECISION')    return 'rp-concl-good';
+  if (c === 'GOOD_READ_BAD_DECISION')     return 'rp-concl-bad';
+  if (c === 'NO_TRADE_CONFIRMED_CORRECT') return 'rp-concl-skip';
+  if (c === 'MISSED_OPPORTUNITY')         return 'rp-concl-missed';
+  return 'rp-concl-insuf';
+}
+function _rpFmt(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
+}
+function _rpTs(ts) {
+  if (!ts) return '—';
+  try { return ts.slice(0, 16).replace('T', ' '); } catch(e) { return String(ts); }
+}
+
+// ── Latest decision card ───────────────────────────────────────────────────
+function _rpRenderLatestCard(reviews) {
+  if (!reviews || !reviews.length) {
+    setHtml('rpLatestCard', '<div class="rp-empty">No replay data yet. Run a monitor cycle to generate decision snapshots.</div>');
+    return;
+  }
+  const r  = reviews[reviews.length - 1];
+  const sa = r.section_a_what_nova_saw     || {};
+  const sb = r.section_b_what_nova_decided || {};
+  const sc = r.section_c_what_happened     || {};
+  const cc = _rpConclClass(r.conclusion);
+  const cl = _rpConclLabel(r.conclusion);
+
+  function fld(lab, val, color) {
+    const cs = color ? ` style="color:${color}"` : '';
+    return `<div class="rp-field"><div class="rp-field-lab">${lab}</div><div class="rp-field-val"${cs}>${_rpFmt(val)}</div></div>`;
+  }
+  function dirColor(d) { return d === 'LONG' ? 'var(--green)' : d === 'SHORT' ? 'var(--red)' : null; }
+  function gradeColor(g) { return g === 'A' ? 'var(--green)' : g === 'B' ? 'var(--yellow)' : null; }
+
+  const html = `
+<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+  <div>
+    <div class="kicker">Latest Decision</div>
+    <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;letter-spacing:1px;color:var(--text);margin-bottom:6px">
+      ${_rpFmt(r.symbol)} &middot; ${_rpFmt(r.session)} &middot; ${_rpTs(r.timestamp)}
+    </div>
+    <span class="rp-concl ${cc}">${cl}</span>
+    &nbsp;<span class="rp-badge">CONF: ${_rpFmt(r.match_confidence)}</span>
+    <span class="rp-badge">OUTCOME: ${_rpFmt(r.outcome)}</span>
+    <span class="rp-badge">STATUS: ${_rpFmt(r.trade_status)}</span>
+  </div>
+  <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);text-align:right">${_rpFmt(r.decision_id)}</div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start">
+
+  <div>
+    <div class="rp-section-lbl">A — What NOVA Saw</div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      ${fld('Session',    sa.session)}
+      ${fld('IB Status',  sa.ib_status)}
+      ${fld('IB Draw',    sa.ib_draw)}
+      ${fld('IB Aligned', sa.ib_aligned)}
+      ${fld('ORB Active', sa.orb_active)}
+      ${fld('ORB Phase',  sa.orb_phase)}
+      ${fld('PROS Active',sa.pros_active)}
+      ${fld('PROS Phase', sa.pros_phase)}
+      ${fld('PROS OTE',   sa.pros_ote_status)}
+      ${fld('PROS Cont',  sa.pros_cont)}
+      ${fld('Peer Align', sa.peer_alignment)}
+      ${fld('Draw Dir',   sa.draw_direction)}
+      ${fld('MCP Status', sa.mcp_status)}
+      ${fld('MCP Conf',   sa.mcp_confidence)}
+      ${fld('Parser',     sa.parser_mode)}
+    </div>
+  </div>
+
+  <div>
+    <div class="rp-section-lbl">B — What NOVA Decided</div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      ${fld('Pre-Signal',    sb.pre_signal)}
+      ${fld('Final Signal',  sb.final_signal_type)}
+      ${fld('Setup Type',    sb.final_setup_type)}
+      ${fld('Direction',     sb.direction, dirColor(sb.direction))}
+      ${fld('Grade',         sb.grade,     gradeColor(sb.grade))}
+      ${fld('Entry Zone',    sb.entry_zone)}
+      ${fld('Stop',          sb.stop)}
+      ${fld('TP1',           sb.tp1)}
+      ${fld('R:R',           sb.rr)}
+      ${fld('Claude Called', sb.claude_called)}
+      ${fld('Exec Ready',    sb.is_execution_ready)}
+      ${fld('Heads Up',      sb.is_heads_up)}
+      ${fld('Rejected',      sb.is_rejected)}
+      ${fld('Alert Sent',    sb.alert_generated)}
+    </div>
+    ${sb.rationale ? `<div class="rp-lesson">${sb.rationale}</div>` : ''}
+  </div>
+
+  <div>
+    <div class="rp-section-lbl">C — What Happened</div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      ${fld('Trade Status', sc.trade_status)}
+      ${fld('Outcome',      sc.outcome)}
+      ${fld('Match Via',    sc.match_method)}
+      ${fld('Confidence',   sc.match_confidence)}
+      ${sc.linked_signal_id ? fld('Signal ID', sc.linked_signal_id) : ''}
+      ${sc.linked_trace_id  ? fld('Trace ID',  sc.linked_trace_id)  : ''}
+      ${sc.close_reason     ? fld('Close Reason', sc.close_reason)  : ''}
+    </div>
+    ${sc.low_confidence_note ? `<div class="rp-lesson" style="margin-top:6px">${sc.low_confidence_note}</div>` : ''}
+    <div class="rp-section-lbl" style="margin-top:14px">D — Review</div>
+    <div style="margin-bottom:8px"><span class="rp-concl ${cc}">${cl}</span></div>
+    ${r.lesson ? `<div class="rp-lesson">${r.lesson}</div>` : ''}
+  </div>
+
+</div>`;
+  setHtml('rpLatestCard', html);
+}
+
+// ── Decisions table ────────────────────────────────────────────────────────
+function _rpRenderTable(rows) {
+  const emptyEl = document.getElementById('rpTableEmpty');
+  if (!rows || !rows.length) {
+    if (emptyEl) emptyEl.style.display = '';
+    setHtml('rpTblHead', '');
+    setHtml('rpTblBody', '');
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  setHtml('rpTblHead', `<tr>
+    <th>Time</th><th>Symbol</th><th>Session</th><th>Setup</th><th>Signal</th>
+    <th>Dir</th><th>Grade</th><th>Parser</th><th>Parse</th><th>MCP</th><th>Conf</th>
+    <th>Exec?</th><th>Rej?</th><th>Status</th><th>Outcome</th>
+    <th>Match Conf</th><th>Conclusion</th>
+  </tr>`);
+
+  setHtml('rpTblBody', rows.map(r => {
+    const cc = _rpConclClass(r.conclusion);
+    const cl = _rpConclLabel(r.conclusion);
+    const dc = r.direction === 'LONG' ? 'color:var(--green)' : r.direction === 'SHORT' ? 'color:var(--red)' : '';
+    return `<tr>
+      <td>${_rpTs(r.timestamp)}</td>
+      <td>${_rpFmt(r.symbol)}</td>
+      <td>${_rpFmt(r.session)}</td>
+      <td>${_rpFmt(r.setup_type)}</td>
+      <td>${_rpFmt(r.signal_type)}</td>
+      <td style="${dc}">${_rpFmt(r.direction)}</td>
+      <td>${_rpFmt(r.grade)}</td>
+      <td>${_rpFmt(r.parser_mode)}</td>
+      <td>${_rpFmt(r.parse_status)}</td>
+      <td>${_rpFmt(r.mcp_status)}</td>
+      <td>${_rpFmt(r.mcp_confidence)}</td>
+      <td>${r.is_execution_ready ? 'Y' : 'N'}</td>
+      <td>${r.is_rejected ? 'Y' : 'N'}</td>
+      <td>${_rpFmt(r.trade_status)}</td>
+      <td>${_rpFmt(r.outcome)}</td>
+      <td>${_rpFmt(r.match_confidence)}</td>
+      <td><span class="rp-concl ${cc}" style="font-size:8px;padding:2px 7px">${cl}</span></td>
+    </tr>`;
+  }).join(''));
+}
+
+// ── Similar setups ─────────────────────────────────────────────────────────
+function _rpRenderSimilar(data) {
+  if (!data || !data.matches || !data.matches.length) {
+    setHtml('rpSimilarPanel', '<div class="rp-empty">No similar historical setups found yet. More cycles needed.</div>');
+    return;
+  }
+  const curr = data.current || {};
+  const header = `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);margin-bottom:10px">
+    Current: <strong>${_rpFmt(curr.setup_type)}</strong> ${_rpFmt(curr.direction)} ${_rpFmt(curr.signal_type)}
+    — ${_rpFmt(curr.symbol)} — ${_rpTs(curr.timestamp)}
+  </div>`;
+  const cards = data.matches.map(m => {
+    const score = typeof m.similarity_score === 'number' ? (m.similarity_score * 100).toFixed(0) + '%' : '—';
+    return `<div class="rp-sim-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+        <div>
+          <span class="rp-badge">SIM ${score}</span>
+          <span class="rp-badge">${_rpFmt(m.symbol)}</span>
+          <span class="rp-badge">${_rpFmt(m.setup_type)}</span>
+          <span class="rp-badge">${_rpFmt(m.direction)}</span>
+          <span class="rp-badge">${_rpFmt(m.signal_type)}</span>
+          <span class="rp-badge">OUT: ${_rpFmt(m.outcome)}</span>
+          <span class="rp-badge">CONF: ${_rpFmt(m.match_confidence)}</span>
+        </div>
+        <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)">${_rpTs(m.timestamp)}</span>
+      </div>
+      ${m.outcome_note ? `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);margin-top:5px">${m.outcome_note}</div>` : ''}
+    </div>`;
+  }).join('');
+  setHtml('rpSimilarPanel', header + cards);
+}
 </script>
 </body>
 </html>'''
