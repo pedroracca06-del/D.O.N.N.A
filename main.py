@@ -1278,6 +1278,23 @@ async def session_memory_endpoint():
         return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
 
 
+@app.get('/api/mcp-snapshots')
+async def mcp_snapshots_endpoint(limit: int = 50):
+    """Rolling MCP snapshots -- last N entries from nova_mcp_snapshots.json (max 500)."""
+    try:
+        from core.config import MCP_SNAPSHOTS_FILE
+        import json as _json
+        limit = max(1, min(limit, 500))
+        if not MCP_SNAPSHOTS_FILE.exists():
+            return []
+        snaps = _json.loads(MCP_SNAPSHOTS_FILE.read_text(encoding='utf-8'))
+        if not isinstance(snaps, list):
+            return []
+        return snaps[-limit:]
+    except Exception as exc:
+        return {'error': str(exc), 'snapshots': []}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""

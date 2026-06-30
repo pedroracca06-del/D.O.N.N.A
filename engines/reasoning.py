@@ -687,6 +687,105 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
     )
 
 
+# ── MCP snapshot logging ───────────────────────────────────────────────────────
+
+_MCP_SNAPSHOT_CAP = 500
+
+def _build_mcp_snapshot(
+    chart_ctx:   dict,
+    nova_state:  dict,
+    mcp_health:  dict,
+    session_ctx: dict,
+) -> dict:
+    """Build a structured snapshot dict from one reasoning cycle.  Pure — no I/O."""
+    import time as _time
+    bm   = nova_state.get('bridge_meta', {})
+    bv2  = nova_state.get('bridge_v2',   {})
+    pros = nova_state.get('pros', {})
+    orb  = nova_state.get('orb',  {})
+
+    # Compact mcp_health copy — only the fields useful for replay/audit
+    _h = {
+        'status':             mcp_health.get('status'),
+        'confidence':         mcp_health.get('confidence'),
+        'bridge_version':     mcp_health.get('bridge_version'),
+        'bridge_v2_detected': mcp_health.get('bridge_v2_detected'),
+        'ticker_match':       mcp_health.get('ticker_match'),
+        'timeframe_match':    mcp_health.get('timeframe_match'),
+        'warnings':           mcp_health.get('warnings', []),
+        'errors':             mcp_health.get('errors',   []),
+    }
+
+    return {
+        # ── identity ──────────────────────────────────────────────────────────
+        'timestamp':       _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime()),
+        'symbol':          chart_ctx.get('symbol'),
+        'timeframe':       chart_ctx.get('timeframe'),
+        'session':         session_ctx.get('session') or mcp_health.get('session'),
+        # ── parser diagnostics ────────────────────────────────────────────────
+        'parser_mode':     nova_state.get('parser_mode'),
+        'parse_status':    nova_state.get('parse_status'),
+        # ── health summary ────────────────────────────────────────────────────
+        'mcp_health':      _h,
+        # ── chart identity cross-check ────────────────────────────────────────
+        'chart_symbol':    chart_ctx.get('symbol'),
+        'chart_timeframe': chart_ctx.get('timeframe'),
+        'parsed_ticker':   bm.get('parsed_ticker'),
+        'parsed_timeframe': bm.get('parsed_timeframe'),
+        'ticker_match':    mcp_health.get('ticker_match'),
+        'timeframe_match': mcp_health.get('timeframe_match'),
+        # ── bridge data ───────────────────────────────────────────────────────
+        'bridge_v2':       dict(bv2),
+        'bridge_meta':     dict(bm),
+        # ── raw NOVA state (rows 0-20 canonical keys) ─────────────────────────
+        'nova_main': dict(nova_state.get('main', {})),
+        'nova_pros': dict(pros),
+        'nova_orb':  dict(orb),
+        # ── market structure (promoted for easy querying) ─────────────────────
+        'ib_high':        pros.get('IB H'),
+        'ib_low':         pros.get('IB L'),
+        'ib_status':      bv2.get('ib_status'),
+        'orb_high':       orb.get('HIGH'),
+        'orb_mid':        orb.get('MID'),
+        'orb_low':        orb.get('LOW'),
+        'orb_active':     bv2.get('orb_active'),
+        'pros_active':    bv2.get('pros_active'),
+        'peer_alignment': bv2.get('peer_align'),
+        'draw_target':    bv2.get('draw_target'),
+        'draw_direction': bv2.get('draw_dir'),
+        # ── signal metadata (None until evaluation completes — Phase C logs
+        #    market state at read time; signal overlay is a future refinement)
+        'setup_type':  None,
+        'signal_type': None,
+        'direction':   None,
+        'confidence':  None,
+        'rationale':   None,
+        # ── aggregated diagnostics ────────────────────────────────────────────
+        'warnings': mcp_health.get('warnings', []),
+        'errors':   mcp_health.get('errors',   []),
+    }
+
+
+def _append_mcp_snapshot(snapshot: dict) -> None:
+    """Append snapshot to the rolling JSON file.  Non-blocking — caller runs in daemon thread."""
+    import json as _json
+    from core.config import MCP_SNAPSHOTS_FILE
+    try:
+        existing: list = []
+        if MCP_SNAPSHOTS_FILE.exists():
+            try:
+                raw = _json.loads(MCP_SNAPSHOTS_FILE.read_text(encoding='utf-8'))
+                existing = raw if isinstance(raw, list) else []
+            except Exception:
+                existing = []
+        existing.append(snapshot)
+        if len(existing) > _MCP_SNAPSHOT_CAP:
+            existing = existing[-_MCP_SNAPSHOT_CAP:]
+        MCP_SNAPSHOTS_FILE.write_text(_json.dumps(existing, indent=2), encoding='utf-8')
+    except Exception as _exc:
+        print(f'[mcp-snapshot] write error (non-fatal): {_exc}')
+
+
 # ── Session context evaluator (fast, deterministic) ────────────────────────────
 
 def _session_info(mins: int, weekday: int) -> dict:
@@ -2112,6 +2211,9 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         except Exception:
             pass
     _threading.Thread(target=_write_and_push_mcp_health, args=(_mcp_health.copy(),), daemon=True).start()
+
+    _snap = _build_mcp_snapshot(chart_ctx, nova_state, _mcp_health, session_ctx)
+    _threading.Thread(target=_append_mcp_snapshot, args=(_snap,), daemon=True).start()
 
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
