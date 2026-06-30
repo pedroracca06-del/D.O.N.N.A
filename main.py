@@ -1572,6 +1572,36 @@ async def mcp_replay_similar_with_outcomes(limit: int = 10):
         return {'error': str(exc), 'current': None, 'matches': []}
 
 
+@app.get('/api/mcp-replay/post-trade-reviews')
+async def mcp_replay_post_trade_reviews(limit: int = 50):
+    """Post-trade self-review records for the last N decision snapshots.
+
+    Each compact record includes what NOVA saw, what she decided, what happened,
+    a conclusion label (GOOD_READ_GOOD_DECISION / NO_TRADE_CORRECT / etc.),
+    and a qualified lesson note.
+    Read-only — no execution impact, no rule changes.
+    """
+    try:
+        from engines.post_trade_review import build_post_trade_review, post_trade_review_compact
+        from engines.outcome_linker import (
+            link_snapshot_to_outcome, load_signal_log, load_journal, load_execution_trace,
+        )
+        limit      = max(1, min(limit, 500))
+        all_snaps  = _read_mcp_snapshots_raw()
+        decisions  = _filter_snapshots(all_snaps, snapshot_type='decision')
+        signal_log = await asyncio.to_thread(load_signal_log)
+        journal    = await asyncio.to_thread(load_journal)
+        trace      = await asyncio.to_thread(load_execution_trace)
+        results = []
+        for snap in decisions[-limit:]:
+            link   = link_snapshot_to_outcome(snap, signal_log, journal, trace)
+            review = build_post_trade_review(snap, link)
+            results.append(post_trade_review_compact(review))
+        return results
+    except Exception as exc:
+        return {'error': str(exc), 'reviews': []}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""
