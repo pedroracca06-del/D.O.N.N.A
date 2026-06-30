@@ -2421,6 +2421,40 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
             <span class="exec-kv-lab">Execution Path</span>
             <span class="exec-kv-val" id="novaEhPath">—</span>
           </div>
+
+          <div class="gov-section-label" style="margin-top:12px">MCP HEALTH</div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Status</span>
+            <span class="exec-kv-val" id="mcpHStatus">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Confidence</span>
+            <span class="exec-kv-val" id="mcpHConfidence">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Bridge</span>
+            <span class="exec-kv-val" id="mcpHBridgeVer">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Ticker / TF</span>
+            <span class="exec-kv-val" id="mcpHTickerTf">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Session</span>
+            <span class="exec-kv-val" id="mcpHSession">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Fields</span>
+            <span class="exec-kv-val" id="mcpHFields">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Warnings / Errors</span>
+            <span class="exec-kv-val" id="mcpHWarnErr">—</span>
+          </div>
+          <div class="exec-kv">
+            <span class="exec-kv-lab">Last Read</span>
+            <span class="exec-kv-val" id="mcpHLastRead" style="font-size:10px">—</span>
+          </div>
         </div>
       </div>
 
@@ -5979,6 +6013,30 @@ async function refreshGovernance() {
   }
 }
 
+async function refreshMcpHealth() {
+  try {
+    const res = await fetch('/api/mcp-health');
+    const d   = await res.json();
+    const status = d.status || 'UNKNOWN';
+    const conf   = d.confidence != null ? d.confidence : 0;
+    const sColor = status === 'HEALTHY' ? 'var(--green)' : status === 'DEGRADED' ? 'var(--gold)' : 'var(--red)';
+    const cColor = conf >= 85 ? 'var(--green)' : conf >= 50 ? 'var(--gold)' : 'var(--red)';
+    _setKv('mcpHStatus', status, sColor);
+    _setKv('mcpHConfidence', conf + '%', cColor);
+    const bv = d.bridge_v2_detected ? 'v2 (BRIDGE)' : d.bridge_version === 1 ? 'v1 (legacy)' : 'none';
+    _setKv('mcpHBridgeVer', bv, d.bridge_v2_detected ? 'var(--green)' : d.bridge_version === 1 ? 'var(--gold)' : 'var(--red)');
+    _setKv('mcpHTickerTf', (d.ticker || '—') + ' / ' + (d.timeframe ? d.timeframe + 'm' : '—'));
+    _setKv('mcpHSession', d.session || '—');
+    const fp = d.fields_present != null ? d.fields_present : '—';
+    const fm = d.fields_missing && d.fields_missing.length ? d.fields_missing.length + ' missing' : 'all present';
+    _setKv('mcpHFields', fp + ' / 13 — ' + fm, d.fields_missing && d.fields_missing.length ? 'var(--gold)' : 'var(--green)');
+    const wc = d.warnings ? d.warnings.length : 0;
+    const ec = d.errors   ? d.errors.length   : 0;
+    _setKv('mcpHWarnErr', wc + ' warn / ' + ec + ' err', ec > 0 ? 'var(--red)' : wc > 0 ? 'var(--gold)' : 'var(--green)');
+    _setKv('mcpHLastRead', d._written_at ? d._written_at.replace('T', ' ').replace('Z', ' UTC') : '—', 'var(--muted2)');
+  } catch(e) { console.error('refreshMcpHealth:', e); }
+}
+
 // ════════ EXECUTION CENTER SUB-NAV ════════
 function switchEcTab(tab) {
   ['execution','governance','audit'].forEach(function(t) {
@@ -6040,6 +6098,8 @@ setInterval(refreshMarketReality, 60000);
 setInterval(refreshGovernance, 30000);
 fetchExecutionGate();
 setInterval(fetchExecutionGate, 15000);
+refreshMcpHealth();
+setInterval(refreshMcpHealth, 30000);
 fetchHarveyData();
 setInterval(fetchHarveyData, 20000);
 fetchGrokIntel();

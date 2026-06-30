@@ -1278,6 +1278,22 @@ async def session_memory_endpoint():
         return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
 
 
+@app.get('/api/mcp-health')
+async def mcp_health_endpoint():
+    """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""
+    try:
+        from core.config import MCP_HEALTH_FILE
+        if MCP_HEALTH_FILE.exists():
+            import json as _json
+            return _json.loads(MCP_HEALTH_FILE.read_text())
+        return {'status': 'UNKNOWN', 'confidence': 0, 'bridge_version': 0, 'bridge_v2_detected': False,
+                'ticker': None, 'timeframe': None, 'session': None,
+                'fields_present': 0, 'fields_missing': [], 'warnings': [], 'errors': [],
+                '_written_at': None, 'error': 'no_local_monitor_data'}
+    except Exception as exc:
+        return {'status': 'UNKNOWN', 'confidence': 0, 'error': str(exc)}
+
+
 @app.get('/morning-brief')
 async def morning_brief_endpoint():
     """Compact structured morning brief -- thesis, draw, participation, macro, watch."""

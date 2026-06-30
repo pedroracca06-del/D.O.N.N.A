@@ -2003,6 +2003,16 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         f' errors={len(_h["errors"])}'
     )
 
+    def _write_mcp_health_snapshot(h: dict) -> None:
+        import time
+        from core.config import MCP_HEALTH_FILE
+        try:
+            h['_written_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+            MCP_HEALTH_FILE.write_text(json.dumps(h, indent=2))
+        except Exception:
+            pass
+    _threading.Thread(target=_write_mcp_health_snapshot, args=(_mcp_health.copy(),), daemon=True).start()
+
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
     ib_eval         = _evaluate_ib_alignment(main_state, chart_ctx, pros_state_data)
