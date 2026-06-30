@@ -1278,21 +1278,142 @@ async def session_memory_endpoint():
         return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
 
 
-@app.get('/api/mcp-snapshots')
-async def mcp_snapshots_endpoint(limit: int = 50):
-    """Rolling MCP snapshots -- last N entries from nova_mcp_snapshots.json (max 500)."""
+# ── MCP Snapshot query helpers ────────────────────────────────────────────────
+
+def _read_mcp_snapshots_raw() -> list:
+    """Load nova_mcp_snapshots.json, return [] on any failure."""
     try:
         from core.config import MCP_SNAPSHOTS_FILE
-        import json as _json
-        limit = max(1, min(limit, 500))
+        import json as _j
         if not MCP_SNAPSHOTS_FILE.exists():
             return []
-        snaps = _json.loads(MCP_SNAPSHOTS_FILE.read_text(encoding='utf-8'))
-        if not isinstance(snaps, list):
-            return []
+        raw = _j.loads(MCP_SNAPSHOTS_FILE.read_text(encoding='utf-8'))
+        return raw if isinstance(raw, list) else []
+    except Exception:
+        return []
+
+
+def _filter_snapshots(
+    snaps: list,
+    *,
+    snapshot_type:      str  | None = None,
+    symbol:             str  | None = None,
+    parser_mode:        str  | None = None,
+    parse_status:       str  | None = None,
+    signal_type:        str  | None = None,
+    setup_type:         str  | None = None,
+    direction:          str  | None = None,
+    is_execution_ready: bool | None = None,
+    is_rejected:        bool | None = None,
+    ticker_match:       bool | None = None,
+    timeframe_match:    bool | None = None,
+) -> list:
+    """Apply optional AND-combined filters to a snapshot list."""
+    r = snaps
+    if snapshot_type      is not None: r = [s for s in r if s.get('snapshot_type')      == snapshot_type]
+    if symbol             is not None: r = [s for s in r if s.get('symbol')             == symbol]
+    if parser_mode        is not None: r = [s for s in r if s.get('parser_mode')        == parser_mode]
+    if parse_status       is not None: r = [s for s in r if s.get('parse_status')       == parse_status]
+    if signal_type        is not None: r = [s for s in r if s.get('signal_type')        == signal_type]
+    if setup_type         is not None: r = [s for s in r if s.get('setup_type')         == setup_type]
+    if direction          is not None: r = [s for s in r if s.get('direction')          == direction]
+    if is_execution_ready is not None: r = [s for s in r if bool(s.get('is_execution_ready')) == is_execution_ready]
+    if is_rejected        is not None: r = [s for s in r if bool(s.get('is_rejected'))        == is_rejected]
+    if ticker_match       is not None: r = [s for s in r if s.get('ticker_match')       == ticker_match]
+    if timeframe_match    is not None: r = [s for s in r if s.get('timeframe_match')    == timeframe_match]
+    return r
+
+
+def _decision_replay_summary(snap: dict) -> dict:
+    """Compact replay format for a single decision snapshot."""
+    h = snap.get('mcp_health') or {}
+    return {
+        'timestamp':          snap.get('timestamp'),
+        'symbol':             snap.get('symbol'),
+        'timeframe':          snap.get('timeframe'),
+        'session':            snap.get('session'),
+        'parser_mode':        snap.get('parser_mode'),
+        'parse_status':       snap.get('parse_status'),
+        'mcp_status':         h.get('status'),
+        'mcp_confidence':     h.get('confidence'),
+        'pre_signal':         snap.get('pre_signal'),
+        'pre_setup':          snap.get('pre_setup'),
+        'signal_type':        snap.get('signal_type'),
+        'setup_type':         snap.get('setup_type'),
+        'direction':          snap.get('direction'),
+        'grade':              snap.get('grade'),
+        'rationale':          snap.get('rationale'),
+        'is_execution_ready': snap.get('is_execution_ready'),
+        'is_heads_up':        snap.get('is_heads_up'),
+        'is_no_trade':        snap.get('is_no_trade'),
+        'is_rejected':        snap.get('is_rejected'),
+        'rejection_reason':   snap.get('rejection_reason'),
+        'ib_status':          snap.get('ib_status'),
+        'orb_active':         snap.get('orb_active'),
+        'pros_active':        snap.get('pros_active'),
+        'peer_alignment':     snap.get('peer_alignment'),
+        'draw_direction':     snap.get('draw_direction'),
+    }
+
+
+@app.get('/api/mcp-snapshots/latest')
+async def mcp_snapshots_latest():
+    """Most recent MCP snapshot (any type)."""
+    snaps = _read_mcp_snapshots_raw()
+    return snaps[-1] if snaps else {}
+
+
+@app.get('/api/mcp-snapshots/decisions')
+async def mcp_snapshots_decisions(limit: int = 50):
+    """Last N decision snapshots (snapshot_type=decision)."""
+    limit = max(1, min(limit, 500))
+    snaps = _read_mcp_snapshots_raw()
+    return _filter_snapshots(snaps, snapshot_type='decision')[-limit:]
+
+
+@app.get('/api/mcp-snapshots')
+async def mcp_snapshots_endpoint(
+    limit:               int        = 50,
+    snapshot_type:       str | None = None,
+    symbol:              str | None = None,
+    parser_mode:         str | None = None,
+    parse_status:        str | None = None,
+    signal_type:         str | None = None,
+    setup_type:          str | None = None,
+    direction:           str | None = None,
+    is_execution_ready:  bool | None = None,
+    is_rejected:         bool | None = None,
+    ticker_match:        bool | None = None,
+    timeframe_match:     bool | None = None,
+):
+    """Rolling MCP snapshots with optional AND-combined filters (last N, max 500)."""
+    try:
+        limit = max(1, min(limit, 500))
+        snaps = _read_mcp_snapshots_raw()
+        snaps = _filter_snapshots(
+            snaps,
+            snapshot_type=snapshot_type, symbol=symbol,
+            parser_mode=parser_mode,     parse_status=parse_status,
+            signal_type=signal_type,     setup_type=setup_type,
+            direction=direction,         is_execution_ready=is_execution_ready,
+            is_rejected=is_rejected,     ticker_match=ticker_match,
+            timeframe_match=timeframe_match,
+        )
         return snaps[-limit:]
     except Exception as exc:
         return {'error': str(exc), 'snapshots': []}
+
+
+@app.get('/api/mcp-replay/decisions')
+async def mcp_replay_decisions(limit: int = 50):
+    """Compact replay summaries for the last N decision snapshots."""
+    try:
+        limit = max(1, min(limit, 500))
+        snaps = _read_mcp_snapshots_raw()
+        decisions = _filter_snapshots(snaps, snapshot_type='decision')
+        return [_decision_replay_summary(s) for s in decisions[-limit:]]
+    except Exception as exc:
+        return {'error': str(exc), 'summaries': []}
 
 
 @app.get('/api/mcp-health')
