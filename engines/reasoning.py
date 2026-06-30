@@ -308,6 +308,15 @@ def _collect_all_contexts() -> list[dict]:
     return contexts
 
 
+# ── NOVA table field specs ────────────────────────────────────────────────────
+# Single source of truth for both parse_nova_tables() and compute_mcp_health().
+_MCP_REQUIRED_V2: frozenset = frozenset({
+    'TICKER', 'TF', 'IB_STATUS', 'SESSION',
+    'ORB_ACTIVE', 'PROS_ACTIVE', 'COOLDOWN', 'TRAP',
+    'ICT_STEP', 'PEER_ALIGN',
+})
+_MCP_OPTIONAL_V2: frozenset = frozenset({'DRAW_TARGET', 'DRAW_DIR'})
+
 # ── NOVA table parsing ─────────────────────────────────────────────────────────
 
 def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
@@ -323,8 +332,25 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     Priority 2: Legacy three-table layout (backward-compat fallback).
       NOVA ENGINE → main, PROS ENGINE → pros, ORB CONSOLE → orb.
       Kept until all charts are confirmed on the new Pine Script.
+
+    Phase B additions (all observability-only, no execution impact):
+      parser_mode  — which parsing path was taken (BRIDGE_V2/BRIDGE_V1/LEGACY_TABLES/NO_BRIDGE/UNREADABLE)
+      parse_status — parse outcome (ok/required_fields_missing/version_mismatch/legacy_fallback/bridge_missing/unreadable/parser_exception)
+      bridge_meta  — extended with field completeness, version gate, required/optional splits
     """
-    parsed = {}
+    try:
+        return _parse_nova_tables_impl(raw_tables)
+    except Exception as exc:
+        print(f'[parse_nova_tables] parser_exception: {exc}')
+        return {
+            'parser_mode':  'UNREADABLE',
+            'parse_status': 'parser_exception',
+            'main': {}, 'pros': {}, 'orb': {},
+        }
+
+
+def _parse_nova_tables_impl(raw_tables: list[list[str]]) -> dict:
+    parsed: dict = {}
 
     def _parse_rows(rows: list[str]) -> dict:
         result = {}
@@ -405,6 +431,12 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
         present = [k for k in _V2_KEYS if d.get(k, '').strip() not in ('', '—')]
         missing = [k for k in _V2_KEYS if d.get(k, '').strip()     in ('', '—')]
 
+        # Phase B: split by required vs optional for diagnostic granularity
+        req_present = [k for k in _MCP_REQUIRED_V2 if d.get(k, '').strip() not in ('', '—')]
+        req_missing  = [k for k in _MCP_REQUIRED_V2 if d.get(k, '').strip()     in ('', '—')]
+        opt_present  = [k for k in _MCP_OPTIONAL_V2 if d.get(k, '').strip() not in ('', '—')]
+        opt_missing  = [k for k in _MCP_OPTIONAL_V2 if d.get(k, '').strip()     in ('', '—')]
+
         bridge_v2 = {
             'bridge_ver':  bridge_ver,
             'ticker':      d.get('TICKER',     '').strip() or None,
@@ -420,7 +452,17 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
             'draw_target': _vfloat(d.get('DRAW_TARGET', '')),
             'draw_dir':    d.get('DRAW_DIR',   '').strip() or None,
         }
+
+        # Phase B: parser_mode / parse_status
+        if v2_detected:
+            parser_mode  = 'BRIDGE_V2'
+            parse_status = 'ok' if not req_missing else 'required_fields_missing'
+        else:
+            parser_mode  = 'BRIDGE_V1'
+            parse_status = 'version_mismatch'
+
         bridge_meta = {
+            # ── existing keys (backward compat) ──────────────────────────────
             'bridge_version':        bridge_ver,
             'bridge_v2_detected':    v2_detected,
             'parsed_ticker':         bridge_v2['ticker'],
@@ -428,10 +470,22 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
             'parsed_session':        bridge_v2['session'],
             'bridge_fields_present': len(present),
             'bridge_fields_missing': missing,
+            # ── Phase B additions ─────────────────────────────────────────────
+            'parser_mode':                  parser_mode,
+            'parse_status':                 parse_status,
+            'expected_bridge_version':      2,
+            'required_fields_present':      req_present,
+            'required_fields_missing':      req_missing,
+            'optional_fields_present':      opt_present,
+            'optional_fields_missing':      opt_missing,
+            'total_bridge_fields_present':  len(present),
+            'total_bridge_fields_expected': len(_V2_KEYS),
         }
 
-        parsed['bridge_v2']   = bridge_v2
-        parsed['bridge_meta'] = bridge_meta
+        parsed['bridge_v2']    = bridge_v2
+        parsed['bridge_meta']  = bridge_meta
+        parsed['parser_mode']  = parser_mode
+        parsed['parse_status'] = parse_status
 
         if v2_detected:
             _miss_str = ','.join(missing) if missing else 'none'
@@ -449,11 +503,13 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
                 f' peer={bridge_v2["peer_align"]}'
                 f' fields={len(present)}/{len(_V2_KEYS)}'
                 f' missing={_miss_str}'
+                f' status={parse_status}'
             )
 
         return parsed  # NOVA BRIDGE found — skip legacy detection
 
     # ── Priority 2: Legacy three-table fallback ───────────────────────────────
+    legacy_found = False
     for table_rows in raw_tables:
         if not table_rows:
             continue
@@ -461,10 +517,13 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
         d = _parse_rows(table_rows)
         if header == 'NOVA ENGINE':
             parsed['main'] = d
+            legacy_found = True
         elif header == 'PROS ENGINE':
             parsed['pros'] = d
+            legacy_found = True
         elif header == 'ORB CONSOLE':
             parsed['orb'] = d
+            legacy_found = True
 
     # Index-based fallback if header detection found nothing
     if 'main' not in parsed and len(raw_tables) >= 1:
@@ -472,20 +531,21 @@ def parse_nova_tables(raw_tables: list[list[str]]) -> dict:
     if 'pros' not in parsed and len(raw_tables) >= 2:
         parsed['pros'] = _parse_rows(raw_tables[1])
 
+    # Phase B: parser_mode / parse_status for non-BRIDGE paths
+    if legacy_found:
+        parsed['parser_mode']  = 'LEGACY_TABLES'
+        parsed['parse_status'] = 'legacy_fallback'
+    elif not raw_tables:
+        parsed['parser_mode']  = 'NO_BRIDGE'
+        parsed['parse_status'] = 'bridge_missing'
+    else:
+        parsed['parser_mode']  = 'NO_BRIDGE'
+        parsed['parse_status'] = 'unreadable'
+
     return parsed
 
 
 # ── MCP health scoring ─────────────────────────────────────────────────────────
-# Required v2 BRIDGE fields for a HEALTHY read.
-# Absence of any required field degrades the confidence score.
-# Optional fields: present = 100, absent = 85 (not BROKEN).
-_MCP_REQUIRED_V2: frozenset = frozenset({
-    'TICKER', 'TF', 'IB_STATUS', 'SESSION',
-    'ORB_ACTIVE', 'PROS_ACTIVE', 'COOLDOWN', 'TRAP',
-    'ICT_STEP', 'PEER_ALIGN',
-})
-_MCP_OPTIONAL_V2: frozenset = frozenset({'DRAW_TARGET', 'DRAW_DIR'})
-
 
 def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
     """
@@ -511,9 +571,14 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
     warnings: list = []
     errors:   list = []
 
+    _pm = nova_state.get('parser_mode',  'UNKNOWN')
+    _ps = nova_state.get('parse_status', 'unknown')
+
     def _result(confidence: int, *, ticker=None, timeframe=None, session=None,
                 fields_present: int = 0, fields_missing: list = None,
-                bridge_ver: int = 1, v2: bool = False) -> dict:
+                bridge_ver: int = 1, v2: bool = False,
+                ticker_match=None, timeframe_match=None,
+                chart_symbol: str = '', chart_timeframe: str = '') -> dict:
         confidence = max(0, min(100, confidence))
         status = ('HEALTHY'  if confidence >= 80 else
                   'DEGRADED' if confidence >= 50 else 'BROKEN')
@@ -529,12 +594,22 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
             'fields_missing':     fields_missing or [],
             'warnings':           list(warnings),
             'errors':             list(errors),
+            # Phase B additions
+            'parser_mode':        _pm,
+            'parse_status':       _ps,
+            'ticker_match':       ticker_match,
+            'timeframe_match':    timeframe_match,
+            'chart_symbol':       chart_symbol,
+            'chart_timeframe':    chart_timeframe,
         }
+
+    _chart_sym = chart_ctx.get('symbol',    '')
+    _chart_tf  = chart_ctx.get('timeframe', '')
 
     # Case 0: TradingView not reachable ───────────────────────────────────────
     if not chart_ctx.get('connected'):
         errors.append('TradingView not reachable')
-        return _result(0)
+        return _result(0, chart_symbol=_chart_sym, chart_timeframe=_chart_tf)
 
     bridge_meta  = nova_state.get('bridge_meta', {})
     nova_tables  = chart_ctx.get('nova_tables',  [])
@@ -546,7 +621,7 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
             errors.append('NOVA tables absent — indicator may be missing from chart')
         else:
             errors.append('NOVA BRIDGE header not found in any table')
-        return _result(30)
+        return _result(30, chart_symbol=_chart_sym, chart_timeframe=_chart_tf)
 
     bridge_ver  = bridge_meta.get('bridge_version',     1)
     v2_detected = bridge_meta.get('bridge_v2_detected', False)
@@ -557,7 +632,8 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
             f'Legacy BRIDGE v{bridge_ver} detected — '
             're-save NOVA EXECUTION V1 to activate v2 fields'
         )
-        return _result(50, bridge_ver=bridge_ver)
+        return _result(50, bridge_ver=bridge_ver,
+                       chart_symbol=_chart_sym, chart_timeframe=_chart_tf)
 
     # Case 3: v2 BRIDGE — evaluate field completeness ─────────────────────────
     all_missing = bridge_meta.get('bridge_fields_missing', [])
@@ -582,16 +658,23 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
     ticker    = bridge_meta.get('parsed_ticker')
     timeframe = bridge_meta.get('parsed_timeframe')
     session   = bridge_meta.get('parsed_session')
-    chart_sym = chart_ctx.get('symbol', '')
 
-    if ticker and chart_sym:
-        def _norm(s: str) -> str:
-            return s.replace('CME_MINI:', '').replace('CME:', '').replace('1!', '').strip().upper()
-        if _norm(ticker) != _norm(chart_sym):
+    def _norm(s: str) -> str:
+        return s.replace('CME_MINI:', '').replace('CME:', '').replace('1!', '').strip().upper()
+
+    ticker_match: bool | None    = None
+    timeframe_match: bool | None = None
+
+    if ticker and _chart_sym:
+        ticker_match = (_norm(ticker) == _norm(_chart_sym))
+        if not ticker_match:
             errors.append(
-                f'Symbol mismatch: BRIDGE TICKER={ticker}, chart symbol={chart_sym}'
+                f'Symbol mismatch: BRIDGE TICKER={ticker}, chart symbol={_chart_sym}'
             )
             confidence = min(confidence, 30)
+
+    if timeframe and _chart_tf:
+        timeframe_match = (timeframe.strip() == _chart_tf.strip())
 
     return _result(
         confidence,
@@ -599,6 +682,8 @@ def compute_mcp_health(chart_ctx: dict, nova_state: dict) -> dict:
         fields_present=bridge_meta.get('bridge_fields_present', 0),
         fields_missing=all_missing,
         bridge_ver=bridge_ver, v2=True,
+        ticker_match=ticker_match, timeframe_match=timeframe_match,
+        chart_symbol=_chart_sym, chart_timeframe=_chart_tf,
     )
 
 
@@ -2001,6 +2086,10 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         f' session={_h["session"]}'
         f' warnings={len(_h["warnings"])}'
         f' errors={len(_h["errors"])}'
+        f' parser_mode={_h.get("parser_mode","?")}'
+        f' parse_status={_h.get("parse_status","?")}'
+        f' ticker_match={_h.get("ticker_match")}'
+        f' tf_match={_h.get("timeframe_match")}'
     )
 
     def _write_and_push_mcp_health(h: dict) -> None:
