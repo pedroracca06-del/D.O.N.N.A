@@ -2003,15 +2003,26 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         f' errors={len(_h["errors"])}'
     )
 
-    def _write_mcp_health_snapshot(h: dict) -> None:
+    def _write_and_push_mcp_health(h: dict) -> None:
         import time
-        from core.config import MCP_HEALTH_FILE
+        from core.config import MCP_HEALTH_FILE, NOVA_RENDER_URL, NOVA_INGEST_SECRET
+        h['_written_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         try:
-            h['_written_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
             MCP_HEALTH_FILE.write_text(json.dumps(h, indent=2))
         except Exception:
             pass
-    _threading.Thread(target=_write_mcp_health_snapshot, args=(_mcp_health.copy(),), daemon=True).start()
+        try:
+            if NOVA_RENDER_URL and NOVA_INGEST_SECRET:
+                import requests as _req
+                _req.post(
+                    NOVA_RENDER_URL + '/api/feed/ingest',
+                    json={'mcp_health': h},
+                    headers={'X-Nova-Ingest-Secret': NOVA_INGEST_SECRET},
+                    timeout=4,
+                )
+        except Exception:
+            pass
+    _threading.Thread(target=_write_and_push_mcp_health, args=(_mcp_health.copy(),), daemon=True).start()
 
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)

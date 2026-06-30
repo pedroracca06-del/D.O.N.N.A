@@ -1523,9 +1523,10 @@ async def nova_feed_ingest(request: Request):
     reasoning_entry    = body.get('reasoning')
     execution_entry    = body.get('execution')
     intelligence_entry = body.get('intelligence')
+    mcp_health_entry   = body.get('mcp_health')
 
-    if not signal_entry and not reasoning_entry and not execution_entry and not intelligence_entry:
-        raise HTTPException(status_code=400, detail='Body must contain signal, reasoning, execution, and/or intelligence.')
+    if not any([signal_entry, reasoning_entry, execution_entry, intelligence_entry, mcp_health_entry]):
+        raise HTTPException(status_code=400, detail='Body must contain signal, reasoning, execution, intelligence, and/or mcp_health.')
 
     from services.feed import ingest_signal, ingest_reasoning, ingest_execution, ingest_intelligence
 
@@ -1545,6 +1546,13 @@ async def nova_feed_ingest(request: Request):
 
     if intelligence_entry and isinstance(intelligence_entry, dict):
         intelligence_id = await asyncio.to_thread(ingest_intelligence, intelligence_entry)
+
+    if mcp_health_entry and isinstance(mcp_health_entry, dict):
+        from core.config import MCP_HEALTH_FILE
+        import json as _json
+        await asyncio.to_thread(
+            lambda: MCP_HEALTH_FILE.write_text(_json.dumps(mcp_health_entry, indent=2))
+        )
 
     return {
         'ok':               True,
