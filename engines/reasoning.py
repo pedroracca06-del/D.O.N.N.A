@@ -717,6 +717,8 @@ def _build_mcp_snapshot(
     }
 
     return {
+        # ── snapshot classification ───────────────────────────────────────────
+        'snapshot_type': 'market_read',
         # ── identity ──────────────────────────────────────────────────────────
         'timestamp':       _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime()),
         'symbol':          chart_ctx.get('symbol'),
@@ -784,6 +786,98 @@ def _append_mcp_snapshot(snapshot: dict) -> None:
         MCP_SNAPSHOTS_FILE.write_text(_json.dumps(existing, indent=2), encoding='utf-8')
     except Exception as _exc:
         print(f'[mcp-snapshot] write error (non-fatal): {_exc}')
+
+
+def _build_decision_snapshot(
+    base_snap:     dict,
+    *,
+    pros_eval:     dict = None,
+    orb_eval:      dict = None,
+    ib_eval:       dict = None,
+    pre_signal:    str  = '',
+    pre_setup:     str  = '',
+    pre_rationale: str  = '',
+    decision:      dict = None,
+    claude_called: bool = False,
+    alert_generated: bool = False,
+) -> dict:
+    """Build a decision-enriched snapshot from a market_read base.  Pure — no I/O."""
+    pe = pros_eval or {}
+    oe = orb_eval  or {}
+    ie = ib_eval   or {}
+    de = decision  or {}
+
+    alert_type     = de.get('alert_type', '') or ''
+    alert_required = bool(de.get('alert_required', False))
+    is_exec_ready  = alert_type == 'EXECUTION_READY'
+    is_heads_up    = alert_type == 'HEADS_UP'
+    is_no_trade    = (alert_type == 'NO_TRADE') or (pre_signal == 'NO_TRADE')
+    is_rejected    = claude_called and not alert_required
+    rejection_reason = (de.get('no_alert_reason', '') or '') if not alert_required else ''
+
+    snap = dict(base_snap)
+    snap.update({
+        'snapshot_type': 'decision',
+        # ── pre-evaluator signal (deterministic output) ───────────────────────
+        'pre_signal':    pre_signal,
+        'pre_setup':     pre_setup,
+        'pre_rationale': pre_rationale,
+        # ── evaluator summaries ───────────────────────────────────────────────
+        'pros_eval_summary': {
+            'phase':          pe.get('phase'),
+            'direction':      pe.get('direction'),
+            'setup_type':     pe.get('setup_type'),
+            'has_signal':     pe.get('has_signal'),
+            'signal_strength': pe.get('signal_strength'),
+            'ote_status':     pe.get('ote_status'),
+            'cont_quality':   pe.get('cont_quality'),
+        },
+        'orb_eval_summary': {
+            'phase':         oe.get('phase'),
+            'direction':     oe.get('direction'),
+            'setup_type':    oe.get('setup_type'),
+            'has_signal':    oe.get('has_signal'),
+            'entry_type':    oe.get('entry_type'),
+            'entry_quality': oe.get('entry_quality'),
+            'in_context':    oe.get('in_context'),
+            'orb_range':     oe.get('orb_range'),
+        },
+        'ib_eval_summary': {
+            'draw':        ie.get('draw'),
+            'draw_source': ie.get('draw_source'),
+            'aligned':     ie.get('aligned'),
+            'ib_range':    ie.get('ib_range'),
+            'ib_tight':    ie.get('ib_tight'),
+            'ib_source':   ie.get('ib_source'),
+        },
+        # ── Claude decision fields ────────────────────────────────────────────
+        'claude_called':  claude_called,
+        'signal_type':    alert_type or pre_signal,
+        'setup_type':     de.get('setup_type') or pre_setup,
+        'direction':      de.get('direction'),
+        'confidence':     None,
+        'grade':          de.get('grade'),
+        'rationale':      de.get('reasoning') or de.get('notes'),
+        'entry_zone':     de.get('entry_zone'),
+        'stop':           de.get('stop'),
+        'tp1':            de.get('tp1'),
+        'rr':             de.get('rr'),
+        # ── final decision state ──────────────────────────────────────────────
+        'alert_required':     alert_required,
+        'alert_generated':    alert_generated,
+        'is_execution_ready': is_exec_ready,
+        'is_heads_up':        is_heads_up,
+        'is_no_trade':        is_no_trade,
+        'is_rejected':        is_rejected,
+        'rejection_reason':   rejection_reason,
+    })
+    return snap
+
+
+def _fire_decision_snapshot(base: dict, **kwargs) -> None:
+    """Build a decision snapshot and append it in a daemon thread (non-blocking)."""
+    snap = _build_decision_snapshot(base, **kwargs)
+    _threading.Thread(target=_append_mcp_snapshot, args=(snap,), daemon=True).start()
 
 
 # ── Session context evaluator (fast, deterministic) ────────────────────────────
@@ -2212,8 +2306,8 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             pass
     _threading.Thread(target=_write_and_push_mcp_health, args=(_mcp_health.copy(),), daemon=True).start()
 
-    _snap = _build_mcp_snapshot(chart_ctx, nova_state, _mcp_health, session_ctx)
-    _threading.Thread(target=_append_mcp_snapshot, args=(_snap,), daemon=True).start()
+    _mcp_snap = _build_mcp_snapshot(chart_ctx, nova_state, _mcp_health, session_ctx)
+    _threading.Thread(target=_append_mcp_snapshot, args=(_mcp_snap,), daemon=True).start()
 
     pros_eval       = _evaluate_pros_phase(main_state, pros_state_data, chart_ctx)
     orb_eval        = _evaluate_orb_phase(main_state, chart_ctx, session_ctx, orb_table)
@@ -2243,6 +2337,12 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
 
     if signal_type is None:
         print(f'[nova-reasoning] {session_ctx["time_et"]} | {symbol} | no signal | {rationale}')
+        _fire_decision_snapshot(
+            _mcp_snap,
+            pros_eval=pros_eval, orb_eval=orb_eval, ib_eval=ib_eval,
+            pre_signal='', pre_setup='', pre_rationale=rationale or '',
+            decision=None, claude_called=False, alert_generated=False,
+        )
         return []
 
     # Derive active family from classification — gates which DP scorers run
@@ -2268,6 +2368,12 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     )
 
     if signal_type == NO_TRADE and session_ctx.get('daily_loss_hit') and AlertData:
+        _fire_decision_snapshot(
+            _mcp_snap,
+            pros_eval=pros_eval, orb_eval=orb_eval, ib_eval=ib_eval,
+            pre_signal=signal_type, pre_setup=setup_type, pre_rationale=rationale or '',
+            decision=None, claude_called=False, alert_generated=True,
+        )
         return [AlertData(
             alert_type  = NO_TRADE,
             symbol      = symbol,
@@ -2302,6 +2408,12 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
     }
     decision = evaluate_with_claude(nova_state, session_ctx, chart_ctx, pre_assess)
     if not decision:
+        _fire_decision_snapshot(
+            _mcp_snap,
+            pros_eval=pros_eval, orb_eval=orb_eval, ib_eval=ib_eval,
+            pre_signal=signal_type, pre_setup=setup_type, pre_rationale=rationale or '',
+            decision=None, claude_called=True, alert_generated=False,
+        )
         return []
 
     # Load MR2 once — shared between reasoning snapshot and signal log entry.
@@ -2525,6 +2637,12 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
         print(f'[signal_log] log error: {_sle}')
 
     alert = decision_to_alert(decision, symbol)
+    _fire_decision_snapshot(
+        _mcp_snap,
+        pros_eval=pros_eval, orb_eval=orb_eval, ib_eval=ib_eval,
+        pre_signal=signal_type, pre_setup=setup_type, pre_rationale=rationale or '',
+        decision=decision, claude_called=True, alert_generated=(alert is not None),
+    )
     return [alert] if alert else []
 
 
