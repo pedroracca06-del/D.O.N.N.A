@@ -867,6 +867,129 @@ def _build_setup_fingerprint(snapshot: dict) -> dict:
     }
 
 
+# ── Setup Similarity Matching ──────────────────────────────────────────────────
+
+# Field weights for similarity scoring. High-weight = core setup identity.
+# Low-weight = supporting context. All fields skipped when either side is None.
+_FP_WEIGHTS: dict[str, float] = {
+    # ── high weight ───────────────────────────────────────────────────────────
+    'market_family':     3.0,
+    'setup_type':        3.0,
+    'signal_type':       3.0,
+    'direction':         3.0,
+    'session':           2.0,
+    'ib_status':         2.0,
+    'ib_location':       2.0,
+    'orb_active':        2.0,
+    'orb_entry_type':    2.0,
+    'pros_phase':        2.5,
+    'pros_quality':      2.0,
+    'pros_continuation': 2.0,
+    'peer_alignment':    2.0,
+    'mcp_status':        1.5,
+    # ── low weight ────────────────────────────────────────────────────────────
+    'time_bucket':       1.0,
+    'grade':             1.0,
+    'draw_direction':    1.0,
+    'orb_in_context':    1.0,
+    'pros_ote_status':   1.0,
+    'ticker_match':      0.5,
+    'timeframe_match':   0.5,
+}
+
+
+def _compare_setup_fingerprints(current: dict, historical: dict) -> dict:
+    """Score similarity between two fingerprints.
+
+    Returns similarity_score 0.0–1.0.  Fields where either side is None are
+    skipped entirely so missing data never inflates or penalises the score.
+    """
+    matched:     list[str] = []
+    mismatched:  list[str] = []
+    breakdown:   dict      = {}
+    total_w    = 0.0
+    matched_w  = 0.0
+
+    for field, weight in _FP_WEIGHTS.items():
+        cv = current.get(field)
+        hv = historical.get(field)
+        if cv is None or hv is None:
+            continue  # incomparable — skip both ways
+        total_w += weight
+        if cv == hv:
+            matched_w += weight
+            matched.append(field)
+            breakdown[field] = {'match': True,  'weight': weight, 'value': cv}
+        else:
+            mismatched.append(field)
+            breakdown[field] = {'match': False, 'weight': weight, 'current': cv, 'historical': hv}
+
+    score = round(matched_w / total_w, 4) if total_w > 0 else 0.0
+    return {
+        'similarity_score':         score,
+        'matched_fields':           matched,
+        'mismatched_fields':        mismatched,
+        'weighted_score_breakdown': breakdown,
+        'total_weight':             round(total_w, 2),
+        'matched_weight':           round(matched_w, 2),
+    }
+
+
+def _find_similar_setups(
+    current_snapshot:    dict,
+    historical_snapshots: list,
+    limit:               int = 10,
+) -> list:
+    """Find the top-N decision snapshots most similar to current_snapshot.
+
+    Rules:
+    - Only compares against decision snapshots (snapshot_type == 'decision').
+    - Skips the current snapshot itself (matched by timestamp).
+    - Requires setup_fingerprint (builds on-the-fly if absent).
+    - Returns at most `limit` results sorted by similarity_score descending.
+    """
+    current_fp = current_snapshot.get('setup_fingerprint') or _build_setup_fingerprint(current_snapshot)
+    current_ts = current_snapshot.get('timestamp')
+
+    results = []
+    for hist in historical_snapshots:
+        if hist.get('snapshot_type') != 'decision':
+            continue
+        if hist.get('timestamp') == current_ts:
+            continue  # skip self
+        hist_fp = hist.get('setup_fingerprint') or _build_setup_fingerprint(hist)
+        comparison = _compare_setup_fingerprints(current_fp, hist_fp)
+        results.append({
+            'snapshot':    hist,
+            'fingerprint': hist_fp,
+            'comparison':  comparison,
+        })
+
+    results.sort(key=lambda x: x['comparison']['similarity_score'], reverse=True)
+    return results[:limit]
+
+
+def _similar_match_summary(match: dict) -> dict:
+    """Compact summary for one _find_similar_setups result."""
+    snap       = match.get('snapshot', {})
+    comparison = match.get('comparison', {})
+    return {
+        'timestamp':         snap.get('timestamp'),
+        'symbol':            snap.get('symbol'),
+        'session':           snap.get('session'),
+        'setup_type':        snap.get('setup_type'),
+        'signal_type':       snap.get('signal_type'),
+        'direction':         snap.get('direction'),
+        'similarity_score':  comparison.get('similarity_score'),
+        'matched_fields':    comparison.get('matched_fields', []),
+        'mismatched_fields': comparison.get('mismatched_fields', []),
+        'is_execution_ready': snap.get('is_execution_ready'),
+        'is_rejected':       snap.get('is_rejected'),
+        'grade':             snap.get('grade'),
+        'rationale':         snap.get('rationale'),
+    }
+
+
 def _build_decision_snapshot(
     base_snap:     dict,
     *,

@@ -1444,6 +1444,47 @@ async def mcp_replay_fingerprints(limit: int = 50):
         return {'error': str(exc), 'fingerprints': []}
 
 
+@app.get('/api/mcp-replay/similar')
+async def mcp_replay_similar(
+    limit:       int        = 10,
+    symbol:      str | None = None,
+    setup_type:  str | None = None,
+    direction:   str | None = None,
+    session:     str | None = None,
+):
+    """Find historical decision snapshots most similar to the latest one.
+
+    Uses setup_fingerprint similarity scoring (0.0–1.0).
+    Observability only — does not affect any execution or signal logic.
+    """
+    try:
+        from engines.reasoning import _find_similar_setups, _similar_match_summary
+        limit = max(1, min(limit, 100))
+        all_snaps = _read_mcp_snapshots_raw()
+        decisions = _filter_snapshots(
+            all_snaps, snapshot_type='decision',
+            symbol=symbol, setup_type=setup_type,
+            direction=direction, session=session,
+        )
+        if not decisions:
+            return {'current': None, 'matches': []}
+        current = decisions[-1]
+        matches = _find_similar_setups(current, decisions, limit=limit)
+        return {
+            'current': {
+                'timestamp':   current.get('timestamp'),
+                'symbol':      current.get('symbol'),
+                'setup_type':  current.get('setup_type'),
+                'signal_type': current.get('signal_type'),
+                'direction':   current.get('direction'),
+                'session':     current.get('session'),
+            },
+            'matches': [_similar_match_summary(m) for m in matches],
+        }
+    except Exception as exc:
+        return {'error': str(exc), 'current': None, 'matches': []}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""
