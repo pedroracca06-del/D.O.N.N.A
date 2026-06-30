@@ -8,14 +8,18 @@ Covers:
   4.  MEDIUM-confidence LOSS snapshot: INSUFFICIENT_DATA (conservative)
   5.  LOW-confidence journal match: INSUFFICIENT_DATA with cautious lesson
   6.  No linked outcome: INSUFFICIENT_DATA
-  7.  Rejected snapshot: NO_TRADE_CORRECT regardless of confidence
-  8.  No-trade snapshot: NO_TRADE_CORRECT
-  9.  Malformed / None snapshot does not crash
- 10.  Malformed / None outcome_link does not crash
- 11.  Compact record has all required fields
- 12.  No win_rate / avg_r / performance claims in any output
- 13.  Low-confidence section_c includes low_confidence_note
- 14.  DEGRADED MCP status appears in lesson note
+  7.  Rejected + no link: NO_TRADE_REVIEW_ONLY
+  8.  Rejected + LOW confidence: NO_TRADE_REVIEW_ONLY
+  9.  Rejected + HIGH confidence LOSS: NO_TRADE_CONFIRMED_CORRECT
+ 10.  Rejected + HIGH confidence WIN: MISSED_OPPORTUNITY
+ 11.  No-trade + no link: NO_TRADE_REVIEW_ONLY
+ 12.  Lesson avoids "correct" for NO_TRADE_REVIEW_ONLY
+ 13.  Malformed / None snapshot does not crash
+ 14.  Malformed / None outcome_link does not crash
+ 15.  Compact record has all required fields
+ 16.  No win_rate / avg_r / performance claims in any output
+ 17.  Low-confidence section_c includes low_confidence_note
+ 18.  DEGRADED MCP status appears in lesson note
 
 Run:  python tests/test_phase_i_post_trade_review.py
       python -m pytest tests/test_phase_i_post_trade_review.py -v
@@ -218,24 +222,73 @@ def test_no_linked_outcome_is_insufficient_data():
     assert _no_forbidden(review)
 
 
-def test_rejected_snapshot_is_no_trade_correct():
+def test_rejected_no_link_is_no_trade_review_only():
     snap   = _decision_snap(is_exec_ready=False, is_rejected=True)
-    # Even with a WIN link, a rejected snapshot stays NO_TRADE_CORRECT
-    for confidence in ('HIGH', 'MEDIUM', 'LOW', 'NONE'):
-        link   = _link(confidence, 'WIN')
+    link   = _no_link()
+    review = build_post_trade_review(snap, link)
+    assert review['conclusion'] == 'NO_TRADE_REVIEW_ONLY', review['conclusion']
+    assert _no_forbidden(review)
+
+
+def test_rejected_low_confidence_is_no_trade_review_only():
+    snap = _decision_snap(is_exec_ready=False, is_rejected=True)
+    for outcome in ('WIN', 'LOSS', 'UNKNOWN'):
+        link   = _link('LOW', outcome, method='DATE_TICKER_DIR', trade_status='TAKEN')
         review = build_post_trade_review(snap, link)
-        assert review['conclusion'] == 'NO_TRADE_CORRECT', (
-            f'confidence={confidence}: expected NO_TRADE_CORRECT, got {review["conclusion"]}'
+        assert review['conclusion'] == 'NO_TRADE_REVIEW_ONLY', (
+            f'LOW conf + {outcome}: expected NO_TRADE_REVIEW_ONLY, got {review["conclusion"]}'
         )
         assert _no_forbidden(review)
 
 
-def test_no_trade_snapshot_is_no_trade_correct():
+def test_rejected_medium_confidence_is_no_trade_review_only():
+    snap = _decision_snap(is_exec_ready=False, is_rejected=True)
+    for outcome in ('WIN', 'LOSS', 'UNKNOWN'):
+        link   = _link('MEDIUM', outcome)
+        review = build_post_trade_review(snap, link)
+        assert review['conclusion'] == 'NO_TRADE_REVIEW_ONLY', (
+            f'MEDIUM conf + {outcome}: expected NO_TRADE_REVIEW_ONLY, got {review["conclusion"]}'
+        )
+        assert _no_forbidden(review)
+
+
+def test_rejected_high_confidence_loss_is_no_trade_confirmed_correct():
+    snap   = _decision_snap(is_exec_ready=False, is_rejected=True)
+    link   = _link('HIGH', 'LOSS', trade_status='TAKEN')
+    review = build_post_trade_review(snap, link)
+    assert review['conclusion'] == 'NO_TRADE_CONFIRMED_CORRECT', review['conclusion']
+    assert 'correct' not in review['lesson'].lower() or 'justified' in review['lesson'].lower(), (
+        'lesson must not use "correct" as a standalone claim'
+    )
+    assert _no_forbidden(review)
+
+
+def test_rejected_high_confidence_win_is_missed_opportunity():
+    snap   = _decision_snap(is_exec_ready=False, is_rejected=True)
+    link   = _link('HIGH', 'WIN', trade_status='TAKEN')
+    review = build_post_trade_review(snap, link)
+    assert review['conclusion'] == 'MISSED_OPPORTUNITY', review['conclusion']
+    assert _no_forbidden(review)
+
+
+def test_no_trade_no_link_is_no_trade_review_only():
     snap   = _decision_snap(signal_type='NO_TRADE', is_exec_ready=False, is_no_trade=True)
     link   = _no_link()
     review = build_post_trade_review(snap, link)
-    assert review['conclusion'] == 'NO_TRADE_CORRECT', review['conclusion']
+    assert review['conclusion'] == 'NO_TRADE_REVIEW_ONLY', review['conclusion']
     assert _no_forbidden(review)
+
+
+def test_lesson_avoids_standalone_correct_for_review_only():
+    snap   = _decision_snap(is_exec_ready=False, is_rejected=True)
+    link   = _no_link()
+    review = build_post_trade_review(snap, link)
+    assert review['conclusion'] == 'NO_TRADE_REVIEW_ONLY'
+    lesson = review['lesson'].lower()
+    # Must not claim correctness — must explicitly say evidence is insufficient
+    assert 'correct or incorrect' in lesson or 'not strong enough' in lesson, (
+        f'Lesson must state outcome is insufficient to judge. Got: {review["lesson"]}'
+    )
 
 
 def test_malformed_snapshot_does_not_crash():
@@ -302,20 +355,25 @@ def test_degraded_mcp_appears_in_lesson():
 
 if __name__ == '__main__':
     tests = [
-        ('HIGH conf WIN: GOOD_READ_GOOD_DECISION',       test_high_confidence_win_is_good_read_good_decision),
-        ('HIGH conf LOSS: GOOD_READ_BAD_DECISION',       test_high_confidence_loss_is_good_read_bad_decision),
-        ('MEDIUM conf WIN: GOOD_READ_GOOD_DECISION',     test_medium_confidence_win_is_good_read_good_decision),
-        ('MEDIUM conf LOSS: INSUFFICIENT_DATA',          test_medium_confidence_loss_is_insufficient_data),
-        ('LOW conf journal: INSUFFICIENT_DATA',          test_low_confidence_journal_match_is_insufficient_data),
-        ('No linked outcome: INSUFFICIENT_DATA',         test_no_linked_outcome_is_insufficient_data),
-        ('Rejected snap: NO_TRADE_CORRECT',              test_rejected_snapshot_is_no_trade_correct),
-        ('No-trade snap: NO_TRADE_CORRECT',              test_no_trade_snapshot_is_no_trade_correct),
-        ('Malformed snapshot does not crash',            test_malformed_snapshot_does_not_crash),
-        ('Malformed outcome_link does not crash',        test_malformed_outcome_link_does_not_crash),
-        ('Compact record has all required fields',       test_compact_record_has_all_required_fields),
-        ('No performance claims in output',              test_no_performance_claims_in_output),
-        ('LOW conf section_c has low_confidence_note',  test_low_confidence_section_c_has_note),
-        ('DEGRADED MCP appears in lesson',              test_degraded_mcp_appears_in_lesson),
+        ('HIGH conf WIN: GOOD_READ_GOOD_DECISION',                  test_high_confidence_win_is_good_read_good_decision),
+        ('HIGH conf LOSS: GOOD_READ_BAD_DECISION',                  test_high_confidence_loss_is_good_read_bad_decision),
+        ('MEDIUM conf WIN: GOOD_READ_GOOD_DECISION',                test_medium_confidence_win_is_good_read_good_decision),
+        ('MEDIUM conf LOSS: INSUFFICIENT_DATA',                     test_medium_confidence_loss_is_insufficient_data),
+        ('LOW conf journal: INSUFFICIENT_DATA',                     test_low_confidence_journal_match_is_insufficient_data),
+        ('No linked outcome: INSUFFICIENT_DATA',                    test_no_linked_outcome_is_insufficient_data),
+        ('Rejected + no link: NO_TRADE_REVIEW_ONLY',                test_rejected_no_link_is_no_trade_review_only),
+        ('Rejected + LOW conf: NO_TRADE_REVIEW_ONLY',               test_rejected_low_confidence_is_no_trade_review_only),
+        ('Rejected + MEDIUM conf: NO_TRADE_REVIEW_ONLY',            test_rejected_medium_confidence_is_no_trade_review_only),
+        ('Rejected + HIGH LOSS: NO_TRADE_CONFIRMED_CORRECT',        test_rejected_high_confidence_loss_is_no_trade_confirmed_correct),
+        ('Rejected + HIGH WIN: MISSED_OPPORTUNITY',                 test_rejected_high_confidence_win_is_missed_opportunity),
+        ('No-trade + no link: NO_TRADE_REVIEW_ONLY',                test_no_trade_no_link_is_no_trade_review_only),
+        ('Lesson avoids standalone "correct" for REVIEW_ONLY',      test_lesson_avoids_standalone_correct_for_review_only),
+        ('Malformed snapshot does not crash',                       test_malformed_snapshot_does_not_crash),
+        ('Malformed outcome_link does not crash',                   test_malformed_outcome_link_does_not_crash),
+        ('Compact record has all required fields',                  test_compact_record_has_all_required_fields),
+        ('No performance claims in output',                         test_no_performance_claims_in_output),
+        ('LOW conf section_c has low_confidence_note',              test_low_confidence_section_c_has_note),
+        ('DEGRADED MCP appears in lesson',                          test_degraded_mcp_appears_in_lesson),
     ]
 
     passed = failed = 0

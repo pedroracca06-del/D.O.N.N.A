@@ -20,8 +20,9 @@ _VALID_CONCLUSIONS = frozenset({
     'GOOD_READ_GOOD_DECISION',
     'GOOD_READ_BAD_DECISION',
     'BAD_READ_DECISION_UNRELIABLE',
-    'NO_TRADE_CORRECT',
-    'NO_TRADE_MISSED_OPPORTUNITY',
+    'NO_TRADE_REVIEW_ONLY',
+    'NO_TRADE_CONFIRMED_CORRECT',
+    'MISSED_OPPORTUNITY',
     'INSUFFICIENT_DATA',
 })
 
@@ -33,15 +34,25 @@ def _classify_conclusion(snapshot: dict, link: dict) -> str:
     is_rej     = bool(snapshot.get('is_rejected'))
     is_no_tr   = bool(snapshot.get('is_no_trade'))
 
-    # No-trade / rejected snapshots: governance worked — trade was not entered
+    # ── No-trade / rejected snapshots ─────────────────────────────────────────
+    # Never claim "correct" unless HIGH-confidence outcome evidence supports it.
     if is_rej or is_no_tr:
-        return 'NO_TRADE_CORRECT'
+        if confidence == 'HIGH':
+            if outcome == 'LOSS':
+                # Setup failed — skipping was justified
+                return 'NO_TRADE_CONFIRMED_CORRECT'
+            if outcome == 'WIN':
+                # Someone took it and won — NOVA missed a valid opportunity
+                return 'MISSED_OPPORTUNITY'
+        # Default: not enough evidence to judge the skip either way
+        return 'NO_TRADE_REVIEW_ONLY'
 
+    # ── Live trade snapshots ───────────────────────────────────────────────────
     # No linked outcome — cannot draw any conclusion
     if confidence == 'NONE':
         return 'INSUFFICIENT_DATA'
 
-    # Require at least MEDIUM confidence to claim anything about live trades
+    # Require at least MEDIUM confidence to claim anything
     if confidence not in ('HIGH', 'MEDIUM'):
         return 'INSUFFICIENT_DATA'
 
@@ -100,10 +111,24 @@ def _build_lesson(snapshot: dict, link: dict, conclusion: str) -> str:
             f"{mcp_note} Monitor until outcome is confirmed.{conf_tag}"
         )
 
-    if conclusion == 'NO_TRADE_CORRECT':
+    if conclusion == 'NO_TRADE_REVIEW_ONLY':
         return (
-            f"No trade taken for {setup} {direction} in {session}.{mcp_note}"
-            f" Governance blocked entry — no conflicting outcome linked.{conf_tag}"
+            f"NOVA skipped {setup} {direction} in {session}.{mcp_note}"
+            f" Outcome evidence is not strong enough to judge the skip as correct or incorrect.{conf_tag}"
+        )
+
+    if conclusion == 'NO_TRADE_CONFIRMED_CORRECT':
+        return (
+            f"NOVA skipped {setup} {direction} in {session}.{mcp_note}"
+            f" HIGH-confidence outcome data shows the setup failed — the skip appears justified."
+            f" Single data point only.{conf_tag}"
+        )
+
+    if conclusion == 'MISSED_OPPORTUNITY':
+        return (
+            f"NOVA skipped {setup} {direction} in {session}.{mcp_note}"
+            f" HIGH-confidence data links this setup to a WIN — review whether the skip was warranted."
+            f" Single data point only, not a rule.{conf_tag}"
         )
 
     if conclusion == 'GOOD_READ_GOOD_DECISION':
@@ -129,12 +154,6 @@ def _build_lesson(snapshot: dict, link: dict, conclusion: str) -> str:
         return (
             f"{setup} {direction} in {session} — read reliability in question."
             f"{mcp_note}{conf_tag}"
-        )
-
-    if conclusion == 'NO_TRADE_MISSED_OPPORTUNITY':
-        return (
-            f"No trade taken for {setup} {direction} in {session}."
-            f" Possible missed opportunity — requires price replay to confirm.{mcp_note}{conf_tag}"
         )
 
     return f"{setup} {direction} in {session} — review complete.{mcp_note}{conf_tag}"
