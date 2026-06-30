@@ -1416,6 +1416,34 @@ async def mcp_replay_decisions(limit: int = 50):
         return {'error': str(exc), 'summaries': []}
 
 
+@app.get('/api/mcp-replay/fingerprints')
+async def mcp_replay_fingerprints(limit: int = 50):
+    """Compact fingerprint records for the last N decision snapshots."""
+    try:
+        from engines.reasoning import _build_setup_fingerprint
+        limit = max(1, min(limit, 500))
+        snaps = _read_mcp_snapshots_raw()
+        decisions = _filter_snapshots(snaps, snapshot_type='decision')
+        out = []
+        for s in decisions[-limit:]:
+            fp = s.get('setup_fingerprint') or _build_setup_fingerprint(s)
+            out.append({
+                'timestamp':          s.get('timestamp'),
+                'symbol':             s.get('symbol'),
+                'setup_type':         s.get('setup_type'),
+                'direction':          s.get('direction'),
+                'signal_type':        s.get('signal_type'),
+                'session':            s.get('session'),
+                'fingerprint':        fp,
+                'mcp_confidence':     (s.get('mcp_health') or {}).get('confidence'),
+                'is_execution_ready': s.get('is_execution_ready'),
+                'is_rejected':        s.get('is_rejected'),
+            })
+        return out
+    except Exception as exc:
+        return {'error': str(exc), 'fingerprints': []}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""

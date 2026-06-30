@@ -788,6 +788,85 @@ def _append_mcp_snapshot(snapshot: dict) -> None:
         print(f'[mcp-snapshot] write error (non-fatal): {_exc}')
 
 
+# ── Setup Fingerprint helpers ──────────────────────────────────────────────────
+
+def _normalize_market_family(symbol: str) -> str:
+    """MES/ES → 'ES', MNQ/NQ → 'NQ', else strip CME_MINI prefix and 1! suffix."""
+    s = (symbol or '').upper().replace('CME_MINI:', '').replace('1!', '').strip()
+    if s in ('MES', 'ES'):
+        return 'ES'
+    if s in ('MNQ', 'NQ'):
+        return 'NQ'
+    return s
+
+
+def _time_bucket_utc(ts: str) -> str | None:
+    """Floor a UTC ISO timestamp to the nearest 30-min bucket string ('HH:MM')."""
+    try:
+        t = (ts or '').split('T')[1][:5]  # 'HH:MM'
+        h, m = int(t[:2]), int(t[3:5])
+        return f'{h:02d}:{(m // 30) * 30:02d}'
+    except Exception:
+        return None
+
+
+def _build_setup_fingerprint(snapshot: dict) -> dict:
+    """Build a deterministic setup fingerprint from a decision snapshot.  Pure — no I/O."""
+    pe = snapshot.get('pros_eval_summary') or {}
+    oe = snapshot.get('orb_eval_summary')  or {}
+    ie = snapshot.get('ib_eval_summary')   or {}
+    h  = snapshot.get('mcp_health')        or {}
+    return {
+        # ── identity ──────────────────────────────────────────────────────────
+        'symbol':        snapshot.get('symbol'),
+        'market_family': _normalize_market_family(snapshot.get('symbol') or ''),
+        'timeframe':     snapshot.get('timeframe'),
+        'session':       snapshot.get('session'),
+        'time_bucket':   _time_bucket_utc(snapshot.get('timestamp') or ''),
+        # ── setup ─────────────────────────────────────────────────────────────
+        'snapshot_type': snapshot.get('snapshot_type'),
+        'pre_signal':    snapshot.get('pre_signal'),
+        'pre_setup':     snapshot.get('pre_setup'),
+        'signal_type':   snapshot.get('signal_type'),
+        'setup_type':    snapshot.get('setup_type'),
+        'direction':     snapshot.get('direction'),
+        'grade':         snapshot.get('grade'),
+        # ── market structure ──────────────────────────────────────────────────
+        'ib_status':          snapshot.get('ib_status'),
+        'ib_location':        ie.get('draw'),
+        'ib_range':           ie.get('ib_range'),
+        'ib_tight':           ie.get('ib_tight'),
+        'orb_active':         snapshot.get('orb_active'),
+        'orb_phase':          oe.get('phase'),
+        'orb_entry_type':     oe.get('entry_type'),
+        'orb_entry_quality':  oe.get('entry_quality'),
+        'orb_in_context':     oe.get('in_context'),
+        'draw_direction':     snapshot.get('draw_direction'),
+        'peer_alignment':     snapshot.get('peer_alignment'),
+        'liquidity_context':  None,
+        # ── strategy state ────────────────────────────────────────────────────
+        'pros_active':       snapshot.get('pros_active'),
+        'pros_phase':        pe.get('phase'),
+        'pros_quality':      pe.get('signal_strength'),
+        'pros_continuation': pe.get('cont_quality'),
+        'pros_ote_status':   pe.get('ote_status'),
+        'orb_has_signal':    oe.get('has_signal'),
+        # ── MCP reliability ───────────────────────────────────────────────────
+        'parser_mode':    snapshot.get('parser_mode'),
+        'parse_status':   snapshot.get('parse_status'),
+        'mcp_status':     h.get('status'),
+        'mcp_confidence': h.get('confidence'),
+        'ticker_match':   snapshot.get('ticker_match'),
+        'timeframe_match': snapshot.get('timeframe_match'),
+        # ── decision flags ────────────────────────────────────────────────────
+        'is_execution_ready': snapshot.get('is_execution_ready'),
+        'is_heads_up':        snapshot.get('is_heads_up'),
+        'is_no_trade':        snapshot.get('is_no_trade'),
+        'is_rejected':        snapshot.get('is_rejected'),
+        'rejection_reason':   snapshot.get('rejection_reason'),
+    }
+
+
 def _build_decision_snapshot(
     base_snap:     dict,
     *,
@@ -871,6 +950,7 @@ def _build_decision_snapshot(
         'is_rejected':        is_rejected,
         'rejection_reason':   rejection_reason,
     })
+    snap['setup_fingerprint'] = _build_setup_fingerprint(snap)
     return snap
 
 
