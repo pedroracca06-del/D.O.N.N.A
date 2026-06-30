@@ -990,6 +990,29 @@ def _similar_match_summary(match: dict) -> dict:
     }
 
 
+# ── Decision ID ────────────────────────────────────────────────────────────────
+
+def _make_decision_id(
+    timestamp:   str,
+    symbol:      str,
+    setup_type:  str,
+    direction:   str,
+    signal_type: str,
+) -> str:
+    """Deterministic decision ID: DEC_{date}_{time}_{hash6}.
+
+    Stable across reruns for the same (timestamp[:16], family, setup, direction,
+    signal_type) tuple.  Used as a linking key for outcome / signal-log matching.
+    """
+    import hashlib as _hl
+    fam = _normalize_market_family(symbol or '')
+    raw = f"{(timestamp or '')[:16]}|{fam}|{setup_type}|{direction}|{signal_type}"
+    h   = _hl.sha256(raw.encode()).hexdigest()[:6].upper()
+    date_part = (timestamp or '2000-01-01T00:00')[:10].replace('-', '')
+    time_part = (timestamp or '2000-01-01T00:00')[11:16].replace(':', '')
+    return f"DEC_{date_part}_{time_part}_{h}"
+
+
 def _build_decision_snapshot(
     base_snap:     dict,
     *,
@@ -1074,6 +1097,13 @@ def _build_decision_snapshot(
         'rejection_reason':   rejection_reason,
     })
     snap['setup_fingerprint'] = _build_setup_fingerprint(snap)
+    snap['decision_id']       = _make_decision_id(
+        snap.get('timestamp', ''),
+        snap.get('symbol', ''),
+        snap.get('setup_type') or '',
+        snap.get('direction') or '',
+        snap.get('signal_type') or '',
+    )
     return snap
 
 

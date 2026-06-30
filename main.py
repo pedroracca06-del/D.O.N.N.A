@@ -1485,6 +1485,93 @@ async def mcp_replay_similar(
         return {'error': str(exc), 'current': None, 'matches': []}
 
 
+@app.get('/api/mcp-replay/outcomes')
+async def mcp_replay_outcomes(limit: int = 50):
+    """Compact outcome records for the last N decision snapshots.
+
+    Links each snapshot to signal log / journal / execution trace entries.
+    Read-only — no execution impact.
+    """
+    try:
+        from engines.outcome_linker import (
+            link_snapshot_to_outcome, outcome_summary,
+            load_signal_log, load_journal, load_execution_trace,
+        )
+        limit       = max(1, min(limit, 500))
+        all_snaps   = _read_mcp_snapshots_raw()
+        decisions   = _filter_snapshots(all_snaps, snapshot_type='decision')
+        signal_log  = await asyncio.to_thread(load_signal_log)
+        journal     = await asyncio.to_thread(load_journal)
+        trace       = await asyncio.to_thread(load_execution_trace)
+        results     = []
+        for snap in decisions[-limit:]:
+            link = link_snapshot_to_outcome(snap, signal_log, journal, trace)
+            results.append(outcome_summary(snap, link))
+        return results
+    except Exception as exc:
+        return {'error': str(exc), 'outcomes': []}
+
+
+@app.get('/api/mcp-replay/similar-with-outcomes')
+async def mcp_replay_similar_with_outcomes(limit: int = 10):
+    """Similar setups enriched with outcome links.
+
+    Finds setups similar to the latest decision snapshot, then attempts to
+    link each historical match to a known trade outcome.  Does NOT compute
+    aggregate stats (win rate, avg R) — outcome data must be linked first.
+    Read-only — no execution impact.
+    """
+    try:
+        from engines.reasoning import _find_similar_setups, _similar_match_summary
+        from engines.outcome_linker import (
+            link_snapshot_to_outcome, load_signal_log, load_journal, load_execution_trace,
+        )
+        limit       = max(1, min(limit, 100))
+        all_snaps   = _read_mcp_snapshots_raw()
+        decisions   = _filter_snapshots(all_snaps, snapshot_type='decision')
+        if not decisions:
+            return {'current': None, 'matches': [], 'outcome_note': 'No decision snapshots available'}
+
+        current    = decisions[-1]
+        signal_log = await asyncio.to_thread(load_signal_log)
+        journal    = await asyncio.to_thread(load_journal)
+        trace      = await asyncio.to_thread(load_execution_trace)
+
+        matches    = _find_similar_setups(current, decisions, limit=limit)
+        enriched   = []
+        for m in matches:
+            base_summary = _similar_match_summary(m)
+            snap = m.get('snapshot', {})
+            link = link_snapshot_to_outcome(snap, signal_log, journal, trace)
+            base_summary['trade_status']     = link.get('trade_status', 'UNKNOWN')
+            base_summary['outcome']          = link.get('outcome', 'UNKNOWN')
+            base_summary['match_confidence'] = link.get('match_confidence', 'NONE')
+            base_summary['linked_signal_id'] = link.get('linked_signal_id', '')
+            base_summary['outcome_note'] = (
+                f"Outcome linked via {link['match_method']}"
+                if link.get('match_method') != 'NONE'
+                else 'No outcome linked — snapshot not yet matched to a trade'
+            )
+            enriched.append(base_summary)
+
+        return {
+            'current': {
+                'timestamp':    current.get('timestamp'),
+                'symbol':       current.get('symbol'),
+                'setup_type':   current.get('setup_type'),
+                'signal_type':  current.get('signal_type'),
+                'direction':    current.get('direction'),
+                'session':      current.get('session'),
+                'decision_id':  current.get('decision_id'),
+            },
+            'matches': enriched,
+            # No aggregate stats — outcome linking is in early stage.
+            # Win rate / avg R will be computed once HIGH-confidence links accumulate.
+        }
+    except Exception as exc:
+        return {'error': str(exc), 'current': None, 'matches': []}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""
