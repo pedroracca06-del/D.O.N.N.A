@@ -145,6 +145,10 @@ class AlertData:
     # Free notes
     notes:            str = ''
 
+    # Execution Bot v2 Phase 1 — observability fields (not used by alert delivery)
+    decision_id:         str = ''   # reasoning snapshot id; empty if not yet wired
+    signal_generated_at: str = ''   # ISO UTC timestamp when signal was created
+
     @property
     def signal_key(self) -> str:
         return f'{self.symbol}_{self.setup_type}_{self.direction}'.upper()

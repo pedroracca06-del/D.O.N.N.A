@@ -2496,28 +2496,35 @@ def decision_to_alert(decision: dict, symbol: str) -> Optional[AlertData]:
     if alert_type not in (HEADS_UP, EXECUTION_READY, INVALIDATION, NO_TRADE):
         return None
 
+    try:
+        from core.config import utc_now_iso as _utc_now_iso
+        _signal_ts = _utc_now_iso()
+    except Exception:
+        _signal_ts = ''
+
     return AlertData(
-        alert_type      = alert_type,
-        symbol          = symbol,
-        setup_type      = decision.get('setup_type', 'UNKNOWN'),
-        direction       = decision.get('direction', 'N/A'),
-        priority        = 'high' if alert_type == EXECUTION_READY else 'standard',
-        session         = decision.get('session', 'NY_OPEN') if 'session' in decision else 'NY_OPEN',
-        session_quality = decision.get('session_quality', '?'),
-        ib_draw         = decision.get('ib_draw', '?'),
-        daily_bias      = decision.get('daily_bias', '?'),
-        htf_4h_bias     = decision.get('htf_4h_bias', '?'),
-        grade           = decision.get('grade', '?'),
-        entry_zone      = decision.get('entry_zone', ''),
-        stop            = decision.get('stop', ''),
-        tp1             = decision.get('tp1', ''),
-        rr              = decision.get('rr', ''),
-        timeframe       = decision.get('timeframe', ''),
-        time_to_close   = decision.get('time_to_close', ''),
-        watch_time      = decision.get('watch_time', ''),
-        reason          = decision.get('reason', ''),
-        action          = decision.get('action', ''),
-        notes           = decision.get('notes', ''),
+        alert_type           = alert_type,
+        symbol               = symbol,
+        setup_type           = decision.get('setup_type', 'UNKNOWN'),
+        direction            = decision.get('direction', 'N/A'),
+        priority             = 'high' if alert_type == EXECUTION_READY else 'standard',
+        session              = decision.get('session', 'NY_OPEN') if 'session' in decision else 'NY_OPEN',
+        session_quality      = decision.get('session_quality', '?'),
+        ib_draw              = decision.get('ib_draw', '?'),
+        daily_bias           = decision.get('daily_bias', '?'),
+        htf_4h_bias          = decision.get('htf_4h_bias', '?'),
+        grade                = decision.get('grade', '?'),
+        entry_zone           = decision.get('entry_zone', ''),
+        stop                 = decision.get('stop', ''),
+        tp1                  = decision.get('tp1', ''),
+        rr                   = decision.get('rr', ''),
+        timeframe            = decision.get('timeframe', ''),
+        time_to_close        = decision.get('time_to_close', ''),
+        watch_time           = decision.get('watch_time', ''),
+        reason               = decision.get('reason', ''),
+        action               = decision.get('action', ''),
+        notes                = decision.get('notes', ''),
+        signal_generated_at  = _signal_ts,
     )
 
 

@@ -431,12 +431,13 @@ def route_to_execution(alert: 'AlertData') -> dict:
     Translate an AlertData object and route it through execute_signal().
 
     Returns dict with keys:
-      status     : 'disabled' | 'skipped' | 'attempted'
-      reason     : why skipped (when status != attempted)
-      code       : rejection code (when status == skipped)
-      signal_id  : unique ID (when status == attempted)
-      result     : execute_signal() return dict (when status == attempted)
-      chain_id   : DECISION_CHAIN trace entry ID (always present)
+      status              : 'disabled' | 'skipped' | 'attempted'
+      reason              : why skipped (when status != attempted)
+      code                : rejection code (when status == skipped)
+      signal_id           : unique ID (when status == attempted)
+      result              : execute_signal() return dict (when status == attempted)
+      chain_id            : DECISION_CHAIN trace entry ID (always present)
+      execution_request   : Phase 1 validation result dict (always present)
     """
     symbol     = getattr(alert, 'symbol',     '')
     alert_type = getattr(alert, 'alert_type', '')
@@ -444,6 +445,41 @@ def route_to_execution(alert: 'AlertData') -> dict:
     direction  = getattr(alert, 'direction',  '')
     setup_type = getattr(alert, 'setup_type', '')
     session    = getattr(alert, 'session',    '')
+
+    # ── Phase 1: Execution request validation (parallel layer) ───────────────────
+    # Always runs. In DRY_RUN mode the result is final and we return here.
+    # In live mode the result is logged but the existing path runs unchanged.
+    _phase1_req: dict = {}
+    try:
+        from services.execution_request import validate_and_record, is_dry_run
+        _phase1_req = validate_and_record(
+            symbol               = symbol,
+            direction            = direction,
+            setup_type           = setup_type,
+            signal_type          = direction,
+            grade                = grade,
+            source               = 'BRIDGE',
+            decision_id          = getattr(alert, 'decision_id', ''),
+            signal_id            = '',   # bridge signal_id generated later; use alert fields for now
+            signal_generated_at  = getattr(alert, 'signal_generated_at', ''),
+        )
+        _log(
+            f'PHASE1  {_phase1_req.get("execution_request_id", "?")}  '
+            f'status={_phase1_req.get("final_status", "?")}  '
+            f'dry_run={_phase1_req.get("dry_run", False)}'
+        )
+        # In dry-run mode: Phase 1 result is final — do not proceed to broker
+        if is_dry_run():
+            return {
+                'status':            _phase1_req.get('final_status', 'DRY_RUN_VALIDATED'),
+                'reason':            _phase1_req.get('final_status', ''),
+                'code':              _phase1_req.get('final_status', ''),
+                'execution_request': _phase1_req,
+                'chain_id':          '',
+            }
+    except Exception as _p1_err:
+        _log(f'Phase 1 validation error (non-blocking): {_p1_err}')
+        _phase1_req = {'error': str(_p1_err), 'final_status': 'FAILED'}
 
     # ── Decision chain accumulator ────────────────────────────────────────────────
     # One entry per gate. Written to execution_trace before every exit so every
@@ -476,7 +512,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
     if not _auto_execute_enabled():
         _log(f'DISABLED  {symbol} {direction} {alert_type}  (set NOVA_AUTO_EXECUTE=true to enable)')
         cid = _fail_exit('NOVA_AUTO_EXECUTE', 'SYSTEM', 'NOVA_AUTO_EXECUTE is false')
-        return {'status': _OFF, 'reason': 'NOVA_AUTO_EXECUTE is false', 'chain_id': cid}
+        return {'status': _OFF, 'reason': 'NOVA_AUTO_EXECUTE is false', 'chain_id': cid, 'execution_request': _phase1_req}
     _cg('NOVA_AUTO_EXECUTE', 'SYSTEM', 'PASS', 'enabled')
 
     # ── Gate 2: Paper mode only — hard block on live
@@ -484,21 +520,21 @@ def route_to_execution(alert: 'AlertData') -> dict:
     if not paper:
         _log(f'BLOCKED  {symbol} — live mode detected, bridge requires paper mode')
         cid = _fail_exit('PAPER_MODE', 'SYSTEM', 'live mode — bridge is paper-only', 'NOT_PAPER_MODE')
-        return {'status': _SKIP, 'reason': 'live mode — bridge is paper-only', 'code': 'NOT_PAPER_MODE', 'chain_id': cid}
+        return {'status': _SKIP, 'reason': 'live mode — bridge is paper-only', 'code': 'NOT_PAPER_MODE', 'chain_id': cid, 'execution_request': _phase1_req}
     _cg('PAPER_MODE', 'SYSTEM', 'PASS', 'Alpaca in paper mode')
 
     # ── Gate 3: EXECUTION_READY only
     if alert_type != 'EXECUTION_READY':
         _log(f'SKIP  {symbol}  alert_type={alert_type}  (not EXECUTION_READY)')
         cid = _fail_exit('ALERT_TYPE', 'QUALITY', f'alert_type={alert_type} — only EXECUTION_READY routes', 'NOT_EXECUTION_READY')
-        return {'status': _SKIP, 'reason': f'alert_type={alert_type}', 'code': 'NOT_EXECUTION_READY', 'chain_id': cid}
+        return {'status': _SKIP, 'reason': f'alert_type={alert_type}', 'code': 'NOT_EXECUTION_READY', 'chain_id': cid, 'execution_request': _phase1_req}
     _cg('ALERT_TYPE', 'QUALITY', 'PASS', 'EXECUTION_READY')
 
     # ── Gate 4: Grade A or B only
     if grade not in ('A', 'B'):
         _log(f'SKIP  {symbol} {direction}  grade={grade}  (not actionable)')
         cid = _fail_exit('GRADE_CHECK', 'QUALITY', f'grade={grade} — only A/B routes', 'GRADE_NOT_ACTIONABLE')
-        return {'status': _SKIP, 'reason': f'grade={grade}', 'code': 'GRADE_NOT_ACTIONABLE', 'chain_id': cid}
+        return {'status': _SKIP, 'reason': f'grade={grade}', 'code': 'GRADE_NOT_ACTIONABLE', 'chain_id': cid, 'execution_request': _phase1_req}
     _cg('GRADE_CHECK', 'QUALITY', 'PASS', f'grade={grade}')
 
     # ── Gate 5: Valid direction
@@ -506,7 +542,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
     if direction_up not in ('LONG', 'SHORT', 'BUY', 'SELL'):
         _log(f'SKIP  {symbol}  direction={direction}  (not tradeable)')
         cid = _fail_exit('DIRECTION', 'QUALITY', f'direction={direction} is not tradeable', 'INVALID_DIRECTION')
-        return {'status': _SKIP, 'reason': f'direction={direction}', 'code': 'INVALID_DIRECTION', 'chain_id': cid}
+        return {'status': _SKIP, 'reason': f'direction={direction}', 'code': 'INVALID_DIRECTION', 'chain_id': cid, 'execution_request': _phase1_req}
     signal = 'LONG' if direction_up in ('LONG', 'BUY') else 'SHORT'
     _cg('DIRECTION', 'QUALITY', 'PASS', signal)
 
@@ -516,7 +552,7 @@ def route_to_execution(alert: 'AlertData') -> dict:
     if not routing:
         _log(f'SKIP  {symbol}  unmapped symbol (key={key})')
         cid = _fail_exit('SYMBOL_ROUTING', 'QUALITY', f'unmapped symbol: {symbol}', 'UNMAPPED_SYMBOL')
-        return {'status': _SKIP, 'reason': f'unmapped symbol: {symbol}', 'code': 'UNMAPPED_SYMBOL', 'chain_id': cid}
+        return {'status': _SKIP, 'reason': f'unmapped symbol: {symbol}', 'code': 'UNMAPPED_SYMBOL', 'chain_id': cid, 'execution_request': _phase1_req}
     instrument = routing['instrument']
     ticker     = routing['ticker']
     _cg('SYMBOL_ROUTING', 'QUALITY', 'PASS', f'{symbol} → {instrument} (routes to {ticker})')
@@ -905,7 +941,13 @@ def route_to_execution(alert: 'AlertData') -> dict:
 
     _notify_discord(alert, result, paper)
 
-    return {'status': _TRIED, 'signal_id': signal_id, 'result': result, 'chain_id': chain_id}
+    return {
+        'status':            _TRIED,
+        'signal_id':         signal_id,
+        'result':            result,
+        'chain_id':          chain_id,
+        'execution_request': _phase1_req,
+    }
 
 
 # ── Smoke test — run directly to verify pipeline without live signals ─────────────
