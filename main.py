@@ -1602,6 +1602,34 @@ async def mcp_replay_post_trade_reviews(limit: int = 50):
         return {'error': str(exc), 'reviews': []}
 
 
+@app.get('/api/mcp-replay/shadow')
+async def mcp_replay_shadow(limit: int = 50):
+    """Shadow engine comparison records for the last N decision snapshots.
+
+    Each record shows native_shadow fields: IB/ORB/PROS computed independently
+    by Python vs what the TradingView bridge reported.
+    Observability only — no execution impact.
+    """
+    try:
+        limit     = max(1, min(limit, 500))
+        all_snaps = _read_mcp_snapshots_raw()
+        decisions = _filter_snapshots(all_snaps, snapshot_type='decision')
+        results   = []
+        for snap in decisions[-limit:]:
+            shadow = snap.get('native_shadow') or {}
+            results.append({
+                'decision_id':    snap.get('decision_id'),
+                'timestamp':      snap.get('timestamp'),
+                'symbol':         snap.get('symbol'),
+                'session':        snap.get('session'),
+                'native_shadow':  shadow,
+                'overall_match':  shadow.get('overall_match', 'NO_DATA'),
+            })
+        return results
+    except Exception as exc:
+        return {'error': str(exc), 'records': []}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""

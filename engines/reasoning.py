@@ -1071,6 +1071,8 @@ def _build_decision_snapshot(
             'draw':        ie.get('draw'),
             'draw_source': ie.get('draw_source'),
             'aligned':     ie.get('aligned'),
+            'ib_high':     ie.get('ib_high'),
+            'ib_low':      ie.get('ib_low'),
             'ib_range':    ie.get('ib_range'),
             'ib_tight':    ie.get('ib_tight'),
             'ib_source':   ie.get('ib_source'),
@@ -1108,9 +1110,44 @@ def _build_decision_snapshot(
 
 
 def _fire_decision_snapshot(base: dict, **kwargs) -> None:
-    """Build a decision snapshot and append it in a daemon thread (non-blocking)."""
+    """Build a decision snapshot, compute shadow engine, and append in a daemon thread."""
     snap = _build_decision_snapshot(base, **kwargs)
-    _threading.Thread(target=_append_mcp_snapshot, args=(snap,), daemon=True).start()
+
+    ie = kwargs.get('ib_eval') or {}
+    oe = kwargs.get('orb_eval') or {}
+    pe = kwargs.get('pros_eval') or {}
+
+    bridge_ib_high    = ie.get('ib_high')
+    bridge_ib_low     = ie.get('ib_low')
+    bridge_ib_source  = ie.get('ib_source', 'pros_table')
+    bridge_orb_high   = oe.get('orb_high')
+    bridge_orb_low    = oe.get('orb_low')
+    bridge_orb_state  = oe.get('phase')
+    bridge_pros_phase = pe.get('phase')
+    bridge_pros_dir   = pe.get('direction')
+
+    def _run() -> None:
+        try:
+            from engines.native_shadow import compute_shadow_report
+            snap['native_shadow'] = compute_shadow_report(
+                bridge_ib_high    = bridge_ib_high,
+                bridge_ib_low     = bridge_ib_low,
+                bridge_ib_source  = bridge_ib_source,
+                bridge_orb_high   = bridge_orb_high,
+                bridge_orb_low    = bridge_orb_low,
+                bridge_orb_state  = bridge_orb_state,
+                bridge_pros_phase = bridge_pros_phase,
+                bridge_pros_dir   = bridge_pros_dir,
+            )
+        except Exception as _se:
+            snap['native_shadow'] = {
+                'overall_match': 'NO_DATA',
+                'shadow_source': 'error',
+                'notes': [f'Shadow engine error: {_se}'],
+            }
+        _append_mcp_snapshot(snap)
+
+    _threading.Thread(target=_run, daemon=True).start()
 
 
 # ── Session context evaluator (fast, deterministic) ────────────────────────────
