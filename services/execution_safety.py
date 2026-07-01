@@ -250,12 +250,13 @@ def run_execution_safety_check(
     Returns structured status dict.
     SAFETY CONTRACT: read-only. Never modifies broker state.
     """
-    checked_at          = datetime.now(timezone.utc).isoformat()
+    checked_at             = datetime.now(timezone.utc).isoformat()
     warnings:  list[str]  = []
     errors:    list[str]  = []
     alerts_sent:       list[dict] = []
     alerts_suppressed: list[str]  = []
     reconciliations:   list[dict] = []
+    prop_account_summary: dict    = {}
 
     try:
         from services.execution_reconcile import (
@@ -324,6 +325,31 @@ def run_execution_safety_check(
                     f'Discord alert failed for {instrument}: {send_result.get("error")}'
                 )
 
+        # Phase 6: Prop account state + trailing drawdown monitoring (non-blocking)
+        try:
+            from services.prop_account_state import (
+                update_prop_account_state_from_broker,
+                check_and_send_prop_alerts,
+            )
+            prop_state = update_prop_account_state_from_broker()
+            prop_account_summary = {
+                'current_balance':             prop_state.get('current_balance'),
+                'high_water_mark':             prop_state.get('high_water_mark'),
+                'trailing_drawdown_threshold': prop_state.get('trailing_drawdown_threshold'),
+                'trailing_drawdown_remaining': prop_state.get('trailing_drawdown_remaining'),
+                'daily_pnl':                   prop_state.get('daily_pnl'),
+                'daily_loss_remaining':        prop_state.get('daily_loss_remaining'),
+                'prop_state_status':           prop_state.get('prop_state_status'),
+                'broker_account_read':         prop_state.get('broker_account_read', False),
+            }
+            prop_result = check_and_send_prop_alerts(prop_state, cooldown_seconds)
+            if prop_result.get('alerts_sent'):
+                alerts_sent.extend(prop_result['alerts_sent'])
+            if prop_result.get('alerts_suppressed'):
+                alerts_suppressed.extend(prop_result['alerts_suppressed'])
+        except Exception as _p6_err:
+            warnings.append(f'Prop account state error (non-blocking): {_p6_err}')
+
         # Merge
         warnings = list(safety.get('warnings', [])) + warnings
         errors   = list(safety.get('errors', []))   + errors
@@ -342,6 +368,7 @@ def run_execution_safety_check(
             'alerts_suppressed_by_cooldown': alerts_suppressed,
             'warnings':                    warnings,
             'errors':                      errors,
+            'prop_account_summary':        prop_account_summary,
         }
 
     except Exception as e:
@@ -360,6 +387,7 @@ def run_execution_safety_check(
             'alerts_suppressed_by_cooldown': [],
             'warnings':                    warnings,
             'errors':                      errors,
+            'prop_account_summary':        {},
         }
 
     _write_safety_status(status)

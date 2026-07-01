@@ -1702,6 +1702,27 @@ async def execution_safety_status_endpoint():
         }
 
 
+@app.get('/api/prop-account/state')
+async def prop_account_state_endpoint():
+    """Read-only prop account state — balance, HWM, trailing drawdown, daily P&L.
+
+    Returns the latest state written by the Phase 6 prop account monitor.
+    Falls back to loading the state file directly if the live update fails.
+    Never modifies broker state.
+    """
+    try:
+        from services.prop_account_state import (
+            update_prop_account_state_from_broker,
+            load_prop_account_state,
+        )
+        try:
+            return update_prop_account_state_from_broker()
+        except Exception:
+            return load_prop_account_state()
+    except Exception as exc:
+        return {'prop_state_status': 'UNKNOWN_ACCOUNT_STATE', 'error': str(exc)}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""
