@@ -49,6 +49,20 @@ STATUS_REJECTED_MAX_CONTRACTS    = 'REJECTED_MAX_CONTRACTS'
 STATUS_REJECTED_SYMBOL           = 'REJECTED_SYMBOL_NOT_ALLOWED'
 STATUS_REJECTED_SESSION          = 'REJECTED_SESSION'
 
+# Phase 3 open-position conflict + reconciliation codes
+STATUS_REJECTED_OPEN_POSITION    = 'REJECTED_OPEN_POSITION'
+# Reconciliation statuses (go in reconciliation_status field, not final_status,
+# except REJECTED_OPEN_POSITION which can become final_status when enforced)
+STATUS_RECON_SYNCED              = 'SYNCED'
+STATUS_RECON_RECONCILED          = 'RECONCILED'
+STATUS_RECON_BROKER_MISSING      = 'BROKER_POSITION_MISSING'
+STATUS_RECON_JOURNAL_MISSING     = 'JOURNAL_MISSING'
+STATUS_RECON_SIZE_MISMATCH       = 'SIZE_MISMATCH'
+STATUS_RECON_DIRECTION_MISMATCH  = 'DIRECTION_MISMATCH'
+STATUS_RECON_UNPROTECTED         = 'UNPROTECTED_POSITION'
+STATUS_RECON_UNKNOWN             = 'UNKNOWN_BROKER_STATE'
+STATUS_RECON_INSUFFICIENT        = 'INSUFFICIENT_DATA'
+
 _lock = threading.Lock()
 
 # ── File paths (resolved lazily so DATA_DIR env is respected) ─────────────────
@@ -269,9 +283,10 @@ def validate_and_record(
       REJECTED_MAX_CONTRACTS     — position cap reached (Phase 2)
       REJECTED_SYMBOL_NOT_ALLOWED
       REJECTED_SESSION
+      REJECTED_OPEN_POSITION     — existing broker position for same instrument (Phase 3)
       FAILED                     — unexpected error in this module
 
-    Phase 2 gate enforcement:
+    Phase 2+3 gate enforcement:
       - dry_run=True OR NOVA_PROP_GATES_ENABLED=true → gates block execution
       - Otherwise: gates run and log but do NOT block (default for live)
     """
@@ -310,7 +325,7 @@ def validate_and_record(
             'signal_generated_at': signal_generated_at or None,
             'signal_age_seconds': None,
             'status': STATUS_FAILED, 'dry_run': dry_run,
-            'validation_errors': [f'Phase 1+2 internal error: {e}'],
+            'validation_errors': [f'Phase 1+2+3 internal error: {e}'],
             'validation_warnings': [],
             'duplicate_check': {'checked': False},
             'stale_check': {'checked': False},
@@ -319,6 +334,17 @@ def validate_and_record(
             'prop_account_size': None,
             'prop_gate_results': [],
             'rejected_gate': None,
+            # Phase 3 fields
+            'open_position_check':        {'checked': False, 'conflict': False},
+            'broker_positions_count':     0,
+            'broker_orders_count':        0,
+            'journal_open_trades_count':  0,
+            'reconciliation_status':      None,
+            'protective_stop_found':      None,
+            'protective_target_found':    None,
+            'unprotected_position_warning': False,
+            'reconciliation_warnings':    [],
+            'reconciliation_errors':      [],
             'broker_called': False,
             'final_status': STATUS_FAILED,
         }
@@ -359,6 +385,8 @@ def _validate_and_record_impl(
             prop_config_loaded=False, prop_firm_name=None, prop_account_size=None,
             prop_gate_results=[], rejected_gate=None,
             final_status=STATUS_BAD_PAYLOAD,
+            # Phase 3 — skipped on bad payload
+            open_position_check={'checked': False, 'conflict': False},
         )
         _append_trace_v2(req)
         return req
@@ -444,7 +472,78 @@ def _validate_and_record_impl(
     except Exception as _pe:
         validation_warnings.append(f'prop_risk gate error (non-blocking): {_pe}')
 
-    # ── Determine final status
+    # ── Phase 3: Open position conflict + broker/journal reconciliation ────────
+    p3_open_check:           dict           = {'checked': False, 'conflict': False}
+    p3_broker_pos_count:     int            = 0
+    p3_broker_ord_count:     int            = 0
+    p3_journal_count:        int            = 0
+    p3_recon_status:         Optional[str]  = None
+    p3_stop_found:           Optional[bool] = None
+    p3_target_found:         Optional[bool] = None
+    p3_unprotected_warn:     bool           = False
+    p3_recon_warnings:       list           = []
+    p3_recon_errors:         list           = []
+    p3_open_rejection_code:  Optional[str]  = None
+
+    try:
+        from services.execution_reconcile import (
+            get_broker_positions_safe,
+            get_broker_orders_safe,
+            get_open_journal_trades_safe,
+            check_open_position_conflict,
+            detect_protective_orders,
+            reconcile_execution_state,
+            _symbol_to_etf as _recon_etf,
+        )
+        routed_etf       = _recon_etf(symbol)
+        broker_positions = get_broker_positions_safe()
+        broker_orders    = get_broker_orders_safe()
+        journal_trades   = get_open_journal_trades_safe()
+
+        p3_broker_pos_count = len(broker_positions)
+        p3_broker_ord_count = len(broker_orders)
+        p3_journal_count    = len(journal_trades)
+
+        # Open position conflict gate
+        p3_open_check = check_open_position_conflict(
+            symbol         = symbol,
+            direction      = direction,
+            routed_etf     = routed_etf,
+            broker_positions = broker_positions,
+        )
+        if p3_open_check.get('conflict'):
+            p3_open_rejection_code = STATUS_REJECTED_OPEN_POSITION
+
+        # Protective order detection for any existing position
+        protective  = detect_protective_orders(routed_etf, broker_positions, broker_orders)
+        p3_stop_found    = protective.get('stop_found')
+        p3_target_found  = protective.get('target_found')
+        p3_unprotected_warn = bool(protective.get('unprotected'))
+        if p3_unprotected_warn:
+            validation_warnings.append(
+                f'UNPROTECTED_POSITION: {routed_etf} position detected with no stop order'
+            )
+
+        # Reconciliation scaffold
+        recon = reconcile_execution_state(
+            execution_request = {'symbol': symbol, 'direction': direction, 'qty': qty},
+            broker_positions  = broker_positions,
+            broker_orders     = broker_orders,
+            journal_trades    = journal_trades,
+        )
+        p3_recon_status   = recon.get('reconciliation_status')
+        p3_recon_warnings = recon.get('warnings', [])
+        p3_recon_errors   = recon.get('errors', [])
+        if p3_recon_warnings:
+            validation_warnings.extend(p3_recon_warnings)
+        if p3_recon_errors:
+            validation_warnings.extend(p3_recon_errors)   # logged as warnings; not hard errors
+
+    except Exception as _p3_err:
+        validation_warnings.append(f'Phase 3 reconcile error (non-blocking): {_p3_err}')
+
+    # ── Determine final status ─────────────────────────────────────────────────
+    # Priority: dup > stale > prop_gates > open_position_conflict > dry_run/live
     enforce = prop_gates_enforced(dry_run)
 
     if dup_check['is_duplicate']:
@@ -453,6 +552,8 @@ def _validate_and_record_impl(
         final_status = STATUS_STALE
     elif enforce and prop_rejection_code:
         final_status = prop_rejection_code
+    elif enforce and p3_open_rejection_code:
+        final_status = p3_open_rejection_code
     elif dry_run:
         final_status = STATUS_DRY_RUN_VALIDATED
     else:
@@ -475,6 +576,17 @@ def _validate_and_record_impl(
         prop_account_size=prop_account_size,
         prop_gate_results=prop_gate_results,
         rejected_gate=rejected_gate,
+        # Phase 3
+        open_position_check=p3_open_check,
+        broker_positions_count=p3_broker_pos_count,
+        broker_orders_count=p3_broker_ord_count,
+        journal_open_trades_count=p3_journal_count,
+        reconciliation_status=p3_recon_status,
+        protective_stop_found=p3_stop_found,
+        protective_target_found=p3_target_found,
+        unprotected_position_warning=p3_unprotected_warn,
+        reconciliation_warnings=p3_recon_warnings,
+        reconciliation_errors=p3_recon_errors,
         final_status=final_status,
     )
 
@@ -490,7 +602,14 @@ def _build_req(
     duplicate_check, stale_check,
     prop_config_loaded, prop_firm_name, prop_account_size,
     prop_gate_results, rejected_gate,
-    final_status,
+    # Phase 3
+    open_position_check=None, broker_positions_count=0,
+    broker_orders_count=0, journal_open_trades_count=0,
+    reconciliation_status=None,
+    protective_stop_found=None, protective_target_found=None,
+    unprotected_position_warning=False,
+    reconciliation_warnings=None, reconciliation_errors=None,
+    final_status='FAILED',
 ) -> dict:
     return {
         'execution_request_id': execution_request_id,
@@ -522,6 +641,17 @@ def _build_req(
         'prop_account_size':    prop_account_size,
         'prop_gate_results':    prop_gate_results,
         'rejected_gate':        rejected_gate,
+        # Phase 3 reconciliation trace fields
+        'open_position_check':          open_position_check or {'checked': False, 'conflict': False},
+        'broker_positions_count':       broker_positions_count,
+        'broker_orders_count':          broker_orders_count,
+        'journal_open_trades_count':    journal_open_trades_count,
+        'reconciliation_status':        reconciliation_status,
+        'protective_stop_found':        protective_stop_found,
+        'protective_target_found':      protective_target_found,
+        'unprotected_position_warning': unprotected_position_warning,
+        'reconciliation_warnings':      reconciliation_warnings or [],
+        'reconciliation_errors':        reconciliation_errors or [],
         'broker_called':        False,
         'final_status':         final_status,
     }
