@@ -53,6 +53,15 @@ except Exception:
     def start_setup_monitor(**kw):  pass
 
 try:
+    from services.execution_safety import run_execution_safety_check, get_latest_safety_status
+    _EXECUTION_SAFETY_AVAILABLE = True
+except Exception as _ese:
+    print(f'[main] execution_safety unavailable: {_ese}')
+    _EXECUTION_SAFETY_AVAILABLE = False
+    def run_execution_safety_check(**kw): return {'status': 'UNAVAILABLE'}
+    def get_latest_safety_status():       return {'status': 'UNAVAILABLE'}
+
+try:
     from services.execution import (
         execute_signal,
         get_account, get_positions,
@@ -389,6 +398,38 @@ async def macro_discord_loop():
         await asyncio.sleep(_news_sleep_seconds())
 
 
+def _safety_sleep_seconds() -> int:
+    """60s during market hours (09:00–16:30 ET weekdays), 120s otherwise."""
+    ny = now_ny()
+    m  = ny.hour * 60 + ny.minute
+    if ny.weekday() < 5 and 9 * 60 <= m <= 16 * 60 + 30:
+        return 60
+    return 120
+
+
+async def execution_safety_loop():
+    """
+    Periodic execution safety monitor (Phase 5).
+    Every 60s during market hours, 120s outside.
+    Reads broker/journal state, detects unprotected positions, sends CRITICAL
+    Discord alerts. Read-only — never modifies broker state.
+    """
+    if not _EXECUTION_SAFETY_AVAILABLE:
+        return
+    while True:
+        try:
+            result = await asyncio.to_thread(run_execution_safety_check)
+            status = result.get('status', 'UNKNOWN')
+            if status == 'UNPROTECTED_POSITIONS_DETECTED':
+                n = len(result.get('unprotected_positions', []))
+                print(f'[execution_safety] CRITICAL — {n} unprotected position(s) detected')
+            elif status not in ('NO_OPEN_POSITIONS', 'ALL_POSITIONS_PROTECTED', 'UNAVAILABLE'):
+                print(f'[execution_safety] status={status}')
+        except Exception as e:
+            print(f'[execution_safety_loop] error: {e}')
+        await asyncio.sleep(_safety_sleep_seconds())
+
+
 # ── Startup ────────────────────────────────────────────────────
 
 def _init_settings_from_bundle() -> None:
@@ -453,6 +494,9 @@ async def startup():
     if _ALERT_ENGINE_AVAILABLE:
         await asyncio.to_thread(start_setup_monitor, 60)
         print('[startup] NOVA alert monitor started (60s polling interval)')
+    if _EXECUTION_SAFETY_AVAILABLE:
+        asyncio.create_task(execution_safety_loop())
+        print('[startup] Execution safety monitor started (60s market / 120s off-hours)')
 
 
 # ── Health / meta ──────────────────────────────────────────────
@@ -1634,23 +1678,25 @@ async def mcp_replay_shadow(limit: int = 50):
 async def execution_safety_status_endpoint():
     """Read-only snapshot of current execution safety state.
 
-    Returns open positions count, open orders count, unprotected positions,
-    emergency alerts if any, and latest reconciliation status.
+    Returns the latest status written by the periodic safety monitor (Phase 5).
+    Falls back to a live computation if the status file is absent.
     Never modifies broker state.
     """
     try:
-        from services.execution_reconcile import get_execution_safety_status
-        return get_execution_safety_status()
+        return get_latest_safety_status()
     except Exception as exc:
         return {
+            'checked_at':            None,
             'status':                'UNKNOWN_BROKER_STATE',
             'open_positions_count':  0,
             'open_orders_count':     0,
             'open_journal_count':    0,
-            'unprotected_positions': [],
             'protected_positions':   [],
+            'unprotected_positions': [],
             'emergency_alerts':      [],
-            'latest_reconciliation': None,
+            'reconciliations':       [],
+            'alerts_sent':           [],
+            'alerts_suppressed_by_cooldown': [],
             'warnings':              [],
             'errors':                [str(exc)],
         }
