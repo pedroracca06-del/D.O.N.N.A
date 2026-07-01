@@ -1630,6 +1630,32 @@ async def mcp_replay_shadow(limit: int = 50):
         return {'error': str(exc), 'records': []}
 
 
+@app.get('/api/execution-safety/status')
+async def execution_safety_status_endpoint():
+    """Read-only snapshot of current execution safety state.
+
+    Returns open positions count, open orders count, unprotected positions,
+    emergency alerts if any, and latest reconciliation status.
+    Never modifies broker state.
+    """
+    try:
+        from services.execution_reconcile import get_execution_safety_status
+        return get_execution_safety_status()
+    except Exception as exc:
+        return {
+            'status':                'UNKNOWN_BROKER_STATE',
+            'open_positions_count':  0,
+            'open_orders_count':     0,
+            'open_journal_count':    0,
+            'unprotected_positions': [],
+            'protected_positions':   [],
+            'emergency_alerts':      [],
+            'latest_reconciliation': None,
+            'warnings':              [],
+            'errors':                [str(exc)],
+        }
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""

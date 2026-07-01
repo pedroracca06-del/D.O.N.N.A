@@ -1,7 +1,8 @@
-"""execution_reconcile.py — Execution Bot v2 Phase 3: broker state reader + reconciliation.
+"""execution_reconcile.py — Execution Bot v2 Phase 3+4: broker state reader + reconciliation.
 
 Read-only inspection of Alpaca broker state and NOVA journal for pre-trade
-conflict detection and state reconciliation.
+conflict detection, state reconciliation, and post-submit protective order
+confirmation.
 
 SAFETY CONTRACT — this module MUST NEVER:
   - Submit orders
@@ -9,7 +10,7 @@ SAFETY CONTRACT — this module MUST NEVER:
   - Modify positions
   - Call any Alpaca write endpoint
 
-Public API:
+Public API (Phase 3):
     get_broker_positions_safe() -> list          — all open Alpaca positions
     get_broker_orders_safe()    -> list          — all open Alpaca orders
     get_open_journal_trades_safe() -> list       — OPEN journal entries
@@ -18,6 +19,11 @@ Public API:
     check_open_position_conflict(...) -> dict    — conflict gate for new signal
     detect_protective_orders(...) -> dict        — stop/target detection
     reconcile_execution_state(...) -> dict       — broker/journal comparison scaffold
+
+Public API (Phase 4):
+    build_unprotected_position_alert(...) -> dict       — emergency alert object
+    confirm_protective_orders_after_submit(...) -> dict — post-submit confirmation
+    get_execution_safety_status() -> dict               — snapshot for /api endpoint
 """
 from __future__ import annotations
 
@@ -512,4 +518,293 @@ def reconcile_execution_state(
             f'SYNCED: broker={broker_side_normalized} {broker_qty} {etf_upper} '
             f'matches journal; protected={not protective["unprotected"]}'
         ),
+    }
+
+
+# ── Phase 4: Emergency alert object ──────────────────────────────────────────
+
+def build_unprotected_position_alert(
+    *,
+    execution_request_id: str = '',
+    decision_id = None,
+    symbol: str,
+    routed_etf: str,
+    broker_position: dict,
+    broker_orders_seen: list,
+) -> dict:
+    """
+    Build a structured emergency alert for an unprotected position.
+
+    This is a data object — it does NOT send to Discord, does NOT cancel orders,
+    does NOT flatten the position. Callers decide what to do with it.
+
+    Severity CRITICAL means the position has NO stop order and is fully exposed
+    to unlimited loss if the market moves against it.
+    """
+    from datetime import datetime, timezone
+    detected_at = datetime.now(timezone.utc).isoformat()
+    qty         = broker_position.get('qty')
+    side        = broker_position.get('side')
+    msg = (
+        f'CRITICAL: {routed_etf} {side} position of {qty} units has NO stop order. '
+        f'Position is fully exposed. Manual intervention required.'
+    )
+    return {
+        'alert_type':           'UNPROTECTED_POSITION',
+        'severity':             'CRITICAL',
+        'symbol':               symbol,
+        'instrument':           routed_etf,
+        'qty':                  qty,
+        'side':                 side,
+        'detected_at':          detected_at,
+        'execution_request_id': execution_request_id or None,
+        'decision_id':          decision_id or None,
+        'broker_position':      broker_position,
+        'broker_orders_seen':   broker_orders_seen,
+        'message':              msg,
+        'recommended_action':   'MANUAL_REVIEW_REQUIRED',
+    }
+
+
+# ── Phase 4: Post-submit protective confirmation ──────────────────────────────
+
+_CONF_CONFIRMED     = 'PROTECTIVE_ORDERS_CONFIRMED'
+_CONF_NOT_FILLED    = 'ENTRY_NOT_FILLED'
+_CONF_NO_POSITION   = 'POSITION_NOT_FOUND'
+_CONF_STOP_MISSING  = 'STOP_MISSING'
+_CONF_TARGET_MISSING = 'TARGET_MISSING'
+_CONF_UNPROTECTED   = 'UNPROTECTED_POSITION'
+_CONF_UNKNOWN       = 'UNKNOWN_BROKER_STATE'
+_CONF_INSUFFICIENT  = 'INSUFFICIENT_DATA'
+
+
+def confirm_protective_orders_after_submit(
+    execution_request: dict,
+    broker_orders: list,
+    broker_positions: list,
+) -> dict:
+    """
+    Verify that a submitted trade has resulted in a filled position with
+    protective orders (stop + target) in place.
+
+    For market orders (which this system uses): position existence IS proof of fill.
+    For limit orders (future use): entry_order_found distinguishes pending from filled.
+
+    Status priority (most → least severe):
+      UNKNOWN_BROKER_STATE      — input data indicates a read failure
+      ENTRY_NOT_FILLED          — pending entry order found but no position yet
+      POSITION_NOT_FOUND        — no position and no entry order (clean or missing)
+      UNPROTECTED_POSITION      — position + no orders at all
+      STOP_MISSING              — position + target only (no stop = unprotected)
+      TARGET_MISSING            — position + stop only (protected but missing target)
+      PROTECTIVE_ORDERS_CONFIRMED — position + stop + target
+
+    SAFETY CONTRACT: read-only. Never modifies any broker state.
+    """
+    symbol      = str(execution_request.get('symbol', '')).upper()
+    direction   = str(execution_request.get('direction', '')).upper()
+    exreq_id    = str(execution_request.get('execution_request_id', '') or '')
+    decision_id = execution_request.get('decision_id')
+
+    warnings: list[str] = []
+    errors:   list[str] = []
+
+    if not symbol:
+        return {
+            'confirmation_status':    _CONF_INSUFFICIENT,
+            'entry_order_found':      False,
+            'entry_filled':           False,
+            'position_found':         False,
+            'stop_order_found':       False,
+            'target_order_found':     False,
+            'bracket_or_oco_detected': False,
+            'unprotected_position':   False,
+            'emergency_alert':        None,
+            'warnings':               ['symbol is empty — cannot confirm'],
+            'errors':                 errors,
+        }
+
+    routed_etf = _symbol_to_etf(symbol)
+    etf_upper  = routed_etf.upper()
+
+    # ── Check for existing position (= fill confirmed for market orders) ──────
+    etf_positions = [
+        p for p in broker_positions
+        if str(p.get('symbol', '')).upper() == etf_upper
+    ]
+    position_found = len(etf_positions) > 0
+
+    # ── Check for pending entry order (unusual for market orders; may indicate issue) ──
+    entry_side = 'buy' if direction in ('LONG', 'BUY') else 'sell'
+    entry_orders = [
+        o for o in broker_orders
+        if str(o.get('symbol', '')).upper() == etf_upper
+        and (o.get('side') or '').lower() == entry_side
+        and (o.get('type') or '').lower() in ('market', 'limit', 'stop_limit')
+    ]
+    entry_order_found = len(entry_orders) > 0
+    # For market orders, position existence IS proof of fill
+    entry_filled = position_found
+
+    # ── Nothing to confirm — clean pre-trade state ───────────────────────────
+    if not position_found and not entry_order_found:
+        return {
+            'confirmation_status':     _CONF_INSUFFICIENT,
+            'entry_order_found':       False,
+            'entry_filled':            False,
+            'position_found':          False,
+            'stop_order_found':        False,
+            'target_order_found':      False,
+            'bracket_or_oco_detected': False,
+            'unprotected_position':    False,
+            'emergency_alert':         None,
+            'warnings':                [f'No position and no pending entry order for {etf_upper}'],
+            'errors':                  errors,
+        }
+
+    # ── Entry order pending but not yet filled ────────────────────────────────
+    if not position_found and entry_order_found:
+        warnings.append(f'Entry order for {etf_upper} found but position not yet open — fill pending')
+        return {
+            'confirmation_status':     _CONF_NOT_FILLED,
+            'entry_order_found':       True,
+            'entry_filled':            False,
+            'position_found':          False,
+            'stop_order_found':        False,
+            'target_order_found':      False,
+            'bracket_or_oco_detected': False,
+            'unprotected_position':    False,
+            'emergency_alert':         None,
+            'warnings':                warnings,
+            'errors':                  errors,
+        }
+
+    # ── Position found — check for protective orders ──────────────────────────
+    protective = detect_protective_orders(routed_etf, broker_positions, broker_orders)
+    stop_found    = protective.get('stop_found', False)
+    target_found  = protective.get('target_found', False)
+    bracket       = protective.get('bracket_detected', False)
+    unprotected   = not stop_found   # stop is the critical protection
+
+    # Build emergency alert whenever stop is missing
+    emergency_alert = None
+    if unprotected:
+        emergency_alert = build_unprotected_position_alert(
+            execution_request_id = exreq_id,
+            decision_id          = decision_id,
+            symbol               = symbol,
+            routed_etf           = routed_etf,
+            broker_position      = etf_positions[0],
+            broker_orders_seen   = broker_orders,
+        )
+        errors.append(
+            f'CRITICAL: {etf_upper} position has NO stop order — UNPROTECTED'
+        )
+
+    # Determine confirmation status
+    if not stop_found and not target_found:
+        status = _CONF_UNPROTECTED
+    elif not stop_found and target_found:
+        status = _CONF_STOP_MISSING      # target only — still unprotected
+    elif stop_found and not target_found:
+        status = _CONF_TARGET_MISSING    # stop only — protected but target missing
+    else:
+        status = _CONF_CONFIRMED         # both stop and target present
+
+    if status == _CONF_TARGET_MISSING:
+        warnings.append(f'{etf_upper}: stop order found but no take-profit limit order')
+
+    return {
+        'confirmation_status':     status,
+        'entry_order_found':       entry_order_found,
+        'entry_filled':            entry_filled,
+        'position_found':          True,
+        'stop_order_found':        stop_found,
+        'target_order_found':      target_found,
+        'bracket_or_oco_detected': bracket,
+        'unprotected_position':    unprotected,
+        'emergency_alert':         emergency_alert,
+        'warnings':                warnings,
+        'errors':                  errors,
+    }
+
+
+# ── Phase 4: Safety status snapshot (for /api endpoint) ──────────────────────
+
+def get_execution_safety_status() -> dict:
+    """
+    Read-only snapshot of current execution safety state.
+
+    Fetches broker positions + orders, checks each position for protection,
+    and returns a structured status summary. Never modifies broker state.
+
+    Used by GET /api/execution-safety/status.
+    """
+    warnings: list[str] = []
+    errors:   list[str] = []
+
+    try:
+        broker_positions = get_broker_positions_safe()
+        broker_orders    = get_broker_orders_safe()
+        open_journal     = get_open_journal_trades_safe()
+    except Exception as e:
+        return {
+            'status':                  _CONF_UNKNOWN,
+            'open_positions_count':    0,
+            'open_orders_count':       0,
+            'open_journal_count':      0,
+            'unprotected_positions':   [],
+            'protected_positions':     [],
+            'emergency_alerts':        [],
+            'latest_reconciliation':   None,
+            'warnings':                [f'Broker state read failed: {e}'],
+            'errors':                  [str(e)],
+        }
+
+    unprotected_positions: list[dict] = []
+    protected_positions:   list[dict] = []
+    emergency_alerts:      list[dict] = []
+
+    for pos in broker_positions:
+        etf = str(pos.get('symbol', '')).upper()
+        protective = detect_protective_orders(etf, broker_positions, broker_orders)
+        pos_summary = {
+            'symbol':       etf,
+            'side':         pos.get('side'),
+            'qty':          pos.get('qty'),
+            'stop_found':   protective.get('stop_found'),
+            'target_found': protective.get('target_found'),
+            'bracket':      protective.get('bracket_detected'),
+            'unprotected':  protective.get('unprotected'),
+        }
+        if protective.get('unprotected'):
+            unprotected_positions.append(pos_summary)
+            alert = build_unprotected_position_alert(
+                symbol           = etf,
+                routed_etf       = etf,
+                broker_position  = pos,
+                broker_orders_seen = broker_orders,
+            )
+            emergency_alerts.append(alert)
+            warnings.append(f'CRITICAL: {etf} position is UNPROTECTED')
+        else:
+            protected_positions.append(pos_summary)
+
+    overall = (
+        'UNPROTECTED_POSITIONS_DETECTED' if unprotected_positions
+        else 'ALL_POSITIONS_PROTECTED'   if protected_positions
+        else 'NO_OPEN_POSITIONS'
+    )
+
+    return {
+        'status':                overall,
+        'open_positions_count':  len(broker_positions),
+        'open_orders_count':     len(broker_orders),
+        'open_journal_count':    len(open_journal),
+        'unprotected_positions': unprotected_positions,
+        'protected_positions':   protected_positions,
+        'emergency_alerts':      emergency_alerts,
+        'latest_reconciliation': None,   # populated by caller if needed
+        'warnings':              warnings,
+        'errors':                errors,
     }

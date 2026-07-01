@@ -325,7 +325,7 @@ def validate_and_record(
             'signal_generated_at': signal_generated_at or None,
             'signal_age_seconds': None,
             'status': STATUS_FAILED, 'dry_run': dry_run,
-            'validation_errors': [f'Phase 1+2+3 internal error: {e}'],
+            'validation_errors': [f'Phase 1+2+3+4 internal error: {e}'],
             'validation_warnings': [],
             'duplicate_check': {'checked': False},
             'stale_check': {'checked': False},
@@ -345,6 +345,17 @@ def validate_and_record(
             'unprotected_position_warning': False,
             'reconciliation_warnings':    [],
             'reconciliation_errors':      [],
+            # Phase 4 fields
+            'protective_confirmation_status': None,
+            'entry_order_found':    None,
+            'entry_filled':         None,
+            'position_found':       None,
+            'stop_order_found':     None,
+            'target_order_found':   None,
+            'bracket_or_oco_detected': None,
+            'emergency_alert':      None,
+            'emergency_alert_type': None,
+            'emergency_alert_severity': None,
             'broker_called': False,
             'final_status': STATUS_FAILED,
         }
@@ -385,8 +396,13 @@ def _validate_and_record_impl(
             prop_config_loaded=False, prop_firm_name=None, prop_account_size=None,
             prop_gate_results=[], rejected_gate=None,
             final_status=STATUS_BAD_PAYLOAD,
-            # Phase 3 — skipped on bad payload
+            # Phase 3+4 — skipped on bad payload
             open_position_check={'checked': False, 'conflict': False},
+            protective_confirmation_status=None,
+            entry_order_found=None, entry_filled=None, p4_position_found=None,
+            stop_order_found=None, target_order_found=None,
+            bracket_or_oco_detected=None,
+            emergency_alert=None, emergency_alert_type=None, emergency_alert_severity=None,
         )
         _append_trace_v2(req)
         return req
@@ -485,6 +501,10 @@ def _validate_and_record_impl(
     p3_recon_errors:         list           = []
     p3_open_rejection_code:  Optional[str]  = None
 
+    # Shared broker state — populated by Phase 3, consumed by Phase 4
+    _shared_broker_positions: list = []
+    _shared_broker_orders:    list = []
+
     try:
         from services.execution_reconcile import (
             get_broker_positions_safe,
@@ -499,6 +519,9 @@ def _validate_and_record_impl(
         broker_positions = get_broker_positions_safe()
         broker_orders    = get_broker_orders_safe()
         journal_trades   = get_open_journal_trades_safe()
+
+        _shared_broker_positions = broker_positions   # share for Phase 4
+        _shared_broker_orders    = broker_orders
 
         p3_broker_pos_count = len(broker_positions)
         p3_broker_ord_count = len(broker_orders)
@@ -541,6 +564,50 @@ def _validate_and_record_impl(
 
     except Exception as _p3_err:
         validation_warnings.append(f'Phase 3 reconcile error (non-blocking): {_p3_err}')
+
+    # ── Phase 4: Post-submit protective confirmation on existing positions ─────
+    p4_conf_status:      Optional[str]  = None
+    p4_entry_order_found: Optional[bool] = None
+    p4_entry_filled:     Optional[bool]  = None
+    p4_pos_found:        Optional[bool]  = None
+    p4_stop_found:       Optional[bool]  = None
+    p4_target_found:     Optional[bool]  = None
+    p4_bracket:          Optional[bool]  = None
+    p4_emergency_alert:  Optional[dict]  = None
+    p4_alert_type:       Optional[str]   = None
+    p4_alert_severity:   Optional[str]   = None
+
+    try:
+        from services.execution_reconcile import confirm_protective_orders_after_submit
+        _p4_req = {
+            'symbol':               symbol,
+            'direction':            direction,
+            'execution_request_id': execution_request_id,
+            'decision_id':          decision_id or None,
+        }
+        p4 = confirm_protective_orders_after_submit(
+            execution_request = _p4_req,
+            broker_orders     = _shared_broker_orders,
+            broker_positions  = _shared_broker_positions,
+        )
+        p4_conf_status       = p4.get('confirmation_status')
+        p4_entry_order_found = p4.get('entry_order_found')
+        p4_entry_filled      = p4.get('entry_filled')
+        p4_pos_found         = p4.get('position_found')
+        p4_stop_found        = p4.get('stop_order_found')
+        p4_target_found      = p4.get('target_order_found')
+        p4_bracket           = p4.get('bracket_or_oco_detected')
+        p4_emergency_alert   = p4.get('emergency_alert')
+        if p4_emergency_alert:
+            p4_alert_type     = p4_emergency_alert.get('alert_type')
+            p4_alert_severity = p4_emergency_alert.get('severity')
+            validation_warnings.append(
+                f'EMERGENCY {p4_alert_type}: {p4_emergency_alert.get("message", "")}'
+            )
+        for err in (p4.get('errors') or []):
+            validation_warnings.append(err)
+    except Exception as _p4_err:
+        validation_warnings.append(f'Phase 4 confirmation error (non-blocking): {_p4_err}')
 
     # ── Determine final status ─────────────────────────────────────────────────
     # Priority: dup > stale > prop_gates > open_position_conflict > dry_run/live
@@ -587,6 +654,17 @@ def _validate_and_record_impl(
         unprotected_position_warning=p3_unprotected_warn,
         reconciliation_warnings=p3_recon_warnings,
         reconciliation_errors=p3_recon_errors,
+        # Phase 4
+        protective_confirmation_status=p4_conf_status,
+        entry_order_found=p4_entry_order_found,
+        entry_filled=p4_entry_filled,
+        p4_position_found=p4_pos_found,
+        stop_order_found=p4_stop_found,
+        target_order_found=p4_target_found,
+        bracket_or_oco_detected=p4_bracket,
+        emergency_alert=p4_emergency_alert,
+        emergency_alert_type=p4_alert_type,
+        emergency_alert_severity=p4_alert_severity,
         final_status=final_status,
     )
 
@@ -609,6 +687,12 @@ def _build_req(
     protective_stop_found=None, protective_target_found=None,
     unprotected_position_warning=False,
     reconciliation_warnings=None, reconciliation_errors=None,
+    # Phase 4
+    protective_confirmation_status=None,
+    entry_order_found=None, entry_filled=None, p4_position_found=None,
+    stop_order_found=None, target_order_found=None,
+    bracket_or_oco_detected=None,
+    emergency_alert=None, emergency_alert_type=None, emergency_alert_severity=None,
     final_status='FAILED',
 ) -> dict:
     return {
@@ -652,6 +736,17 @@ def _build_req(
         'unprotected_position_warning': unprotected_position_warning,
         'reconciliation_warnings':      reconciliation_warnings or [],
         'reconciliation_errors':        reconciliation_errors or [],
+        # Phase 4 protective confirmation trace fields
+        'protective_confirmation_status': protective_confirmation_status,
+        'entry_order_found':              entry_order_found,
+        'entry_filled':                   entry_filled,
+        'position_found':                 p4_position_found,
+        'stop_order_found':               stop_order_found,
+        'target_order_found':             target_order_found,
+        'bracket_or_oco_detected':        bracket_or_oco_detected,
+        'emergency_alert':                emergency_alert,
+        'emergency_alert_type':           emergency_alert_type,
+        'emergency_alert_severity':       emergency_alert_severity,
         'broker_called':        False,
         'final_status':         final_status,
     }
