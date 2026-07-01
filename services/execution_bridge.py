@@ -458,13 +458,14 @@ def route_to_execution(alert: 'AlertData') -> dict:
             setup_type           = setup_type,
             signal_type          = direction,
             grade                = grade,
+            session              = session,
             source               = 'BRIDGE',
             decision_id          = getattr(alert, 'decision_id', ''),
             signal_id            = '',   # bridge signal_id generated later; use alert fields for now
             signal_generated_at  = getattr(alert, 'signal_generated_at', ''),
         )
         _log(
-            f'PHASE1  {_phase1_req.get("execution_request_id", "?")}  '
+            f'PHASE1+2  {_phase1_req.get("execution_request_id", "?")}  '
             f'status={_phase1_req.get("final_status", "?")}  '
             f'dry_run={_phase1_req.get("dry_run", False)}'
         )

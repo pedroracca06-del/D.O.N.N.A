@@ -1,17 +1,19 @@
-"""execution_request.py — Execution Bot v2 Phase 1: request backbone.
+"""execution_request.py — Execution Bot v2 Phase 1+2: request backbone + prop gates.
 
 Every execution attempt generates an execution_request_id, is deduplicated
-against a persistent registry, checked for signal freshness, and recorded
-in a v2 trace file.
+against a persistent registry, checked for signal freshness, run through
+prop-firm risk gates, and recorded in a v2 trace file.
 
 This module is a PARALLEL validation layer. It does not replace or call
-the existing execution path. In live mode (DRY_RUN=false) it logs and
-returns, then the caller continues to the existing gates. In dry-run mode
-(DRY_RUN=true) its result is final and no broker call is made.
+the existing execution path. In live mode (DRY_RUN=false) with
+NOVA_PROP_GATES_ENABLED=false (default) it logs and returns, then the caller
+continues to the existing gates. In dry-run mode (DRY_RUN=true) or with
+NOVA_PROP_GATES_ENABLED=true its result is final and no broker call is made.
 
 Public API:
     validate_and_record(**kwargs) -> dict   — call once per execution attempt
     is_dry_run() -> bool                    — read env var at call time
+    prop_gates_enforced(dry_run) -> bool    — whether prop gates block execution
     get_registry_stats() -> dict            — summary for /api endpoints
 """
 from __future__ import annotations
@@ -31,13 +33,21 @@ MAX_SIGNAL_AGE_SECONDS = int(os.getenv('NOVA_MAX_SIGNAL_AGE_SECONDS', '120'))
 REGISTRY_MAX = 5000   # oldest records are dropped when limit is exceeded
 TRACE_V2_MAX = 5000
 
-# Status codes
+# Phase 1 status codes
 STATUS_RECEIVED          = 'RECEIVED'
 STATUS_BAD_PAYLOAD       = 'REJECTED_BAD_PAYLOAD'
 STATUS_DUPLICATE         = 'REJECTED_DUPLICATE'
 STATUS_STALE             = 'REJECTED_STALE'
 STATUS_DRY_RUN_VALIDATED = 'DRY_RUN_VALIDATED'
 STATUS_FAILED            = 'FAILED'
+
+# Phase 2 prop gate rejection codes
+STATUS_REJECTED_PROP_DAILY_LOSS  = 'REJECTED_PROP_DAILY_LOSS'
+STATUS_REJECTED_PROP_MAX_LOSS    = 'REJECTED_PROP_MAX_LOSS'
+STATUS_REJECTED_MAX_TRADES       = 'REJECTED_MAX_TRADES'
+STATUS_REJECTED_MAX_CONTRACTS    = 'REJECTED_MAX_CONTRACTS'
+STATUS_REJECTED_SYMBOL           = 'REJECTED_SYMBOL_NOT_ALLOWED'
+STATUS_REJECTED_SESSION          = 'REJECTED_SESSION'
 
 _lock = threading.Lock()
 
@@ -64,6 +74,18 @@ def _trace_v2_file() -> Path:
 def is_dry_run() -> bool:
     """Read env var at call time so changes take effect without restart."""
     return os.getenv('NOVA_EXECUTION_DRY_RUN', 'false').strip().lower() == 'true'
+
+
+def prop_gates_enforced(dry_run: bool) -> bool:
+    """
+    Prop gates block execution when:
+    - dry_run=True (always enforce in dry-run), OR
+    - NOVA_PROP_GATES_ENABLED=true (explicit live enforcement)
+    Default: gates run and log but do NOT block the live path.
+    """
+    if dry_run:
+        return True
+    return os.getenv('NOVA_PROP_GATES_ENABLED', 'false').strip().lower() == 'true'
 
 
 # ── ID generation ─────────────────────────────────────────────────────────────
@@ -221,6 +243,7 @@ def validate_and_record(
     setup_type: str,
     signal_type: str = '',
     grade: str = '',
+    session: str = '',
     entry: Optional[float] = None,
     stop: Optional[float] = None,
     target: Optional[float] = None,
@@ -232,23 +255,25 @@ def validate_and_record(
     dry_run_override: Optional[bool] = None,
 ) -> dict:
     """
-    Phase 1 entry point. Call once per execution attempt before any broker logic.
+    Phase 1+2 entry point. Call once per execution attempt before any broker logic.
 
     Returns a record dict with 'final_status':
-      DRY_RUN_VALIDATED   — all checks passed, dry-run mode active
-      RECEIVED            — all checks passed, live mode (caller continues to broker)
+      DRY_RUN_VALIDATED          — all checks passed, dry-run mode active
+      RECEIVED                   — all checks passed, live mode (caller continues to broker)
       REJECTED_BAD_PAYLOAD
       REJECTED_DUPLICATE
       REJECTED_STALE
-      FAILED              — unexpected error in this module
+      REJECTED_PROP_DAILY_LOSS   — prop daily loss limit hit (Phase 2)
+      REJECTED_PROP_MAX_LOSS     — prop total loss limit hit (Phase 2)
+      REJECTED_MAX_TRADES        — max_trades_per_day reached (Phase 2)
+      REJECTED_MAX_CONTRACTS     — position cap reached (Phase 2)
+      REJECTED_SYMBOL_NOT_ALLOWED
+      REJECTED_SESSION
+      FAILED                     — unexpected error in this module
 
-    In dry_run mode (NOVA_EXECUTION_DRY_RUN=true):
-      - Returns DRY_RUN_VALIDATED or a rejection status
-      - Caller must NOT call broker if final_status == DRY_RUN_VALIDATED
-
-    In live mode:
-      - Returns RECEIVED (all checks logged, caller continues unchanged)
-      - Rejections are logged but current execution path is NOT blocked by them
+    Phase 2 gate enforcement:
+      - dry_run=True OR NOVA_PROP_GATES_ENABLED=true → gates block execution
+      - Otherwise: gates run and log but do NOT block (default for live)
     """
     dry_run    = dry_run_override if dry_run_override is not None else is_dry_run()
     created_at = _utc_now()
@@ -260,6 +285,7 @@ def validate_and_record(
             setup_type=setup_type,
             signal_type=signal_type,
             grade=grade,
+            session=session,
             entry=entry,
             stop=stop,
             target=target,
@@ -278,15 +304,21 @@ def validate_and_record(
             'signal_id': signal_id or None,
             'symbol': symbol, 'direction': direction, 'setup_type': setup_type,
             'signal_type': signal_type, 'grade': grade,
+            'session': session,
             'entry': entry, 'stop': stop, 'target': target, 'qty': qty,
             'source': source, 'created_at': created_at,
             'signal_generated_at': signal_generated_at or None,
             'signal_age_seconds': None,
             'status': STATUS_FAILED, 'dry_run': dry_run,
-            'validation_errors': [f'Phase 1 internal error: {e}'],
+            'validation_errors': [f'Phase 1+2 internal error: {e}'],
             'validation_warnings': [],
             'duplicate_check': {'checked': False},
             'stale_check': {'checked': False},
+            'prop_config_loaded': False,
+            'prop_firm_name': None,
+            'prop_account_size': None,
+            'prop_gate_results': [],
+            'rejected_gate': None,
             'broker_called': False,
             'final_status': STATUS_FAILED,
         }
@@ -295,7 +327,7 @@ def validate_and_record(
 
 
 def _validate_and_record_impl(
-    *, symbol, direction, setup_type, signal_type, grade,
+    *, symbol, direction, setup_type, signal_type, grade, session,
     entry, stop, target, qty, source,
     decision_id, signal_id, signal_generated_at,
     dry_run, created_at,
@@ -315,7 +347,7 @@ def _validate_and_record_impl(
         req = _build_req(
             execution_request_id=f'EXREQ_BAD_{uuid.uuid4().hex[:8].upper()}',
             symbol=symbol, direction=direction, setup_type=setup_type,
-            signal_type=signal_type, grade=grade,
+            signal_type=signal_type, grade=grade, session=session,
             entry=entry, stop=stop, target=target, qty=qty,
             source=source, decision_id=decision_id, signal_id=signal_id,
             signal_generated_at=signal_generated_at,
@@ -324,6 +356,8 @@ def _validate_and_record_impl(
             validation_warnings=validation_warnings,
             duplicate_check={'checked': False},
             stale_check={'checked': False},
+            prop_config_loaded=False, prop_firm_name=None, prop_account_size=None,
+            prop_gate_results=[], rejected_gate=None,
             final_status=STATUS_BAD_PAYLOAD,
         )
         _append_trace_v2(req)
@@ -373,14 +407,52 @@ def _validate_and_record_impl(
                 direction=direction,
                 setup_type=setup_type,
                 created_at=created_at,
-                status=STATUS_RECEIVED,  # updated below after final determination
+                status=STATUS_RECEIVED,
             )
 
+    # ── Phase 2: Prop risk gate evaluation (always runs for observability)
+    prop_config_loaded  = False
+    prop_firm_name      = None
+    prop_account_size   = None
+    prop_gate_results:  list = []
+    rejected_gate:      Optional[str] = None
+    prop_rejection_code: Optional[str] = None
+
+    try:
+        from services.prop_risk import (
+            load_prop_config, run_prop_gates, get_runtime_context,
+        )
+        prop_config       = load_prop_config()
+        prop_config_loaded = not prop_config.get('_config_missing', True)
+        prop_firm_name    = prop_config.get('prop_firm_name') or None
+        prop_account_size = prop_config.get('account_size') or None
+        runtime           = get_runtime_context()
+        prop_gate_results = run_prop_gates(
+            symbol         = symbol,
+            session        = session,
+            trade_count    = runtime.get('trade_count', 0),
+            daily_pnl      = runtime.get('daily_pnl', 0.0),
+            open_positions = runtime.get('open_positions', []),
+            config         = prop_config,
+        )
+        failed_gate = next(
+            (g for g in prop_gate_results if g.get('result') == 'FAIL'), None
+        )
+        if failed_gate:
+            rejected_gate       = failed_gate['gate']
+            prop_rejection_code = failed_gate['rejection_code']
+    except Exception as _pe:
+        validation_warnings.append(f'prop_risk gate error (non-blocking): {_pe}')
+
     # ── Determine final status
+    enforce = prop_gates_enforced(dry_run)
+
     if dup_check['is_duplicate']:
         final_status = STATUS_DUPLICATE
     elif stale_check.get('checked') and not stale_check.get('missing_timestamp') and stale_check.get('is_stale'):
         final_status = STATUS_STALE
+    elif enforce and prop_rejection_code:
+        final_status = prop_rejection_code
     elif dry_run:
         final_status = STATUS_DRY_RUN_VALIDATED
     else:
@@ -389,7 +461,7 @@ def _validate_and_record_impl(
     req = _build_req(
         execution_request_id=execution_request_id,
         symbol=symbol, direction=direction, setup_type=setup_type,
-        signal_type=signal_type, grade=grade,
+        signal_type=signal_type, grade=grade, session=session,
         entry=entry, stop=stop, target=target, qty=qty,
         source=source, decision_id=decision_id, signal_id=signal_id,
         signal_generated_at=signal_generated_at,
@@ -398,6 +470,11 @@ def _validate_and_record_impl(
         validation_warnings=validation_warnings,
         duplicate_check=dup_check,
         stale_check=stale_check,
+        prop_config_loaded=prop_config_loaded,
+        prop_firm_name=prop_firm_name,
+        prop_account_size=prop_account_size,
+        prop_gate_results=prop_gate_results,
+        rejected_gate=rejected_gate,
         final_status=final_status,
     )
 
@@ -407,10 +484,13 @@ def _validate_and_record_impl(
 
 def _build_req(
     *, execution_request_id, symbol, direction, setup_type,
-    signal_type, grade, entry, stop, target, qty,
+    signal_type, grade, session, entry, stop, target, qty,
     source, decision_id, signal_id, signal_generated_at,
     created_at, dry_run, validation_errors, validation_warnings,
-    duplicate_check, stale_check, final_status,
+    duplicate_check, stale_check,
+    prop_config_loaded, prop_firm_name, prop_account_size,
+    prop_gate_results, rejected_gate,
+    final_status,
 ) -> dict:
     return {
         'execution_request_id': execution_request_id,
@@ -421,6 +501,7 @@ def _build_req(
         'setup_type':           setup_type,
         'signal_type':          signal_type,
         'grade':                grade,
+        'session':              session or None,
         'entry':                entry,
         'stop':                 stop,
         'target':               target,
@@ -435,6 +516,12 @@ def _build_req(
         'validation_warnings':  validation_warnings,
         'duplicate_check':      duplicate_check,
         'stale_check':          stale_check,
+        # Phase 2 prop gate trace fields
+        'prop_config_loaded':   prop_config_loaded,
+        'prop_firm_name':       prop_firm_name,
+        'prop_account_size':    prop_account_size,
+        'prop_gate_results':    prop_gate_results,
+        'rejected_gate':        rejected_gate,
         'broker_called':        False,
         'final_status':         final_status,
     }
