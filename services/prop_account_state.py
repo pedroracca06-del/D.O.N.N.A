@@ -61,7 +61,7 @@ _STATUS_SEVERITY: dict[str, int] = {
 
 WARNING_BUFFER_PCT = 0.25   # alert when ≤ 25% of the buffer remains
 
-ALERT_COOLDOWN_SECONDS = 300  # 5 min per alert key
+ALERT_COOLDOWN_SECONDS = 300  # fallback only — runtime uses _env_cooldown_seconds()
 
 # ── File paths ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +71,51 @@ def _prop_account_state_file() -> Path:
         return DATA_DIR / 'nova_prop_account_state.json'
     except Exception:
         return Path('data') / 'nova_prop_account_state.json'
+
+
+def _prop_alert_registry_file() -> Path:
+    try:
+        from core.config import DATA_DIR
+        return DATA_DIR / 'nova_prop_alert_registry.json'
+    except Exception:
+        return Path('data') / 'nova_prop_alert_registry.json'
+
+
+def _load_prop_alert_registry() -> dict:
+    p = _prop_alert_registry_file()
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_prop_alert_registry_entry(key: str, alert_key: str, sent_at: str) -> None:
+    try:
+        reg = _load_prop_alert_registry()
+        reg[key] = {'alert_key': alert_key, 'last_sent_at': sent_at}
+        _prop_alert_registry_file().write_text(
+            json.dumps(reg, indent=2), encoding='utf-8'
+        )
+    except Exception:
+        pass
+
+
+def _discord_enabled() -> bool:
+    try:
+        from core.config import NOVA_EXECUTION_SAFETY_DISCORD_ENABLED
+        return bool(NOVA_EXECUTION_SAFETY_DISCORD_ENABLED)
+    except Exception:
+        return False  # default OFF
+
+
+def _env_cooldown_seconds() -> int:
+    try:
+        from core.config import NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS
+        return int(NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS)
+    except Exception:
+        return ALERT_COOLDOWN_SECONDS
 
 
 # ── Default state ──────────────────────────────────────────────────────────────
@@ -435,14 +480,25 @@ def _is_prop_in_cooldown(alert_key: str, cooldown_seconds: int = ALERT_COOLDOWN_
 
 
 def _record_prop_alert_sent(alert_key: str) -> None:
+    sent_at = datetime.now(timezone.utc).isoformat()
     with _prop_cooldown_lock:
-        _prop_cooldown[alert_key] = datetime.now(timezone.utc).isoformat()
+        _prop_cooldown[alert_key] = sent_at
+    _save_prop_alert_registry_entry(alert_key, alert_key, sent_at)
 
 
 def clear_prop_cooldown_state() -> None:
     """Reset all prop alert cooldowns (for testing)."""
     with _prop_cooldown_lock:
         _prop_cooldown.clear()
+
+
+# Pre-populate in-memory cooldown from persistent registry at import time
+try:
+    for _rk, _re in _load_prop_alert_registry().items():
+        if _re.get('last_sent_at'):
+            _prop_cooldown[_rk] = _re['last_sent_at']
+except Exception:
+    pass
 
 
 # ── Alert generation ──────────────────────────────────────────────────────────
@@ -558,20 +614,28 @@ def send_prop_alert_discord(alert: dict, state: dict) -> dict:
 
 def check_and_send_prop_alerts(
     state:            dict,
-    cooldown_seconds: int = ALERT_COOLDOWN_SECONDS,
+    cooldown_seconds: int | None = None,
 ) -> dict:
     """
-    Evaluate prop state for breach risk, send Discord alerts respecting cooldown.
+    Evaluate prop state for breach risk, send Discord alerts respecting Phase 5.1 controls.
+    Respects NOVA_EXECUTION_SAFETY_DISCORD_ENABLED and NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS.
     Returns {'alerts_sent': [...], 'alerts_suppressed': [...]}.
     SAFETY: Discord only — no broker writes.
     """
+    if cooldown_seconds is None:
+        cooldown_seconds = _env_cooldown_seconds()
+    discord_on = _discord_enabled()
+
     alerts_sent: list[dict] = []
     alerts_suppressed: list[str] = []
 
     for alert in get_prop_breach_alerts(state):
         key = alert.get('alert_key', '')
         if _is_prop_in_cooldown(key, cooldown_seconds):
-            alerts_suppressed.append(key)
+            alerts_suppressed.append(f'{key}:COOLDOWN')
+            continue
+        if not discord_on:
+            alerts_suppressed.append(f'{key}:DISCORD_DISABLED')
             continue
         result = send_prop_alert_discord(alert, state)
         _record_prop_alert_sent(key)

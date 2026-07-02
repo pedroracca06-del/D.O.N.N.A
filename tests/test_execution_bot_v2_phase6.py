@@ -18,6 +18,13 @@ Tests cover:
 15. Safety status includes prop_account_summary key
 16. No broker write methods called during prop account update
 17. Prop warning alert sent when near breach (Discord mock)
+18. Endpoint returns latest state safely
+19. Strategy logic unchanged by prop module
+20. Discord disabled suppresses prop alert send
+21. Suppressed list shows DISCORD_DISABLED reason (not COOLDOWN)
+22. Cooldown suppressed list shows COOLDOWN reason
+23. Persistent registry written when prop alert sent
+24. Persistent prop cooldown survives simulated restart
 
 Note: All patches on services.execution_reconcile.* use string-form to survive
 Phase 4's module re-import in _isolated_er(). Prop module patches use patch.object.
@@ -406,7 +413,8 @@ def test_prop_warning_alert_sent_when_near_breach(tmp_path):
     state['prop_state_status']         = pas.PROP_TRAILING_DRAWDOWN_WARNING
 
     mock_send = MagicMock(return_value={'ok': True})
-    with patch.object(pas, 'send_prop_alert_discord', mock_send):
+    with patch.object(pas, 'send_prop_alert_discord', mock_send), \
+         patch.object(pas, '_discord_enabled', return_value=True):
         result = pas.check_and_send_prop_alerts(state, cooldown_seconds=0)
 
     mock_send.assert_called_once()
@@ -478,3 +486,166 @@ def test_strategy_logic_unchanged_by_prop_update(tmp_path):
     # If we reach here, no strategy module was called
     assert result['broker_account_read'] is True
     assert 'prop_state_status' in result
+
+
+# ── 20. Discord disabled suppresses prop alert send ──────────────────────────
+
+def test_prop_discord_disabled_suppresses_alert():
+    """When NOVA_EXECUTION_SAFETY_DISCORD_ENABLED=false, Discord must not be called."""
+    pas.clear_prop_cooldown_state()
+
+    state = pas._default_state()
+    state['trailing_drawdown_enabled'] = True
+    state['trailing_drawdown_amount']  = 2_500.0
+    state['trailing_drawdown_type']    = 'trailing'
+    state['high_water_mark']           = 52_000.0
+    state['current_balance']           = 50_125.0
+    state['trailing_drawdown_status']  = pas.PROP_TRAILING_DRAWDOWN_WARNING
+    state['daily_loss_status']         = pas.PROP_STATE_OK
+    state['total_loss_status']         = pas.PROP_STATE_OK
+    state['prop_state_status']         = pas.PROP_TRAILING_DRAWDOWN_WARNING
+
+    mock_send = MagicMock(return_value={'ok': True})
+    with patch.object(pas, 'send_prop_alert_discord', mock_send), \
+         patch.object(pas, '_discord_enabled', return_value=False):
+        result = pas.check_and_send_prop_alerts(state, cooldown_seconds=0)
+
+    mock_send.assert_not_called()
+    assert result['alerts_sent'] == []
+    assert len(result['alerts_suppressed']) >= 1
+
+
+# ── 21. Suppressed list shows DISCORD_DISABLED reason ───────────────────────
+
+def test_prop_suppressed_reason_discord_disabled():
+    pas.clear_prop_cooldown_state()
+
+    state = pas._default_state()
+    state['trailing_drawdown_enabled'] = True
+    state['trailing_drawdown_amount']  = 2_500.0
+    state['trailing_drawdown_type']    = 'trailing'
+    state['high_water_mark']           = 52_000.0
+    state['current_balance']           = 50_125.0
+    state['trailing_drawdown_status']  = pas.PROP_TRAILING_DRAWDOWN_WARNING
+    state['daily_loss_status']         = pas.PROP_STATE_OK
+    state['total_loss_status']         = pas.PROP_STATE_OK
+    state['prop_state_status']         = pas.PROP_TRAILING_DRAWDOWN_WARNING
+
+    with patch.object(pas, 'send_prop_alert_discord', MagicMock()), \
+         patch.object(pas, '_discord_enabled', return_value=False):
+        result = pas.check_and_send_prop_alerts(state, cooldown_seconds=0)
+
+    suppressed = result['alerts_suppressed']
+    assert any(':DISCORD_DISABLED' in s for s in suppressed), \
+        f'Expected DISCORD_DISABLED in suppressed list, got: {suppressed}'
+    # Must NOT say COOLDOWN when the reason is Discord disabled
+    assert not any(':COOLDOWN' in s for s in suppressed), \
+        f'COOLDOWN reason must not appear when Discord is disabled, got: {suppressed}'
+
+
+# ── 22. Cooldown suppressed list shows COOLDOWN reason ──────────────────────
+
+def test_prop_suppressed_reason_cooldown():
+    pas.clear_prop_cooldown_state()
+
+    state = pas._default_state()
+    state['trailing_drawdown_enabled'] = True
+    state['trailing_drawdown_amount']  = 2_500.0
+    state['trailing_drawdown_type']    = 'trailing'
+    state['high_water_mark']           = 52_000.0
+    state['current_balance']           = 50_125.0
+    state['trailing_drawdown_status']  = pas.PROP_TRAILING_DRAWDOWN_WARNING
+    state['daily_loss_status']         = pas.PROP_STATE_OK
+    state['total_loss_status']         = pas.PROP_STATE_OK
+    state['prop_state_status']         = pas.PROP_TRAILING_DRAWDOWN_WARNING
+
+    with patch.object(pas, 'send_prop_alert_discord', MagicMock(return_value={'ok': True})), \
+         patch.object(pas, '_discord_enabled', return_value=True):
+        # First send — no cooldown
+        pas.check_and_send_prop_alerts(state, cooldown_seconds=900)
+        # Second send — now in cooldown
+        result = pas.check_and_send_prop_alerts(state, cooldown_seconds=900)
+
+    suppressed = result['alerts_suppressed']
+    assert any(':COOLDOWN' in s for s in suppressed), \
+        f'Expected COOLDOWN in suppressed list, got: {suppressed}'
+
+    pas.clear_prop_cooldown_state()
+
+
+# ── 23. Persistent registry written when prop alert sent ─────────────────────
+
+def test_prop_registry_written_when_alert_sent(tmp_path):
+    pas.clear_prop_cooldown_state()
+
+    state = pas._default_state()
+    state['trailing_drawdown_status']  = pas.PROP_TRAILING_DRAWDOWN_WARNING
+    state['trailing_drawdown_enabled'] = True
+    state['trailing_drawdown_amount']  = 2_500.0
+    state['trailing_drawdown_type']    = 'trailing'
+    state['high_water_mark']           = 52_000.0
+    state['current_balance']           = 50_125.0
+    state['daily_loss_status']         = pas.PROP_STATE_OK
+    state['total_loss_status']         = pas.PROP_STATE_OK
+    state['prop_state_status']         = pas.PROP_TRAILING_DRAWDOWN_WARNING
+
+    registry_path = tmp_path / 'prop_registry.json'
+    with patch.object(pas, 'send_prop_alert_discord', return_value={'ok': True}), \
+         patch.object(pas, '_discord_enabled', return_value=True), \
+         patch.object(pas, '_prop_alert_registry_file', return_value=registry_path):
+        pas.check_and_send_prop_alerts(state, cooldown_seconds=0)
+
+    assert registry_path.exists(), 'Registry file must be written after alert sent'
+    reg = json.loads(registry_path.read_text(encoding='utf-8'))
+    assert len(reg) >= 1
+    entry = list(reg.values())[0]
+    assert 'last_sent_at' in entry
+
+    pas.clear_prop_cooldown_state()
+
+
+# ── 24. Persistent prop cooldown survives simulated restart ──────────────────
+
+def test_prop_persistent_cooldown_survives_reload(tmp_path):
+    """
+    Send an alert, then simulate restart by resetting in-memory cooldown
+    and reloading from the registry file. The reload must block a second send.
+    """
+    state = pas._default_state()
+    state['trailing_drawdown_status']  = pas.PROP_TRAILING_DRAWDOWN_WARNING
+    state['trailing_drawdown_enabled'] = True
+    state['trailing_drawdown_amount']  = 2_500.0
+    state['trailing_drawdown_type']    = 'trailing'
+    state['high_water_mark']           = 52_000.0
+    state['current_balance']           = 50_125.0
+    state['daily_loss_status']         = pas.PROP_STATE_OK
+    state['total_loss_status']         = pas.PROP_STATE_OK
+    state['prop_state_status']         = pas.PROP_TRAILING_DRAWDOWN_WARNING
+
+    registry_path = tmp_path / 'prop_registry.json'
+    p_registry = patch.object(pas, '_prop_alert_registry_file', return_value=registry_path)
+    p_discord  = patch.object(pas, '_discord_enabled', return_value=True)
+    p_send     = patch.object(pas, 'send_prop_alert_discord', return_value={'ok': True})
+
+    with p_registry, p_discord, p_send:
+        pas.clear_prop_cooldown_state()
+        r1 = pas.check_and_send_prop_alerts(state, cooldown_seconds=900)
+        assert len(r1['alerts_sent']) == 1, 'First send must succeed'
+        assert registry_path.exists(), 'Registry must be written'
+
+        # Simulate restart: clear in-memory cooldown, reload from registry
+        pas.clear_prop_cooldown_state()
+        reg = json.loads(registry_path.read_text(encoding='utf-8'))
+        with pas._prop_cooldown_lock:
+            for _rk, _re in reg.items():
+                if _re.get('last_sent_at'):
+                    pas._prop_cooldown[_rk] = _re['last_sent_at']
+
+        r2 = pas.check_and_send_prop_alerts(state, cooldown_seconds=900)
+
+    assert r2['alerts_sent'] == [], 'After reload, cooldown must block second send'
+    suppressed = r2['alerts_suppressed']
+    assert any(':COOLDOWN' in s for s in suppressed), \
+        f'Expected COOLDOWN after reload, got: {suppressed}'
+
+    pas.clear_prop_cooldown_state()
