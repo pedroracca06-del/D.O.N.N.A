@@ -113,6 +113,14 @@ ALERT_COOLDOWN_MINUTES = int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
 ALERT_DAILY_MAX        = int(os.getenv('ALERT_DAILY_MAX', '20'))
 ALERT_STATE_FILE       = _data_file('nova_alert_state.json', 'donna_alert_state.json')
 
+# ── Execution Safety Monitor (Phase 5.1) ──────────────────────
+# NOVA_EXECUTION_SAFETY_MONITOR_ENABLED  — set false to pause the entire monitor loop
+# NOVA_EXECUTION_SAFETY_DISCORD_ENABLED  — default OFF; set true to allow Discord delivery
+# NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS — seconds between repeat alerts (default 900 = 15 min)
+NOVA_EXECUTION_SAFETY_MONITOR_ENABLED        = os.getenv('NOVA_EXECUTION_SAFETY_MONITOR_ENABLED', 'true').strip().lower() == 'true'
+NOVA_EXECUTION_SAFETY_DISCORD_ENABLED        = os.getenv('NOVA_EXECUTION_SAFETY_DISCORD_ENABLED', 'false').strip().lower() == 'true'
+NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS = int(os.getenv('NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS', '900'))
+
 # ── Feed sync (local → Render replication) ────────────────────
 # NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)
 # NOVA_INGEST_SECRET: shared secret for POST /api/feed/ingest — set in both local .env and Render env vars

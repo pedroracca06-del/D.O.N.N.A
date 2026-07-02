@@ -109,6 +109,15 @@ def _flt(raw: dict, key: str, default=None):
         return default
 
 
+def _json_safe(obj) -> dict:
+    """Round-trip through json to convert UUID/Enum/Decimal to str/float. Never raises."""
+    import json as _json
+    try:
+        return _json.loads(_json.dumps(obj, default=str))
+    except Exception:
+        return {}
+
+
 def normalize_position_record(pos) -> dict:
     """
     Alpaca Position object or dict → standard dict.
@@ -127,7 +136,7 @@ def normalize_position_record(pos) -> dict:
         'avg_entry_price': _flt(raw, 'avg_entry_price'),
         'market_value':    _flt(raw, 'market_value'),
         'unrealized_pl':   _flt(raw, 'unrealized_pl'),
-        'raw':             raw,
+        'raw':             _json_safe(raw),
     }
 
 
@@ -154,7 +163,7 @@ def normalize_order_record(order) -> dict:
         'stop_price':  _flt(raw, 'stop_price'),
         'order_class': _str_val(raw.get('order_class')),
         'legs':        legs,
-        'raw':         raw,
+        'raw':         _json_safe(raw),
     }
 
 

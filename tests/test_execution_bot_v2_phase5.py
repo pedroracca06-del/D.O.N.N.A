@@ -22,6 +22,9 @@ Tests cover:
 Note: Phase 4 tests use _isolated_er() which re-imports services.execution_reconcile.
 All patching here uses string-form `patch('services.execution_reconcile.X')` so that
 mock resolution always goes through the current sys.modules entry, not a stale reference.
+
+Phase 5.1 note: Discord delivery is now gated by _discord_enabled(). Tests that
+expect Discord sends must patch _discord_enabled to return True.
 """
 from __future__ import annotations
 
@@ -54,10 +57,11 @@ def _ord(symbol='QQQ', side='sell', order_type='stop',
 
 
 def _file_patches(tmp_path: Path):
-    """Redirect status + log files to tmp_path."""
+    """Redirect status + log + registry files to tmp_path."""
     return (
-        patch.object(es, '_safety_status_file', return_value=tmp_path / 'safety_status.json'),
-        patch.object(es, '_safety_log_file',    return_value=tmp_path / 'safety_log.json'),
+        patch.object(es, '_safety_status_file',  return_value=tmp_path / 'safety_status.json'),
+        patch.object(es, '_safety_log_file',     return_value=tmp_path / 'safety_log.json'),
+        patch.object(es, '_alert_registry_file', return_value=tmp_path / 'registry.json'),
     )
 
 
@@ -77,9 +81,9 @@ def _broker_patches(positions=None, orders=None, journal=None):
 
 def test_safety_check_writes_status_file(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     b1, b2, b3 = _broker_patches()
-    with p1, p2, b1, b2, b3:
+    with p1, p2, p3, b1, b2, b3:
         es.run_execution_safety_check()
 
     status_file = tmp_path / 'safety_status.json'
@@ -94,9 +98,9 @@ def test_safety_check_writes_status_file(tmp_path):
 
 def test_safety_log_appends(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     b1, b2, b3 = _broker_patches()
-    with p1, p2, b1, b2, b3:
+    with p1, p2, p3, b1, b2, b3:
         es.run_execution_safety_check()
         es.run_execution_safety_check()
 
@@ -112,9 +116,9 @@ def test_safety_log_appends(tmp_path):
 
 def test_no_positions_returns_no_open_positions(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     b1, b2, b3 = _broker_patches()
-    with p1, p2, b1, b2, b3:
+    with p1, p2, p3, b1, b2, b3:
         result = es.run_execution_safety_check()
 
     assert result['status']               == 'NO_OPEN_POSITIONS'
@@ -127,11 +131,11 @@ def test_no_positions_returns_no_open_positions(tmp_path):
 
 def test_protected_position_returns_all_protected(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions = [_pos('QQQ', 'long', 10.0)]
     orders    = [_ord('QQQ', 'sell', 'stop'), _ord('QQQ', 'sell', 'limit', limit_price=420.0)]
     b1, b2, b3 = _broker_patches(positions=positions, orders=orders)
-    with p1, p2, b1, b2, b3:
+    with p1, p2, p3, b1, b2, b3:
         result = es.run_execution_safety_check()
 
     assert result['status']                    == 'ALL_POSITIONS_PROTECTED'
@@ -144,11 +148,11 @@ def test_protected_position_returns_all_protected(tmp_path):
 
 def test_unprotected_position_detected(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions = [_pos('QQQ', 'long', 10.0)]
     b1, b2, b3 = _broker_patches(positions=positions)
-    with p1, p2, b1, b2, b3, \
-         patch.object(es, 'send_safety_discord_alert', return_value={'ok': True}):
+    with p1, p2, p3, b1, b2, b3, \
+         patch.object(es, '_discord_enabled', return_value=False):
         result = es.run_execution_safety_check()
 
     assert result['status']                     == 'UNPROTECTED_POSITIONS_DETECTED'
@@ -160,15 +164,15 @@ def test_unprotected_position_detected(tmp_path):
 
 def test_critical_emergency_alert_present(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions = [_pos('QQQ', 'long', 10.0)]
     b1, b2, b3 = _broker_patches(positions=positions)
-    with p1, p2, b1, b2, b3, \
-         patch.object(es, 'send_safety_discord_alert', return_value={'ok': True}):
+    with p1, p2, p3, b1, b2, b3, \
+         patch.object(es, '_discord_enabled', return_value=False):
         result = es.run_execution_safety_check()
 
     alerts = result['emergency_alerts']
-    assert len(alerts)          == 1
+    assert len(alerts)             == 1
     assert alerts[0]['alert_type'] == 'UNPROTECTED_POSITION'
     assert alerts[0]['severity']   == 'CRITICAL'
 
@@ -177,12 +181,14 @@ def test_critical_emergency_alert_present(tmp_path):
 
 def test_discord_alert_sent_once_for_new_alert(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions  = [_pos('QQQ', 'long', 10.0)]
     b1, b2, b3 = _broker_patches(positions=positions)
     mock_send  = MagicMock(return_value={'ok': True})
-    with p1, p2, b1, b2, b3, patch.object(es, 'send_safety_discord_alert', mock_send):
-        es.run_execution_safety_check()
+    with p1, p2, p3, b1, b2, b3, \
+         patch.object(es, '_discord_enabled', return_value=True), \
+         patch.object(es, 'send_safety_discord_alert', mock_send):
+        es.run_execution_safety_check(cooldown_seconds=0)
 
     mock_send.assert_called_once()
     assert mock_send.call_args[0][0]['alert_type'] == 'UNPROTECTED_POSITION'
@@ -192,16 +198,19 @@ def test_discord_alert_sent_once_for_new_alert(tmp_path):
 
 def test_duplicate_alert_suppressed_by_cooldown(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions  = [_pos('QQQ', 'long', 10.0)]
     b1, b2, b3 = _broker_patches(positions=positions)
     mock_send  = MagicMock(return_value={'ok': True})
-    with p1, p2, b1, b2, b3, patch.object(es, 'send_safety_discord_alert', mock_send):
+    with p1, p2, p3, b1, b2, b3, \
+         patch.object(es, '_discord_enabled', return_value=True), \
+         patch.object(es, 'send_safety_discord_alert', mock_send):
         es.run_execution_safety_check(cooldown_seconds=300)
         result2 = es.run_execution_safety_check(cooldown_seconds=300)
 
     assert mock_send.call_count == 1, 'Discord must only be called on first alert'
-    assert 'QQQ' in result2['alerts_suppressed_by_cooldown']
+    # suppression now includes instrument:COOLDOWN format
+    assert any('QQQ' in s for s in result2['alerts_suppressed_by_cooldown'])
     assert result2['alerts_sent'] == []
 
 
@@ -209,11 +218,13 @@ def test_duplicate_alert_suppressed_by_cooldown(tmp_path):
 
 def test_alert_fires_again_after_cooldown_cleared(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions  = [_pos('QQQ', 'long', 10.0)]
     b1, b2, b3 = _broker_patches(positions=positions)
     mock_send  = MagicMock(return_value={'ok': True})
-    with p1, p2, b1, b2, b3, patch.object(es, 'send_safety_discord_alert', mock_send):
+    with p1, p2, p3, b1, b2, b3, \
+         patch.object(es, '_discord_enabled', return_value=True), \
+         patch.object(es, 'send_safety_discord_alert', mock_send):
         es.run_execution_safety_check(cooldown_seconds=300)   # fires alert
         es.clear_cooldown_state()                              # simulate cooldown expiry
         es.run_execution_safety_check(cooldown_seconds=300)   # must fire again
@@ -225,8 +236,8 @@ def test_alert_fires_again_after_cooldown_cleared(tmp_path):
 
 def test_broker_reader_failure_does_not_crash(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
-    with p1, p2, \
+    p1, p2, p3 = _file_patches(tmp_path)
+    with p1, p2, p3, \
          patch('services.execution_reconcile.get_broker_positions_safe',
                side_effect=RuntimeError('Alpaca down')), \
          patch('services.execution_reconcile.get_broker_orders_safe',
@@ -242,11 +253,11 @@ def test_broker_reader_failure_does_not_crash(tmp_path):
 # ── 11. get_latest_safety_status reads from file ─────────────────────────────
 
 def test_get_latest_safety_status_reads_file(tmp_path):
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     status_file = tmp_path / 'safety_status.json'
     fake = {'status': 'ALL_POSITIONS_PROTECTED', 'checked_at': '2026-06-30T12:00:00Z'}
     status_file.write_text(json.dumps(fake), encoding='utf-8')
-    with p1, p2:
+    with p1, p2, p3:
         result = es.get_latest_safety_status()
 
     assert result['status']     == 'ALL_POSITIONS_PROTECTED'
@@ -256,9 +267,9 @@ def test_get_latest_safety_status_reads_file(tmp_path):
 # ── 12. get_latest_safety_status falls back to live when file missing ─────────
 
 def test_get_latest_safety_status_fallback_to_live(tmp_path):
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     b1, b2, b3 = _broker_patches()
-    with p1, p2, b1, b2, b3:
+    with p1, p2, p3, b1, b2, b3:
         result = es.get_latest_safety_status()
 
     assert result['status'] == 'NO_OPEN_POSITIONS'
@@ -268,7 +279,7 @@ def test_get_latest_safety_status_fallback_to_live(tmp_path):
 
 def test_no_broker_write_methods_called(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     cancel_calls  = []
     submit_calls  = []
     flatten_calls = []
@@ -280,7 +291,7 @@ def test_no_broker_write_methods_called(tmp_path):
     mock_client.submit_order.side_effect         = lambda *a, **k: submit_calls.append(1)
     mock_client.close_all_positions.side_effect  = lambda *a: flatten_calls.append(1)
 
-    with p1, p2, \
+    with p1, p2, p3, \
          patch('services.execution_reconcile._get_alpaca_client',
                return_value=(mock_client, None)):
         es.run_execution_safety_check()
@@ -293,7 +304,7 @@ def test_no_broker_write_methods_called(tmp_path):
 # ── 14. Safety log capped at SAFETY_LOG_MAX ──────────────────────────────────
 
 def test_safety_log_capped_at_max(tmp_path):
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     log_file = tmp_path / 'safety_log.json'
     existing = [{'status': 'NO_OPEN_POSITIONS', '_log_type': 'SAFETY_CHECK', 'n': i}
                 for i in range(es.SAFETY_LOG_MAX)]
@@ -301,7 +312,7 @@ def test_safety_log_capped_at_max(tmp_path):
 
     b1, b2, b3 = _broker_patches()
     es.clear_cooldown_state()
-    with p1, p2, b1, b2, b3:
+    with p1, p2, p3, b1, b2, b3:
         es.run_execution_safety_check()
 
     entries = json.loads(log_file.read_text())
@@ -323,11 +334,13 @@ def test_cooldown_key_per_instrument():
 
 def test_cooldown_zero_never_suppresses(tmp_path):
     es.clear_cooldown_state()
-    p1, p2 = _file_patches(tmp_path)
+    p1, p2, p3 = _file_patches(tmp_path)
     positions  = [_pos('QQQ', 'long', 10.0)]
     b1, b2, b3 = _broker_patches(positions=positions)
     mock_send  = MagicMock(return_value={'ok': True})
-    with p1, p2, b1, b2, b3, patch.object(es, 'send_safety_discord_alert', mock_send):
+    with p1, p2, p3, b1, b2, b3, \
+         patch.object(es, '_discord_enabled', return_value=True), \
+         patch.object(es, 'send_safety_discord_alert', mock_send):
         es.run_execution_safety_check(cooldown_seconds=0)
         es.run_execution_safety_check(cooldown_seconds=0)
 

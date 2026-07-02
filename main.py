@@ -409,20 +409,34 @@ def _safety_sleep_seconds() -> int:
 
 async def execution_safety_loop():
     """
-    Periodic execution safety monitor (Phase 5).
+    Periodic execution safety monitor (Phase 5 + 5.1).
     Every 60s during market hours, 120s outside.
-    Reads broker/journal state, detects unprotected positions, sends CRITICAL
-    Discord alerts. Read-only — never modifies broker state.
+    Reads broker/journal state, detects unprotected positions.
+    Discord delivery controlled by NOVA_EXECUTION_SAFETY_DISCORD_ENABLED (default OFF).
+    Monitor can be paused via NOVA_EXECUTION_SAFETY_MONITOR_ENABLED=false.
+    Read-only — never modifies broker state.
     """
     if not _EXECUTION_SAFETY_AVAILABLE:
         return
     while True:
         try:
+            # Respect monitor-enabled flag (still sleeps when disabled)
+            try:
+                from core.config import NOVA_EXECUTION_SAFETY_MONITOR_ENABLED
+                monitor_on = NOVA_EXECUTION_SAFETY_MONITOR_ENABLED
+            except Exception:
+                monitor_on = True
+            if not monitor_on:
+                await asyncio.sleep(_safety_sleep_seconds())
+                continue
+
             result = await asyncio.to_thread(run_execution_safety_check)
             status = result.get('status', 'UNKNOWN')
+            discord_on = result.get('discord_enabled', False)
             if status == 'UNPROTECTED_POSITIONS_DETECTED':
                 n = len(result.get('unprotected_positions', []))
-                print(f'[execution_safety] CRITICAL — {n} unprotected position(s) detected')
+                disc_note = '' if discord_on else ' [Discord OFF — set NOVA_EXECUTION_SAFETY_DISCORD_ENABLED=true to alert]'
+                print(f'[execution_safety] CRITICAL — {n} unprotected position(s) detected{disc_note}')
             elif status not in ('NO_OPEN_POSITIONS', 'ALL_POSITIONS_PROTECTED', 'UNAVAILABLE'):
                 print(f'[execution_safety] status={status}')
         except Exception as e:
@@ -1711,14 +1725,8 @@ async def prop_account_state_endpoint():
     Never modifies broker state.
     """
     try:
-        from services.prop_account_state import (
-            update_prop_account_state_from_broker,
-            load_prop_account_state,
-        )
-        try:
-            return update_prop_account_state_from_broker()
-        except Exception:
-            return load_prop_account_state()
+        from services.prop_account_state import get_latest_prop_account_state
+        return get_latest_prop_account_state()
     except Exception as exc:
         return {'prop_state_status': 'UNKNOWN_ACCOUNT_STATE', 'error': str(exc)}
 

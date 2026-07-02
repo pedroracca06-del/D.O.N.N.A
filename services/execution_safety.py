@@ -1,8 +1,8 @@
-"""execution_safety.py — Execution Bot v2 Phase 5: Periodic safety monitor.
+"""execution_safety.py — Execution Bot v2 Phase 5 + 5.1: Periodic safety monitor.
 
 Periodic read-only scan of broker/journal state. Detects unprotected positions,
-sends CRITICAL Discord alerts with 5-minute per-instrument cooldown, writes a
-snapshot status file and a rolling log.
+sends CRITICAL Discord alerts (when enabled), writes a snapshot status file and a
+rolling log.
 
 SAFETY CONTRACT — this module MUST NEVER:
   - Submit orders
@@ -10,13 +10,21 @@ SAFETY CONTRACT — this module MUST NEVER:
   - Modify positions
   - Call any Alpaca write endpoint
 
-Cooldown state is in-memory. Restarts intentionally clear it — no stale
-suppression carries across sessions.
+Phase 5.1 alert controls (read from core.config / env vars):
+  NOVA_EXECUTION_SAFETY_MONITOR_ENABLED  — if false, loop skips run (still sleeps)
+  NOVA_EXECUTION_SAFETY_DISCORD_ENABLED  — if false, alerts are logged but not sent to Discord
+  NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS — repeat-alert cooldown (default 900)
+
+Cooldown is dual-layer:
+  - In-memory: fast check within the same process lifetime
+  - File-backed: nova_execution_safety_alert_registry.json — survives restarts
 
 Public API:
     run_execution_safety_check(cooldown_seconds) -> dict
     get_latest_safety_status() -> dict
     send_safety_discord_alert(alert) -> dict
+    get_cooldown_state() -> dict
+    clear_cooldown_state() -> None
 """
 from __future__ import annotations
 
@@ -28,7 +36,7 @@ from pathlib import Path
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 SAFETY_LOG_MAX         = 1000
-ALERT_COOLDOWN_SECONDS = 300      # 5 minutes per instrument+alert_type pair
+ALERT_COOLDOWN_SECONDS = 300      # legacy default; env var overrides at runtime
 
 
 # ── File paths ─────────────────────────────────────────────────────────────────
@@ -49,10 +57,62 @@ def _safety_log_file() -> Path:
         return Path('data') / 'nova_execution_safety_log.json'
 
 
-# ── Alert cooldown (in-memory; resets on restart) ─────────────────────────────
+def _alert_registry_file() -> Path:
+    try:
+        from core.config import DATA_DIR
+        return DATA_DIR / 'nova_execution_safety_alert_registry.json'
+    except Exception:
+        return Path('data') / 'nova_execution_safety_alert_registry.json'
+
+
+# ── Persistent alert registry ─────────────────────────────────────────────────
+
+def _load_alert_registry() -> dict:
+    """Load persistent cooldown registry from file. Returns {key: entry_dict}."""
+    p = _alert_registry_file()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_alert_registry_entry(
+    key:        str,
+    instrument: str,
+    alert_type: str,
+    sent_at:    str,
+) -> None:
+    """Persist a single alert record to the registry (survives restart)."""
+    try:
+        registry = _load_alert_registry()
+        registry[key] = {
+            'alert_key':    key,
+            'instrument':   instrument,
+            'alert_type':   alert_type,
+            'last_sent_at': sent_at,
+        }
+        _alert_registry_file().write_text(
+            json.dumps(registry, indent=2), encoding='utf-8'
+        )
+    except Exception:
+        pass
+
+
+# ── Alert cooldown (in-memory + file-backed) ──────────────────────────────────
 
 _cooldown_state: dict[str, str] = {}   # {key: iso_timestamp_of_last_alert}
 _cooldown_lock  = threading.Lock()
+
+# Pre-populate from persistent registry so cooldowns survive restarts
+try:
+    for _rk, _re in _load_alert_registry().items():
+        if _re.get('last_sent_at'):
+            _cooldown_state[_rk] = _re['last_sent_at']
+except Exception:
+    pass
 
 
 def _cooldown_key(instrument: str, alert_type: str) -> str:
@@ -81,21 +141,42 @@ def _is_in_cooldown(
 
 
 def _record_alert_sent(instrument: str, alert_type: str) -> None:
-    key = _cooldown_key(instrument, alert_type)
+    """Record that an alert was sent — updates both in-memory and file registry."""
+    key     = _cooldown_key(instrument, alert_type)
+    sent_at = datetime.now(timezone.utc).isoformat()
     with _cooldown_lock:
-        _cooldown_state[key] = datetime.now(timezone.utc).isoformat()
+        _cooldown_state[key] = sent_at
+    _save_alert_registry_entry(key, instrument, alert_type, sent_at)
 
 
 def get_cooldown_state() -> dict:
-    """Return a copy of the current cooldown state (for inspection/testing)."""
+    """Return a copy of the current in-memory cooldown state."""
     with _cooldown_lock:
         return dict(_cooldown_state)
 
 
 def clear_cooldown_state() -> None:
-    """Reset all cooldowns (used in testing; not called from production paths)."""
+    """Reset all in-memory cooldowns (used in testing; not called from production)."""
     with _cooldown_lock:
         _cooldown_state.clear()
+
+
+# ── Env-var helpers ────────────────────────────────────────────────────────────
+
+def _discord_enabled() -> bool:
+    try:
+        from core.config import NOVA_EXECUTION_SAFETY_DISCORD_ENABLED
+        return bool(NOVA_EXECUTION_SAFETY_DISCORD_ENABLED)
+    except Exception:
+        return False   # default OFF
+
+
+def _env_cooldown_seconds() -> int:
+    try:
+        from core.config import NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS
+        return int(NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS)
+    except Exception:
+        return 900
 
 
 # ── Discord CRITICAL alert delivery ───────────────────────────────────────────
@@ -236,20 +317,29 @@ def get_latest_safety_status() -> dict:
 # ── Main safety check ─────────────────────────────────────────────────────────
 
 def run_execution_safety_check(
-    cooldown_seconds: int = ALERT_COOLDOWN_SECONDS,
+    cooldown_seconds: int | None = None,
 ) -> dict:
     """
     Full periodic safety check:
       1. Fetch broker positions + orders + open journal trades
       2. Detect unprotected positions (Phase 4 get_execution_safety_status)
       3. Reconcile each position against journal (Phase 3 reconcile_execution_state)
-      4. Send Discord CRITICAL alert for each unprotected position not in cooldown
-      5. Write nova_execution_safety_status.json
-      6. Append to nova_execution_safety_log.json
+      4. [Phase 5.1] If Discord enabled and not in cooldown: send CRITICAL alert
+         If Discord disabled: record DISCORD_DISABLED suppression; no send
+      5. [Phase 6] Update prop account state
+      6. Write nova_execution_safety_status.json
+      7. Append to nova_execution_safety_log.json
+
+    cooldown_seconds: override the env-var default (used in tests).
 
     Returns structured status dict.
     SAFETY CONTRACT: read-only. Never modifies broker state.
     """
+    if cooldown_seconds is None:
+        cooldown_seconds = _env_cooldown_seconds()
+
+    discord_on = _discord_enabled()
+
     checked_at             = datetime.now(timezone.utc).isoformat()
     warnings:  list[str]  = []
     errors:    list[str]  = []
@@ -303,16 +393,27 @@ def run_execution_safety_check(
             except Exception as _re:
                 warnings.append(f'Reconciliation error for {symbol}: {_re}')
 
-        # 3. Send CRITICAL Discord alerts for unprotected positions (respecting cooldown)
+        # 3. Alert routing (Phase 5.1 controls)
         for alert in safety.get('emergency_alerts', []):
             instrument = str(alert.get('instrument', '')).upper()
             alert_type = str(alert.get('alert_type', 'UNPROTECTED_POSITION')).upper()
 
+            # Cooldown check (applies regardless of Discord setting)
             if _is_in_cooldown(instrument, alert_type, cooldown_seconds):
-                alerts_suppressed.append(instrument)
+                alerts_suppressed.append(f'{instrument}:COOLDOWN')
                 warnings.append(f'Alert suppressed by cooldown: {instrument} {alert_type}')
                 continue
 
+            if not discord_on:
+                # Monitor still running; Discord delivery is OFF by config
+                alerts_suppressed.append(f'{instrument}:DISCORD_DISABLED')
+                warnings.append(
+                    f'Discord disabled — alert NOT sent for {instrument} {alert_type}. '
+                    f'Set NOVA_EXECUTION_SAFETY_DISCORD_ENABLED=true to enable.'
+                )
+                continue
+
+            # Discord enabled → send
             send_result = send_safety_discord_alert(alert)
             _record_alert_sent(instrument, alert_type)
             alerts_sent.append({
@@ -334,11 +435,13 @@ def run_execution_safety_check(
             prop_state = update_prop_account_state_from_broker()
             prop_account_summary = {
                 'current_balance':             prop_state.get('current_balance'),
+                'starting_balance':            prop_state.get('starting_balance'),
                 'high_water_mark':             prop_state.get('high_water_mark'),
                 'trailing_drawdown_threshold': prop_state.get('trailing_drawdown_threshold'),
                 'trailing_drawdown_remaining': prop_state.get('trailing_drawdown_remaining'),
                 'daily_pnl':                   prop_state.get('daily_pnl'),
                 'daily_loss_remaining':        prop_state.get('daily_loss_remaining'),
+                'total_loss_remaining':        prop_state.get('total_loss_remaining'),
                 'prop_state_status':           prop_state.get('prop_state_status'),
                 'broker_account_read':         prop_state.get('broker_account_read', False),
             }
@@ -369,6 +472,8 @@ def run_execution_safety_check(
             'warnings':                    warnings,
             'errors':                      errors,
             'prop_account_summary':        prop_account_summary,
+            'discord_enabled':             discord_on,
+            'cooldown_seconds':            cooldown_seconds,
         }
 
     except Exception as e:
@@ -388,6 +493,8 @@ def run_execution_safety_check(
             'warnings':                    warnings,
             'errors':                      errors,
             'prop_account_summary':        {},
+            'discord_enabled':             discord_on,
+            'cooldown_seconds':            cooldown_seconds,
         }
 
     _write_safety_status(status)

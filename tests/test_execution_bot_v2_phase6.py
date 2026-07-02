@@ -361,6 +361,8 @@ def test_safety_status_includes_prop_summary(tmp_path):
     assert ps['prop_state_status']    == pas.PROP_STATE_OK
     assert ps['current_balance']      == 50_000.0
     assert ps['broker_account_read']  is True
+    assert 'starting_balance'         in ps
+    assert 'total_loss_remaining'     in ps
 
 
 # ── 16. No broker write methods called during prop update ───────────────────
@@ -412,3 +414,67 @@ def test_prop_warning_alert_sent_when_near_breach(tmp_path):
     assert result['alerts_sent'][0]['alert_key'] == pas.PROP_TRAILING_DRAWDOWN_WARNING
 
     pas.clear_prop_cooldown_state()
+
+
+# ── 18. Endpoint returns latest state safely ─────────────────────────────────
+
+def test_get_latest_prop_account_state_from_file(tmp_path):
+    """get_latest_prop_account_state() reads from file first (no API call)."""
+    saved = {
+        'current_balance':  51_500.0,
+        'high_water_mark':  51_500.0,
+        'prop_state_status': pas.PROP_STATE_OK,
+        'last_updated':     '2026-06-30T14:00:00+00:00',
+    }
+    file_path = tmp_path / 'prop_account_state.json'
+    file_path.write_text(json.dumps(saved), encoding='utf-8')
+
+    client_patch, client = _client_patch(equity=99_999.0)
+    with patch.object(pas, '_prop_account_state_file', return_value=file_path), \
+         client_patch:
+        result = pas.get_latest_prop_account_state()
+
+    # Must have returned file data — broker was never needed
+    assert result['current_balance']   == 51_500.0
+    assert result['prop_state_status'] == pas.PROP_STATE_OK
+    client.get_account.assert_not_called()   # file-first: no API call
+
+
+def test_get_latest_prop_account_state_live_fallback(tmp_path):
+    """get_latest_prop_account_state() falls back to live read when file missing."""
+    file_path = tmp_path / 'prop_account_state.json'   # does NOT exist yet
+
+    client_patch, _ = _client_patch(equity=50_000.0)
+    with patch.object(pas, '_prop_account_state_file', return_value=file_path), \
+         client_patch, \
+         patch('services.prop_account_state._today_et', return_value='2026-06-30'):
+        result = pas.get_latest_prop_account_state()
+
+    assert result.get('current_balance') == 50_000.0
+    assert result.get('broker_account_read') is True
+
+
+# ── 19. Strategy logic unchanged by prop module ──────────────────────────────
+
+def test_strategy_logic_unchanged_by_prop_update(tmp_path):
+    """
+    update_prop_account_state_from_broker() must never touch strategy/reasoning/
+    signal-processing modules. Patch the critical ones to raise if called.
+    """
+    def _must_not_call(*a, **k):
+        raise AssertionError('Strategy module called from prop state updater')
+
+    client_patch, _ = _client_patch(equity=50_000.0)
+    with patch.object(pas, '_prop_account_state_file',
+                      return_value=tmp_path / 'state.json'), \
+         client_patch, \
+         patch('services.prop_account_state._today_et', return_value='2026-06-30'), \
+         patch.dict('sys.modules', {
+             'engines.reasoning': type('M', (), {'__getattr__': _must_not_call})(),
+             'engines.signals':   type('M', (), {'__getattr__': _must_not_call})(),
+         }):
+        result = pas.update_prop_account_state_from_broker()
+
+    # If we reach here, no strategy module was called
+    assert result['broker_account_read'] is True
+    assert 'prop_state_status' in result

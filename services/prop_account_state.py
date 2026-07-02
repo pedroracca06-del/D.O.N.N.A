@@ -16,7 +16,8 @@ SAFETY CONTRACT — this module MUST NEVER:
 Public API:
     load_prop_account_state() -> dict
     save_prop_account_state(state) -> None
-    update_prop_account_state_from_broker() -> dict       — main entry
+    get_latest_prop_account_state() -> dict               — file-first, live fallback
+    update_prop_account_state_from_broker() -> dict       — main entry (live read + save)
     compute_trailing_drawdown_state(state) -> dict        — pure
     compute_daily_loss_state(state) -> dict               — pure
     compute_total_loss_state(state) -> dict               — pure
@@ -385,6 +386,31 @@ def update_prop_account_state_from_broker() -> dict:
 
     save_prop_account_state(state)
     return state
+
+
+def get_latest_prop_account_state() -> dict:
+    """
+    Return the most recent prop account state.
+
+    Priority:
+      1. Read saved nova_prop_account_state.json — cheap, no API call
+      2. Fall back to update_prop_account_state_from_broker() if file missing/empty
+      3. Fall back to _default_state() if both fail
+
+    Never raises.
+    """
+    p = _prop_account_state_file()
+    if p.exists():
+        try:
+            saved = json.loads(p.read_text(encoding='utf-8'))
+            if isinstance(saved, dict) and saved.get('last_updated'):
+                return saved
+        except Exception:
+            pass
+    try:
+        return update_prop_account_state_from_broker()
+    except Exception:
+        return _default_state()
 
 
 # ── Prop alert cooldown ───────────────────────────────────────────────────────
