@@ -1731,6 +1731,20 @@ async def prop_account_state_endpoint():
         return {'prop_state_status': 'UNKNOWN_ACCOUNT_STATE', 'error': str(exc)}
 
 
+@app.get('/api/prop-readiness/status')
+async def prop_readiness_status_endpoint():
+    """Prop readiness validation report — checks env vars, config, safety monitor, account state.
+
+    Returns READY_FOR_DRY_RUN or NOT_READY with blockers and warnings.
+    Never modifies broker state.
+    """
+    try:
+        from services.prop_readiness import write_prop_readiness_report
+        return write_prop_readiness_report()
+    except Exception as exc:
+        return {'readiness_status': 'NOT_READY', 'error': str(exc)}
+
+
 @app.get('/api/mcp-health')
 async def mcp_health_endpoint():
     """MCP health snapshot -- written locally by reasoning cycle, graceful fallback when no local monitor."""
