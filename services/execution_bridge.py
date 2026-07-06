@@ -7,6 +7,7 @@ Safety contract (enforced in order):
   1. NOVA_AUTO_EXECUTE env var must be 'true'           — disabled by default
   2. Alpaca must be in paper mode (_PAPER=True)          — live blocks hard
   3. alert_type must be EXECUTION_READY                  — HEADS_UP never executes
+  3b. tp1 + stop must both be non-empty                  — no trade without defined TP and SL
   4. grade must be A or B                                — C/D never executes
   5. direction must be LONG / SHORT / BUY / SELL         — N/A never executes
   6. symbol must be in the routing table                 — unknown symbols never execute
@@ -530,6 +531,21 @@ def route_to_execution(alert: 'AlertData') -> dict:
         cid = _fail_exit('ALERT_TYPE', 'QUALITY', f'alert_type={alert_type} — only EXECUTION_READY routes', 'NOT_EXECUTION_READY')
         return {'status': _SKIP, 'reason': f'alert_type={alert_type}', 'code': 'NOT_EXECUTION_READY', 'chain_id': cid, 'execution_request': _phase1_req}
     _cg('ALERT_TYPE', 'QUALITY', 'PASS', 'EXECUTION_READY')
+
+    # ── Gate 3b: TP1 + Stop required — every trade must have defined levels
+    _tp1_val  = str(getattr(alert, 'tp1',  '') or '').strip()
+    _stop_val = str(getattr(alert, 'stop', '') or '').strip()
+    if not _tp1_val or not _stop_val:
+        _missing = [x for x, v in (('TP1', _tp1_val), ('SL', _stop_val)) if not v]
+        _log(f'SKIP  {symbol} {direction}  missing required levels: {", ".join(_missing)}')
+        cid = _fail_exit(
+            'MISSING_TP_SL', 'QUALITY',
+            f'EXECUTION_READY missing {", ".join(_missing)} — every trade requires defined TP1 and SL',
+            'MISSING_TP_SL',
+        )
+        return {'status': _SKIP, 'reason': f'missing {", ".join(_missing)}', 'code': 'MISSING_TP_SL',
+                'chain_id': cid, 'execution_request': _phase1_req}
+    _cg('TP_SL_DEFINED', 'QUALITY', 'PASS', f'TP1={_tp1_val[:40]}  SL={_stop_val[:40]}')
 
     # ── Gate 4: Grade A or B only
     if grade not in ('A', 'B'):

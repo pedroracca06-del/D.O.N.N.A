@@ -219,9 +219,9 @@ def _build_execution_embed(d: AlertData) -> dict:
     if d.stop:
         fields.append(_field('Stop', d.stop, inline=False))
     if d.tp1:
-        fields.append(_field('TP1', f'{d.tp1}  ·  IB level — hold if volume strong', inline=False))
+        fields.append(_field('TP1', d.tp1, inline=False))
     if d.rr:
-        fields.append(_field('R:R', f'{d.rr}  →  hold for 3–4:1 if momentum intact', inline=False))
+        fields.append(_field('R:R', d.rr, inline=False))
     fields.append(_spacer())
     fields.append(_field('Grade',    f'{_bias_icon(d.grade)} {d.grade}'))
     fields.append(_field('Session',  d.session))
