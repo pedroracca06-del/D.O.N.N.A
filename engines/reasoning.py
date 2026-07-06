@@ -2117,7 +2117,7 @@ OTE zone: 0.618–0.705 fib (primary). 0.786 valid as outer boundary. 0.5 = subo
 - SHORT setup: expansion down → pullback to 0.618–0.705 → rejection → target IB LOW / PDL / equal lows
 - Entry: rejection signal at OTE required (momentum shift, pin, engulf). Limit orders valid with clear bias.
 - Stop: below/above OTE zone or displacement base. Normal: 30pts MES. High vol: 40pts.
-- Target: IB high/low = TP1 (checkpoint, not mandatory exit). Hold to 3:1–4:1 if volume/momentum intact.
+- TP1: nearest untested structural high (LONG) or low (SHORT) from the OTE entry. Priority order: IB high/low → 15M swing high/low → 1H swing high/low. Always set a specific price. TP1 is the defined exit target for the signal, not a suggestion.
 
 Grade criteria:
   A = clean displacement + OTE tap 0.618–0.705 + rejection confirmed + IB draw aligned + session timing correct. Execute.
@@ -2149,7 +2149,8 @@ Entry 1 (Midpoint Rejection):
   2. Price re-enters the ORB box
   3. Price taps ORB midpoint → rejection confirmed
   4. Entry: continuation in original breakout direction
-  Stop: beyond midpoint rejection candle. Target: opposite ORB extreme then extension.
+  Stop: 6–8 pts beyond midpoint rejection candle (max 12 pts on volatile days).
+  TP1: nearest untested session high/low (Asia/London/NY). If no untested level within 20 pts, target 15–20 pts from entry. Always set a specific price.
 
 Entry 2 (External Liquidity Rejection):
   1. Price breaks out of ORB
@@ -2170,8 +2171,8 @@ Rules:
 - Determine IB draw (IB HIGH = bullish draw, IB LOW = bearish draw) BEFORE grading any setup.
 - PROS direction must align with IB draw → Grade A candidate.
 - PROS direction opposes IB draw → countertrend → Grade C or avoid.
-- IB level is TP1 (first target, not a hard exit).
-- At TP1: if volume/momentum still strong → hold to 3:1–4:1 RR.
+- IB high/low is TP1 — the primary defined price target. If IB is not yet formed or the IB level is very far, use the nearest 15M or 1H structural high/low instead.
+- Always specify a concrete price for TP1. Never leave it empty or vague.
 - IB range tight/choppy → draw less reliable → degrade session quality.
 
 ## SESSION QUALITY
@@ -2440,7 +2441,7 @@ A valid displacement + price at OTE is a trade regardless of whether Pine re-fir
 1. Use BOTH indicator state AND price structure to assess the setup
 2. Grade A/B/C/D — if price structure shows clean OTE with IB aligned = Grade B minimum
 3. Generate all alert fields for Discord delivery
-4. For EXECUTION_READY: include entry_zone, stop, tp1, rr
+4. For EXECUTION_READY: include entry_zone, stop, tp1 (must be a specific structural price — a high or low level, never empty), rr
 5. For HEADS_UP: include watch_time and entry zone to watch
 6. Infer daily_bias and htf_4h_bias from price action and market reality
 7. Grade D = skip (structure broken). Grade C = HEADS_UP only. Grade A/B = execute.
