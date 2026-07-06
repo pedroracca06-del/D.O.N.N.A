@@ -1,5 +1,5 @@
 //@version=6
-indicator("NOVA EXECUTION V1", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=200)
+indicator("NOVA EXECUTION V1", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=200, max_bars_back=2000)
 
 //====================================================
 // NOVA EXECUTION V1
