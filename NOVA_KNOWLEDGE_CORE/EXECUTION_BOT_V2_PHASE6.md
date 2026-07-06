@@ -11,13 +11,13 @@ any rule approaches or exceeds its limit.
 No trades are placed, no orders are cancelled or modified, no positions are flattened.
 
 **Files changed:**
-- `services/prop_account_state.py` — NEW: full prop account state module
+- `services/prop_account_state.py` — NEW: full prop account state module + Phase 5.1 alert controls
 - `services/execution_safety.py` — Phase 6 block wired into `run_execution_safety_check()`
 - `main.py` — `GET /api/prop-account/state` endpoint
-- `tests/test_execution_bot_v2_phase6.py` — 19 tests
+- `tests/test_execution_bot_v2_phase6.py` — 27 tests (19 core + 5 Phase 5.1 integration + 3 endpoint/isolation)
 - `nova_knowledge_core/EXECUTION_BOT_V2_PHASE6.md` — this doc
 
-**Test count:** 138/138 total (P1: 19, P2: 31, P3: 31, P4: 21, P5: 17, P6: 19)
+**Test count:** 146/146 total (P1: 19, P2: 31, P3: 31, P4: 21, P5: 17, P6: 27)
 
 ---
 
@@ -129,25 +129,59 @@ Daily reset does NOT touch HWM — that carries across days (prop firms track HW
 
 ---
 
+## Phase 5.1 Alert Controls Integration
+
+Prop alerts obey the same Phase 5.1 env vars as the safety monitor:
+
+| Variable | Default | Effect on prop alerts |
+|---|---|---|
+| `NOVA_EXECUTION_SAFETY_DISCORD_ENABLED` | `false` | `false` → Discord suppressed; state/log still written |
+| `NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS` | `900` | Seconds between repeat alerts per key |
+
+### Suppression reasons in `alerts_suppressed`:
+- `PROP_TRAILING_DRAWDOWN_WARNING:COOLDOWN` — within cooldown window
+- `PROP_TRAILING_DRAWDOWN_WARNING:DISCORD_DISABLED` — Discord off
+
+When Discord is disabled: alert is NOT recorded in the cooldown registry (so when re-enabled, alerts fire immediately instead of waiting out a stale cooldown).
+
+### Persistent cooldown registry
+
+File: `nova_prop_alert_registry.json`
+
+```json
+{
+  "PROP_TRAILING_DRAWDOWN_WARNING": {
+    "alert_key": "PROP_TRAILING_DRAWDOWN_WARNING",
+    "last_sent_at": "2026-07-06T14:00:00Z"
+  }
+}
+```
+
+Loaded at module import time into `_prop_cooldown` (in-memory dict). Survives process restarts.
+
+---
+
 ## Integration with Phase 5 Safety Loop
 
 Phase 6 runs as a non-blocking block inside `run_execution_safety_check()`:
 
 ```
 run_execution_safety_check()
+  ├── Phase 5.1: Discord gate + persistent cooldown registry
   ├── Phase 5: broker reconciliation + UNPROTECTED_POSITION alerts
   └── Phase 6 (non-blocking try/except):
-        ├── update_prop_account_state_from_broker()   ← reads Alpaca account
+        ├── update_prop_account_state_from_broker()   ← reads Alpaca account (read-only)
         ├── populate prop_account_summary in status dict
-        └── check_and_send_prop_alerts()              ← Discord if WARNING/BREACHED
+        └── check_and_send_prop_alerts()              ← respects DISCORD_ENABLED + cooldown
 ```
 
 If Phase 6 raises any exception, the error is captured in `warnings[]` and the rest
 of the safety check is unaffected. `prop_account_summary: {}` is always present in
 the status dict.
 
-**Cooldown:** Prop alerts use a separate in-memory cooldown dict from Phase 5's
-position alerts. Default 5 minutes per alert key. Resets on restart (intentional).
+**Cooldown:** Prop alerts use a separate cooldown dict (`_prop_cooldown`) backed by
+`nova_prop_alert_registry.json`. Persists across restarts. Uses
+`NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS` env var (default 900s).
 
 ---
 
