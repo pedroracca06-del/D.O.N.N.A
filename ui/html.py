@@ -5363,23 +5363,36 @@ function renderTradeDetail(data, idx) {
   document.getElementById(\'jtdBody\').innerHTML = html;
 }
 
+function _novaReviewError(msg) {
+  // Self-contained toast — survives any subsequent re-render of the card
+  // or trade-detail modal, unlike writing into a nova-gen-/nova-body- element.
+  const el = document.createElement(\'div\');
+  el.textContent = msg;
+  el.style.cssText = \'position:fixed;bottom:20px;right:20px;z-index:2000;background:rgba(192,57,43,.95);color:#fff;padding:10px 16px;border-radius:8px;font-family:"Space Mono",monospace;font-size:11px;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.3)\';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
 async function generateAnalysis(idx) {
   const btn = document.getElementById(`nova-gen-${idx}`);
   const body = document.getElementById(`nova-body-${idx}`);
   if (btn) { btn.disabled = true; btn.textContent = \'GENERATING...\'; }
   try {
     const res  = await fetch(\'/journal/analyze\', {method:\'POST\', headers:{\'Content-Type\':\'application/json\'}, body: JSON.stringify({index: idx})});
-    const data = await res.json();
-    if (data.status === \'ok\') {
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.status === \'ok\') {
       if (body) { body.textContent = data.analysis; body.classList.add(\'open\'); }
       const hdr = document.getElementById(`nova-hdr-${idx}`);
       if (hdr) hdr.querySelector(\'.itc-review-hdr-ts\').textContent = \'Just now\';
       if (btn) btn.style.display = \'none\';
       refreshJournal();
     } else {
+      const msg = (data && (data.detail || data.error)) || `Request failed (HTTP ${res.status})`;
+      _novaReviewError(`NOVA Review failed: ${msg}`);
       if (btn) { btn.disabled = false; btn.textContent = \'GENERATE NOVA REVIEW\'; }
     }
   } catch(e) {
+    _novaReviewError(`NOVA Review failed: ${(e && e.message) || \'network error\'}`);
     if (btn) { btn.disabled = false; btn.textContent = \'GENERATE NOVA REVIEW\'; }
   }
 }
