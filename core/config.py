@@ -14,6 +14,20 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).parent.parent
 load_dotenv(BASE_DIR / '.env')
 
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var without ever raising — a malformed value in
+    Render's env config must fall back to the default, not take down import
+    of this module (and everything that imports it)."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except (TypeError, ValueError):
+        print(f'[env] {name}="{raw}" is not a valid int — using default {default}')
+        return default
+
 # ── Timezone ──────────────────────────────────────────────────
 NY_TZ  = ZoneInfo('America/New_York')
 UTC_TZ = ZoneInfo('UTC')
@@ -109,8 +123,8 @@ DISCORD_CHANNEL_SYSTEM_HEALTH  = os.getenv('DISCORD_CHANNEL_SYSTEM_HEALTH', '').
 
 # ── Alert engine ──────────────────────────────────────────────
 ALERT_SCREENSHOT       = os.getenv('ALERT_SCREENSHOT', 'true').strip().lower() == 'true'
-ALERT_COOLDOWN_MINUTES = int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
-ALERT_DAILY_MAX        = int(os.getenv('ALERT_DAILY_MAX', '20'))
+ALERT_COOLDOWN_MINUTES = _env_int('ALERT_COOLDOWN_MINUTES', 15)
+ALERT_DAILY_MAX        = _env_int('ALERT_DAILY_MAX', 20)
 ALERT_STATE_FILE       = _data_file('nova_alert_state.json', 'donna_alert_state.json')
 
 # ── Execution Safety Monitor (Phase 5.1) ──────────────────────
@@ -119,7 +133,7 @@ ALERT_STATE_FILE       = _data_file('nova_alert_state.json', 'donna_alert_state.
 # NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS — seconds between repeat alerts (default 900 = 15 min)
 NOVA_EXECUTION_SAFETY_MONITOR_ENABLED        = os.getenv('NOVA_EXECUTION_SAFETY_MONITOR_ENABLED', 'true').strip().lower() == 'true'
 NOVA_EXECUTION_SAFETY_DISCORD_ENABLED        = os.getenv('NOVA_EXECUTION_SAFETY_DISCORD_ENABLED', 'false').strip().lower() == 'true'
-NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS = int(os.getenv('NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS', '900'))
+NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS = _env_int('NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS', 900)
 
 # ── Feed sync (local → Render replication) ────────────────────
 # NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)

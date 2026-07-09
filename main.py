@@ -78,7 +78,8 @@ try:
         get_rejections,
     )
     _EXECUTION_AVAILABLE = True
-except Exception:
+except Exception as _exec_err:
+    print(f'[main] services.execution unavailable — EXECUTION PATH will show ERROR: {_exec_err}')
     _EXECUTION_AVAILABLE = False
     def execute_signal(r):                  return {'status': 'unavailable'}
     def get_account():                      return {'available': False}

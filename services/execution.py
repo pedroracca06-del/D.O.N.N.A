@@ -44,6 +44,54 @@ CLOSE_REASON_AUTO_TARGET  = 'AUTO_TARGET'   # bracket take-profit leg filled
 CLOSE_REASON_AUTO_STOP    = 'AUTO_STOP'     # bracket stop-loss leg filled
 CLOSE_REASON_AUTO_UNKNOWN = 'AUTO_UNKNOWN'  # bracket leg filled, leg type unavailable
 
+# ── Safe env parsing ────────────────────────────────────────────
+# Module-level env parsing must never raise — a malformed value in Render's
+# env config would otherwise take down import of this whole module (and
+# every module that imports it) instead of just falling back to a default.
+
+def _env_int(name: str, default: int, min_value: int | None = None, max_value: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        val = int(raw.strip())
+    except (TypeError, ValueError):
+        print(f'[env] {name}="{raw}" is not a valid int — using default {default}')
+        return default
+    if min_value is not None and val < min_value:
+        print(f'[env] {name}={val} below min {min_value} — using default {default}')
+        return default
+    if max_value is not None and val > max_value:
+        print(f'[env] {name}={val} above max {max_value} — using default {default}')
+        return default
+    return val
+
+
+def _env_float(name: str, default: float, min_value: float | None = None, max_value: float | None = None) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        val = float(raw.strip())
+    except (TypeError, ValueError):
+        print(f'[env] {name}="{raw}" is not a valid float — using default {default}')
+        return default
+    if min_value is not None and val < min_value:
+        print(f'[env] {name}={val} below min {min_value} — using default {default}')
+        return default
+    if max_value is not None and val > max_value:
+        print(f'[env] {name}={val} above max {max_value} — using default {default}')
+        return default
+    return val
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 # ── Alpaca setup ───────────────────────────────────────────────
 
 ALPACA_API_KEY    = os.getenv('ALPACA_API_KEY', '').strip()
@@ -79,8 +127,8 @@ _ETF_SIZING: dict[str, dict] = {
 # ── Risk rule constants ────────────────────────────────────────
 
 _RED_FOLDER_MINS    = 30        # Rule 1: blackout on each side of a HIGH event
-_SESSION_MAX_TRADES = int(os.getenv('NOVA_SESSION_MAX_TRADES', '5'))   # Rule 2: max trades per session window
-_RISK_PCT_PER_TRADE = float(os.getenv('NOVA_RISK_PCT_PER_TRADE', '1.0'))  # Rule 5: % of equity per trade
+_SESSION_MAX_TRADES = _env_int('NOVA_SESSION_MAX_TRADES', 5, min_value=1)   # Rule 2: max trades per session window
+_RISK_PCT_PER_TRADE = _env_float('NOVA_RISK_PCT_PER_TRADE', 1.0, min_value=0.0)  # Rule 5: % of equity per trade
 _LOSS_LIMIT_USD     = -1000.0   # Rule 3: unified P&L floor (all sessions)
 
 
@@ -2300,9 +2348,3 @@ def execute_signal(signal_result: dict) -> dict:
     return {'status': 'error', 'reason': f'Unknown BROKER_MODE: {BROKER_MODE}'}
 
 
-# ── One-time QQQ cleanup — closes Asia-session violation positions on module load ──
-try:
-    _qqq_result = close_qqq_positions()
-    print(f'[donna_execution] QQQ cleanup on load: {_qqq_result}')
-except Exception as _e:
-    print(f'[donna_execution] QQQ cleanup error: {_e}')
