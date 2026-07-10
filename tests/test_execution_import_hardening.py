@@ -19,6 +19,7 @@ Covers:
   8.  importing services.execution does not call cancel_order
   9.  importing services.execution does not call close_position
   10. main imports with _EXECUTION_AVAILABLE=True
+  11. get_execution_status() runs cleanly end-to-end (no NameError etc.)
 
 Tests 1-5 and 10 spawn a clean subprocess so module-level code actually
 re-executes (sys.modules caching would otherwise hide an import crash).
@@ -26,6 +27,14 @@ Tests 6-9 statically walk the AST of services/execution.py and assert none
 of the forbidden broker calls appear as a module-level (import-time)
 statement — calls inside function bodies (the normal, on-demand trading
 path) are untouched and expected.
+
+Test 11 exists because a successful import is necessary but not sufficient
+for the dashboard's EXECUTION PATH to be healthy: get_execution_status()
+(the actual /execution-status response body) can still raise at call time
+even when the module imports fine. Caught one real instance of this on
+2026-07-10 — a dangling reference to a function (_get_asia_trade_taken)
+removed in an earlier refactor (commit 14bea2a) but never cleaned out of
+this dict literal, which 500'd the endpoint on every single call.
 
 Run:  python tests/test_execution_import_hardening.py
       python -m pytest tests/test_execution_import_hardening.py -v
@@ -173,6 +182,41 @@ def test_main_imports_with_execution_available_true():
     )
 
 
+# ── Test 11: get_execution_status() runs end-to-end without raising ───────
+
+def test_get_execution_status_runs_without_raising():
+    result = _run_import(
+        'services.execution',
+        env_overrides=None,
+        timeout=30,
+    )
+    assert result.returncode == 0, f'import crashed: {result.stderr}'
+
+    code = (
+        'import services.execution as ex\n'
+        'status = ex.get_execution_status()\n'
+        'assert isinstance(status, dict)\n'
+        'required = ("broker_mode", "daily_trades_taken", "asia_trade_taken", '
+        '"account", "positions")\n'
+        'missing = [k for k in required if k not in status]\n'
+        'assert not missing, f"missing keys: {missing}"\n'
+        'print("STATUS_OK")\n'
+    )
+    result = subprocess.run(
+        [sys.executable, '-c', code],
+        cwd=str(REPO_ROOT),
+        env=_SAFE_ENV_BASE,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f'get_execution_status() raised — this is the exact failure mode that '
+        f'produces a 500 on GET /execution-status: {result.stderr}'
+    )
+    assert 'STATUS_OK' in result.stdout
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -187,6 +231,7 @@ if __name__ == '__main__':
         ('import does not call cancel_order',                                  test_import_does_not_call_cancel_order),
         ('import does not call close_position',                                test_import_does_not_call_close_position),
         ('main imports with _EXECUTION_AVAILABLE=True',                        test_main_imports_with_execution_available_true),
+        ('get_execution_status() runs without raising',                        test_get_execution_status_runs_without_raising),
     ]
 
     passed = failed = 0

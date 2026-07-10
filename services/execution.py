@@ -1301,7 +1301,7 @@ def get_execution_status() -> dict:
         'first_trade_outcome':      risk.get('first_trade_outcome', ''),
         'size_reduction_active':    bool(risk.get('size_reduction_active', False)),
         'cumulative_risk_today':    float(risk.get('cumulative_risk_today', 0.0)),
-        'asia_trade_taken':         _get_asia_trade_taken(),
+        'asia_trade_taken':         bool(_get_session_trade_count('ASIA')),
         'red_folder_window_active': rf['active'],
         'next_red_folder_event':    rf['next_event_name'],
         'next_event_time_et':       rf['next_event_time_et'],
