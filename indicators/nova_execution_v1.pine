@@ -2222,120 +2222,6 @@ riskText := orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
      inAsia                           ? "ASIA CONDITIONS"    : "NORMAL"
 
 //====================================================
-// PHASE 3 — RP LIQUIDITY-REJECTION IDENTITY
-//====================================================
-// Gives RP (Rejection / Bounce / Failed Breakout / Sweep & Reclaim) its own
-// Pine identity instead of the generic "REVERSAL" strategy_family bucket.
-// Connects the EXISTING highSweepReject/lowSweepReject detectors (963-964,
-// unchanged — no new or looser criteria added to them) to a named RP state
-// machine instead of leaving them as disconnected score/text context.
-//
-// Per the knowledge base (nova_knowledge_core/ORB_RP/reaction_setups.md):
-// "Difference from Bounce: Mechanically identical, mirrored — rejection is
-// at highs (short), bounce is at lows (long). Same confirmation logic, same
-// parameters." So BOUNCE (long) and REJECTION (short) both get real
-// detection this phase — the exact existing lowSweepReject/highSweepReject
-// mechanisms, respectively, under their historically correct names. No new
-// detection logic was written for either.
-//
-// FAILED_BREAKOUT and SWEEP_RECLAIM are named as supported setup types (per
-// the approved scope) but have no non-ORB detection mechanism already
-// present in this script to connect to — building one would be new/invented
-// criteria, out of scope for this phase. They never fire; see the Phase 3
-// doc's Known Limitations.
-//
-// lowSweepReject requires close > open; highSweepReject requires close <
-// open — mutually exclusive by construction, so no conflict guard is needed
-// (unlike canonicalBuy/canonicalSell, which combine independently-evaluated
-// ORB/ICT/PROS/RP families and therefore do need one).
-
-// ── liquidity source naming ───────────────────────────────────────────────
-// Only PSH/PDH/PWH / PSL/PDL/PWL — the levels highSweepReject/lowSweepReject
-// already check. Asia/London H-L are NOT part of that existing gate and are
-// not added here (see Known Limitations — the "ASIA HIGH" example from the
-// original request isn't reachable without expanding the existing detector).
-rpLiqSourceBull =
-     sweptPWL ? "PWL" : sweptPDL ? "PDL" : sweptPSL ? "PSL" :
-     nearPWL  ? "PWL" : nearPDL  ? "PDL" : nearPSL  ? "PSL" : "NONE"
-
-rpLiqSourceBear =
-     sweptPWH ? "PWH" : sweptPDH ? "PDH" : sweptPSH ? "PSH" :
-     nearPWH  ? "PWH" : nearPDH  ? "PDH" : nearPSH  ? "PSH" : "NONE"
-
-// ── interaction type — was the level truly swept, or only approached? ────
-rpInteractionBull = (sweptPSL or sweptPDL or sweptPWL) ? "SWEEP_REJECT" : (nearPSL or nearPDL or nearPWL) ? "NEAR_REJECT" : "NONE"
-rpInteractionBear = (sweptPSH or sweptPDH or sweptPWH) ? "SWEEP_REJECT" : (nearPSH or nearPDH or nearPWH) ? "NEAR_REJECT" : "NONE"
-
-// ── rejection context detected (tier 1) — near/swept, wick pattern not yet
-// confirmed. Broadest, earliest-stage awareness, existing booleans only. ──
-rpContextBull = nearPSL or nearPDL or nearPWL or sweptPSL or sweptPDL or sweptPWL
-rpContextBear = nearPSH or nearPDH or nearPWH or sweptPSH or sweptPDH or sweptPWH
-
-// ── RP candidate (tier 2) — the full wick-rejection pattern confirmed this
-// bar. Single-bar pulse, exactly highSweepReject/lowSweepReject, unchanged. ──
-rpCandidateBull = lowSweepReject
-rpCandidateBear = highSweepReject
-
-rpSetupTypeBull = rpCandidateBull ? "BOUNCE"    : ""
-rpSetupTypeBear = rpCandidateBear ? "REJECTION" : ""
-
-// Freshness window — display continuity only (mirrors the existing
-// prosContStickyBull/Bear pattern elsewhere in this file), NOT a promotion
-// gate. rpBuySignal/rpSellSignal below still fire strictly on the same bar
-// as rpCandidateBull/Bear — this only keeps the state TEXT visible for a
-// few bars afterward instead of flashing for one bar and vanishing.
-var int rpCandidateBullBar = na
-var int rpCandidateBearBar = na
-if newDay
-    rpCandidateBullBar := na
-    rpCandidateBearBar := na
-if rpCandidateBull
-    rpCandidateBullBar := bar_index
-if rpCandidateBear
-    rpCandidateBearBar := bar_index
-rpCandidateBullFresh = not na(rpCandidateBullBar) and (bar_index - rpCandidateBullBar) <= 3
-rpCandidateBearFresh = not na(rpCandidateBearBar) and (bar_index - rpCandidateBearBar) <= 3
-
-// ── RP promotion gate (tier 3/4) — existing thresholds only, verbatim from
-// liqLongReady/liqShortReady (1776-1777): trend alignment + not already
-// pushing into opposing liquidity. Not loosened, not duplicated as a new
-// gate — this IS that existing gate, applied to the RP candidate. ──
-rpReadyBull = rpCandidateBull and localBullBias and not nearLiquidityHigh
-rpReadyBear = rpCandidateBear and localBearBias and not nearLiquidityLow
-
-// canSmartBuy/canSmartSell — the existing 20-bar cooldown (1771-1772),
-// unchanged — RP shares it rather than getting a separate cooldown clock.
-rpBuySignal  = rpReadyBull and canSmartBuy
-rpSellSignal = rpReadyBear and canSmartSell
-
-// ── rejection reason when blocked — only meaningful while a candidate is
-// fresh and hasn't promoted; existing gate variables named directly. ──
-rpBlockReasonBull =
-     not rpCandidateBullFresh or rpBuySignal ? "" :
-     not localBullBias   ? "NO_BULL_BIAS"          :
-     nearLiquidityHigh   ? "NEAR_OVERHEAD_LIQUIDITY":
-     not canSmartBuy     ? "COOLDOWN"               : ""
-
-rpBlockReasonBear =
-     not rpCandidateBearFresh or rpSellSignal ? "" :
-     not localBearBias   ? "NO_BEAR_BIAS"           :
-     nearLiquidityLow    ? "NEAR_BELOW_LIQUIDITY"    :
-     not canSmartSell    ? "COOLDOWN"                : ""
-
-// ── five-tier state ladder: NONE / CONTEXT / HEADS_UP / READY / BUY|SELL ──
-rpStateBull =
-     rpBuySignal                          ? "RP_BUY"      :
-     rpCandidateBullFresh and rpReadyBull ? "RP_READY"    :
-     rpCandidateBullFresh                 ? "RP_HEADS_UP" :
-     rpContextBull                        ? "RP_CONTEXT"  : "NONE"
-
-rpStateBear =
-     rpSellSignal                         ? "RP_SELL"     :
-     rpCandidateBearFresh and rpReadyBear ? "RP_READY"    :
-     rpCandidateBearFresh                 ? "RP_HEADS_UP" :
-     rpContextBear                        ? "RP_CONTEXT"  : "NONE"
-
-//====================================================
 // PHASE 1 — CANONICAL SIGNAL STATE
 //====================================================
 // Single authoritative signal model. The chart dashboard, (future) BUY/SELL
@@ -2346,30 +2232,21 @@ rpStateBear =
 // (orbBuySignal or ictBuySignal or prosBuySignal, and the SELL mirror) —
 // no threshold or gate inside those is changed here.
 //
-// Phase 3: rpBuySignal/rpSellSignal (RP's own promotion gate, defined just
-// above) are now OR-ed in alongside buySignal/sellSignal. buySignal/sellSignal
-// THEMSELVES are untouched (still exactly orbBuySignal or ictBuySignal or
-// prosBuySignal) — only canonicalBuy/canonicalSell, Phase 1's own construct,
-// is extended, the same way ORB/ICT/PROS already coexist as independent
-// OR-ed branches. The legacy commandText/donnaCommand/CMD bridge field still
-// reads only buySignal/sellSignal and does NOT yet know about RP — same
-// deferred-cutover precedent as CMD/SYS_STATE from Phase 1, resolved in
-// Phase 5, not here.
+// RP-shaped setups (highSweepReject/lowSweepReject, donnaLiqReversalLong/Short)
+// are intentionally NOT wired into canonicalBuy/canonicalSell yet — they gain
+// a canonical path only once RP has its own Pine identity and gates (Phase 3).
+// donnaCommand/donnaScenario keep displaying RP-shaped scenario context exactly
+// as before via the existing CMD/SYS_STATE bridge rows — informational, not
+// canonical, and not part of this signal model until Phase 3 lands.
 //
-// canonicalSignalConflict guards against the combined buy side (buySignal or
-// rpBuySignal) and combined sell side (sellSignal or rpSellSignal) both being
-// true on the same bar. Written as the OR'd sides rather than the original
-// literal "buySignal and sellSignal" so it stays correct now that RP is a
-// second OR'd family — e.g. buySignal (ORB/ICT/PROS long) and rpSellSignal
-// (RP short) firing on the same bar is a real, independent-evaluator
-// possibility this must also catch, not just buySignal-vs-sellSignal.
-// Structurally still equivalent to Phase 1's original check whenever RP
-// hasn't fired, so this is a generalization, not a behavior change to any
-// case Phase 1 already covered.
-canonicalSignalConflict = (buySignal or rpBuySignal) and (sellSignal or rpSellSignal)
+// canonicalSignalConflict guards against buySignal and sellSignal both being
+// true on the same bar (not observed in practice, but structurally possible
+// since ORB/ICT/PROS are independent evaluators). If both fire, neither side
+// is treated as canonical for that bar rather than risk an ambiguous marker.
+canonicalSignalConflict = buySignal and sellSignal
 
-canonicalBuy  = (buySignal  or rpBuySignal)  and not canonicalSignalConflict
-canonicalSell = (sellSignal or rpSellSignal) and not canonicalSignalConflict
+canonicalBuy  = buySignal  and not canonicalSignalConflict
+canonicalSell = sellSignal and not canonicalSignalConflict
 
 // Phase 2 — new-signal transition guards. canonicalBuy/canonicalSell can stay
 // true for more than one bar depending on which underlying family fired; these
@@ -2394,27 +2271,14 @@ canonicalSignalState =
      (buyScore  >= 58 and buyScore  > sellScore)    ? "HEADS_UP"        :
      (sellScore >= 58 and sellScore > buyScore)     ? "HEADS_UP"        : "WAIT"
 
-// Phase 3: when the ORIGINAL buySignal/sellSignal fired (ORB/ICT/PROS),
-// strategy_family/setup_type are shown exactly as before — zero change to
-// existing display behavior. Only when canonicalBuy/canonicalSell became
-// true SOLELY because RP fired (buySignal/sellSignal false) does the RP
-// naming apply — additive, not a replacement of the pre-existing branch.
-canonicalStrategy =
-     not (canonicalBuy or canonicalSell) ? "NONE" :
-     (buySignal or sellSignal)            ? strategy_family : "RP"
-
-canonicalSetup =
-     not (canonicalBuy or canonicalSell) ? "NONE" :
-     (buySignal or sellSignal)            ? setup_type :
-     canonicalBuy                          ? "RP_" + rpSetupTypeBull :
-     "RP_" + rpSetupTypeBear
-
+canonicalStrategy = (canonicalBuy or canonicalSell) ? strategy_family : "NONE"
+canonicalSetup    = (canonicalBuy or canonicalSell) ? setup_type      : "NONE"
 canonicalGrade    = canonicalBuy ? buyGrade : canonicalSell ? sellGrade : "NA"
 
-// Liquidity source/interaction naming: ORB (Phase 1) and RP (Phase 3) each
-// have a named external-liquidity concept; PROS (fib-zone) and ICT (HTF-swing)
-// still do not, so they continue to report "NONE" rather than a fabricated
-// value.
+// Liquidity source/interaction naming is currently only meaningful for ORB —
+// PROS (fib-zone) and ICT (HTF-swing) have no equivalent named external-
+// liquidity concept yet, so they report "NONE" rather than a fabricated value.
+// RP gets its own liquidity-source naming in Phase 3.
 canonicalLiquiditySourceBull =
      orbAsiaLowSweepNow    ? "ASIA LOW" :
      orbSweepTierBull == 3 ? "PWL"      :
@@ -2428,14 +2292,11 @@ canonicalLiquiditySourceBear =
      orbSweepTierBear == 1 ? "PSH"       : "NONE"
 
 canonicalLiquiditySource =
-     canonicalStrategy == "ORB" ? (canonicalBuy ? canonicalLiquiditySourceBull : canonicalSell ? canonicalLiquiditySourceBear : "NONE") :
-     canonicalStrategy == "RP"  ? (canonicalBuy ? rpLiqSourceBull              : canonicalSell ? rpLiqSourceBear              : "NONE") :
-     "NONE"
+     canonicalStrategy != "ORB" ? "NONE" :
+     canonicalBuy                ? canonicalLiquiditySourceBull :
+     canonicalSell               ? canonicalLiquiditySourceBear : "NONE"
 
-canonicalInteraction =
-     canonicalStrategy == "ORB" ? orbEntryType :
-     canonicalStrategy == "RP"  ? (canonicalBuy ? rpInteractionBull : canonicalSell ? rpInteractionBear : "NONE") :
-     "NONE"
+canonicalInteraction = canonicalStrategy == "ORB" ? orbEntryType : "NONE"
 
 //================ ALERTS ================
 // Legacy per-family alertconditions kept unchanged (backward-compatible with
@@ -2496,10 +2357,10 @@ if ictSellSignal and not ictSellSignal[1]
 // conflicted bar cannot produce a marker without any extra guard here.
 
 // ── context text (shown only when showSignalContext = true) ──────────────
-// Maps the existing setup_type values, plus Phase 3's RP_BOUNCE/RP_REJECTION,
-// to readable marker text. Falls back to the raw canonicalStrategy name for
-// any setup_type not explicitly mapped below, so the marker never prints a
-// blank or "UNKNOWN" line for a real signal.
+// Maps the existing setup_type values (unchanged, Part 9/Phase-3 scope note:
+// RP is not among them yet) to readable marker text. Falls back to the raw
+// canonicalStrategy name for any setup_type not explicitly mapped below, so
+// the marker never prints a blank or "UNKNOWN" line for a real signal.
 canonicalMarkerStrategyText =
      canonicalSetup == "PROS_CONTINUATION"     ? "PROS CONTINUATION"      :
      canonicalSetup == "ORB_MID_REJECT"        ? "ORB MID REJECTION"      :
@@ -2512,8 +2373,6 @@ canonicalMarkerStrategyText =
      canonicalSetup == "ICT_LIQUIDITY_SWEEP"   ? "ICT LIQUIDITY SWEEP"   :
      canonicalSetup == "FAILED_AUCTION"        ? "FAILED AUCTION"         :
      canonicalSetup == "MOMENTUM_CONTINUATION" ? "MOMENTUM CONTINUATION"  :
-     canonicalSetup == "RP_BOUNCE"             ? "RP BOUNCE"              :
-     canonicalSetup == "RP_REJECTION"          ? "RP REJECTION"           :
      canonicalStrategy != "NONE"               ? canonicalStrategy       : "SIGNAL"
 
 // canonicalLiquiditySource is only ever non-"NONE" when canonicalStrategy is
