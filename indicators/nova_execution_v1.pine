@@ -25,6 +25,14 @@ showSessions  = input.bool(true,  "Show Session Background")
 showSignals   = input.bool(true,  "Show Signals")
 showBridge    = input.bool(false, "Show NOVA Bridge (debug)")
 
+// Phase 2 — canonical BUY/SELL chart markers (showSignals above now gates them;
+// it was declared but unused prior to this phase).
+showSignalContext = input.bool(true, "Show Signal Context (strategy/liquidity source)", group="Signals")
+signalLabelSizeInput = input.string("Normal", "Signal Label Size", options=["Small", "Normal", "Large"], group="Signals")
+signalLabelSize =
+     signalLabelSizeInput == "Small" ? size.small :
+     signalLabelSizeInput == "Large" ? size.large : size.normal
+
 showHistBoxes = input.bool(true, "Show Historical Session Boxes", group="Historical Memory")
 showHistORB   = input.bool(true, "Show Historical ORB Boxes",     group="Historical Memory")
 histLookback  = input.int(3, "Lookback Days", minval=1, maxval=5, group="Historical Memory")
@@ -2240,6 +2248,14 @@ canonicalSignalConflict = buySignal and sellSignal
 canonicalBuy  = buySignal  and not canonicalSignalConflict
 canonicalSell = sellSignal and not canonicalSignalConflict
 
+// Phase 2 — new-signal transition guards. canonicalBuy/canonicalSell can stay
+// true for more than one bar depending on which underlying family fired; these
+// fire exactly once per setup (rising edge only) and are the sole source for
+// the chart marker and the canonical alertcondition() calls — never a second,
+// independently-computed signal boolean.
+canonicalBuyNew  = canonicalBuy  and not canonicalBuy[1]
+canonicalSellNew = canonicalSell and not canonicalSell[1]
+
 canonicalDirection =
      canonicalBuy  ? "LONG"  :
      canonicalSell ? "SHORT" : "NONE"
@@ -2291,8 +2307,10 @@ alertcondition(orbBuySignal,   "ORB BUY",   "ORB buy signal")
 alertcondition(orbSellSignal,  "ORB SELL",  "ORB sell signal")
 alertcondition(prosBuySignal,  "PROS BUY",  "PROS continuation long")
 alertcondition(prosSellSignal, "PROS SELL", "PROS continuation short")
-alertcondition(canonicalBuy,   "NOVA BUY",  "NOVA canonical buy signal (ORB/ICT/PROS)")
-alertcondition(canonicalSell,  "NOVA SELL", "NOVA canonical sell signal (ORB/ICT/PROS)")
+// Phase 2: switched to the edge-triggered variants so the alert fires once per
+// setup, matching the chart marker exactly — same source, same transition.
+alertcondition(canonicalBuyNew,  "NOVA BUY",  "NOVA canonical buy signal (ORB/ICT/PROS)")
+alertcondition(canonicalSellNew, "NOVA SELL", "NOVA canonical sell signal (ORB/ICT/PROS)")
 
 //================ WEBHOOK JSON ALERTS ================
 // Structured JSON payloads sent to DONNA /webhook on each signal bar.
@@ -2324,6 +2342,68 @@ if ictBuySignal and not ictBuySignal[1]
 
 if ictSellSignal and not ictSellSignal[1]
     alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+
+//====================================================
+// PHASE 2 — CANONICAL BUY / SELL CHART MARKERS
+//====================================================
+// Source of truth is canonicalBuyNew/canonicalSellNew (Phase 1's canonical
+// state, edge-triggered) — no new signal boolean is computed here. Markers
+// are pure Pine-side visuals: no reference to execution/broker/prop state
+// exists anywhere in this script, so they are structurally independent of
+// Auto Execute, paper/live mode, or execution path health.
+//
+// canonicalSignalConflict already forces both canonicalBuy and canonicalSell
+// false (see Phase 1) — canonicalBuyNew/canonicalSellNew inherit that, so a
+// conflicted bar cannot produce a marker without any extra guard here.
+
+// ── context text (shown only when showSignalContext = true) ──────────────
+// Maps the existing setup_type values (unchanged, Part 9/Phase-3 scope note:
+// RP is not among them yet) to readable marker text. Falls back to the raw
+// canonicalStrategy name for any setup_type not explicitly mapped below, so
+// the marker never prints a blank or "UNKNOWN" line for a real signal.
+canonicalMarkerStrategyText =
+     canonicalSetup == "PROS_CONTINUATION"     ? "PROS CONTINUATION"      :
+     canonicalSetup == "ORB_MID_REJECT"        ? "ORB MID REJECTION"      :
+     canonicalSetup == "ORB_LIQ_REJECT"        ? "ORB LIQ REJECTION"      :
+     canonicalSetup == "ORB_EDGE_REJECT"       ? "ORB EDGE REJECTION"     :
+     canonicalSetup == "ORB_FAILURE"           ? "ORB FAILURE"            :
+     canonicalSetup == "ICT_ELITE"             ? "ICT ELITE CONTINUATION" :
+     canonicalSetup == "ICT_SMT_CONFIRMATION"  ? "ICT SMT CONFIRMATION"   :
+     canonicalSetup == "ICT_OB_FVG_ENTRY"      ? "ICT OB/FVG ENTRY"       :
+     canonicalSetup == "ICT_LIQUIDITY_SWEEP"   ? "ICT LIQUIDITY SWEEP"   :
+     canonicalSetup == "FAILED_AUCTION"        ? "FAILED AUCTION"         :
+     canonicalSetup == "MOMENTUM_CONTINUATION" ? "MOMENTUM CONTINUATION"  :
+     canonicalStrategy != "NONE"               ? canonicalStrategy       : "SIGNAL"
+
+// canonicalLiquiditySource is only ever non-"NONE" when canonicalStrategy is
+// "ORB" (Phase 1 scope) — appended as a second context line when present.
+canonicalMarkerContextText =
+     canonicalLiquiditySource != "NONE" ? canonicalMarkerStrategyText + "\n" + canonicalLiquiditySource : canonicalMarkerStrategyText
+
+// ── primary marker: plotshape() carries the BUY/SELL word itself ─────────
+plotshape(showSignals and canonicalBuyNew,
+     title="NOVA BUY", style=shape.labelup, location=location.belowbar,
+     color=color.new(color.lime, 0), text="BUY", textcolor=color.black,
+     size=signalLabelSize)
+
+plotshape(showSignals and canonicalSellNew,
+     title="NOVA SELL", style=shape.labeldown, location=location.abovebar,
+     color=color.new(color.red, 0), text="SELL", textcolor=color.white,
+     size=signalLabelSize)
+
+// ── optional context label: separate object, only when showSignalContext ─
+// Offset by ATR beyond the primary marker so the two objects don't overlap.
+// Uses the existing atrValue (unchanged) purely for visual spacing.
+if showSignals and showSignalContext and canonicalBuyNew
+    label.new(bar_index, low - atrValue * 1.5, canonicalMarkerContextText,
+         style=label.style_label_up, color=color.new(color.lime, 80),
+         textcolor=color.lime, size=signalLabelSize)
+
+if showSignals and showSignalContext and canonicalSellNew
+    label.new(bar_index, high + atrValue * 1.5, canonicalMarkerContextText,
+         style=label.style_label_down, color=color.new(color.red, 80),
+         textcolor=color.red, size=signalLabelSize)
+
 //================ LIQUIDITY MARKERS ================
 var line pshLine = na
 var line pslLine = na
