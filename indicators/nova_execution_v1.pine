@@ -43,7 +43,11 @@ showLondonLevels                 = input.bool(true,  "Show London High/Low",    
 showOvernightLevels              = input.bool(true,  "Show Overnight High/Low",     group="External Liquidity Levels")
 showPreviousDayLevels            = input.bool(true,  "Show Previous Day High/Low",  group="External Liquidity Levels")
 showPreviousWeekLevels           = input.bool(true,  "Show Previous Week High/Low", group="External Liquidity Levels")
-showDailyWeeklyLevels            = input.bool(true,  "Show Daily/Weekly High/Low",  group="External Liquidity Levels")
+// Refinement: current Daily/Weekly High/Low are dynamic reference levels, not
+// major external liquidity — default OFF, kept as an opt-in rather than
+// removed outright. Not part of the "nearest major level" emphasis ranking
+// below (Asia/London/Overnight/PDH/PDL/PWH/PWL only).
+showDailyWeeklyLevels             = input.bool(false, "Show Daily/Weekly High/Low (optional, off by default)", group="External Liquidity Levels")
 externalLiquidityLineWidth       = input.int(2, "External Liquidity Line Width", minval=1, maxval=4, group="External Liquidity Levels")
 externalLiquidityLineStyleInput  = input.string("Solid", "External Liquidity Line Style", options=["Solid", "Dashed", "Dotted"], group="External Liquidity Levels")
 externalLiquidityOpacity         = input.int(20, "External Liquidity Line/Label Transparency", minval=0, maxval=90, group="External Liquidity Levels")
@@ -2486,6 +2490,13 @@ f_liqLevel(showFlag, levelPrice, labelText, baseColor, isEmphasized) =>
     _w     = isEmphasized ? externalLiquidityLineWidth + 1 : externalLiquidityLineWidth
     _trans = isEmphasized ? math.max(externalLiquidityOpacity - 15, 0) : externalLiquidityOpacity
     _ext   = extendExternalLiquidityThroughNY ? extend.right : extend.none
+    // Refinement: "slightly larger label" when emphasized — one size tier up
+    // (Small->Normal->Large), capped at Large. No flashing/animation, no new
+    // size infrastructure — reuses the existing size.* constants.
+    _labelSize =
+         not isEmphasized                             ? externalLiquidityLabelSize :
+         externalLiquidityLabelSize == size.small      ? size.normal :
+         size.large
     if showFlag and not na(levelPrice) and barstate.islast
         if na(lv)
             lv := line.new(bar_index, levelPrice, bar_index + 12, levelPrice, color=color.new(baseColor, _trans), width=_w, style=externalLiquidityLineStyle, extend=_ext)
@@ -2496,11 +2507,12 @@ f_liqLevel(showFlag, levelPrice, labelText, baseColor, isEmphasized) =>
             line.set_color(lv, color.new(baseColor, _trans))
             line.set_extend(lv, _ext)
         if na(lb)
-            lb := label.new(bar_index + 13, levelPrice, labelText, style=label.style_label_left, color=color.new(color.black, 100), textcolor=baseColor, size=externalLiquidityLabelSize)
+            lb := label.new(bar_index + 13, levelPrice, labelText, style=label.style_label_left, color=color.new(color.black, 100), textcolor=baseColor, size=_labelSize)
         else
             label.set_xy(lb, bar_index + 13, levelPrice)
             label.set_text(lb, labelText)
             label.set_textcolor(lb, baseColor)
+            label.set_size(lb, _labelSize)
     if not showFlag
         if not na(lv)
             line.delete(lv)
@@ -2512,16 +2524,51 @@ f_liqLevel(showFlag, levelPrice, labelText, baseColor, isEmphasized) =>
 extLiqGreen = color.new(color.green, 0)
 extLiqRed   = color.new(color.red,   0)
 
-f_liqLevel(showAsiaLevels,        asiaHigh,      "ASIA HIGH",     extLiqGreen, f_near(asiaHigh, liqThresh)      or f_swept_high(asiaHigh))
-f_liqLevel(showAsiaLevels,        asiaLow,       "ASIA LOW",      extLiqRed,   f_near(asiaLow,  liqThresh)      or f_swept_low(asiaLow))
-f_liqLevel(showLondonLevels,      londonHigh,    "LONDON HIGH",   extLiqGreen, f_near(londonHigh, liqThresh)    or f_swept_high(londonHigh))
-f_liqLevel(showLondonLevels,      londonLow,     "LONDON LOW",    extLiqRed,   f_near(londonLow,  liqThresh)    or f_swept_low(londonLow))
-f_liqLevel(showOvernightLevels,   overnightHigh, "OVERNIGHT HIGH",extLiqGreen, f_near(overnightHigh, liqThresh) or f_swept_high(overnightHigh))
-f_liqLevel(showOvernightLevels,   overnightLow,  "OVERNIGHT LOW", extLiqRed,   f_near(overnightLow,  liqThresh) or f_swept_low(overnightLow))
-f_liqLevel(showPreviousDayLevels, prevDayHigh,   "PDH",           extLiqGreen, nearPDH or sweptPDH)
-f_liqLevel(showPreviousDayLevels, prevDayLow,    "PDL",           extLiqRed,   nearPDL or sweptPDL)
-f_liqLevel(showPreviousWeekLevels,prevWeekHigh,  "PWH",           extLiqGreen, nearPWH or sweptPWH)
-f_liqLevel(showPreviousWeekLevels,prevWeekLow,   "PWL",           extLiqRed,   nearPWL or sweptPWL)
+// Refinement: "nearest relevant level" emphasis. Only the single closest
+// major external liquidity level (across Asia/London/Overnight/PDH/PDL/PWH/
+// PWL — Daily/Weekly are excluded, per this refinement, from the "major"
+// ranking since they're an optional, off-by-default reference, not major
+// external liquidity) gets the visual boost, rather than every level that
+// happens to be independently near/swept. 1e10 is a sentinel "not eligible"
+// distance for a disabled or unavailable level so it can never win.
+extLiqDistAsiaHigh      = showAsiaLevels         and not na(asiaHigh)      ? math.abs(close - asiaHigh)      : 1e10
+extLiqDistAsiaLow       = showAsiaLevels         and not na(asiaLow)       ? math.abs(close - asiaLow)       : 1e10
+extLiqDistLondonHigh    = showLondonLevels       and not na(londonHigh)    ? math.abs(close - londonHigh)    : 1e10
+extLiqDistLondonLow     = showLondonLevels       and not na(londonLow)     ? math.abs(close - londonLow)     : 1e10
+extLiqDistOvernightHigh = showOvernightLevels    and not na(overnightHigh) ? math.abs(close - overnightHigh) : 1e10
+extLiqDistOvernightLow  = showOvernightLevels    and not na(overnightLow)  ? math.abs(close - overnightLow)  : 1e10
+extLiqDistPDH           = showPreviousDayLevels  and not na(prevDayHigh)   ? math.abs(close - prevDayHigh)   : 1e10
+extLiqDistPDL           = showPreviousDayLevels  and not na(prevDayLow)    ? math.abs(close - prevDayLow)    : 1e10
+extLiqDistPWH           = showPreviousWeekLevels and not na(prevWeekHigh)  ? math.abs(close - prevWeekHigh)  : 1e10
+extLiqDistPWL           = showPreviousWeekLevels and not na(prevWeekLow)   ? math.abs(close - prevWeekLow)   : 1e10
+
+extLiqNearestDist = math.min(
+     math.min(math.min(extLiqDistAsiaHigh, extLiqDistAsiaLow), math.min(extLiqDistLondonHigh, extLiqDistLondonLow)),
+     math.min(math.min(extLiqDistOvernightHigh, extLiqDistOvernightLow), math.min(math.min(extLiqDistPDH, extLiqDistPDL), math.min(extLiqDistPWH, extLiqDistPWL))))
+
+extLiqAsiaHighNearest      = extLiqDistAsiaHigh      < 1e10 and extLiqDistAsiaHigh      == extLiqNearestDist
+extLiqAsiaLowNearest       = extLiqDistAsiaLow       < 1e10 and extLiqDistAsiaLow       == extLiqNearestDist
+extLiqLondonHighNearest    = extLiqDistLondonHigh    < 1e10 and extLiqDistLondonHigh    == extLiqNearestDist
+extLiqLondonLowNearest     = extLiqDistLondonLow     < 1e10 and extLiqDistLondonLow     == extLiqNearestDist
+extLiqOvernightHighNearest = extLiqDistOvernightHigh < 1e10 and extLiqDistOvernightHigh == extLiqNearestDist
+extLiqOvernightLowNearest  = extLiqDistOvernightLow  < 1e10 and extLiqDistOvernightLow  == extLiqNearestDist
+extLiqPDHNearest           = extLiqDistPDH           < 1e10 and extLiqDistPDH           == extLiqNearestDist
+extLiqPDLNearest           = extLiqDistPDL           < 1e10 and extLiqDistPDL           == extLiqNearestDist
+extLiqPWHNearest           = extLiqDistPWH           < 1e10 and extLiqDistPWH           == extLiqNearestDist
+extLiqPWLNearest           = extLiqDistPWL           < 1e10 and extLiqDistPWL           == extLiqNearestDist
+
+f_liqLevel(showAsiaLevels,        asiaHigh,      "ASIA HIGH",     extLiqGreen, extLiqAsiaHighNearest)
+f_liqLevel(showAsiaLevels,        asiaLow,       "ASIA LOW",      extLiqRed,   extLiqAsiaLowNearest)
+f_liqLevel(showLondonLevels,      londonHigh,    "LONDON HIGH",   extLiqGreen, extLiqLondonHighNearest)
+f_liqLevel(showLondonLevels,      londonLow,     "LONDON LOW",    extLiqRed,   extLiqLondonLowNearest)
+f_liqLevel(showOvernightLevels,   overnightHigh, "OVERNIGHT HIGH",extLiqGreen, extLiqOvernightHighNearest)
+f_liqLevel(showOvernightLevels,   overnightLow,  "OVERNIGHT LOW", extLiqRed,   extLiqOvernightLowNearest)
+f_liqLevel(showPreviousDayLevels, prevDayHigh,   "PDH",           extLiqGreen, extLiqPDHNearest)
+f_liqLevel(showPreviousDayLevels, prevDayLow,    "PDL",           extLiqRed,   extLiqPDLNearest)
+f_liqLevel(showPreviousWeekLevels,prevWeekHigh,  "PWH",           extLiqGreen, extLiqPWHNearest)
+f_liqLevel(showPreviousWeekLevels,prevWeekLow,   "PWL",           extLiqRed,   extLiqPWLNearest)
+// Daily/Weekly: optional, off by default, not part of the "major" nearest-
+// level ranking — keep the simple near/swept emphasis from Phase 4 unchanged.
 f_liqLevel(showDailyWeeklyLevels, dailyHigh,     "DAILY HIGH",    extLiqGreen, f_near(dailyHigh, liqThresh)      or f_swept_high(dailyHigh))
 f_liqLevel(showDailyWeeklyLevels, dailyLow,      "DAILY LOW",     extLiqRed,   f_near(dailyLow,  liqThresh)      or f_swept_low(dailyLow))
 f_liqLevel(showDailyWeeklyLevels, weeklyHigh,    "WEEKLY HIGH",   extLiqGreen, f_near(weeklyHigh, liqThresh)     or f_swept_high(weeklyHigh))

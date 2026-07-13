@@ -147,3 +147,15 @@ This replaces object churn with in-place updates: each level gets exactly one pe
 - **No execution/broker changes:** only `indicators/nova_execution_v1.pine` and this documentation file changed.
 
 One incidental, cosmetic-only change: the existing `newAsia`/`newLondon`/`newNYPre`/`newNYCash` lines were re-aligned (whitespace only) to line up with the new `newOvernight` line added alongside them — confirmed via diff that no operator or value changed on any of those four lines, only column spacing.
+
+## PHASE 4 REFINEMENT (approved after initial Phase 4 review)
+
+Two corrections, both display-only:
+
+**1. Daily/Weekly High/Low demoted from default-on.** They're dynamic, in-progress reference levels, not major external liquidity — `showDailyWeeklyLevels` default changed from `true` to `false` (input label updated to `"Show Daily/Weekly High/Low (optional, off by default)"`). The calculation and drawing code were kept (option 2 from the two offered), not removed, since the underlying `request.security` values remain a legitimate opt-in reference. They are also explicitly excluded from the "nearest major level" emphasis ranking below — the major hierarchy is Asia/London/Overnight/PDH/PDL/PWH/PWL only, exactly as specified.
+
+**2. Emphasis mechanism corrected to genuine "nearest of all major levels," not independent near/swept.** The original Phase 4 implementation gave *every* level that was individually near-or-swept a boost, which could emphasize several levels simultaneously. This refinement computes `math.abs(close - level)` for each of the 10 major levels (Asia/London/Overnight/PDH/PDL/PWH/PWL, each masked to a sentinel `1e10` distance when disabled or unavailable so it can never win), takes the minimum via `math.min`, and marks **only** the single level matching that minimum as "nearest" — `extLiqAsiaHighNearest`, `extLiqPDLNearest`, etc. This is the sole input to `f_liqLevel`'s `isEmphasized` parameter for the seven major pairs. Daily/Weekly keep the original simple near/swept emphasis, unchanged, since they're excluded from the major ranking.
+
+`f_liqLevel` itself gained one addition: when `isEmphasized`, the label size now also steps up one tier (Small→Normal, Normal→Large, capped at Large) via `label.set_size()`, in addition to the existing wider-line/lower-transparency boost from initial Phase 4 — satisfying "slightly larger label" from this refinement's request. No flashing, no animation, no new size infrastructure — a static, deterministic per-bar choice from the existing `size.*` constants.
+
+**Confirmed:** no signal logic, BUY/SELL conditions, execution, or alerts changed — verified via `git diff`, zero lines touching `canonicalBuy`/`canonicalSell`/`plotshape`/`alertcondition`/`orbBuySignal`/`ictBuySignal`/`prosBuySignal`/`buyScore`/`sellScore` in this refinement. Compiled clean: 0 errors, 0 warnings (stateless endpoint only, live script untouched).
