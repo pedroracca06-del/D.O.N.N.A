@@ -62,6 +62,16 @@ externalLiquidityLabelSize =
      externalLiquidityLabelSizeInput == "Small" ? size.small :
      externalLiquidityLabelSizeInput == "Large" ? size.large : size.normal
 
+// Phase 5 — liquidity interaction visualization (temporary, expiring context
+// labels only — not the persistent Phase 4 level lines/labels above).
+showLiquidityInteractionLabels = input.bool(true, "Show Liquidity Interaction Labels", group="Liquidity Interaction Context")
+interactionLabelBars           = input.int(6, "Interaction Label Duration (bars)", minval=1, maxval=50, group="Liquidity Interaction Context")
+interactionLabelSizeInput      = input.string("Normal", "Interaction Label Size", options=["Small", "Normal", "Large"], group="Liquidity Interaction Context")
+
+interactionLabelSize =
+     interactionLabelSizeInput == "Small" ? size.small :
+     interactionLabelSizeInput == "Large" ? size.large : size.normal
+
 showHistBoxes = input.bool(true, "Show Historical Session Boxes", group="Historical Memory")
 showHistORB   = input.bool(true, "Show Historical ORB Boxes",     group="Historical Memory")
 histLookback  = input.int(3, "Lookback Days", minval=1, maxval=5, group="Historical Memory")
@@ -2573,6 +2583,70 @@ f_liqLevel(showDailyWeeklyLevels, dailyHigh,     "DAILY HIGH",    extLiqGreen, f
 f_liqLevel(showDailyWeeklyLevels, dailyLow,      "DAILY LOW",     extLiqRed,   f_near(dailyLow,  liqThresh)      or f_swept_low(dailyLow))
 f_liqLevel(showDailyWeeklyLevels, weeklyHigh,    "WEEKLY HIGH",   extLiqGreen, f_near(weeklyHigh, liqThresh)     or f_swept_high(weeklyHigh))
 f_liqLevel(showDailyWeeklyLevels, weeklyLow,     "WEEKLY LOW",    extLiqRed,   f_near(weeklyLow,  liqThresh)     or f_swept_low(weeklyLow))
+
+//====================================================
+// PHASE 5 — LIQUIDITY INTERACTION VISUALIZATION
+//====================================================
+// Temporary, self-expiring context labels — NOT trade signals. Built
+// entirely from existing booleans (f_near/f_swept_high/f_swept_low,
+// highSweepReject/lowSweepReject, nearPDH/sweptPDH etc.), no new interaction
+// logic invented. ORB and IB are excluded — they have their own visual
+// identity (see the Phase 5 audit doc, Part 6). Nothing here reads from or
+// writes to canonicalBuy/canonicalSell/canonicalSignalState/buyScore/
+// sellScore/any grade/any alert/any execution code.
+//
+// Per the Phase 5 audit doc, Part 2: Asia/London/Overnight can only ever
+// show TEST/SWEEP (highSweepReject/lowSweepReject don't check those levels,
+// unchanged from the Phase 3 correction's finding) — not REJECTION. PDH/PDL/
+// PWH/PWL can show TEST/SWEEP/REJECTION. RECLAIM has no non-ORB equivalent
+// anywhere in this script and is not shown for any level here.
+asiaHighClass      = f_swept_high(asiaHigh)      ? "SWEEP" : f_near(asiaHigh, liqThresh)      ? "TEST" : "NONE"
+asiaLowClass       = f_swept_low(asiaLow)        ? "SWEEP" : f_near(asiaLow,  liqThresh)       ? "TEST" : "NONE"
+londonHighClass    = f_swept_high(londonHigh)    ? "SWEEP" : f_near(londonHigh, liqThresh)    ? "TEST" : "NONE"
+londonLowClass     = f_swept_low(londonLow)      ? "SWEEP" : f_near(londonLow,  liqThresh)     ? "TEST" : "NONE"
+overnightHighClass = f_swept_high(overnightHigh) ? "SWEEP" : f_near(overnightHigh, liqThresh) ? "TEST" : "NONE"
+overnightLowClass  = f_swept_low(overnightLow)   ? "SWEEP" : f_near(overnightLow,  liqThresh)  ? "TEST" : "NONE"
+pdhClass = (highSweepReject and (nearPDH or sweptPDH)) ? "REJECTION" : sweptPDH ? "SWEEP" : nearPDH ? "TEST" : "NONE"
+pdlClass = (lowSweepReject  and (nearPDL or sweptPDL)) ? "REJECTION" : sweptPDL ? "SWEEP" : nearPDL ? "TEST" : "NONE"
+pwhClass = (highSweepReject and (nearPWH or sweptPWH)) ? "REJECTION" : sweptPWH ? "SWEEP" : nearPWH ? "TEST" : "NONE"
+pwlClass = (lowSweepReject  and (nearPWL or sweptPWL)) ? "REJECTION" : sweptPWL ? "SWEEP" : nearPWL ? "TEST" : "NONE"
+
+// Creates a label only when the classification changes to a new, non-"NONE"
+// value (a sustained TEST across many bars fires once; escalating to SWEEP
+// or REJECTION mid-hold fires a fresh label). Expires after
+// interactionLabelBars bars via a stored expiry bar-index — never a
+// permanent object.
+f_interactionLabel(showFlag, classification, levelPrice, levelName, labelColor) =>
+    var label lb          = na
+    var string prevClass  = "NONE"
+    var int    expiryBar  = na
+    if showFlag and not na(levelPrice)
+        if classification != "NONE" and classification != prevClass
+            if not na(lb)
+                label.delete(lb)
+            lb := label.new(bar_index, levelPrice, levelName + " " + classification,
+                 style=label.style_label_down, color=color.new(color.black, 20),
+                 textcolor=labelColor, size=interactionLabelSize)
+            expiryBar := bar_index + interactionLabelBars
+        prevClass := classification
+    if not na(expiryBar) and bar_index >= expiryBar and not na(lb)
+        label.delete(lb)
+        lb := na
+        expiryBar := na
+    if not showFlag and not na(lb)
+        label.delete(lb)
+        lb := na
+
+f_interactionLabel(showLiquidityInteractionLabels and showAsiaLevels,        asiaHighClass,      asiaHigh,      "ASIA HIGH",      extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showAsiaLevels,        asiaLowClass,       asiaLow,       "ASIA LOW",       extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showLondonLevels,      londonHighClass,    londonHigh,    "LONDON HIGH",    extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showLondonLevels,      londonLowClass,     londonLow,     "LONDON LOW",     extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showOvernightLevels,   overnightHighClass, overnightHigh, "OVERNIGHT HIGH", extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showOvernightLevels,   overnightLowClass,  overnightLow,  "OVERNIGHT LOW",  extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousDayLevels, pdhClass,           prevDayHigh,   "PDH",            extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousDayLevels, pdlClass,           prevDayLow,    "PDL",            extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousWeekLevels,pwhClass,           prevWeekHigh,  "PWH",            extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousWeekLevels,pwlClass,           prevWeekLow,   "PWL",            extLiqRed)
 
 //====================================================
 // SMART TARGETS ENGINE
