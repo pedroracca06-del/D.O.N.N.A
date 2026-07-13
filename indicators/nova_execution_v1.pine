@@ -1914,7 +1914,7 @@ buyScore  += failedAuctionBull ? 20 : 0
 sellScore += failedAuctionBear ? 20 : 0
 
 // ICT STEP MODEL — adaptive weights
-// ORB score now sourced from orbBuyPass/orbSellPass (new RP-faithful gate layer) — see below
+// ORB score now sourced from orbBuyPass/orbSellPass (structured ORB gate layer) — see below
 // buyScore  += orbLongReady    ? orbWeight  : 0  [replaced — old composite gate]
 // sellScore += orbShortReady   ? orbWeight  : 0  [replaced — old composite gate]
 buyScore  += ictLongReady    ? ictWeight  : 0
