@@ -1059,50 +1059,55 @@ lowSweepReject  = (nearPSL or nearPDL or nearPWL or sweptPSL or sweptPDL or swep
 // doc, Part 1, for the concrete false-attribution scenario this fixes).
 // Each xReject below only ever references its OWN level's near/swept
 // boolean and its OWN level's price — never an OR across other levels.
-// Same structural components as the generic formula (touch-or-sweep,
-// close-through, candle direction, 1.10 wick/body ratio) — no new
-// threshold, no volume/MACD/HTF/displacement requirement added. These are
-// context/detection booleans only — none of them feed canonicalBuy/
-// canonicalSell, buySignal/sellSignal, any score, grade, or alert.
+// Phase 6.1: restored the original generic detector's close < high[1] /
+// close > low[1] confirmation condition to every formula below, for exact
+// parity with highSweepReject/lowSweepReject's own requirements — this is
+// not a new threshold, it closes a Phase 6 omission while preserving the
+// source-specific attribution fix. Same structural components as the
+// generic formula otherwise (touch-or-sweep, close-through-the-exact-level,
+// candle direction, 1.10 wick/body ratio) — no volume/MACD/HTF/displacement
+// requirement added. These are context/detection booleans only — none of
+// them feed canonicalBuy/canonicalSell, buySignal/sellSignal, any score,
+// grade, or alert.
 asiaHighTest   = nearAsiaHigh
 asiaHighSweep  = sweptAsiaHigh
-asiaHighReject = (nearAsiaHigh or sweptAsiaHigh) and close < asiaHigh and close < open and upperWick > body * 1.10
+asiaHighReject = (nearAsiaHigh or sweptAsiaHigh) and close < asiaHigh and close < open and upperWick > body * 1.10 and close < high[1]
 
 asiaLowTest   = nearAsiaLow
 asiaLowSweep  = sweptAsiaLow
-asiaLowReject = (nearAsiaLow or sweptAsiaLow) and close > asiaLow and close > open and lowerWick > body * 1.10
+asiaLowReject = (nearAsiaLow or sweptAsiaLow) and close > asiaLow and close > open and lowerWick > body * 1.10 and close > low[1]
 
 londonHighTest   = nearLondonHigh
 londonHighSweep  = sweptLondonHigh
-londonHighReject = (nearLondonHigh or sweptLondonHigh) and close < londonHigh and close < open and upperWick > body * 1.10
+londonHighReject = (nearLondonHigh or sweptLondonHigh) and close < londonHigh and close < open and upperWick > body * 1.10 and close < high[1]
 
 londonLowTest   = nearLondonLow
 londonLowSweep  = sweptLondonLow
-londonLowReject = (nearLondonLow or sweptLondonLow) and close > londonLow and close > open and lowerWick > body * 1.10
+londonLowReject = (nearLondonLow or sweptLondonLow) and close > londonLow and close > open and lowerWick > body * 1.10 and close > low[1]
 
 overnightHighTest   = nearOvernightHigh
 overnightHighSweep  = sweptOvernightHigh
-overnightHighReject = (nearOvernightHigh or sweptOvernightHigh) and close < overnightHigh and close < open and upperWick > body * 1.10
+overnightHighReject = (nearOvernightHigh or sweptOvernightHigh) and close < overnightHigh and close < open and upperWick > body * 1.10 and close < high[1]
 
 overnightLowTest   = nearOvernightLow
 overnightLowSweep  = sweptOvernightLow
-overnightLowReject = (nearOvernightLow or sweptOvernightLow) and close > overnightLow and close > open and lowerWick > body * 1.10
+overnightLowReject = (nearOvernightLow or sweptOvernightLow) and close > overnightLow and close > open and lowerWick > body * 1.10 and close > low[1]
 
 pdhTest   = nearPDH
 pdhSweep  = sweptPDH
-pdhReject = (nearPDH or sweptPDH) and close < prevDayHigh and close < open and upperWick > body * 1.10
+pdhReject = (nearPDH or sweptPDH) and close < prevDayHigh and close < open and upperWick > body * 1.10 and close < high[1]
 
 pdlTest   = nearPDL
 pdlSweep  = sweptPDL
-pdlReject = (nearPDL or sweptPDL) and close > prevDayLow and close > open and lowerWick > body * 1.10
+pdlReject = (nearPDL or sweptPDL) and close > prevDayLow and close > open and lowerWick > body * 1.10 and close > low[1]
 
 pwhTest   = nearPWH
 pwhSweep  = sweptPWH
-pwhReject = (nearPWH or sweptPWH) and close < prevWeekHigh and close < open and upperWick > body * 1.10
+pwhReject = (nearPWH or sweptPWH) and close < prevWeekHigh and close < open and upperWick > body * 1.10 and close < high[1]
 
 pwlTest   = nearPWL
 pwlSweep  = sweptPWL
-pwlReject = (nearPWL or sweptPWL) and close > prevWeekLow and close > open and lowerWick > body * 1.10
+pwlReject = (nearPWL or sweptPWL) and close > prevWeekLow and close > open and lowerWick > body * 1.10 and close > low[1]
 
 highBreakHold = (acceptedAbovePSH or acceptedAbovePDH or acceptedAbovePWH) and close > emaFast and close > open
 lowBreakHold  = (acceptedBelowPSL or acceptedBelowPDL or acceptedBelowPWL) and close < emaFast and close < open
