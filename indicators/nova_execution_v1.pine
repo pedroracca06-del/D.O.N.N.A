@@ -2212,12 +2212,87 @@ riskText := orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
      nearLiquidityLow  and sellSignal ? "BELOW LIQUIDITY"    :
      isLunch                          ? "LUNCH CONDITIONS"   :
      inAsia                           ? "ASIA CONDITIONS"    : "NORMAL"
-         
+
+//====================================================
+// PHASE 1 — CANONICAL SIGNAL STATE
+//====================================================
+// Single authoritative signal model. The chart dashboard, (future) BUY/SELL
+// markers, alertcondition(), and bridge output all read from these variables
+// instead of each computing their own view of "is there a signal."
+//
+// canonicalBuy/canonicalSell WRAP the existing buySignal/sellSignal composite
+// (orbBuySignal or ictBuySignal or prosBuySignal, and the SELL mirror) —
+// no threshold or gate inside those is changed here.
+//
+// RP-shaped setups (highSweepReject/lowSweepReject, donnaLiqReversalLong/Short)
+// are intentionally NOT wired into canonicalBuy/canonicalSell yet — they gain
+// a canonical path only once RP has its own Pine identity and gates (Phase 3).
+// donnaCommand/donnaScenario keep displaying RP-shaped scenario context exactly
+// as before via the existing CMD/SYS_STATE bridge rows — informational, not
+// canonical, and not part of this signal model until Phase 3 lands.
+//
+// canonicalSignalConflict guards against buySignal and sellSignal both being
+// true on the same bar (not observed in practice, but structurally possible
+// since ORB/ICT/PROS are independent evaluators). If both fire, neither side
+// is treated as canonical for that bar rather than risk an ambiguous marker.
+canonicalSignalConflict = buySignal and sellSignal
+
+canonicalBuy  = buySignal  and not canonicalSignalConflict
+canonicalSell = sellSignal and not canonicalSignalConflict
+
+canonicalDirection =
+     canonicalBuy  ? "LONG"  :
+     canonicalSell ? "SHORT" : "NONE"
+
+// HEADS_UP tier reuses the exact score/threshold logic already in commandText
+// (see buyScore/sellScore >= 58 above) — no new threshold introduced.
+// LOCKED reuses the same donnaTrapRisk/orbFail check novaStateText already
+// applied before this phase.
+canonicalSignalState =
+     (donnaTrapRisk or orbFailBull or orbFailBear) ? "LOCKED"          :
+     canonicalBuy                                   ? "EXECUTION_READY" :
+     canonicalSell                                  ? "EXECUTION_READY" :
+     (buyScore  >= 58 and buyScore  > sellScore)    ? "HEADS_UP"        :
+     (sellScore >= 58 and sellScore > buyScore)     ? "HEADS_UP"        : "WAIT"
+
+canonicalStrategy = (canonicalBuy or canonicalSell) ? strategy_family : "NONE"
+canonicalSetup    = (canonicalBuy or canonicalSell) ? setup_type      : "NONE"
+canonicalGrade    = canonicalBuy ? buyGrade : canonicalSell ? sellGrade : "NA"
+
+// Liquidity source/interaction naming is currently only meaningful for ORB —
+// PROS (fib-zone) and ICT (HTF-swing) have no equivalent named external-
+// liquidity concept yet, so they report "NONE" rather than a fabricated value.
+// RP gets its own liquidity-source naming in Phase 3.
+canonicalLiquiditySourceBull =
+     orbAsiaLowSweepNow    ? "ASIA LOW" :
+     orbSweepTierBull == 3 ? "PWL"      :
+     orbSweepTierBull == 2 ? "PDL"      :
+     orbSweepTierBull == 1 ? "PSL"      : "NONE"
+
+canonicalLiquiditySourceBear =
+     orbAsiaHighSweepNow   ? "ASIA HIGH" :
+     orbSweepTierBear == 3 ? "PWH"       :
+     orbSweepTierBear == 2 ? "PDH"       :
+     orbSweepTierBear == 1 ? "PSH"       : "NONE"
+
+canonicalLiquiditySource =
+     canonicalStrategy != "ORB" ? "NONE" :
+     canonicalBuy                ? canonicalLiquiditySourceBull :
+     canonicalSell               ? canonicalLiquiditySourceBear : "NONE"
+
+canonicalInteraction = canonicalStrategy == "ORB" ? orbEntryType : "NONE"
+
 //================ ALERTS ================
+// Legacy per-family alertconditions kept unchanged (backward-compatible with
+// any TradingView alerts a user may already have configured against these
+// exact names). Canonical alertconditions are ADDED below, not a replacement —
+// they cover the same signals plus the previously-missing ICT family.
 alertcondition(orbBuySignal,   "ORB BUY",   "ORB buy signal")
 alertcondition(orbSellSignal,  "ORB SELL",  "ORB sell signal")
 alertcondition(prosBuySignal,  "PROS BUY",  "PROS continuation long")
 alertcondition(prosSellSignal, "PROS SELL", "PROS continuation short")
+alertcondition(canonicalBuy,   "NOVA BUY",  "NOVA canonical buy signal (ORB/ICT/PROS)")
+alertcondition(canonicalSell,  "NOVA SELL", "NOVA canonical sell signal (ORB/ICT/PROS)")
 
 //================ WEBHOOK JSON ALERTS ================
 // Structured JSON payloads sent to DONNA /webhook on each signal bar.
@@ -2559,7 +2634,7 @@ dashSessionBg =
 // NOVA STATUS STRIP — minimal one-row status (Layer 1)
 var table novaStrip  = table.new(position.top_right,   7, 1, border_width=0, frame_width=0)
 // NOVA BRIDGE — permanent machine-readable automation interface (Layer 2)
-var table novaBridge = table.new(position.bottom_left, 2, 34, border_width=0)
+var table novaBridge = table.new(position.bottom_left, 2, 43, border_width=0)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2821,10 +2896,12 @@ novaSetupText =
      prosLegValidBull     or prosLegValidBear      ? "PROS" :
      orbIsActive and isESChart                     ? "ORB"  : "NONE"
 
-novaStateText =
-     donnaTrapRisk or orbFailBull or orbFailBear                           ? "LOCKED"          :
-     buySignal or sellSignal                                               ? "EXECUTION_READY" :
-     dashCommandText == "WATCH LONG" or dashCommandText == "WATCH SHORT"  ? "HEADS_UP"        : "WAIT"
+// Phase 1: novaStateText now reads canonicalSignalState directly instead of
+// re-deriving its own view — this is the fix for the chart-vs-bridge
+// disagreement documented in the audit (Part 3 Q23): previously this ternary
+// never checked dashCommandText == "BUY"/"SELL", which allowed the bridge CMD
+// field to say BUY/SELL while this strip simultaneously said WAIT.
+novaStateText = canonicalSignalState
 
 novaIBText =
      isIBWindow                        ? "FORMING" :
@@ -2936,7 +3013,7 @@ if barstate.islast
     table.cell(novaBridge, 1, 20, orbLowText,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     // ── v2 rows (rows 21-33) — observation/health fields, no execution gates ──
     table.cell(novaBridge, 0, 21, "BRIDGE_VER",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
-    table.cell(novaBridge, 1, 21, "2",             text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 21, "3",             text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 22, "TICKER",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 1, 22, syminfo.ticker,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 23, "TF",            text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
@@ -2961,6 +3038,30 @@ if barstate.islast
     table.cell(novaBridge, 1, 32, _brDrawTarget,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 33, "DRAW_DIR",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 1, 33, _brDrawDir,      text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    // ── v3 rows (rows 34-42) — Phase 1 canonical signal state ──────────────
+    // Additive only: CMD (row 1) and SYS_STATE (row 2) above are UNCHANGED —
+    // still donnaCommand/donnaScenario exactly as before. engines/reasoning.py
+    // is not modified in this phase; it keeps reading CMD/SYS_STATE until an
+    // explicit, separately-approved Phase 5 cutover. These rows exist so the
+    // canonical state is observable now, ahead of that cutover.
+    table.cell(novaBridge, 0, 34, "CANON_STATE",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 34, canonicalSignalState, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 35, "CANON_DIR",     text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 35, canonicalDirection,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 36, "CANON_STRAT",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 36, canonicalStrategy,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 37, "CANON_SETUP",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 37, canonicalSetup,       text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 38, "CANON_GRADE",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 38, canonicalGrade,       text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 39, "CANON_LIQ_SRC", text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 39, canonicalLiquiditySource, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 40, "CANON_INTERACT",text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 40, canonicalInteraction, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 41, "CANON_BUY",     text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 41, canonicalBuy  ? "1" : "0", text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 42, "CANON_SELL",    text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 42, canonicalSell ? "1" : "0", text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE
