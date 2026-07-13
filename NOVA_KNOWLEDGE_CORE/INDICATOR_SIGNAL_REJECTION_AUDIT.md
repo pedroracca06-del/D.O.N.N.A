@@ -10,7 +10,7 @@
 
 **Corrected framing (post-review):** RP is the correct terminology — RAP is not part of this framework and has been removed from this document. Break & Retest is strictly an ORB setup (break out of the ORB zone, return to test the ORB boundary, retest holds, continuation follows) — it is not, and was never classified in this audit as, an RP setup; see Part 4. ORB's restriction to ES/MES (`isESChart`) is **intentional current configuration, not a bug** — it is not a root cause and is not being proposed for removal. The MNQ Asia-High-rejection acceptance example was never going to be an ORB setup; it should have been evaluated and promoted through the **RP liquidity-rejection path**, which is where the real gap is.
 
-1. **RP does not have a proper Pine strategy identity.** The knowledge base (`nova_knowledge_core/ORB_RP/reaction_setups.md`) fully documents three RP setups (Bounce, Rejection, Break & Retest as RP's own fallback language — not to be confused with the ORB Break & Retest setup, which is a separate, ORB-owned concept) as level-reaction trades independent of ORB. None of RP's setups are implemented as a named strategy family in Pine. The only structurally similar Pine logic (`highSweepReject`/`lowSweepReject`, lines 963–964) is unlabeled and falls into a generic `"REVERSAL"` bucket in `strategy_family` at best — it has no RP-specific direction/liquidity-source/interaction-type/setup-state/grade output (Part 3, Part 9 Phase 3).
+1. **RP does not have a proper Pine strategy identity.** RP's approved setup types are Rejection, Bounce, Failed Breakout, and Sweep & Reclaim — level-reaction trades, independent of ORB. Break & Retest is not, and has never been, an RP setup; it belongs exclusively to ORB (break out of the ORB zone, retest the ORB boundary, retest holds, continuation follows — see Part 4). The knowledge-base source (`nova_knowledge_core/ORB_RP/reaction_setups.md`) uses older wording that groups a break-and-retest description alongside RP's bounce/rejection setups — that source document is historical transcript extraction and is not being rewritten here, but it is superseded by this correction: within NOVA's framework, Break & Retest is ORB-only. None of RP's four setup types (Rejection, Bounce, Failed Breakout, Sweep & Reclaim) are implemented as a named strategy family in Pine today. The only structurally similar Pine logic (`highSweepReject`/`lowSweepReject`, lines 963–964) is unlabeled and falls into a generic `"REVERSAL"` bucket in `strategy_family` at best — it has no RP-specific direction/liquidity-source/interaction-type/setup-state/grade output (Part 3, Part 9 Phase 3).
 
 2. **Existing sweep/rejection conditions do not feed the canonical BUY/SELL signal path.** `highSweepReject`/`lowSweepReject` feed `liqLongReady`/`liqShortReady` and `donnaLiqReversalLong`/`Short`, which can move `donnaCommand` to `"BUY"`/`"SELL"` — but this never reaches the `buySignal`/`sellSignal` composite (line 2140–2141) that the on-chart state and (once built) any chart marker would consume. There is no single canonical signal state today; there are at least three independent representations (`buySignal`/`sellSignal`, `donnaCommand`, `novaStateText`) that can disagree (Part 2, Part 9 Phase 1).
 
@@ -64,7 +64,7 @@ There is **no single, unified rejection engine**. There are three independent, n
 - Reachable, but empirically never reached in the sample: **0/94 logged cycles have `orb_signal = true`.**
 
 ### 2b. Generic (non-ORB) liquidity rejection — the closest thing to RP
-- `highSweepReject`/`lowSweepReject` (963–964): fires when price is near/at/through a PSH/PDH/PWH (or PSL/PDL/PWL) level, closes back through it, with wick > 1.10×body. This is unlabeled, symbol-agnostic, and the closest existing analog to RP Setup 1/2 (Bounce/Rejection).
+- `highSweepReject`/`lowSweepReject` (963–964): fires when price is near/at/through a PSH/PDH/PWH (or PSL/PDL/PWL) level, closes back through it, with wick > 1.10×body. This is unlabeled, symbol-agnostic, and the closest existing analog to RP's Bounce/Rejection setups.
 - Feeds `liqLongReady`/`liqShortReady` (1776–1777, requires `localBullBias`/`localBearBias` HTF-alignment AND-condition — RP's methodology explicitly allows counter-nothing trades at "clear" levels and only warns against fighting a *clear* trend, which is a looser and more discretionary condition than a hard EMA-bias AND-gate).
 - Feeds `donnaLiqReversalLong`/`Short` (2461–2462, requires additionally `clusterBelow`/`clusterAbove` or nearness, plus `bullOBSupport`/`bearOBResistance`).
 - **Does not feed `buySignal`/`sellSignal`** (2140–2141 only OR-combine `orbBuySignal`, `ictBuySignal`, `prosBuySignal`). This means RP-style setups can drive `donnaCommand` to `"BUY"`/`"SELL"` (via `donnaLiqReversalLong/Short` inside the `donnaCommand` ternary chain, 2495–2516) **without ever setting the raw `buySignal`/`sellSignal` booleans** that `novaStateText` (2824–2827) checks for `EXECUTION_READY`.
@@ -238,6 +238,83 @@ Export the canonical Pine state (signal_state, signal_direction, strategy, setup
 Add `AUTO`/`DESKTOP_READABLE`/`MOBILE_READABLE`/`OFF` modes to the on-chart panel, prioritizing Direction/Strategy/Signal State (row 1) and Liquidity Source/Interaction/Grade (row 2) over full field dumps.
 
 **Non-goals for every phase:** no execution/broker logic changes, no threshold loosening, no blind signal-frequency increase, no touching the Execution Bot. Implementation proceeds one phase at a time, each compiled, reported, and committed separately before the next begins.
+
+---
+
+## PART 10 — PHASE 1 VERIFICATION RECORD
+
+Branch: `indicator/canonical-signal-phase1`. Commits: `a1afb67` (audit doc), `c942fa5` (Phase 1 Pine changes). No Execution Bot Phase 8 files staged or modified at any point.
+
+### Real Pine compile result
+
+Ran TradingView's actual server-side compile-check endpoint (`pine-facade.tradingview.com/pine-facade/translate_light`, invoked via `mcp/tradingview`'s `pine check` command — a genuine compiler pass, not static text analysis) against the current `indicators/nova_execution_v1.pine`:
+
+```
+{
+  "success": true,
+  "compiled": true,
+  "error_count": 0,
+  "warning_count": 0,
+  "note": "Pine Script compiled successfully."
+}
+```
+
+**Result: 0 errors, 0 warnings. No fixes were required.** The check pipeline was validated as genuine (not a no-op) by running it against a deliberately broken copy of the same file first — it correctly reported 1 error at the exact injected line/column (`"Syntax error at input {value}"`), confirming the clean result above is a real pass, not a default success response.
+
+### Canonical variable definitions (exact, as committed at lines 2216–2283)
+
+| Variable | Definition | Wraps / derived from | Fallback |
+|---|---|---|---|
+| `canonicalSignalConflict` | `buySignal and sellSignal` | New — safety guard only | n/a (bool) |
+| `canonicalBuy` | `buySignal and not canonicalSignalConflict` | Wraps `buySignal` (`orbBuySignal or ictBuySignal or prosBuySignal`) | n/a (bool) |
+| `canonicalSell` | `sellSignal and not canonicalSignalConflict` | Wraps `sellSignal` (`orbSellSignal or ictSellSignal or prosSellSignal`) | n/a (bool) |
+| `canonicalDirection` | `canonicalBuy ? "LONG" : canonicalSell ? "SHORT" : "NONE"` | New, derived | `"NONE"` |
+| `canonicalSignalState` | LOCKED (trap/orbFail) → EXECUTION_READY (canonicalBuy/Sell) → HEADS_UP (`buyScore`/`sellScore >= 58` and strictly greater than the other side) → WAIT | Reformulates the old `novaStateText` ternary + `commandText`'s existing 58-threshold — same threshold, same trap check | `"WAIT"` |
+| `canonicalStrategy` | `(canonicalBuy or canonicalSell) ? strategy_family : "NONE"` | Wraps `strategy_family` | `"NONE"` |
+| `canonicalSetup` | `(canonicalBuy or canonicalSell) ? setup_type : "NONE"` | Wraps `setup_type` | `"NONE"` |
+| `canonicalGrade` | `canonicalBuy ? buyGrade : canonicalSell ? sellGrade : "NA"` | Wraps `buyGrade` (buy side) / `sellGrade` (sell side) — verified not swapped | `"NA"` |
+| `canonicalLiquiditySourceBull` | Asia Low / PWL / PDL / PSL by existing `orbSweepTierBull` tier, else | Wraps `orbAsiaLowSweepNow`, `orbSweepTierBull` | `"NONE"` |
+| `canonicalLiquiditySourceBear` | Asia High / PWH / PDH / PSH by existing `orbSweepTierBear` tier, else | Wraps `orbAsiaHighSweepNow`, `orbSweepTierBear` | `"NONE"` |
+| `canonicalLiquiditySource` | Only meaningful when `canonicalStrategy == "ORB"`, else | Wraps the two above | `"NONE"` |
+| `canonicalInteraction` | `canonicalStrategy == "ORB" ? orbEntryType : "NONE"` | Wraps `orbEntryType` | `"NONE"` |
+
+**Verified:** every ternary above terminates in a literal fallback (no path can return `na`); every referenced variable (`buySignal`, `sellSignal`, `donnaTrapRisk`, `orbFailBull`, `orbFailBear`, `buyScore`, `sellScore`, `strategy_family`, `setup_type`, `buyGrade`, `sellGrade`, `orbAsiaLowSweepNow`, `orbSweepTierBull`, `orbAsiaHighSweepNow`, `orbSweepTierBear`, `orbEntryType`) exists verbatim elsewhere in the file (grep-confirmed); every canonical variable is declared exactly once and only ever used after its own definition point (checked both within the new block and against all downstream uses, e.g. `novaStateText`, the bridge cells). `canonicalBuy`/`canonicalSell` are mathematically guaranteed mutually exclusive by construction (both gated on `not canonicalSignalConflict`, which is true exactly when they'd otherwise both be true).
+
+### Threshold/eligibility before-vs-after (byte-level proof)
+
+`diff` between commit `a1afb67` (pre-Phase-1) and the current working tree for **lines 1–2214 of the file — i.e. everything up to and including `riskText`, which covers every threshold, gate, score weight, grade cutoff, session gate, and instrument gate in the script — is empty. Zero changes.** Phase 1 only appends code after that point; nothing before it was touched. Confirmed individually and identically for: `buySignal`, `sellSignal`, `orbBuySignal`, `orbSellSignal`, `ictBuySignal`, `ictSellSignal`, `prosBuySignal`, `prosSellSignal`, `buyGrade`/`sellGrade` (78/65/58 cutoffs), `orbLive`/`isESChart` (instrument gate), `smartCooldownBars`/`canSmartBuy`/`canSmartSell` (20-bar cooldown, session-independent). **No setup that was ineligible before Phase 1 became eligible after it.**
+
+### novaStateText case verification (reasoned against the committed ternary)
+
+- **Case A** (`canonicalBuy = true`) → `EXECUTION_READY`, **provided** `donnaTrapRisk`/`orbFailBull`/`orbFailBear` are false. This is not a new caveat — the pre-Phase-1 `novaStateText` checked the LOCKED condition first too (`donnaTrapRisk or orbFailBull or orbFailBear ? "LOCKED" : buySignal or sellSignal ? "EXECUTION_READY" : ...`), and `donnaTrapRisk`'s own definition includes `(buySignal and nearLiquidityHigh)` as one of its triggers — so a live buy signal against overhead liquidity was *already* classified LOCKED before this phase. Phase 1 preserves that exact precedence unchanged.
+- **Case B** (`canonicalSell = true`) → `EXECUTION_READY` under the same, pre-existing, unchanged caveat (mirrored via `nearLiquidityLow`).
+- **Case C** (`buyScore >= 58`, no canonical signal) → `HEADS_UP` **provided** `buyScore > sellScore` as well — this is the exact same condition `commandText` already used pre-Phase-1 (`buyScore >= 58 and buyScore > sellScore ? "WATCH LONG"`); not a new requirement.
+- **Case D** — mirrored, same pre-existing caveat.
+- **Case E** (no qualifying score or signal) → `WAIT`. Confirmed, no caveats — this is the ternary's unconditional final fallback.
+- **Case F** (trap risk or ORB failure lock) → `LOCKED`. Confirmed, takes priority over every other branch, including a live canonical signal (see Case A/B).
+- **Case G** (`canonicalSignalConflict = true`) → `canonicalBuy` and `canonicalSell` both resolve to `false` by construction, so `canonicalSignalState` can never reach `EXECUTION_READY` on a conflicted bar. It can still resolve to `HEADS_UP` if `buyScore`/`sellScore` independently qualify (score thresholds are separate from the conflict guard) — that is expected and is not an "ambiguous execution-ready state," which the guard specifically prevents.
+
+### Canonical alert verification
+
+- `alertcondition(canonicalBuy, "NOVA BUY", ...)` and `alertcondition(canonicalSell, "NOVA SELL", ...)` — confirmed wired to the canonical booleans.
+- The four legacy alertconditions (`ORB BUY`, `ORB SELL`, `PROS BUY`, `PROS SELL`) are byte-identical to before Phase 1 — kept, not replaced, so any already-configured TradingView alert against those names keeps working.
+- ICT remains covered only via the existing `alert()` JSON webhook block (untouched, still fires for `ictBuySignal`/`ictSellSignal`) — the two new canonical alertconditions add ICT to the *alertcondition* dropdown for the first time, but that dropdown entry is TradingView-UI metadata only.
+- **No duplicate webhook delivery risk:** `alertcondition()` does not itself send anything — it only registers an option in TradingView's "Create Alert" dialog. Actual webhook delivery to DONNA happens exclusively through the `alert()` JSON calls in the untouched "WEBHOOK JSON ALERTS" section. Adding two more `alertcondition()` entries cannot create a second webhook firing for the same event.
+
+### Bridge compatibility verification
+
+- Table size: `table.new(position.bottom_left, 2, 43, ...)` — rows 0–42 all populated exactly twice each (label + value cell), confirmed via row-index audit, no gaps or duplicates.
+- `BRIDGE_VER` is `"3"` (confirmed).
+- Rows 0–33: byte-identical labels and source variables to pre-Phase-1, confirmed via diff — `CMD` is still `dashCommandText` (=`donnaCommand`), `SYS_STATE` is still `donnaScenario`. Neither was touched.
+- Rows 34–42 (new, v3): `CANON_STATE`/`CANON_DIR`/`CANON_STRAT`/`CANON_SETUP`/`CANON_GRADE`/`CANON_LIQ_SRC`/`CANON_INTERACT`/`CANON_BUY`/`CANON_SELL`, sourced from the canonical variables above.
+- Searched `engines/reasoning.py`: `bridge_ver = int(...) if ... else 1` and `v2_detected = bridge_ver >= 2` — uses `>=`, not `==`, so `BRIDGE_VER=3` is safely treated identically to `2` for existing v2 extraction. The one `'expected_bridge_version': 2` reference is a static logging/metadata field, not a comparison gate.
+- `_parse_rows()` builds a generic key→value dict from every row; unreferenced keys (the new `CANON_*` ones) simply sit unused in that dict — confirmed zero existing references to any `CANON_*` key anywhere in the Python codebase (`grep` returned no hits). No compatibility risk.
+
+### Known limitations (unchanged from the approved plan)
+
+- RP is still intentionally excluded from `canonicalBuy`/`canonicalSell` — it gains a canonical path only in Phase 3.
+- `CMD`/`SYS_STATE` remain legacy (`donnaCommand`/`donnaScenario`) until an explicitly-approved Phase 5 cutover; `engines/reasoning.py` was not modified and still reads only the legacy fields.
+- Break & Retest is described only as an ORB setup throughout this document; RP's approved setup types are Rejection, Bounce, Failed Breakout, and Sweep & Reclaim.
 
 ---
 
