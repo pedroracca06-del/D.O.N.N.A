@@ -33,6 +33,31 @@ signalLabelSize =
      signalLabelSizeInput == "Small" ? size.small :
      signalLabelSizeInput == "Large" ? size.large : size.normal
 
+// Phase 4 — external liquidity level visibility. None of these duplicate an
+// existing input: Asia/London previously had no independent visibility
+// toggle at all (only the shared showSessions background), and PDH/PDL/PWH/
+// PWL were drawn unconditionally with no toggle whatsoever (see the Phase 4
+// audit doc, Part 1).
+showAsiaLevels                   = input.bool(true,  "Show Asia High/Low",          group="External Liquidity Levels")
+showLondonLevels                 = input.bool(true,  "Show London High/Low",        group="External Liquidity Levels")
+showOvernightLevels              = input.bool(true,  "Show Overnight High/Low",     group="External Liquidity Levels")
+showPreviousDayLevels            = input.bool(true,  "Show Previous Day High/Low",  group="External Liquidity Levels")
+showPreviousWeekLevels           = input.bool(true,  "Show Previous Week High/Low", group="External Liquidity Levels")
+showDailyWeeklyLevels            = input.bool(true,  "Show Daily/Weekly High/Low",  group="External Liquidity Levels")
+externalLiquidityLineWidth       = input.int(2, "External Liquidity Line Width", minval=1, maxval=4, group="External Liquidity Levels")
+externalLiquidityLineStyleInput  = input.string("Solid", "External Liquidity Line Style", options=["Solid", "Dashed", "Dotted"], group="External Liquidity Levels")
+externalLiquidityOpacity         = input.int(20, "External Liquidity Line/Label Transparency", minval=0, maxval=90, group="External Liquidity Levels")
+externalLiquidityLabelSizeInput  = input.string("Normal", "External Liquidity Label Size", options=["Small", "Normal", "Large"], group="External Liquidity Levels")
+extendExternalLiquidityThroughNY = input.bool(true, "Extend External Liquidity Lines Through NY Session", group="External Liquidity Levels")
+
+externalLiquidityLineStyle =
+     externalLiquidityLineStyleInput == "Dashed" ? line.style_dashed :
+     externalLiquidityLineStyleInput == "Dotted" ? line.style_dotted : line.style_solid
+
+externalLiquidityLabelSize =
+     externalLiquidityLabelSizeInput == "Small" ? size.small :
+     externalLiquidityLabelSizeInput == "Large" ? size.large : size.normal
+
 showHistBoxes = input.bool(true, "Show Historical Session Boxes", group="Historical Memory")
 showHistORB   = input.bool(true, "Show Historical ORB Boxes",     group="Historical Memory")
 histLookback  = input.int(3, "Lookback Days", minval=1, maxval=5, group="Historical Memory")
@@ -70,11 +95,17 @@ isLunch     = hourNow >= 12 and hourNow < 13
 isPowerHour = hourNow >= 15 and hourNow < 16
 isDeadHours = not inAsia and not inLondon and not inNYPre and not inNYCash
 
+// Phase 4 — Overnight session window (NY cash close through NY cash open),
+// display-only, feeds no strategy/threshold logic. Standard futures/equity
+// "overnight range" convention.
+inOvernight = hourNow >= 16 or hourNow < 9 or (hourNow == 9 and minuteNow < 30)
+
 //================ SESSION START FLAGS ================
-newAsia   = inAsia   and not inAsia[1]
-newLondon = inLondon and not inLondon[1]
-newNYPre  = inNYPre  and not inNYPre[1]
-newNYCash = inNYCash and not inNYCash[1]
+newAsia      = inAsia      and not inAsia[1]
+newLondon    = inLondon    and not inLondon[1]
+newNYPre     = inNYPre     and not inNYPre[1]
+newNYCash    = inNYCash    and not inNYCash[1]
+newOvernight = inOvernight and not inOvernight[1]
 
 //================ SESSION BACKGROUNDS ================
 sessionBg =
@@ -586,6 +617,10 @@ var float londonHigh = na
 var float londonLow  = na
 var float nyHigh     = na
 var float nyLow      = na
+// Phase 4 — Overnight range storage, same accumulation pattern as Asia/
+// London/NY above, display-only.
+var float overnightHigh = na
+var float overnightLow  = na
 
 if newAsia
     asiaHigh := high
@@ -605,6 +640,12 @@ if newNYCash
 if inNYCash
     nyHigh := na(nyHigh) ? high : math.max(nyHigh, high)
     nyLow  := na(nyLow)  ? low  : math.min(nyLow,  low)
+if newOvernight
+    overnightHigh := high
+    overnightLow  := low
+if inOvernight
+    overnightHigh := na(overnightHigh) ? high : math.max(overnightHigh, high)
+    overnightLow  := na(overnightLow)  ? low  : math.min(overnightLow,  low)
 
 //================ PREVIOUS SESSION STORAGE ================
 var float prevAsiaHigh   = na
@@ -634,6 +675,13 @@ prevDayHigh  = request.security(syminfo.tickerid, "D", high[1])
 prevDayLow   = request.security(syminfo.tickerid, "D", low[1])
 prevWeekHigh = request.security(syminfo.tickerid, "W", high[1])
 prevWeekLow  = request.security(syminfo.tickerid, "W", low[1])
+// Phase 4 — current (in-progress) day/week high/low, display-only. Same
+// request.security mechanism as prevDayHigh/prevWeekHigh above, just without
+// the [1] historical offset — no new calculation concept, no threshold.
+dailyHigh  = request.security(syminfo.tickerid, "D", high)
+dailyLow   = request.security(syminfo.tickerid, "D", low)
+weeklyHigh = request.security(syminfo.tickerid, "W", high)
+weeklyLow  = request.security(syminfo.tickerid, "W", low)
 
 //================ LIQUIDITY HELPERS ================
 liqThresh = atrValue * 0.25
@@ -2407,38 +2455,77 @@ if showSignals and showSignalContext and canonicalSellNew
          textcolor=color.red, size=signalLabelSize)
 
 //================ LIQUIDITY MARKERS ================
+// Previous Session High/Low (PSH/PSL) — not part of the Phase 4 target list,
+// left exactly as before: unconditional, delete-and-recreate every redraw.
 var line pshLine = na
 var line pslLine = na
-var line pdhLine = na
-var line pdlLine = na
-var line pwhLine = na
-var line pwlLine = na
 
 if barstate.islast
     if not na(pshLine)
         line.delete(pshLine)
     if not na(pslLine)
         line.delete(pslLine)
-    if not na(pdhLine)
-        line.delete(pdhLine)
-    if not na(pdlLine)
-        line.delete(pdlLine)
-    if not na(pwhLine)
-        line.delete(pwhLine)
-    if not na(pwlLine)
-        line.delete(pwlLine)
     if not na(prevSessionHigh)
         pshLine := line.new(bar_index, prevSessionHigh, bar_index + 12, prevSessionHigh, color=color.new(color.green, 40), width=2)
     if not na(prevSessionLow)
         pslLine := line.new(bar_index, prevSessionLow,  bar_index + 12, prevSessionLow,  color=color.new(color.red,   40), width=2)
-    if not na(prevDayHigh)
-        pdhLine := line.new(bar_index, prevDayHigh,     bar_index + 12, prevDayHigh,     color=color.green, width=2)
-    if not na(prevDayLow)
-        pdlLine := line.new(bar_index, prevDayLow,      bar_index + 12, prevDayLow,      color=color.red,   width=2)
-    if not na(prevWeekHigh)
-        pwhLine := line.new(bar_index, prevWeekHigh,    bar_index + 12, prevWeekHigh,    color=color.new(color.green, 0), width=1, style=line.style_dashed)
-    if not na(prevWeekLow)
-        pwlLine := line.new(bar_index, prevWeekLow,     bar_index + 12, prevWeekLow,     color=color.new(color.red,   0), width=1, style=line.style_dashed)
+
+//====================================================
+// PHASE 4 — EXTERNAL LIQUIDITY LEVEL VISIBILITY
+//====================================================
+// Replaces the old pdhLine/pdlLine/pwhLine/pwlLine (delete-and-recreate every
+// bar, fixed 12-bar segment, no label, no toggle) with persistent objects
+// repositioned in place, plus adds Asia/London/Overnight/Daily/Weekly, which
+// previously had no dedicated High/Low line+label at all (see the Phase 4
+// audit doc, Part 1). No threshold, gate, or strategy logic is read or
+// written here beyond the existing f_near/f_swept_high/f_swept_low helpers
+// and liqThresh, called fresh for display/emphasis only.
+f_liqLevel(showFlag, levelPrice, labelText, baseColor, isEmphasized) =>
+    var line lv = na
+    var label lb = na
+    _w     = isEmphasized ? externalLiquidityLineWidth + 1 : externalLiquidityLineWidth
+    _trans = isEmphasized ? math.max(externalLiquidityOpacity - 15, 0) : externalLiquidityOpacity
+    _ext   = extendExternalLiquidityThroughNY ? extend.right : extend.none
+    if showFlag and not na(levelPrice) and barstate.islast
+        if na(lv)
+            lv := line.new(bar_index, levelPrice, bar_index + 12, levelPrice, color=color.new(baseColor, _trans), width=_w, style=externalLiquidityLineStyle, extend=_ext)
+        else
+            line.set_xy1(lv, bar_index, levelPrice)
+            line.set_xy2(lv, bar_index + 12, levelPrice)
+            line.set_width(lv, _w)
+            line.set_color(lv, color.new(baseColor, _trans))
+            line.set_extend(lv, _ext)
+        if na(lb)
+            lb := label.new(bar_index + 13, levelPrice, labelText, style=label.style_label_left, color=color.new(color.black, 100), textcolor=baseColor, size=externalLiquidityLabelSize)
+        else
+            label.set_xy(lb, bar_index + 13, levelPrice)
+            label.set_text(lb, labelText)
+            label.set_textcolor(lb, baseColor)
+    if not showFlag
+        if not na(lv)
+            line.delete(lv)
+            lv := na
+        if not na(lb)
+            label.delete(lb)
+            lb := na
+
+extLiqGreen = color.new(color.green, 0)
+extLiqRed   = color.new(color.red,   0)
+
+f_liqLevel(showAsiaLevels,        asiaHigh,      "ASIA HIGH",     extLiqGreen, f_near(asiaHigh, liqThresh)      or f_swept_high(asiaHigh))
+f_liqLevel(showAsiaLevels,        asiaLow,       "ASIA LOW",      extLiqRed,   f_near(asiaLow,  liqThresh)      or f_swept_low(asiaLow))
+f_liqLevel(showLondonLevels,      londonHigh,    "LONDON HIGH",   extLiqGreen, f_near(londonHigh, liqThresh)    or f_swept_high(londonHigh))
+f_liqLevel(showLondonLevels,      londonLow,     "LONDON LOW",    extLiqRed,   f_near(londonLow,  liqThresh)    or f_swept_low(londonLow))
+f_liqLevel(showOvernightLevels,   overnightHigh, "OVERNIGHT HIGH",extLiqGreen, f_near(overnightHigh, liqThresh) or f_swept_high(overnightHigh))
+f_liqLevel(showOvernightLevels,   overnightLow,  "OVERNIGHT LOW", extLiqRed,   f_near(overnightLow,  liqThresh) or f_swept_low(overnightLow))
+f_liqLevel(showPreviousDayLevels, prevDayHigh,   "PDH",           extLiqGreen, nearPDH or sweptPDH)
+f_liqLevel(showPreviousDayLevels, prevDayLow,    "PDL",           extLiqRed,   nearPDL or sweptPDL)
+f_liqLevel(showPreviousWeekLevels,prevWeekHigh,  "PWH",           extLiqGreen, nearPWH or sweptPWH)
+f_liqLevel(showPreviousWeekLevels,prevWeekLow,   "PWL",           extLiqRed,   nearPWL or sweptPWL)
+f_liqLevel(showDailyWeeklyLevels, dailyHigh,     "DAILY HIGH",    extLiqGreen, f_near(dailyHigh, liqThresh)      or f_swept_high(dailyHigh))
+f_liqLevel(showDailyWeeklyLevels, dailyLow,      "DAILY LOW",     extLiqRed,   f_near(dailyLow,  liqThresh)      or f_swept_low(dailyLow))
+f_liqLevel(showDailyWeeklyLevels, weeklyHigh,    "WEEKLY HIGH",   extLiqGreen, f_near(weeklyHigh, liqThresh)     or f_swept_high(weeklyHigh))
+f_liqLevel(showDailyWeeklyLevels, weeklyLow,     "WEEKLY LOW",    extLiqRed,   f_near(weeklyLow,  liqThresh)     or f_swept_low(weeklyLow))
 
 //====================================================
 // SMART TARGETS ENGINE
