@@ -2232,12 +2232,12 @@ riskText := orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
 // (orbBuySignal or ictBuySignal or prosBuySignal, and the SELL mirror) —
 // no threshold or gate inside those is changed here.
 //
-// RP-shaped setups (highSweepReject/lowSweepReject, donnaLiqReversalLong/Short)
-// are intentionally NOT wired into canonicalBuy/canonicalSell yet — they gain
-// a canonical path only once RP has its own Pine identity and gates (Phase 3).
-// donnaCommand/donnaScenario keep displaying RP-shaped scenario context exactly
-// as before via the existing CMD/SYS_STATE bridge rows — informational, not
-// canonical, and not part of this signal model until Phase 3 lands.
+// Liquidity-rejection-shaped setups (highSweepReject/lowSweepReject,
+// donnaLiqReversalLong/Short) are intentionally NOT wired into canonicalBuy/
+// canonicalSell — they are a detection/context layer, not a strategy family.
+// Only ORB and PROS are valid strategy families here. donnaCommand/
+// donnaScenario keep displaying this rejection context exactly as before via
+// the existing CMD/SYS_STATE bridge rows — informational, not canonical.
 //
 // canonicalSignalConflict guards against buySignal and sellSignal both being
 // true on the same bar (not observed in practice, but structurally possible
@@ -2278,7 +2278,9 @@ canonicalGrade    = canonicalBuy ? buyGrade : canonicalSell ? sellGrade : "NA"
 // Liquidity source/interaction naming is currently only meaningful for ORB —
 // PROS (fib-zone) and ICT (HTF-swing) have no equivalent named external-
 // liquidity concept yet, so they report "NONE" rather than a fabricated value.
-// RP gets its own liquidity-source naming in Phase 3.
+// The liquidity rejection detectors (highSweepReject/lowSweepReject etc.) are
+// a supporting detection layer, not a separate strategy — see
+// nova_knowledge_core/INDICATOR_PHASE3_REJECTION_ENGINE_CORRECTION.md.
 canonicalLiquiditySourceBull =
      orbAsiaLowSweepNow    ? "ASIA LOW" :
      orbSweepTierBull == 3 ? "PWL"      :
@@ -2357,10 +2359,10 @@ if ictSellSignal and not ictSellSignal[1]
 // conflicted bar cannot produce a marker without any extra guard here.
 
 // ── context text (shown only when showSignalContext = true) ──────────────
-// Maps the existing setup_type values (unchanged, Part 9/Phase-3 scope note:
-// RP is not among them yet) to readable marker text. Falls back to the raw
-// canonicalStrategy name for any setup_type not explicitly mapped below, so
-// the marker never prints a blank or "UNKNOWN" line for a real signal.
+// Maps the existing setup_type values (unchanged — ORB and PROS only) to
+// readable marker text. Falls back to the raw canonicalStrategy name for any
+// setup_type not explicitly mapped below, so the marker never prints a blank
+// or "UNKNOWN" line for a real signal.
 canonicalMarkerStrategyText =
      canonicalSetup == "PROS_CONTINUATION"     ? "PROS CONTINUATION"      :
      canonicalSetup == "ORB_MID_REJECT"        ? "ORB MID REJECTION"      :
