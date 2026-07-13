@@ -996,6 +996,24 @@ sweptPDL = f_swept_low(prevDayLow)
 sweptPWH = f_swept_high(prevWeekHigh)
 sweptPWL = f_swept_low(prevWeekLow)
 
+// Phase 6 — source-specific near/swept for the six levels that previously
+// had no dedicated boolean (only used inline via f_near/f_swept_high/low in
+// Phase 5). Same functions, same liqThresh, extended to Asia/London/
+// Overnight for consistency with the PSH/PDH/PWH naming convention above.
+nearAsiaHigh      = f_near(asiaHigh, liqThresh)
+nearAsiaLow       = f_near(asiaLow,  liqThresh)
+nearLondonHigh    = f_near(londonHigh, liqThresh)
+nearLondonLow     = f_near(londonLow,  liqThresh)
+nearOvernightHigh = f_near(overnightHigh, liqThresh)
+nearOvernightLow  = f_near(overnightLow,  liqThresh)
+
+sweptAsiaHigh      = f_swept_high(asiaHigh)
+sweptAsiaLow       = f_swept_low(asiaLow)
+sweptLondonHigh    = f_swept_high(londonHigh)
+sweptLondonLow     = f_swept_low(londonLow)
+sweptOvernightHigh = f_swept_high(overnightHigh)
+sweptOvernightLow  = f_swept_low(overnightLow)
+
 acceptedAbovePSH = not na(prevSessionHigh) and close > prevSessionHigh and open > prevSessionHigh
 acceptedBelowPSL = not na(prevSessionLow)  and close < prevSessionLow  and open < prevSessionLow
 acceptedAbovePDH = not na(prevDayHigh)     and close > prevDayHigh     and open > prevDayHigh
@@ -1032,6 +1050,59 @@ shortTargetLabel = not na(prevDayLow)  and prevDayLow  < close ? "PDL" : not na(
 
 highSweepReject = (nearPSH or nearPDH or nearPWH or sweptPSH or sweptPDH or sweptPWH) and close < open and upperWick > body * 1.10 and close < high[1]
 lowSweepReject  = (nearPSL or nearPDL or nearPWL or sweptPSL or sweptPDL or sweptPWL) and close > open and lowerWick > body * 1.10 and close > low[1]
+
+//====================================================
+// PHASE 6 — SOURCE-SPECIFIC REJECTION DETECTION
+//====================================================
+// highSweepReject/lowSweepReject above are GENERIC — their six-way OR gives
+// no proof of which specific level triggered them (see the Phase 6 audit
+// doc, Part 1, for the concrete false-attribution scenario this fixes).
+// Each xReject below only ever references its OWN level's near/swept
+// boolean and its OWN level's price — never an OR across other levels.
+// Same structural components as the generic formula (touch-or-sweep,
+// close-through, candle direction, 1.10 wick/body ratio) — no new
+// threshold, no volume/MACD/HTF/displacement requirement added. These are
+// context/detection booleans only — none of them feed canonicalBuy/
+// canonicalSell, buySignal/sellSignal, any score, grade, or alert.
+asiaHighTest   = nearAsiaHigh
+asiaHighSweep  = sweptAsiaHigh
+asiaHighReject = (nearAsiaHigh or sweptAsiaHigh) and close < asiaHigh and close < open and upperWick > body * 1.10
+
+asiaLowTest   = nearAsiaLow
+asiaLowSweep  = sweptAsiaLow
+asiaLowReject = (nearAsiaLow or sweptAsiaLow) and close > asiaLow and close > open and lowerWick > body * 1.10
+
+londonHighTest   = nearLondonHigh
+londonHighSweep  = sweptLondonHigh
+londonHighReject = (nearLondonHigh or sweptLondonHigh) and close < londonHigh and close < open and upperWick > body * 1.10
+
+londonLowTest   = nearLondonLow
+londonLowSweep  = sweptLondonLow
+londonLowReject = (nearLondonLow or sweptLondonLow) and close > londonLow and close > open and lowerWick > body * 1.10
+
+overnightHighTest   = nearOvernightHigh
+overnightHighSweep  = sweptOvernightHigh
+overnightHighReject = (nearOvernightHigh or sweptOvernightHigh) and close < overnightHigh and close < open and upperWick > body * 1.10
+
+overnightLowTest   = nearOvernightLow
+overnightLowSweep  = sweptOvernightLow
+overnightLowReject = (nearOvernightLow or sweptOvernightLow) and close > overnightLow and close > open and lowerWick > body * 1.10
+
+pdhTest   = nearPDH
+pdhSweep  = sweptPDH
+pdhReject = (nearPDH or sweptPDH) and close < prevDayHigh and close < open and upperWick > body * 1.10
+
+pdlTest   = nearPDL
+pdlSweep  = sweptPDL
+pdlReject = (nearPDL or sweptPDL) and close > prevDayLow and close > open and lowerWick > body * 1.10
+
+pwhTest   = nearPWH
+pwhSweep  = sweptPWH
+pwhReject = (nearPWH or sweptPWH) and close < prevWeekHigh and close < open and upperWick > body * 1.10
+
+pwlTest   = nearPWL
+pwlSweep  = sweptPWL
+pwlReject = (nearPWL or sweptPWL) and close > prevWeekLow and close > open and lowerWick > body * 1.10
 
 highBreakHold = (acceptedAbovePSH or acceptedAbovePDH or acceptedAbovePWH) and close > emaFast and close > open
 lowBreakHold  = (acceptedBelowPSL or acceptedBelowPDL or acceptedBelowPWL) and close < emaFast and close < open
@@ -2600,16 +2671,20 @@ f_liqLevel(showDailyWeeklyLevels, weeklyLow,     "WEEKLY LOW",    extLiqRed,   f
 // unchanged from the Phase 3 correction's finding) — not REJECTION. PDH/PDL/
 // PWH/PWL can show TEST/SWEEP/REJECTION. RECLAIM has no non-ORB equivalent
 // anywhere in this script and is not shown for any level here.
-asiaHighClass      = f_swept_high(asiaHigh)      ? "SWEEP" : f_near(asiaHigh, liqThresh)      ? "TEST" : "NONE"
-asiaLowClass       = f_swept_low(asiaLow)        ? "SWEEP" : f_near(asiaLow,  liqThresh)       ? "TEST" : "NONE"
-londonHighClass    = f_swept_high(londonHigh)    ? "SWEEP" : f_near(londonHigh, liqThresh)    ? "TEST" : "NONE"
-londonLowClass     = f_swept_low(londonLow)      ? "SWEEP" : f_near(londonLow,  liqThresh)     ? "TEST" : "NONE"
-overnightHighClass = f_swept_high(overnightHigh) ? "SWEEP" : f_near(overnightHigh, liqThresh) ? "TEST" : "NONE"
-overnightLowClass  = f_swept_low(overnightLow)   ? "SWEEP" : f_near(overnightLow,  liqThresh)  ? "TEST" : "NONE"
-pdhClass = (highSweepReject and (nearPDH or sweptPDH)) ? "REJECTION" : sweptPDH ? "SWEEP" : nearPDH ? "TEST" : "NONE"
-pdlClass = (lowSweepReject  and (nearPDL or sweptPDL)) ? "REJECTION" : sweptPDL ? "SWEEP" : nearPDL ? "TEST" : "NONE"
-pwhClass = (highSweepReject and (nearPWH or sweptPWH)) ? "REJECTION" : sweptPWH ? "SWEEP" : nearPWH ? "TEST" : "NONE"
-pwlClass = (lowSweepReject  and (nearPWL or sweptPWL)) ? "REJECTION" : sweptPWL ? "SWEEP" : nearPWL ? "TEST" : "NONE"
+// Phase 6: now source-specific (asiaHighReject etc.) instead of the generic
+// highSweepReject/lowSweepReject ANDed with a nearby-level check — see the
+// Phase 6 audit doc, Parts 1/4, for why the old expression risked naming
+// the wrong source when two levels were clustered close together.
+asiaHighClass      = asiaHighReject      ? "REJECTION" : asiaHighSweep      ? "SWEEP" : asiaHighTest      ? "TEST" : "NONE"
+asiaLowClass       = asiaLowReject       ? "REJECTION" : asiaLowSweep       ? "SWEEP" : asiaLowTest       ? "TEST" : "NONE"
+londonHighClass    = londonHighReject   ? "REJECTION" : londonHighSweep    ? "SWEEP" : londonHighTest    ? "TEST" : "NONE"
+londonLowClass     = londonLowReject    ? "REJECTION" : londonLowSweep     ? "SWEEP" : londonLowTest     ? "TEST" : "NONE"
+overnightHighClass = overnightHighReject? "REJECTION" : overnightHighSweep ? "SWEEP" : overnightHighTest ? "TEST" : "NONE"
+overnightLowClass  = overnightLowReject ? "REJECTION" : overnightLowSweep  ? "SWEEP" : overnightLowTest  ? "TEST" : "NONE"
+pdhClass = pdhReject ? "REJECTION" : pdhSweep ? "SWEEP" : pdhTest ? "TEST" : "NONE"
+pdlClass = pdlReject ? "REJECTION" : pdlSweep ? "SWEEP" : pdlTest ? "TEST" : "NONE"
+pwhClass = pwhReject ? "REJECTION" : pwhSweep ? "SWEEP" : pwhTest ? "TEST" : "NONE"
+pwlClass = pwlReject ? "REJECTION" : pwlSweep ? "SWEEP" : pwlTest ? "TEST" : "NONE"
 
 // Creates a label only when the classification changes to a new, non-"NONE"
 // value (a sustained TEST across many bars fires once; escalating to SWEEP
