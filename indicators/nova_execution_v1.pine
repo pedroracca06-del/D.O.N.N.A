@@ -2283,8 +2283,16 @@ analytics_session   = sessionStateText
 analytics_score     = buySignal ? buyScore : sellSignal ? sellScore : 0
 analytics_confidence = 0
 //================ SIGNAL ASSIGNMENT ================
-buySignal  := orbBuySignal  or ictBuySignal  or prosBuySignal
-sellSignal := orbSellSignal or ictSellSignal or prosSellSignal
+// Phase 6.2: ICT removed from canonical trade-signal promotion. ICT is a
+// supporting context/confirmation framework, not an approved NOVA strategy
+// family (approved families: ORB, PROS) — see nova_knowledge_core/
+// INDICATOR_PHASE6_2_ICT_CONTEXT_ALIGNMENT.md. ictBuySignal/ictSellSignal
+// and everything upstream of them (ictLongReady/ictShortReady, the 6-step
+// model, scoring contributions, Donna-engine consumers) are UNCHANGED and
+// keep computing exactly as before — only their promotion into buySignal/
+// sellSignal is removed.
+buySignal  := orbBuySignal  or prosBuySignal
+sellSignal := orbSellSignal or prosSellSignal
 
 if buySignal
     lastSmartBuyBar   := bar_index
@@ -2449,8 +2457,8 @@ alertcondition(prosBuySignal,  "PROS BUY",  "PROS continuation long")
 alertcondition(prosSellSignal, "PROS SELL", "PROS continuation short")
 // Phase 2: switched to the edge-triggered variants so the alert fires once per
 // setup, matching the chart marker exactly — same source, same transition.
-alertcondition(canonicalBuyNew,  "NOVA BUY",  "NOVA canonical buy signal (ORB/ICT/PROS)")
-alertcondition(canonicalSellNew, "NOVA SELL", "NOVA canonical sell signal (ORB/ICT/PROS)")
+alertcondition(canonicalBuyNew,  "NOVA BUY",  "NOVA canonical buy signal (ORB/PROS)")
+alertcondition(canonicalSellNew, "NOVA SELL", "NOVA canonical sell signal (ORB/PROS)")
 
 //================ WEBHOOK JSON ALERTS ================
 // Structured JSON payloads sent to DONNA /webhook on each signal bar.
@@ -2477,11 +2485,24 @@ if orbBuySignal and not orbBuySignal[1]
 if orbSellSignal and not orbSellSignal[1]
     alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ORB","instrument":"ES","tier":"2","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
 
-if ictBuySignal and not ictBuySignal[1]
-    alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
-
-if ictSellSignal and not ictSellSignal[1]
-    alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+// Phase 6.2: disabled, not deleted. This is the exact payload shape
+// (strategy_family":"ICT") from the documented pre-engagement incident
+// where a live ICT_OB_FVG_ENTRY alert reached the production webhook and
+// executed two real paper trades before execution-side governance existed.
+// ICT is confirmed blocked at the broker today (services/execution.py's
+// check_strategy_and_instrument_allowed()), but this Pine-side alert would
+// still fire an executable-shaped notification to the webhook/Discord layer
+// on every ictBuySignal/ictSellSignal transition. Classified as a legacy
+// execution-capable alert (Part 3, category B) — disabled per instruction
+// rather than left running as an unnecessary duplicate notification path.
+// _j_ict_tier is now unused as a result — left in place, harmless, and
+// available if this block is ever re-enabled by explicit future decision.
+//
+// if ictBuySignal and not ictBuySignal[1]
+//     alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+//
+// if ictSellSignal and not ictSellSignal[1]
+//     alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
 
 //====================================================
 // PHASE 2 — CANONICAL BUY / SELL CHART MARKERS
