@@ -198,6 +198,22 @@ def log_cycle(
     # ib_maturity: derived label — UNCLEAR / FORMING / MATURE / CLOSED_NO_DRAW
     ny_open_minutes:  Optional[int]   = None,
     ib_window_closed: bool            = False,
+
+    # Phase 6.3 — BRIDGE v3 canonical state + legacy/canonical mismatch
+    # telemetry. Observational only in this phase: does not gate
+    # alert_required/execution. Populated only for BRIDGE_VER >= 3 charts;
+    # None/'' on BRIDGE_VER 1/2, same as every other optional field here.
+    canonical_state:            str            = '',
+    canonical_direction:        str            = '',
+    canonical_strategy:         str            = '',
+    canonical_setup:            str            = '',
+    canonical_grade:            str            = '',
+    canonical_buy:              Optional[bool] = None,
+    canonical_sell:             Optional[bool] = None,
+    legacy_cmd:                 str            = '',
+    legacy_sys_state:           str            = '',
+    legacy_canonical_mismatch:  Optional[bool] = None,
+    mismatch_reason:            str            = '',
 ) -> dict:
     """
     Write one signal detection record to the log.
@@ -339,6 +355,20 @@ def log_cycle(
             'FORMING'        if not ib_window_closed and ib_draw not in ('', 'UNCLEAR') else
             'UNCLEAR'
         ),
+
+        # Phase 6.3 — canonical (BRIDGE v3) and legacy fields kept separate,
+        # never merged into one "direction"/"state" value at write time.
+        'canonical_state':           canonical_state,
+        'canonical_direction':       canonical_direction,
+        'canonical_strategy':        canonical_strategy,
+        'canonical_setup':           canonical_setup,
+        'canonical_grade':           canonical_grade,
+        'canonical_buy':             canonical_buy,
+        'canonical_sell':            canonical_sell,
+        'legacy_cmd':                legacy_cmd,
+        'legacy_sys_state':          legacy_sys_state,
+        'legacy_canonical_mismatch': legacy_canonical_mismatch,
+        'mismatch_reason':           mismatch_reason,
     }
 
     with _lock:
