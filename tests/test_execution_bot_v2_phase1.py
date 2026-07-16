@@ -27,6 +27,13 @@ from unittest.mock import patch
 
 import pytest
 
+# Legacy execution test (controlled retirement, 2026-07-16): the trading
+# subsystem is disabled by default everywhere, including in tests. This file's
+# test_bridge_phase1_error_does_not_block_live_path calls route_to_execution()
+# expecting it to reach Phase 1 / downstream gates, so it explicitly opts into
+# the trading-enabled fixture -- see tests/conftest.py's legacy_trading_enabled.
+pytestmark = pytest.mark.usefixtures('legacy_trading_enabled')
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

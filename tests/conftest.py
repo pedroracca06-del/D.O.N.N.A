@@ -14,6 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
+import services.execution
+
 
 @pytest.fixture(autouse=True)
 def _default_empty_broker():
@@ -24,24 +26,25 @@ def _default_empty_broker():
         yield
 
 
-@pytest.fixture(autouse=True)
-def _trading_subsystem_enabled_for_existing_tests(monkeypatch):
+@pytest.fixture
+def legacy_trading_enabled(monkeypatch):
     """Controlled retirement (2026-07-16): NOVA_TRADING_SUBSYSTEM_ENABLED now
-    gates every broker-write function in services/execution.py, defaulting to
-    False in production. Most tests in this suite pre-date that flag and call
-    execute_signal()/close_position()/close_all_positions()/cancel_all_orders()/
-    route_to_execution() directly, asserting on their real business-logic
-    results (bracket protection, governance gates, cooldowns, etc.) -- so this
-    autouse fixture keeps the flag enabled for the in-process test environment
-    by default. Tests that specifically prove the disabled-by-default safety
-    contract override it back within their own test body (see
-    test_trading_subsystem_disablement.py) or run in a subprocess with a
-    deliberately clean environment, which this fixture cannot reach.
+    gates every broker-write function in services/execution.py and Gate 0 of
+    services/execution_bridge.py's route_to_execution(), defaulting to False
+    in production and, since 2026-07-16, in the test suite too -- the same
+    safe default as the real application.
+
+    This fixture is NOT autouse. It exists only for the small set of legacy
+    execution tests that were written before the retirement flag existed and
+    intentionally need to exercise the archived business logic (bracket
+    protection, governance gates, cooldowns, Phase 1 request validation).
+    Every other test -- Journal, Market/News, NOVA Assistant, main
+    application/startup, and the retirement safety tests themselves -- runs
+    with trading disabled unless it explicitly requests this fixture (directly,
+    or via `pytestmark = pytest.mark.usefixtures('legacy_trading_enabled')` at
+    the top of a legacy execution test file). No test accidentally inherits
+    trading-enabled state.
     """
     monkeypatch.setenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'true')
-    try:
-        import services.execution as _ex
-        monkeypatch.setattr(_ex, 'NOVA_TRADING_SUBSYSTEM_ENABLED', True)
-    except Exception:
-        pass
+    monkeypatch.setattr(services.execution, 'NOVA_TRADING_SUBSYSTEM_ENABLED', True)
     yield
