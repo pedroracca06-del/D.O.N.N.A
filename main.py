@@ -19,6 +19,7 @@ from core.config import (
     MORNING_BRIEF_FILE, NY_TZ, GROK_INTEL_FILE,
     CACHE, now_ny, utc_now_iso, session_label, safe_float,
     send_telegram_message,
+    NOVA_TRADING_SUBSYSTEM_ENABLED,
 )
 from core.state import (
     ensure_files,
@@ -2310,6 +2311,8 @@ async def close_all_eod_manual():
     """Manually trigger EOD close of all open positions immediately."""
     if not _EXECUTION_AVAILABLE:
         return {'status': 'unavailable', 'error': 'execution not loaded'}
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return {'status': 'TRADING_SUBSYSTEM_DISABLED', 'positions_closed': 0}
     n = await asyncio.to_thread(close_all_positions_eod)
     return {'status': 'ok', 'positions_closed': n}
 
