@@ -22,3 +22,26 @@ def _default_empty_broker():
          patch('services.execution_reconcile.get_broker_orders_safe', return_value=[]), \
          patch('services.execution_reconcile.get_open_journal_trades_safe', return_value=[]):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _trading_subsystem_enabled_for_existing_tests(monkeypatch):
+    """Controlled retirement (2026-07-16): NOVA_TRADING_SUBSYSTEM_ENABLED now
+    gates every broker-write function in services/execution.py, defaulting to
+    False in production. Most tests in this suite pre-date that flag and call
+    execute_signal()/close_position()/close_all_positions()/cancel_all_orders()/
+    route_to_execution() directly, asserting on their real business-logic
+    results (bracket protection, governance gates, cooldowns, etc.) -- so this
+    autouse fixture keeps the flag enabled for the in-process test environment
+    by default. Tests that specifically prove the disabled-by-default safety
+    contract override it back within their own test body (see
+    test_trading_subsystem_disablement.py) or run in a subprocess with a
+    deliberately clean environment, which this fixture cannot reach.
+    """
+    monkeypatch.setenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'true')
+    try:
+        import services.execution as _ex
+        monkeypatch.setattr(_ex, 'NOVA_TRADING_SUBSYSTEM_ENABLED', True)
+    except Exception:
+        pass
+    yield
