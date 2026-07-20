@@ -1,0 +1,357 @@
+//@version=6
+//
+// ═══════════════════════════════════════════════════════════════════
+//  NOVA Market Map V1
+// ═══════════════════════════════════════════════════════════════════
+//  Clean, standalone, visual-only market map for NQ/MNQ (primary).
+//  Source of truth: nova_knowledge_core/MARKET_MAP_V1_SPECIFICATION.md
+//  (controlling spec commits: 2da1c22, c60e1b7).
+//
+//  Draws exactly:
+//    Levels : PDH, PDL, ASH, ASL, LH, LL, 1H H, 1H L
+//    Boxes  : Asia, London, New York, ORB
+//             (ORB and New York are box-only — no lines, no labels,
+//              no midpoint, no level extension)
+//
+//  Contains no trading logic of any kind: no signals, no entries or
+//  exits, no setups, no alerts, no scoring, no execution, no broker,
+//  no webhook, no bridge, and no NOVA backend dependency. This script
+//  reads only the chart's own OHLC/time and draws reference visuals.
+//
+//  Non-repainting HTF pattern (official Pine v6 idiom): every
+//  request.security() call pairs a [1] offset with lookahead_on so
+//  PDH/PDL and 1H H/1H L always show the previous COMPLETED candle,
+//  behave identically on historical and realtime bars, and never leak
+//  the developing HTF candle into history. The [1] offset must never
+//  be removed, and lookahead_on must never be used without it.
+//
+//  Timeframe support: session boxes, Asia/London levels, and Hourly
+//  levels render on 1m–15m charts and are suppressed above 15m (no
+//  approximation from coarse bars). PDH/PDL work on all intraday
+//  timeframes and are suppressed on daily and above.
+// ═══════════════════════════════════════════════════════════════════
+
+indicator("NOVA Market Map V1", overlay = true, max_lines_count = 100, max_labels_count = 60, max_boxes_count = 30)
+
+// ─────────────────────────── INPUTS ────────────────────────────────
+
+// ── Session Times ──
+grpSess  = "Session Times"
+tzInput  = input.string("America/New_York", "Timezone", group = grpSess, tooltip = "IANA timezone applied to every session window. Daylight-saving shifts are handled automatically by TradingView's timezone-aware time() — no fixed UTC offsets are used anywhere.")
+sessAsia = input.session("1900-0300", "Asia session",     group = grpSess)
+sessLdn  = input.session("0300-0930", "London session",   group = grpSess)
+sessNy   = input.session("0930-1600", "New York session", group = grpSess)
+sessOrb  = input.session("0830-0930", "ORB session",      group = grpSess, tooltip = "Default 08:30–09:30 Eastern per the approved specification.")
+
+// ── Level Visibility (independent per-level toggles) ──
+grpVis  = "Level Visibility"
+showPdh = input.bool(true, "PDH — previous day high",   group = grpVis)
+showPdl = input.bool(true, "PDL — previous day low",    group = grpVis)
+showAsh = input.bool(true, "ASH — Asia high",           group = grpVis)
+showAsl = input.bool(true, "ASL — Asia low",            group = grpVis)
+showLh  = input.bool(true, "LH — London high",          group = grpVis)
+showLl  = input.bool(true, "LL — London low",           group = grpVis)
+showH1h = input.bool(true, "1H H — previous hour high", group = grpVis)
+showH1l = input.bool(true, "1H L — previous hour low",  group = grpVis)
+
+// ── Session Boxes (independent per-box toggles) ──
+grpBoxVis   = "Session Boxes"
+showAsiaBox = input.bool(true, "Asia box",     group = grpBoxVis)
+showLdnBox  = input.bool(true, "London box",   group = grpBoxVis)
+showNyBox   = input.bool(true, "New York box", group = grpBoxVis)
+showOrbBox  = input.bool(true, "ORB box",      group = grpBoxVis)
+
+// ── Colors (coordinated by family; changing a family color updates
+//    every element of that family together) ──
+grpCol  = "Colors"
+colAsia = input.color(#a37fe0, "Asia family (box + ASH/ASL)",  group = grpCol)
+colLdn  = input.color(#4f8fe0, "London family (box + LH/LL)",  group = grpCol)
+colNy   = input.color(#4f7d63, "New York box",                 group = grpCol)
+colOrb  = input.color(#e0a23f, "ORB box",                      group = grpCol)
+colPdh  = input.color(#c9cdd6, "PDH",                          group = grpCol)
+colPdl  = input.color(#9aa0ac, "PDL",                          group = grpCol)
+colH1h  = input.color(#3fb8c9, "Hourly high (1H H)",           group = grpCol)
+colH1l  = input.color(#2f8f9e, "Hourly low (1H L)",            group = grpCol)
+
+// ── Labels ──
+grpLbl     = "Labels"
+showLabels = input.bool(true, "Show labels", group = grpLbl, tooltip = "Master switch. Hides every label while keeping all lines and boxes.")
+lblSizeStr = input.string("Small", "Label size", options = ["Small", "Normal", "Large"], group = grpLbl)
+
+// ── Lines ──
+grpLine      = "Lines"
+sessLineW    = input.int(1, "Asia/London level width", minval = 1, maxval = 4, group = grpLine)
+sessStyleStr = input.string("Solid",  "Asia/London level style", options = ["Solid", "Dashed", "Dotted"], group = grpLine)
+pdLineW      = input.int(1, "PDH/PDL width", minval = 1, maxval = 4, group = grpLine)
+pdStyleStr   = input.string("Dashed", "PDH/PDL style",           options = ["Solid", "Dashed", "Dotted"], group = grpLine)
+h1LineW      = input.int(1, "Hourly width", minval = 1, maxval = 4, group = grpLine)
+h1StyleStr   = input.string("Dotted", "Hourly style",            options = ["Solid", "Dashed", "Dotted"], group = grpLine)
+lifeModeStr  = input.string("Extend through NY close", "Completed session levels", options = ["Extend through NY close", "Stop at session end"], group = grpLine, tooltip = "Purely time-based visual behavior for completed Asia/London levels. ORB and New York are box-only and never create extended levels.")
+
+// ── Box Style ──
+grpBox     = "Box Style"
+boxTransp  = input.int(94, "Box fill transparency",     minval = 0, maxval = 100, group = grpBox)
+orbTransp  = input.int(90, "ORB box fill transparency", minval = 0, maxval = 100, group = grpBox, tooltip = "Slightly more visible than the other boxes by default, per the approved Phase 0 direction.")
+showBorder = input.bool(true, "Box borders", group = grpBox)
+borderW    = input.int(1, "Border thickness", minval = 1, maxval = 3, group = grpBox)
+
+// ── History ──
+grpHist = "History"
+keepN   = input.int(1, "Session instances to keep", minval = 1, maxval = 3, group = grpHist, tooltip = "Bounded retention per session type. Default shows only the current/latest instance; older retained instances render automatically faded and are deleted beyond this cap.")
+
+// ─────────────────────────── DERIVED ───────────────────────────────
+
+f_lineStyle(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+lblSize    = lblSizeStr == "Large" ? size.large : lblSizeStr == "Normal" ? size.normal : size.small
+extendMode = lifeModeStr == "Extend through NY close"
+
+// Timeframe gates — session/hourly precision is only trustworthy on
+// 1m–15m; PDH/PDL (single completed daily candle) works on any
+// intraday chart. Nothing is approximated above its supported range.
+tfSessionOk = timeframe.in_seconds(timeframe.period) <= 15 * 60
+tfPdOk      = timeframe.isintraday
+
+// New York close event — derived from the configurable NY session
+// input, used to stop completed-level extension (default mode).
+inNy       = not na(time(timeframe.period, sessNy, tzInput))
+nyCloseEvt = (not inNy) and inNy[1]
+
+// ─────────────────── NON-REPAINTING HTF VALUES ─────────────────────
+// Official Pine v6 idiom: [1] offset + lookahead_on. Always the
+// previous COMPLETED candle at each resolution; identical behavior on
+// historical and realtime bars; no future data leaks into history.
+
+[prevDayHigh, prevDayLow] = request.security(
+     syminfo.tickerid,
+     "1D",
+     [high[1], low[1]],
+     lookahead = barmerge.lookahead_on)
+
+[prevHourHigh, prevHourLow] = request.security(
+     syminfo.tickerid,
+     "60",
+     [high[1], low[1]],
+     lookahead = barmerge.lookahead_on)
+
+// ─────────────────── OBJECT-MANAGEMENT HELPERS ─────────────────────
+// Bounded retention: push newest, delete oldest past the cap. No
+// per-bar object creation anywhere — active objects update in place.
+
+f_trimBoxes(array<box> a, int n) =>
+    while a.size() > n
+        box.delete(a.shift())
+
+f_trimLines(array<line> a, int n) =>
+    while a.size() > n
+        line.delete(a.shift())
+
+f_trimLabels(array<label> a, int n) =>
+    while a.size() > n
+        label.delete(a.shift())
+
+// Older retained instances keep their family color but render faded.
+f_fadeFamily(array<box> bxs, array<line> hLns, array<line> lLns, array<label> hLbs, array<label> lLbs, color famCol, int fillT) =>
+    fadedFill = color.new(famCol, math.min(100, fillT + 4))
+    fadedBrd  = showBorder ? color.new(famCol, 85) : color(na)
+    fadedEl   = color.new(famCol, 68)
+    if bxs.size() > 0
+        for i = 0 to bxs.size() - 1
+            box.set_bgcolor(bxs.get(i), fadedFill)
+            box.set_border_color(bxs.get(i), fadedBrd)
+    if hLns.size() > 0
+        for i = 0 to hLns.size() - 1
+            line.set_color(hLns.get(i), fadedEl)
+    if lLns.size() > 0
+        for i = 0 to lLns.size() - 1
+            line.set_color(lLns.get(i), fadedEl)
+    if hLbs.size() > 0
+        for i = 0 to hLbs.size() - 1
+            label.set_textcolor(hLbs.get(i), fadedEl)
+    if lLbs.size() > 0
+        for i = 0 to lLbs.size() - 1
+            label.set_textcolor(lLbs.get(i), fadedEl)
+
+// ───────────────────── SESSION FAMILY ENGINE ───────────────────────
+// One engine drives all four session families. Asia/London expose
+// High/Low lines + labels; ORB and New York pass hiOn=loOn=false and
+// are therefore box-only — their internal high/low accumulator exists
+// solely to size the box and is never exposed as a line, label, or
+// midpoint. Levels begin only from a fully observed session start (a
+// partially loaded first session draws nothing rather than a wrong
+// range).
+
+f_family(bool tfOk, string sessStr, color famCol, bool boxOn, int fillT, bool hiOn, bool loOn, string hiTxt, string loTxt) =>
+    var array<box>   bxs  = array.new<box>()
+    var array<line>  hLns = array.new<line>()
+    var array<line>  lLns = array.new<line>()
+    var array<label> hLbs = array.new<label>()
+    var array<label> lLbs = array.new<label>()
+    var float fHi     = na
+    var float fLo     = na
+    var bool  extLive = false
+
+    inSess    = tfOk and not na(time(timeframe.period, sessStr, tzInput))
+    sessStart = inSess and not inSess[1]
+    sessEnd   = (not inSess) and inSess[1]
+    lvlStyle  = f_lineStyle(sessStyleStr)
+
+    if sessStart
+        extLive := false
+        f_fadeFamily(bxs, hLns, lLns, hLbs, lLbs, famCol, fillT)
+        fHi := high
+        fLo := low
+        if boxOn
+            bxs.push(box.new(bar_index, fHi, bar_index, fLo,
+                 border_color = showBorder ? color.new(famCol, 60) : color(na),
+                 border_width = borderW,
+                 bgcolor      = color.new(famCol, fillT)))
+            f_trimBoxes(bxs, keepN)
+        if hiOn
+            hLns.push(line.new(bar_index, fHi, bar_index, fHi, color = famCol, style = lvlStyle, width = sessLineW))
+            f_trimLines(hLns, keepN)
+            if showLabels
+                hLbs.push(label.new(bar_index + 3, fHi, hiTxt, style = label.style_none, textcolor = famCol, size = lblSize))
+                f_trimLabels(hLbs, keepN)
+        if loOn
+            lLns.push(line.new(bar_index, fLo, bar_index, fLo, color = famCol, style = lvlStyle, width = sessLineW))
+            f_trimLines(lLns, keepN)
+            if showLabels
+                lLbs.push(label.new(bar_index + 3, fLo, loTxt, style = label.style_none, textcolor = famCol, size = lblSize))
+                f_trimLabels(lLbs, keepN)
+    else if inSess and not na(fHi)
+        // Live-growing accumulation while the session is open — the
+        // expected behavior for a session range, not repainting.
+        fHi := math.max(fHi, high)
+        fLo := math.min(fLo, low)
+        if boxOn and bxs.size() > 0
+            b = bxs.last()
+            box.set_top(b, fHi)
+            box.set_bottom(b, fLo)
+            box.set_right(b, bar_index)
+        if hiOn and hLns.size() > 0
+            hl = hLns.last()
+            line.set_y1(hl, fHi)
+            line.set_y2(hl, fHi)
+            line.set_x2(hl, bar_index)
+            if hLbs.size() > 0
+                label.set_xy(hLbs.last(), bar_index + 3, fHi)
+        if loOn and lLns.size() > 0
+            ll = lLns.last()
+            line.set_y1(ll, fLo)
+            line.set_y2(ll, fLo)
+            line.set_x2(ll, bar_index)
+            if lLbs.size() > 0
+                label.set_xy(lLbs.last(), bar_index + 3, fLo)
+
+    // Completed-level lifetime: boxes always stay fixed over their own
+    // window. Levels (Asia/London only) optionally extend through the
+    // configurable New York close, then stop. Box-only families never
+    // enter extension because hiOn/loOn are false.
+    if sessEnd
+        extLive := extendMode and (hiOn or loOn)
+    if nyCloseEvt
+        extLive := false
+    if extLive and not inSess
+        if hiOn and hLns.size() > 0
+            line.set_x2(hLns.last(), bar_index)
+            if hLbs.size() > 0
+                label.set_x(hLbs.last(), bar_index + 3)
+        if loOn and lLns.size() > 0
+            line.set_x2(lLns.last(), bar_index)
+            if lLbs.size() > 0
+                label.set_x(lLbs.last(), bar_index + 3)
+
+// ───────────────────────── SESSION FAMILIES ────────────────────────
+
+f_family(tfSessionOk, sessAsia, colAsia, showAsiaBox, boxTransp, showAsh, showAsl, "ASH", "ASL")
+f_family(tfSessionOk, sessLdn,  colLdn,  showLdnBox,  boxTransp, showLh,  showLl,  "LH",  "LL")
+f_family(tfSessionOk, sessNy,   colNy,   showNyBox,   boxTransp, false,   false,   "",    "")
+f_family(tfSessionOk, sessOrb,  colOrb,  showOrbBox,  orbTransp, false,   false,   "",    "")
+
+// ─────────────────────────── PDH / PDL ─────────────────────────────
+// Previous completed exchange-defined daily candle. Persistent line +
+// label per level, re-anchored once per daily rollover, extended in
+// place every bar — never recreated per bar.
+
+pdStyle = f_lineStyle(pdStyleStr)
+dayChg  = timeframe.change("1D")
+
+var line  pdhLn = na
+var label pdhLb = na
+var line  pdlLn = na
+var label pdlLb = na
+
+if tfPdOk and showPdh and not na(prevDayHigh)
+    if na(pdhLn)
+        pdhLn := line.new(bar_index, prevDayHigh, bar_index, prevDayHigh, color = colPdh, style = pdStyle, width = pdLineW)
+        if showLabels
+            pdhLb := label.new(bar_index + 3, prevDayHigh, "PDH", style = label.style_none, textcolor = colPdh, size = lblSize)
+    if dayChg
+        line.set_xy1(pdhLn, bar_index, prevDayHigh)
+        line.set_xy2(pdhLn, bar_index, prevDayHigh)
+    else
+        line.set_y1(pdhLn, prevDayHigh)
+        line.set_y2(pdhLn, prevDayHigh)
+        line.set_x2(pdhLn, bar_index)
+    if not na(pdhLb)
+        label.set_xy(pdhLb, bar_index + 3, prevDayHigh)
+
+if tfPdOk and showPdl and not na(prevDayLow)
+    if na(pdlLn)
+        pdlLn := line.new(bar_index, prevDayLow, bar_index, prevDayLow, color = colPdl, style = pdStyle, width = pdLineW)
+        if showLabels
+            pdlLb := label.new(bar_index + 3, prevDayLow, "PDL", style = label.style_none, textcolor = colPdl, size = lblSize)
+    if dayChg
+        line.set_xy1(pdlLn, bar_index, prevDayLow)
+        line.set_xy2(pdlLn, bar_index, prevDayLow)
+    else
+        line.set_y1(pdlLn, prevDayLow)
+        line.set_y2(pdlLn, prevDayLow)
+        line.set_x2(pdlLn, bar_index)
+    if not na(pdlLb)
+        label.set_xy(pdlLb, bar_index + 3, prevDayLow)
+
+// ────────────────────────── 1H H / 1H L ────────────────────────────
+// Single most recently completed hourly candle — exactly one pair
+// visible, updated once at each hourly rollover. No multi-hour
+// history list. Suppressed above 15m with the other session elements.
+
+h1Style = f_lineStyle(h1StyleStr)
+hourChg = timeframe.change("60")
+
+var line  h1hLn = na
+var label h1hLb = na
+var line  h1lLn = na
+var label h1lLb = na
+
+if tfSessionOk and showH1h and not na(prevHourHigh)
+    if na(h1hLn)
+        h1hLn := line.new(bar_index, prevHourHigh, bar_index, prevHourHigh, color = colH1h, style = h1Style, width = h1LineW)
+        if showLabels
+            h1hLb := label.new(bar_index + 3, prevHourHigh, "1H H", style = label.style_none, textcolor = colH1h, size = lblSize)
+    if hourChg
+        line.set_xy1(h1hLn, bar_index, prevHourHigh)
+        line.set_xy2(h1hLn, bar_index, prevHourHigh)
+    else
+        line.set_y1(h1hLn, prevHourHigh)
+        line.set_y2(h1hLn, prevHourHigh)
+        line.set_x2(h1hLn, bar_index)
+    if not na(h1hLb)
+        label.set_xy(h1hLb, bar_index + 3, prevHourHigh)
+
+if tfSessionOk and showH1l and not na(prevHourLow)
+    if na(h1lLn)
+        h1lLn := line.new(bar_index, prevHourLow, bar_index, prevHourLow, color = colH1l, style = h1Style, width = h1LineW)
+        if showLabels
+            h1lLb := label.new(bar_index + 3, prevHourLow, "1H L", style = label.style_none, textcolor = colH1l, size = lblSize)
+    if hourChg
+        line.set_xy1(h1lLn, bar_index, prevHourLow)
+        line.set_xy2(h1lLn, bar_index, prevHourLow)
+    else
+        line.set_y1(h1lLn, prevHourLow)
+        line.set_y2(h1lLn, prevHourLow)
+        line.set_x2(h1lLn, bar_index)
+    if not na(h1lLb)
+        label.set_xy(h1lLb, bar_index + 3, prevHourLow)
