@@ -631,6 +631,7 @@ async def check_env():
         'telegram_alert_mode':         TELEGRAM_ALERT_MODE,
         'chat_model':                  ANTHROPIC_ASSISTANT_MODEL,
         'fast_model':                  ANTHROPIC_MODEL,
+        'trading_subsystem_enabled':   NOVA_TRADING_SUBSYSTEM_ENABLED,
     }
 
 
