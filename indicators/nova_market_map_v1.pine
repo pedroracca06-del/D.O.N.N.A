@@ -90,8 +90,8 @@ lifeModeStr  = input.string("Extend through NY close", "Completed session levels
 
 // ── Box Style ──
 grpBox     = "Box Style"
-boxTransp  = input.int(94, "Box fill transparency",     minval = 0, maxval = 100, group = grpBox)
-orbTransp  = input.int(90, "ORB box fill transparency", minval = 0, maxval = 100, group = grpBox, tooltip = "Slightly more visible than the other boxes by default, per the approved Phase 0 direction.")
+boxTransp  = input.int(88, "Box fill transparency",     minval = 0, maxval = 100, group = grpBox)
+orbTransp  = input.int(80, "ORB box fill transparency", minval = 0, maxval = 100, group = grpBox, tooltip = "Slightly more visible than the other boxes by default, per the approved Phase 0 direction.")
 showBorder = input.bool(true, "Box borders", group = grpBox)
 borderW    = input.int(1, "Border thickness", minval = 1, maxval = 3, group = grpBox)
 
@@ -212,7 +212,7 @@ f_family(bool tfOk, string sessStr, color famCol, bool boxOn, int fillT, bool hi
         fLo := low
         if boxOn
             bxs.push(box.new(bar_index, fHi, bar_index, fLo,
-                 border_color = showBorder ? color.new(famCol, 60) : color(na),
+                 border_color = showBorder ? color.new(famCol, 35) : color(na),
                  border_width = borderW,
                  bgcolor      = color.new(famCol, fillT)))
             f_trimBoxes(bxs, keepN)
