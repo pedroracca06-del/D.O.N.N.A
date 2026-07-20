@@ -9,7 +9,15 @@ Status: **Specification only. No Pine code exists yet.** This document defines w
 - **2026-07-19, draft 3** (commit `40575c2`): Pedro finalized a fuller scope after reviewing a reference image and draft 2 — added the New York session box, redefined Hourly High/Low to the single most-recently-completed candle, locked exact label text, restored per-level/per-box independent visibility toggles, reopened session-time/retention/line-lifetime defaults as proposals, named NQ/MNQ primary validation.
 - **2026-07-19, draft 4** (commit `fc632a2`): Pedro approved draft 3 in full, including every item draft 3 had listed as "proposed, awaiting approval" — Asia/London/New York default times, the `input.session()` + `America/New_York` mechanism, the current-session-default 1–3 retention range, the extend-through-NY-close default line-lifetime behavior, the filename/title, and the small-commit sequence. All of those moved from PROPOSED to FINAL. Two new requirements were added: (1) **customizable colors** — every level family and every session box gets a user-configurable color input from TradingView's settings, coordinated by family; (2) **compact level presentation** — thin lines, short labels positioned directly beside/below the line, price candles remaining the visual focus, and the "AS.L"-style abbreviation clarified as a neatness reference only.
 - **2026-07-19, draft 5:** two rounds of correction after reviewing the Phase 0 mock. First, Pedro approved the broad color direction (purple Asia, blue London, amber/prominent ORB, muted green New York, neutral PDH/PDL, teal Hourly) and the family-coordination behavior, but required the mock itself be corrected before final Phase 0 sign-off: remove the legend/dashboard entirely (session identity comes from box color + settings, not an on-chart legend); make session-box fills more transparent so candles stay primary; stop using any mock-only label-decluttering — labels must sit at their level's real price, with natural overlap between genuinely close levels accepted as a documented V1 limitation, never faked or hidden; make labels smaller/plainer with no background block; and regenerate the synthetic price path so PDH/PDL sit within a reasonable visible distance of current price (a mock-only data change, not a hint to compress real levels in the eventual indicator). Second, and more significantly, **Pedro issued a final ORB scope correction: ORB becomes box-only**, matching New York's treatment exactly. `ORH`, `ORL`, and `ORM` — their lines, labels, toggles, and dedicated color settings — were removed entirely from every part of this specification. This dropped the key-level count from eleven to eight.
-- **2026-07-19, draft 6 (this revision):** **Phase 0 is complete — Pedro approved the revised mock and the full visual direction**, with one final default-style adjustment: the amber ORB box is confirmed to render **slightly more visible** than the Asia/London/New York boxes (still transparent, still subordinate to price) — everything else in the approved direction (compact aligned labels, thin lines, no label backgrounds, purple Asia, blue London, muted green New York, neutral dashed PDH/PDL, dim teal Hourly, candles dominant, all colors/transparency user-configurable) is unchanged from draft 5. This revision's edits are a verification pass confirming `ORH`/`ORL`/`ORM` are fully absent from every section, plus updating every remaining "pending Phase 0" hedge now that Phase 0 has actually concluded. **This draft supersedes drafts 1–5 wherever they conflict.** Commits `8c88781`, `df13725`, `40575c2`, and `fc632a2` remain in git history unamended — superseded, not erased. **Phase 0 approval does not itself authorize Pine implementation** — Phase 1 still requires Pedro's separate, explicit go-ahead.
+- **2026-07-19, draft 6** (commit `2da1c22`): **Phase 0 is complete — Pedro approved the revised mock and the full visual direction**, with one final default-style adjustment: the amber ORB box is confirmed to render **slightly more visible** than the Asia/London/New York boxes (still transparent, still subordinate to price) — everything else in the approved direction (compact aligned labels, thin lines, no label backgrounds, purple Asia, blue London, muted green New York, neutral dashed PDH/PDL, dim teal Hourly, candles dominant, all colors/transparency user-configurable) is unchanged from draft 5. This revision's edits were a verification pass confirming `ORH`/`ORL`/`ORM` are fully absent from every section, plus updating every remaining "pending Phase 0" hedge now that Phase 0 had actually concluded. **Phase 0 approval does not itself authorize Pine implementation** — Phase 1 still requires Pedro's separate, explicit go-ahead.
+- **2026-07-19, draft 7 (this revision):** **Technical correction to the non-repainting HTF pattern for PDH/PDL and Hourly High/Low**, caught before Phase 1. Every prior draft paired the `[1]` offset with `lookahead = barmerge.lookahead_off`; TradingView's officially documented non-repainting higher-timeframe idiom instead pairs the `[1]` offset with `lookahead = barmerge.lookahead_on`. Both requests are corrected to:
+
+    ```
+    [previousDayHigh, previousDayLow] = request.security(syminfo.tickerid, "1D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+    [previousHourHigh, previousHourLow] = request.security(syminfo.tickerid, "60", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+    ```
+
+  Behavioral requirements are unchanged from every prior draft — PDH/PDL and 1H H/1H L still always represent the previous *completed* candle at their resolution, still behave identically on historical and realtime bars, and no future data leaks into historical bars. The `[1]` offset must never be removed, and `lookahead_on` must never be used without it — removing the offset while keeping `lookahead_on` would leak the developing current HTF candle. **This draft supersedes drafts 1–6 wherever they conflict.** Commits `8c88781`, `df13725`, `40575c2`, `fc632a2`, and `2da1c22` remain in git history unamended — superseded, not erased.
 
 ---
 
@@ -109,7 +117,18 @@ Regardless of which input mechanism is used, the timezone is never hardcoded to 
 
 **FINAL, redefined from both prior drafts.** `1H H` / `1H L` represent the **High and Low of the most recently completed hourly candle** — not the live-growing current hour (draft 1's model), and not a multi-instance retention list of several completed hours (draft 2's model). There is exactly one `1H H` value and one `1H L` value visible at any time, and they update once, at the top of each new hour, to reflect the hour that just closed.
 
-Implementation: `request.security(syminfo.tickerid, "60", high[1], lookahead=barmerge.lookahead_off)` / the equivalent for `low[1]` — reading the hourly-resolution series one bar back, so the value is always a **fully completed** hourly candle, never the still-forming one. This is the same non-repainting pattern as PDH/PDL (§7), applied at 60-minute resolution instead of daily.
+**Implementation (corrected 2026-07-19 — official Pine v6 non-repainting HTF pattern):**
+
+```
+[previousHourHigh, previousHourLow] = request.security(
+    syminfo.tickerid,
+    "60",
+    [high[1], low[1]],
+    lookahead = barmerge.lookahead_on
+)
+```
+
+The `[1]` offset reads the prior, already-completed hourly bar; pairing that offset with `lookahead = barmerge.lookahead_on` is TradingView's documented correct combination for a non-repainting higher-timeframe value — offset-without-lookahead-on is not the officially recommended idiom and is superseded by this pattern everywhere in this specification. This is the same corrected pattern as PDH/PDL (§7), applied at 60-minute resolution instead of daily.
 
 Because this is a single completed value (not an accumulator growing bar-by-bar within the current hour), `1H H`/`1H L` do not "grow live" the way Asia's and London's High/Low levels (and ORB's box top/bottom, internally) do — they are static between hourly updates, then jump to the new completed hour's values at the top of each hour. This is intentional and matches "avoid repainting": the displayed value never changes after it's first shown for that hour.
 
@@ -121,9 +140,26 @@ If Pedro would prefer a different non-repainting definition (e.g., a rolling N-h
 
 | Level | Method |
 |---|---|
-| PDH / PDL | Previous **completed** exchange-defined daily futures candle: `request.security(syminfo.tickerid, "1D", high[1]/low[1], lookahead=barmerge.lookahead_off)`. This is the prior daily candle as TradingView's own "1D" resolution already defines it for the chart's futures symbol — not a custom ET-midnight-to-midnight aggregation. Values remain stable and unchanged throughout the trading day once read. |
+| PDH / PDL | Previous **completed** exchange-defined daily futures candle — see the corrected `request.security` pattern below. This is the prior daily candle as TradingView's own "1D" resolution already defines it for the chart's futures symbol — not a custom ET-midnight-to-midnight aggregation. Values remain stable and unchanged throughout the trading day once read. |
 | ASH / ASL, LH / LL | Running max/min of `high`/`low` accumulated only over bars whose (configurable-timezone) timestamp falls inside that level's configured window, using the standard Pine accumulator pattern (reset when the window opens, `math.max`/`math.min` while the window is active). These **live-grow** during their window and lock at window close, and are exposed as their own lines and labels. |
 | 1H H / 1H L | Per §6 — single most-recently-completed hourly candle via `request.security`, not an accumulator. |
+
+**PDH/PDL implementation (corrected 2026-07-19 — official Pine v6 non-repainting HTF pattern):**
+
+```
+[previousDayHigh, previousDayLow] = request.security(
+    syminfo.tickerid,
+    "1D",
+    [high[1], low[1]],
+    lookahead = barmerge.lookahead_on
+)
+```
+
+This replaces the earlier drafts' `high[1]/low[1]` paired with `lookahead = barmerge.lookahead_off` — that pairing is not TradingView's officially recommended non-repainting idiom. The corrected requirement, unchanged in spirit from every prior draft:
+
+- The `[1]` offset must never be removed — it is what guarantees a fully completed daily candle is read, never the still-forming one.
+- `lookahead = barmerge.lookahead_on` must never be used *without* that `[1]` offset — doing so would leak the developing current daily candle's values into historical bars, which is exactly the repainting behavior this pattern exists to prevent.
+- PDH/PDL always represent the previous completed daily candle, behave identically on historical and realtime bars, and never shift once shown for the day.
 
 **ORB (box-only, corrected this revision):** ORB's box top/bottom uses the identical running max/min accumulator pattern as Asia/London — it still needs a live high/low internally to size the box correctly — but that high/low is **never exposed as a separate line, label, or midpoint value**. No `ORH`, `ORL`, or `ORM` exist anywhere in V1. The box itself, drawn from the accumulated high/low, is the only visible representation of the completed ORB range.
 
@@ -236,7 +272,7 @@ This default must remain useful for TradingView Replay (§11) without accumulati
 **FINAL requirement.** Two distinct concepts must not be confused, and the spec is explicit about which applies where:
 
 - **Live-growing is expected, not repainting.** Asia's and London's High/Low accumulators (and ORB's internal box-sizing accumulator, §7) are *meant* to update every bar while their window is open — that is the whole point of a live session range. This is not repainting: nothing already-displayed silently changes after the fact; the displayed value (or box edge) is always "the correct running high/low as of the current bar," which is exactly what it claims to be.
-- **True repainting — a displayed value silently changing after being shown as final — must never happen**, and is the specific risk for `PDH`/`PDL` and `1H H`/`1H L`, both of which read from an already-completed higher-timeframe candle via `request.security`. Both use `lookahead=barmerge.lookahead_off` and read the `[1]`-offset (prior, completed) bar of their respective resolution, guaranteeing the value shown is always final for that period and never silently revised.
+- **True repainting — a displayed value silently changing after being shown as final — must never happen**, and is the specific risk for `PDH`/`PDL` and `1H H`/`1H L`, both of which read from an already-completed higher-timeframe candle via `request.security`. Both use the corrected pattern (§6, §7): the `[1]`-offset (prior, completed) bar of their respective resolution **combined with** `lookahead = barmerge.lookahead_on` — TradingView's officially documented non-repainting HTF idiom, not the offset-with-`lookahead_off` pairing earlier drafts incorrectly specified. The offset guarantees no future data leaks into historical bars; `lookahead_on` combined with that offset guarantees the value behaves identically on historical and realtime bars, with the value shown always final for that period and never silently revised.
 
 **Daylight-saving time:** handled automatically because every session boundary is computed via Pine's timezone-aware time functions against the configured timezone string (§5), never a fixed UTC offset — the same code produces correctly-placed boxes/levels on both sides of a DST changeover with zero special-case logic. Included as an explicit case in the validation checklist (§13).
 
