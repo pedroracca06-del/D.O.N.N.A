@@ -507,9 +507,15 @@ async def startup():
         await asyncio.to_thread(reconcile_positions_from_alpaca)
         asyncio.create_task(position_outcomes_loop())
         asyncio.create_task(eod_close_loop())
-    if _ALERT_ENGINE_AVAILABLE:
-        await asyncio.to_thread(start_setup_monitor, 60)
-        print('[startup] NOVA alert monitor started (60s polling interval)')
+    # The retired setup-monitor thread (delivery.alert_engine.start_setup_monitor)
+    # polled TradingView/MCP every 60s and, when a chart was reachable, ran the
+    # legacy Claude setup-grading pipeline (engines.reasoning.evaluate_with_claude)
+    # independently of NOVA_TRADING_SUBSYSTEM_ENABLED -- the trading kill switch
+    # only ever guarded broker writes, never this reasoning/alert loop. Disabled
+    # here per the NOVA Intelligence Rebuild Phase 0 safety audit: normal startup
+    # must never reactivate legacy Claude grading or Discord setup alerts, even
+    # with TradingView/CDP open locally. start_setup_monitor() and the reasoning
+    # pipeline it calls remain intact and importable -- archived, not deleted.
     if _EXECUTION_SAFETY_AVAILABLE:
         asyncio.create_task(execution_safety_loop())
         print('[startup] Execution safety monitor started (60s market / 120s off-hours)')

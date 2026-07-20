@@ -147,20 +147,23 @@ def _check_credentials() -> list[dict]:
     else:
         results.append(_r(FAIL, 'Discord bot token not set in .env'))
 
-    # Anthropic
-    ak = os.getenv('ANTHROPIC_API_KEY', '')
-    if ak:
-        try:
-            from anthropic import Anthropic
-            c = Anthropic(api_key=ak)
-            model = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
-            c.messages.create(model=model, max_tokens=1,
-                messages=[{'role': 'user', 'content': 'ping'}])
-            results.append(_r(PASS, f'Anthropic API responsive  ({model})'))
-        except Exception as e:
-            results.append(_r(FAIL, f'Anthropic API failed  ({str(e)[:60]})'))
-    else:
-        results.append(_r(FAIL, 'Anthropic API key not set in .env'))
+    # Anthropic — local configuration check only, no external API call.
+    # A live messages.create(max_tokens=1) ping here used to make a real,
+    # billable Claude API call on every health check (NOVA Intelligence
+    # Rebuild Phase 0 audit finding) -- removed. This never claims the API
+    # is "responsive" or "healthy"; it only reports whether a key is
+    # configured locally. value is one of: configured, not_configured,
+    # unknown (unknown only on an unexpected error reading local config --
+    # never from contacting Anthropic).
+    try:
+        ak    = os.getenv('ANTHROPIC_API_KEY', '')
+        model = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+        if ak:
+            results.append(_r(PASS, f'Anthropic API key configured locally  ({model})  — not contacted, no billable check', value='configured'))
+        else:
+            results.append(_r(FAIL, 'Anthropic API key not set in .env', value='not_configured'))
+    except Exception as e:
+        results.append(_r(WARNING, f'Anthropic config check error  ({str(e)[:60]})', value='unknown'))
 
     return results
 
