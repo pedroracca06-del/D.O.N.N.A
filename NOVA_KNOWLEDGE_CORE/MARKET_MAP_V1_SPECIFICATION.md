@@ -1,334 +1,313 @@
 # Market Map V1 — Specification
 
 Date: 2026-07-19
-Status: **Specification only. No Pine code exists yet.** This document defines what Market Map V1 must do before a single line of Pine is written. It follows the controlled retirement of the legacy NOVA EXECUTION V1 indicator (`indicators/nova_execution_v1.pine`, archived, not deleted) and the UI retirement documented in `TRADING_SUBSYSTEM_UI_RETIREMENT.md`. This is the first artifact of the clean rebuild track — nothing here authorizes implementation. Pedro must explicitly approve this specification, and separately approve each phase of implementation, before any Pine file is created or edited.
+Status: **Specification only. No Pine code exists yet.** This document defines what Market Map V1 must do before a single line of Pine is written. It follows the controlled retirement of the legacy NOVA EXECUTION V1 indicator (`indicators/nova_execution_v1.pine`, archived, not deleted) and the UI retirement documented in `TRADING_SUBSYSTEM_UI_RETIREMENT.md`. This is the first artifact of the clean rebuild track — nothing here authorizes implementation. Pedro must explicitly approve this specification, and separately approve a Phase 0 visual mock, before any Pine file is created or edited.
 
-**Revision note (2026-07-19):** the overall direction was approved, with seven corrections applied — PDH/PDL definition (exchange daily candle, not a custom ET-midnight aggregation), session history retention (3 completed instances, not 1), Hourly High/Low redefined as lines only (not boxes), simplified label toggles (three category toggles, not per-object), tighter supported-timeframe range (1m–15m, not "up to 1H"), an explicit 16:00 ET line-lifetime rule, and a settings table matching all of the above. This revision supersedes the original per-section text everywhere the two disagree; the seven approved foundational decisions (ET-anchoring, the three session windows, live-growing display, ORB midpoint default-off, and the full exclusion list) are unchanged from the first draft.
-
----
-
-## 1. Exact purpose and non-purpose
-
-**Purpose:** Market Map V1 is a *visual reference layer*. It draws session boxes and key historical/current price levels on the chart so a discretionary trader can see where price has been and where the current session's range sits, at a glance. It answers "where are the levels that matter" — nothing more.
-
-**Non-purpose — Market Map V1 is not:**
-
-- Not a strategy. It contains no entry/exit logic of any kind.
-- Not a signal generator. It never tells the user to buy or sell.
-- Not a scoring or grading system. No confidence, no A–D grades, no bias score.
-- Not connected to NOVA. No bridge, no backend call, no webhook, no dependency on Harvey, Market Reality, or any NOVA data file.
-- Not a strategy-family implementation. No PROS, ICT, IB, FVG, MACD, or any other named methodology.
-- Not an alerting tool. No `alertcondition()`, no TradingView alert triggers.
-- Not an execution or broker-adjacent tool in any way.
-
-It must run as a completely standalone `//@version=6 indicator(...)` script that a user could delete NOVA entirely and still find useful on any TradingView chart.
+**Revision history:**
+- **2026-07-19, draft 1** (commit `8c88781`): initial specification.
+- **2026-07-19, draft 2** (commit `df13725`): seven corrections — PDH/PDL as exchange daily candle, 3-session retention, hourly-as-lines, category label toggles, 1m–15m timeframe range, 16:00 ET line-lifetime rule.
+- **2026-07-19, draft 3 (this revision):** Pedro finalized a fuller scope after reviewing a reference image and draft 2. **This draft supersedes drafts 1 and 2 wherever they conflict.** Commits `8c88781` and `df13725` remain in git history unamended — they are superseded, not erased. Major changes in this draft: a fourth session box (New York) is added; Hourly High/Low is redefined a second time, now to the single most-recently-**completed** hourly candle (not live-growing, not a multi-instance retention list — draft 2's "lines only, current + N completed" model is replaced); Pedro's exact label text is now locked (`PDH`, `PDL`, `ASH`, `ASL`, `LH`, `LL`, `1H H`, `1H L`, `ORH`, `ORL`, `ORM`); every major level and every session box gets its own independent visibility toggle (this supersedes draft 2's "three category toggles only" label-simplification correction — that correction was about *labels specifically*, and still stands for labels, but level/box *visibility* now requires per-object toggles); session times (Asia/London/New York) become user-configurable inputs with proposed-but-not-yet-approved defaults, rather than silently inherited NOVA convention; session history retention depth (draft 2's "3 completed, faded") is reopened as a proposed-not-final default; line-lifetime (draft 2's fixed "always through 16:00 ET") becomes a configurable choice with a proposed default; NQ/MNQ are named the primary validation instruments (ES/MES compatibility may remain possible but is not the validation target); and a reference image Pedro shared governs visual neatness/layout impression only — never exact colors, branding, or any strategy element.
 
 ---
 
-## 2. Exact session times and timezone behavior
+## 0. Requirements status key
 
-All session boundaries are anchored to **America/New_York (Eastern Time)**, regardless of the chart's symbol exchange timezone or the user's personal TradingView timezone display setting. This matches the session model already used elsewhere in NOVA (`core/config.py::session_label()`), so "Asia," "London," and "ORB" mean the same wall-clock windows here as everywhere else in the product.
+Every requirement below is tagged so approval status is unambiguous:
 
-| Session | Window (ET) | Notes |
+- **FINAL** — Pedro has explicitly locked this; it does not need re-approval.
+- **PROPOSED** — a default this document recommends; requires Pedro's explicit approval before Phase 0/implementation.
+- **DEFERRED** — intentionally out of scope for V1, documented so it isn't silently dropped or silently built.
+- **LIMITATION** — a constraint imposed by Pine or by chart timeframe, not a design choice.
+
+---
+
+## 1. Purpose and non-purpose
+
+**FINAL.** Market Map V1 is a *visual reference layer* for NQ/MNQ (primary) that draws session boxes and key liquidity levels so Pedro can instantly see where price has been, where the current session's range sits, and where current price sits relative to those areas — "make the chart easier to read," never "tell me to buy or sell."
+
+**Non-purpose — Market Map V1 contains none of the following, ever, in V1 or any future version without a separate, explicitly-approved specification:**
+
+BUY/SELL signals, entries, exits, trade setups, scoring, grades, confidence scores, alerts (`alertcondition()` or any TradingView alert wiring), execution logic, broker logic, bot integration, AI logic, ICT logic, IB logic, PROS logic, Fibonacci logic, FVG logic, Order Block logic, MACD logic, canonical-signal logic, reaction automation, NOVA backend/bridge/webhook dependency, Harvey or Market Reality dependency.
+
+It runs as a completely standalone `//@version=6 indicator(...)` script with zero dependency on any NOVA file, endpoint, or the retired trading subsystem — a user could delete NOVA entirely and still find it useful on any TradingView chart.
+
+**Reference image note (FINAL):** Pedro shared a reference image for style direction. It governs **visual neatness only** — general layout impression, cleanliness, and how minimal/professional a good market-map indicator looks. It does **not** authorize copying its branding, watermarks, exact colors, unrelated content, or any strategy/signal element that might appear in it. Exact colors remain a Phase 0 decision (§8).
+
+---
+
+## 2. Proposed Pine file name
+
+**PROPOSED:** `indicators/nova_market_map_v1.pine`, matching the existing convention (`indicators/nova_execution_v1.pine`). Declared indicator title inside the file: `"NOVA Market Map V1"` (overlay indicator, not a strategy — `indicator(...)`, never `strategy(...)`).
+
+This file does not exist yet and will not be created until Pedro approves this specification and, separately, the Phase 0 visual mock (§13).
+
+---
+
+## 3. Key levels
+
+| Level | Label (FINAL, exact text) | Optional toggle |
 |---|---|---|
-| Asia | 19:00 – 03:00 | Spans midnight; opens the prior calendar evening, closes the next calendar morning. |
-| London | 03:00 – 09:30 | Immediately follows Asia. |
-| ORB | 08:30 – 09:30 | Explicitly specified by Pedro. Overlaps the tail end of London — **approved as intentional**: the two windows measure different things (London's full session range vs. the tighter pre-open ORB range), and both lock at 09:30 ET, before Pedro's active NY trading window continues. |
-| Hourly | Every ET clock hour, `:00`–`:00` | Independent of the three sessions above; see §8. |
+| Previous Day High | `PDH` | Show/hide PDH |
+| Previous Day Low | `PDL` | Show/hide PDL |
+| Asia High | `ASH` | Show/hide Asia High |
+| Asia Low | `ASL` | Show/hide Asia Low |
+| London High | `LH` | Show/hide London High |
+| London Low | `LL` | Show/hide London Low |
+| Hourly High | `1H H` | Show/hide Hourly High |
+| Hourly Low | `1H L` | Show/hide Hourly Low |
+| ORB High | `ORH` | Show/hide ORB High |
+| ORB Low | `ORL` | Show/hide ORB Low |
+| ORB Midpoint | `ORM` | Show/hide ORB Midpoint (default off) |
 
-Implementation must use Pine's timezone-aware time functions (`time(timeframe, session, "America/New_York")` or equivalent `hour()`/`minute()` calls against a `"America/New_York"`-adjusted timestamp) — never a fixed UTC offset. This is what makes DST handling automatic (§16).
-
-**Approved (2026-07-19):** ET-anchoring for all four windows above, regardless of viewer timezone, is confirmed as final for V1 — not exchange-local, not viewer-local.
+No other level exists in V1. In particular, **there is no separate New York High/Low level** — New York is a session **box** only (§4); Pedro's key-level list does not include NY High/Low, and none is added here.
 
 ---
 
-## 3. How every high and low is calculated
+## 4. Session boxes
 
-Every level is a running max/min of `high`/`low` accumulated only over bars whose ET timestamp falls inside that level's defining window, using the standard Pine accumulator pattern:
+**FINAL:** four session boxes — Asia, London, New York, ORB — each lightly shaded, visually subtle, each with its own independent show/hide toggle. Boxes must not dominate the chart.
 
-```
-var float rangeHigh = na
-var float rangeLow  = na
-if inWindow and not inWindow[1]        // window just opened
-    rangeHigh := high
-    rangeLow  := low
-else if inWindow
-    rangeHigh := math.max(rangeHigh, high)
-    rangeLow  := math.min(rangeLow, low)
-```
+**FINAL — ORB window:** 08:30–09:30 AM Eastern, fixed as the default. This is explicitly restated as final per Pedro's direct instruction, not merely proposed.
 
-| Level | Source window |
+**PROPOSED — Asia, London, New York windows.** Per Pedro's explicit instruction not to silently carry old NOVA session definitions into this new, independent indicator, the times below are presented as a starting proposal, most of them (Asia/London) drawn from the existing convention in `core/config.py::session_label()` for consistency with the rest of the product, but requiring Pedro's fresh, explicit approval here rather than being assumed:
+
+| Session | Proposed default window (ET) | Basis for the proposal |
+|---|---|---|
+| Asia | 19:00 – 03:00 | Matches `core/config.py::session_label()`'s existing `ASIA` window — proposed for consistency, not silently assumed. |
+| London | 03:00 – 09:30 | Matches `core/config.py::session_label()`'s existing `LONDON` window — proposed for consistency, not silently assumed. |
+| New York | 09:30 – 16:00 | New box, not present in draft 1/2. Matches `core/config.py::session_label()`'s `NEW_YORK_CASH` window (regular futures/equity trading hours) — proposed as the standard, recognizable "NY session" definition. |
+| ORB | 08:30 – 09:30 | **FINAL**, see above. |
+
+All four windows are **user-configurable inputs** (§9) — the table above is only the shipped default. Pedro can change any of the three proposed windows at approval time, or leave them as proposed, or change them later via the indicator's own settings without needing a new specification.
+
+---
+
+## 5. Timezone behavior
+
+**PROPOSED implementation approach:** a single `input.string` (or equivalent) timezone setting, default `"America/New_York"`, applied to every session/level calculation. Session windows themselves use Pine's native `input.session()` type (TradingView's built-in session-picker widget, producing a `"HHMM-HHMM"` string) paired with `time(timeframe, session, timezone)` — this is idiomatic, safe Pine, gives Pedro a real UI picker rather than four separate hour/minute number inputs, and inherits DST handling automatically from the platform (§11) with zero custom offset math. This is a build-approach proposal, not a locked requirement — an equivalent `input.int` hour/minute pair per session would also satisfy "configurable," but the session-picker approach is recommended as cleaner and less error-prone for Pedro to adjust from the settings menu.
+
+Regardless of which input mechanism is used, the timezone is never hardcoded to a fixed UTC offset — always resolved through Pine's timezone-aware time functions against the configured timezone string, which is what makes daylight-saving handling automatic (§11).
+
+---
+
+## 6. Exact definition of Hourly High and Hourly Low
+
+**FINAL, redefined from both prior drafts.** `1H H` / `1H L` represent the **High and Low of the most recently completed hourly candle** — not the live-growing current hour (draft 1's model), and not a multi-instance retention list of several completed hours (draft 2's model). There is exactly one `1H H` value and one `1H L` value visible at any time, and they update once, at the top of each new hour, to reflect the hour that just closed.
+
+Implementation: `request.security(syminfo.tickerid, "60", high[1], lookahead=barmerge.lookahead_off)` / the equivalent for `low[1]` — reading the hourly-resolution series one bar back, so the value is always a **fully completed** hourly candle, never the still-forming one. This is the same non-repainting pattern as PDH/PDL (§7), applied at 60-minute resolution instead of daily.
+
+Because this is a single completed value (not an accumulator growing bar-by-bar within the current hour), `1H H`/`1H L` do not "grow live" the way Asia/London/ORB do — they are static between hourly updates, then jump to the new completed hour's values at the top of each hour. This is intentional and matches "avoid repainting": the displayed value never changes after it's first shown for that hour.
+
+If Pedro would prefer a different non-repainting definition (e.g., a rolling N-hour window, or the live-current-hour-plus-history model from draft 2), that must be separately documented and approved before implementation — this specification does not silently reintroduce either alternative.
+
+---
+
+## 7. Level calculation method
+
+| Level | Method |
 |---|---|
-| Asia High / Low | Asia window (§2) |
-| London High / Low | London window (§2) |
-| ORB High / Low | ORB window (§2) |
-| Hourly High / Low | Current ET clock hour (§8) |
-| Previous Day High / Low | The prior **completed exchange-defined daily futures candle** for the chart's symbol — see below. |
-
-**Approved (2026-07-19) — PDH/PDL definition, corrected:** the original draft's `request.security(syminfo.tickerid, "1D", high[1])` / `low[1]` proposal is kept, but the framing around it was wrong and is corrected here: this is **not** a plain ET midnight-to-midnight aggregation, and the spec must not claim it is. It is simply the prior completed daily candle as TradingView's own "1D" resolution already defines it for the chart's futures symbol (NQ/MNQ), whatever exchange session convention that resolution already uses internally — Market Map V1 does not reimplement or second-guess that convention.
-
-Requirements for this correction:
-
-- PDH/PDL use the previous **completed** exchange-defined daily candle — never the still-forming current daily candle.
-- The `request.security` call must be written without lookahead/repainting (`lookahead=barmerge.lookahead_off`, and the `[1]` offset applied to the *requested* series so a completed bar is always read, never the in-progress one).
-- Once read for the day, PDH/PDL values must remain **stable and unchanged** throughout Pedro's NY trading window — they do not silently shift intraday.
-- **No custom midnight-to-midnight ET daily aggregation is built in V1.** This was the original draft's error: proposing a plain-ET-day definition alongside 1D-candle code that doesn't actually produce one. V1 uses the exchange daily candle only.
+| PDH / PDL | Previous **completed** exchange-defined daily futures candle: `request.security(syminfo.tickerid, "1D", high[1]/low[1], lookahead=barmerge.lookahead_off)`. This is the prior daily candle as TradingView's own "1D" resolution already defines it for the chart's futures symbol — not a custom ET-midnight-to-midnight aggregation. Values remain stable and unchanged throughout the trading day once read. |
+| ASH / ASL, LH / LL, ORH / ORL | Running max/min of `high`/`low` accumulated only over bars whose (configurable-timezone) timestamp falls inside that level's configured window, using the standard Pine accumulator pattern (reset when the window opens, `math.max`/`math.min` while the window is active). These **live-grow** during their window and lock at window close. |
+| ORM | `(ORH + ORL) / 2`, computed only once ORB has at least one bar of data; optional toggle, default off. |
+| 1H H / 1H L | Per §6 — single most-recently-completed hourly candle via `request.security`, not an accumulator. |
 
 ---
 
-## 4. When each level begins displaying
+## 8. Box creation method
 
-Session/ORB/Hourly levels **display live, growing in real time**, from the first bar of their window onward — the box and its High/Low lines appear as soon as the window opens and update every bar until the window closes. This is the standard, expected ORB-box behavior and is recommended for all four windowed levels (Asia, London, ORB, Hourly) for consistency.
+**PROPOSED:** each of the four session boxes (Asia, London, New York, ORB) uses one persistent `box.new(...)` object per box type, updated in place via `box.set_top` / `box.set_bottom` / `box.set_right` while its window is live, rather than deleted-and-recreated every bar (avoids unnecessary object churn and flicker). Box fill is light and transparent by default; border is thin and subtle. Boxes are never filled solid and never visually dominate price action.
 
-PDH/PDL display from the first bar of the current trading day (they don't "grow" — they're already-known fixed values pulled from the completed prior day via `request.security`, per the corrected definition in §3).
+**Default colors and transparency (PROPOSED — style-direction only, exact hex/percentages pending the Phase 0 mock, §13):**
 
-**Approved (2026-07-19):** live-growing display is confirmed as final for V1 for all windowed levels (Asia, London, ORB, Hourly) — not the hidden-until-closed alternative.
+| Session/level family | Color direction | Notes |
+|---|---|---|
+| Asia | Purple | Box + High/Low lines |
+| London | Blue | Box + High/Low lines |
+| New York | Muted green (working proposal — needs Pedro's confirmation; chosen to be clearly distinct from Asia/London/ORB without implying "bullish," but this is exactly the kind of choice the Phase 0 mock exists to validate) | Box only (no NY H/L level exists, §3) |
+| ORB | Orange/amber, slightly more visually prominent than the other three (most-referenced level) | Box + High/Low lines + optional midpoint (dimmer amber, dotted) |
+| PDH / PDL | Neutral gray/white, dashed | Line only, no box |
+| 1H H / 1H L | Dim teal, dotted, thin — visually subordinate to every other level | Line only, no box |
 
----
-
-## 5. When each level stops extending or resets
-
-**Approved (2026-07-19), corrected — line lifetime:** the original draft's "extends forward until the same session's next occurrence begins" was too vague and risked old session levels visually bleeding into unrelated overnight periods. Final rule:
-
-- **Asia / London / ORB:** the box stops growing at its window's close (e.g., ORB box locks at 09:30 ET). After close, the High/Low become static lines that extend forward (right) only **through 16:00 ET on the associated NY trading day** — not indefinitely, not until the next session begins. At 16:00 ET the line's extension stops (the line itself remains visible as history per the §6 retention depth; it simply stops drawing further right).
-- **Session boxes themselves** (the shaded rectangle, as opposed to the extended H/L lines) stay fixed over their actual session window — they never stretch to 16:00, only the two boundary lines do.
-- **Hourly:** locks at the top of the next ET hour and follows its own rolling retention rule (§8) — not the 16:00 rule, since hourly ranges are already short-lived by design.
-- **PDH/PDL:** remain visible and stable throughout the entire applicable trading day (§3) — the 16:00 rule does not apply to PDH/PDL, since "yesterday's high/low" is meaningful for the full day, not just until the NY close.
-
-Reset trigger for every level is strictly time-based (ET clock), never price-based (no "level resets if broken" logic — that would be trading logic, which is explicitly excluded).
+Historical retained instances (§10), if any beyond the current one, render in a dimmer/lower-opacity variant of their base color, consistent with the general "recede with age" visual hierarchy from draft 2.
 
 ---
 
-## 6. Historical versus current-session behavior
+## 9. Settings structure
 
-**Approved (2026-07-19), corrected:** strictly single-most-recent was rejected as too weak for chart review and TradingView replay. Final V1 behavior:
+**FINAL requirement, PROPOSED exact layout.** Every item Pedro listed is included; grouped using the existing project's `group=` input convention (as used in `nova_execution_v1.pine`):
 
-- **Default completed-session history depth: 3** instances per session type (Asia, London, ORB each independently keep their own last 3 completed instances).
-- **Configurable range: 1–5** via a `sessionsToKeep` input.
-- The **live-forming current instance is additional to, not counted within,** that retained-history number — at the default setting of 3, the chart shows 3 completed sessions plus whichever session is currently forming, per type.
-- Older retained instances are **visually faded** relative to the most recent completed one (lower opacity / dimmer color), so the eye is drawn to the most recent completed range first while older ones remain available for context.
-- This is bounded and rolling: when a new session completes, the oldest retained instance for that type is deleted (`box.delete()` / `line.delete()`) so the count never exceeds the configured depth. **Unlimited historical sessions are never drawn.**
+**Group: Level Visibility** (one independent toggle each, FINAL requirement)
+Show/hide PDH · PDL · Asia High · Asia Low · London High · London Low · Hourly High · Hourly Low · ORB High · ORB Low · ORB Midpoint (default off).
 
----
-
-## 7. ORB construction and optional midpoint behavior
-
-- Box drawn from 08:30–09:30 ET, top = ORB High, bottom = ORB Low, live-growing per §4.
-- At 09:30 ET the box locks; ORB High and ORB Low become two solid horizontal lines extending right **through 16:00 ET** (§5), not indefinitely.
-- **Optional ORB midpoint** (`(ORB High + ORB Low) / 2`): user-toggleable input, default **off** — **approved as final (2026-07-19)**. When enabled, drawn as a distinct dim amber dotted/thin line between the High and Low lines, clearly less visually dominant than the two boundary lines.
-
----
-
-## 8. Hourly High/Low behavior
-
-**Approved (2026-07-19), corrected — lines only, not boxes.** The original draft described Hourly High/Low using the same box-construction pattern as the sessions; that was wrong. Hourly High/Low is a **line-only** feature with no box, no fill, at any point in V1.
-
-- Window = `[HH:00, HH+1:00)` ET, resets at the top of every hour.
-- The **live current ET hour's developing High and Low** are shown as two thin lines that extend and update in real time as the hour progresses (live-growing per §4, applied to lines directly — no intermediate box object is ever created).
-- At hour-close, the pair locks and becomes part of the completed-hour retention set below.
-- **Completed-hour retention: default 2, configurable 1–3** (not the original draft's N=3/capped-at-6 box-based scope). At the maximum setting (3), the chart shows the current developing hour plus the 3 most recently completed hourly pairs — 4 pairs of lines total at most.
-- Older completed-hour line pairs are **explicitly deleted** (`line.delete()`) as new ones roll in, so the retained count never exceeds the configured limit.
-- Hourly lines are **thin and visually subordinate** to session/ORB/PDH-PDL lines (dim teal, dotted, 1px — see §10) — they are a secondary reference, not a headline level.
-- **No hourly box fill exists at any point.** No hourly box construction, no hourly box retention — both were incorrect in the original draft and are removed here.
-- Hourly labels default **off** (§11/§12) — with no boxes and no default labels, the current-hour-plus-two-completed default stays visually quiet even though it's four line pairs.
-
----
-
-## 9. Session-box construction
-
-Each session (Asia, London, ORB) is drawn with `box.new(left=<window-open bar>, right=<current or window-close bar>, top=rangeHigh, bottom=rangeLow, ...)`, updated in place (`box.set_*`) while the window is live rather than deleted-and-recreated every bar (performance: avoids unnecessary object churn), with up to the configured retention depth (§6) of completed instances kept simultaneously, oldest deleted on rollover. **Hourly High/Low is line-only (§8) and does not use `box.new` at all** — this is a correction from the original draft, which incorrectly implied a shared box-based construction pattern for hourly levels. See §10 for the exact styling of each box and line.
-
----
-
-## 10. Labels, colors, line styles, widths, and transparency
-
-**Approved general visual hierarchy (2026-07-19); exact hex values and transparency percentages remain pending Phase 0 visual mock approval.** The color family, relative prominence, and line-style choices below are confirmed as the direction to build the Phase 0 mock against — NOVA's established pattern (per `nova_ui_vision/` mockup review) is that exact color/visual decisions get explicit sign-off against a rendered mock before being built, and that final step has not happened yet.
-
-Approved-direction style table:
-
-| Level | Color family | Box fill | Line style | Width | Label |
-|---|---|---|---|---|---|
-| Asia High/Low + box | Purple | Transparent, subtle | Solid | 1px | `ASIA H` / `ASIA L`, right-aligned at line end |
-| London High/Low + box | Blue | Transparent, subtle | Solid | 1px | `LDN H` / `LDN L` |
-| ORB High/Low + box | Orange/amber | Transparent, subtle | Solid | 2px (slightly more prominent — most-referenced level) | `ORB H` / `ORB L` |
-| ORB Midpoint (optional) | Dim amber | n/a (line only) | Dotted | 1px | `ORB MID` |
-| Previous Day High/Low | Neutral gray/white | n/a (line only, no box) | Dashed | 1px | `PDH` / `PDL` |
-| Hourly High/Low | Dim teal | n/a (line only, no box — see §8 correction) | Dotted | 1px | `H1 H` / `H1 L` for the live-forming hour; completed pairs unlabeled by default (hourly labels default off, §11/§12) |
-
-Retained historical instances (§6) render in a dimmer/lower-opacity variant of their level's base color, so the most recent completed instance of each session type is always the most visually prominent, with older retained instances receding.
-
-All labels use a small, fixed-size font (not scaling with zoom), positioned at the right edge of each line, using short abbreviations rather than full words, per the corrected label-complexity rules in §11. Exact color hex values, precise transparency percentages, and final label text are **not locked** — this table is the approved starting direction for Pedro to react to against a rendered Phase 0 mock (§17), not a final palette.
-
----
-
-## 11. Mobile readability requirements
-
-**Approved (2026-07-19), corrected — label complexity scaled back.** The original draft promised per-object label toggles and a label-collision-avoidance engine; both were rejected as overbuilt for V1. Corrected requirements:
-
-- Labels are kept short (compact abbreviations, e.g. `ASIA H`, `PDH`, `ORB MID`), placed consistently at the **right edge** of their line, using reasonable fixed offsets between categories where practical (e.g., session labels and PDH/PDL labels nudged to avoid the most common collision cases).
-- Label visibility is controlled by **three category toggles only** (§12): Show session labels, Show PDH/PDL labels, Show hourly labels — not a separate toggle per box or line. A user on a small screen strips down to fewer categories, not fewer individual objects.
-- **No automatic label-collision engine is built in V1.** The spec does not promise labels can never overlap under every chart scale and price condition — it is explicitly documented that tightly clustered price levels (e.g., ORB Low landing very close to PDL) can still visually converge, and that is an accepted V1 limitation, not a bug.
-- Minimum line width of 1px must remain visible at TradingView's mobile app default line rendering — no sub-pixel or "hairline" styles.
-- Hourly labels default **off** (§8, §12) — with the category toggle off, the current-hour-plus-two-completed-hours default (§8) draws lines only, no labels, keeping it quiet on a phone-sized chart by default.
-- No dashboard/table overlay (`table.new`) is part of V1 — that's exactly the kind of dense panel that reads badly on mobile and isn't needed for a pure levels map.
-
----
-
-## 12. User-configurable settings
-
-**Approved (2026-07-19), corrected to match §3/§6/§8/§11.** Grouped, matching the existing project's input-grouping convention (`group=` parameter, as used in `nova_execution_v1.pine`):
-
-**Group: Session Visibility**
-- Show Asia (bool, default true)
-- Show London (bool, default true)
-- Show ORB (bool, default true)
-- Show Hourly High/Low (bool, default true)
-- Show PDH/PDL (bool, default true)
-
-**Group: ORB**
-- Show ORB midpoint (bool, default false) — §7
-
-**Group: History**
-- Completed sessions to retain (int, default 3, min 1, max 5) — per session type, see §6
-- Completed hourly ranges to retain (int, default 2, min 1, max 3) — see §8
+**Group: Session Boxes** (one independent toggle each, FINAL requirement)
+Show/hide Asia box · London box · New York box · ORB box.
 
 **Group: Labels**
-- Show session labels (bool, default true)
-- Show PDH/PDL labels (bool, default true)
-- Show hourly labels (bool, default false) — see §8, §11
-- Label size (string: Small/Normal/Large)
+- Show/hide all labels (master switch, labels only — does not hide the underlying lines).
+- Individual per-label toggles beyond the per-level toggles above: **DEFERRED** — see §14. The per-level toggles (which already gate line + label together) plus this master label switch (hide all labels while keeping all lines) already give full practical control without doubling the settings-menu size; Pedro's own instruction permits treating this as optional ("if this can be done cleanly") and asks the spec not to overwhelm the settings menu.
+- Label size (Small/Normal/Large).
+- Label position preference where Pine allows it (right-edge of the line is the default and, practically, closest to Pine's native label-anchoring options).
 
-**Group: Style**
-- Reasonable color controls per level family: Asia, London, ORB, ORB Midpoint, PDH/PDL, Hourly — one `input.color` each, defaults per §10
-- Line width control for session/ORB levels and for PDH/PDL and Hourly lines, per §10's defaults
-- Box fill transparency control for the three session box types
+**Group: Lines**
+- Line color, per level family (§8 defaults).
+- Line thickness.
+- Line style (solid/dashed/dotted per family, §8 defaults).
+- Line-lifetime behavior — **PROPOSED, reopened from draft 2's hardcoded rule:** a choice between "Extend through end of NY trading day" (proposed default, matches draft 2's approved 16:00 ET behavior) and "Stop at session end" (line freezes at the right edge of its own box, does not extend further). Both are simple, purely time-based visual behaviors.
+- "Continuation until touched" — **DEFERRED**, see §14.
 
-V1 deliberately does **not** provide a separate setting for every individual drawn object (no per-instance color, no per-retained-history-slot toggle) — control is at the level-family/category granularity described above, consistent with the label-complexity correction in §11. No input controls anything about trading behavior, alerts, or strategy — every input listed above is purely visual/display scope, consistent with §1's non-purpose list.
+**Group: Boxes**
+Box color, box transparency, border visibility, border thickness, historical box limit (§10).
+
+**Group: Session Times**
+Timezone (default `America/New_York`), Asia session time, London session time, New York session time (all §4/§5), ORB time (input exists for configurability, but defaults fixed to 08:30–09:30 ET per the FINAL requirement).
+
+No input in any group controls trading behavior, alerts, or strategy — every input is purely visual/display scope, consistent with §1.
 
 ---
 
-## 13. Object-limit and performance safeguards
+## 10. Historical lookback behavior
 
-Pine enforces hard per-indicator limits on drawn objects. `nova_execution_v1.pine` declares `max_lines_count=500, max_labels_count=500, max_boxes_count=200, max_bars_back=2000` for a much heavier, multi-feature dashboard indicator. Market Map V1 draws a small, bounded number of objects by design (§6, §8 retention limits), so it should declare much lower, tighter limits as a defensive measure — if the object count ever unexpectedly exceeds the declared cap, Pine throws a runtime error rather than silently misrendering, which is the correct failure mode for a "keep it simple" tool.
+**PROPOSED, reopened from draft 2.** Draft 2 had locked a default of "3 completed sessions per type, 1–5 configurable." Pedro's new instruction explicitly reopens this as a proposal requiring fresh approval, with a strong emphasis on keeping the default chart clean and not showing "weeks of old boxes and labels by default."
 
-**Recomputed for the corrected retention depths (2026-07-19):** worst case at maximum settings — 3 session types (Asia/London/ORB) × up to 6 instances each (5 retained completed + 1 live, at the max `sessionsToKeep` setting) = up to 18 boxes and up to 36 boundary lines, plus up to 4 hourly line pairs (8 lines) at the max hourly-retention setting, plus 2 PDH/PDL lines, plus 1 optional ORB midpoint line, plus a modest label budget per the three label categories (§11/§12). The declared limits below give comfortable headroom above the *default*-settings case (3 retained + 1 live = 12 boxes, 24 session lines) while still catching genuine runaway-object bugs at the configured maximums:
+**Recommended default: current session only** — i.e., retention depth of **1** (the live-forming instance, plus the most recently completed instance replacing the prior one on rollover, per session type: Asia, London, New York, ORB independently). This is a tighter default than draft 2 proposed, in direct response to "the default chart should remain clean."
+
+**Configurable range: 1–3** via a `sessionsToKeep` input per the "Previous 1–3 sessions" option Pedro listed — deliberately narrower than draft 2's 1–5, again favoring a clean default surface; older retained instances (when the setting is raised above 1) render faded per §8.
+
+**Hourly (`1H H`/`1H L`) has no lookback list at all** — per the redefined §6, it is always exactly one completed hour's value, with no retention concept to configure.
+
+This default must remain useful for TradingView Replay (§11) without accumulating unlimited clutter — bounded by the same 1–3 retention cap during replay as during live/historical viewing.
+
+---
+
+## 11. Non-repainting safeguards
+
+**FINAL requirement.** Two distinct concepts must not be confused, and the spec is explicit about which applies where:
+
+- **Live-growing is expected, not repainting.** Asia/London/ORB High/Low accumulators are *meant* to update every bar while their window is open — that is the whole point of a live session range. This is not repainting: nothing already-displayed silently changes after the fact; the displayed value is always "the correct running high/low as of the current bar," which is exactly what it claims to be.
+- **True repainting — a displayed value silently changing after being shown as final — must never happen**, and is the specific risk for `PDH`/`PDL` and `1H H`/`1H L`, both of which read from an already-completed higher-timeframe candle via `request.security`. Both use `lookahead=barmerge.lookahead_off` and read the `[1]`-offset (prior, completed) bar of their respective resolution, guaranteeing the value shown is always final for that period and never silently revised.
+
+**Daylight-saving time:** handled automatically because every session boundary is computed via Pine's timezone-aware time functions against the configured timezone string (§5), never a fixed UTC offset — the same code produces correctly-placed boxes/levels on both sides of a DST changeover with zero special-case logic. Included as an explicit case in the validation checklist (§13).
+
+**Replay behavior:** TradingView's Bar Replay feature re-runs historical bars through the same live logic path — since every level's calculation (§7) is a pure function of bar time and price with no `barstate.isrealtime`-only branching, replay produces the same results as live or historical viewing. Explicitly checked in §13.
+
+---
+
+## 12. Mobile-readability plan
+
+**FINAL requirements, adapted from draft 2's corrections (still valid) plus Pedro's new per-level toggle requirement:**
+
+- Labels are compact, exact-text (§3), positioned at the right edge of their line by default.
+- Visibility is layered: per-level/per-box toggles (§9, new, FINAL) give coarse control; the master "show all labels" switch (§9) gives a labels-only override; true per-object label toggles beyond that remain deferred (§14) to avoid a bloated settings menu, per Pedro's own "if this can be done cleanly" framing.
+- **No automatic label-collision engine is built in V1** (carried over from draft 2 and reaffirmed by Pedro's new instruction: "Do not build a complex automatic label-collision engine unless separately approved"). Tightly clustered levels (e.g., ORB Low landing very close to PDL) may still visually converge — documented as an accepted V1 limitation, not a bug.
+- No labels are created repeatedly on every bar — every label is a persistent object, created once per level/instance and updated (`label.set_xy`, `label.set_text`, etc.) rather than recreated, which is also what keeps mobile chart performance smooth (§14).
+- No dashboard/table overlay (`table.new`) — a dense panel reads badly on mobile and isn't needed for a pure levels map.
+- Minimum 1px line width, visible at TradingView mobile's default rendering — no sub-pixel/hairline styles.
+
+---
+
+## 13. Validation checklist
+
+Before Phase 1 coding begins, Pedro reviews a static visual mock (colors, line styles, box shading, label placement, per §8's proposed direction) against a real NQ or MNQ chart screenshot — informed by neatness cues from Pedro's reference image (§1), never copying its exact colors/branding. No Pine is written until that mock is approved.
+
+Once implementation begins, validation covers:
+
+1. **Live formation** — Asia, London, New York, and ORB boxes all form and grow correctly on NQ and MNQ, on 1m/5m/15m charts.
+2. **Hourly correctness** — `1H H`/`1H L` update exactly once per hour, to the just-completed hour's values, with zero mid-hour changes (non-repainting per §6/§11).
+3. **PDH/PDL accuracy** — matches the previous completed daily futures candle exactly; no repaint on historical bars.
+4. **Exact labels** — every visible label reads exactly `PDH`, `PDL`, `ASH`, `ASL`, `LH`, `LL`, `1H H`, `1H L`, `ORH`, `ORL`, or `ORM` — no variants.
+5. **Independent toggles** — every level and every box can be hidden/shown independently of every other; the master label switch hides labels without hiding lines; no toggle has a side effect on an unrelated element.
+6. **Session-time configurability** — changing the Asia/London/New York/ORB session-time inputs correctly moves the corresponding box/levels; the ORB default remains 08:30–09:30 ET until explicitly changed.
+7. **Historical lookback default** — confirms the proposed default (current session only, §10) renders cleanly with no old-session clutter, and that raising the retention input to 2 or 3 fades older instances correctly and never exceeds the configured cap.
+8. **Line-lifetime behavior** — both configurable modes (extend-through-NY-close vs. stop-at-session-end, §9) behave as documented; "continuation until touched" is confirmed absent (deferred, §14).
+9. **No stale objects** — toggling any input off/on, and letting retention rollover happen naturally, leaves no orphaned or duplicate objects and triggers no runtime object-limit errors.
+10. **DST alignment** — historical data spanning a DST transition weekend shows every level type staying aligned to correct wall-clock times before and after.
+11. **Replay accuracy** — TradingView Bar Replay through a full session cycle produces identical results to live/historical viewing.
+12. **NQ/MNQ primary validation** — full checklist run on both NQ and MNQ; ES/MES checked only as a bonus, not blocking sign-off (§15).
+13. **Mobile readability** — labels legible, lines visible, no dashboard/table overlay, on a real mobile device or TradingView's mobile emulation.
+
+---
+
+## 14. Optional features — explicitly deferred, not silently built or silently dropped
+
+- **Continuation-until-touched line behavior.** Pedro explicitly allowed this to be deferred if it adds excessive complexity. It does: correctly tracking "has price touched this level since it locked" without drifting into reaction-detection/signal territory requires careful scoping that has not been done here. **Recommendation: defer to a future, separately-specified revision.** V1 ships with the two simpler, purely time-based line-lifetime modes from §9 only.
+- **Fully independent per-label toggles** beyond the per-level/per-box toggles and the master label switch (§9, §12). Recommendation: defer; revisit only if Pedro finds the two-layer model insufficient in practice.
+- **Session retention depth above 3**, or any "current day" / "user-defined lookback" mode beyond the 1–3 range proposed in §10. Recommendation: ship the tighter 1–3 range; revisit if Pedro wants deeper history after using V1.
+
+None of the above is present in the shipped V1 settings menu unless Pedro explicitly asks for it to be un-deferred before Phase 0.
+
+---
+
+## 15. Limitations imposed by Pine or chart timeframe
+
+- **Session-window precision is only accurate on lower timeframes.** An 08:30 ET ORB boundary (or any session boundary) cannot be reliably reconstructed from coarse bars without lower-timeframe aggregation, which V1 does not build. **PROPOSED, carried over from draft 2:** full session-box and hourly precision on **1m, 3m, 5m, and 15m** charts; auto-suppressed (drawing nothing, never an approximation) above 15m. PDH/PDL is unaffected (reads a single daily candle regardless of chart timeframe) and works on any intraday timeframe.
+- **Pine's per-indicator object limits** (`max_lines_count`, `max_labels_count`, `max_boxes_count`) are hard platform caps. V1's design (persistent, updated-not-recreated objects; bounded 1–3 retention; no per-bar object creation) keeps real usage far below reasonable declared limits, but the exact declared numbers are an implementation detail to finalize during Phase 1, not this specification.
+- **NQ/MNQ are the primary validation target (FINAL).** ES/MES compatibility may remain possible since the implementation is symbol-agnostic by construction (no hardcoded ticker/tick-size/contract-multiplier logic), but ES/MES is not part of the V1 acceptance bar and any symbol-specific issue there does not block sign-off.
+- **No automatic label-collision avoidance** (§12) — a Pine/complexity limitation accepted by design, not a bug to fix later within V1's scope.
+
+---
+
+## Exact files that will be created
+
+**Only one new file, and only after Pedro approves this specification and the Phase 0 mock:**
 
 ```
-//@version=6
-indicator("Market Map V1", overlay=true, max_lines_count=100, max_labels_count=60, max_boxes_count=30, max_bars_back=2000)
+indicators/nova_market_map_v1.pine
 ```
 
-Object lifecycle rule: every level type owns a small, fixed set of object-ID variables (arrays of `box`/`line` IDs sized to the configured retention depth, e.g. `var box[] asiaBoxes`) that are updated in place or explicitly deleted (`box.delete()`, `line.delete()`) and recreated on rollover — never accumulated without bound. No level type may create a new object every bar without deleting the oldest one once its retention slot is full.
+No other file is created or modified as part of Market Map V1 — not `ui/html.py`, not any `main.py` route, not any file under `services/`, `engines/`, `delivery/`, `core/`, `tests/`, or `data/`. This specification document (`nova_knowledge_core/MARKET_MAP_V1_SPECIFICATION.md`) is the only file this revision touches.
 
 ---
 
-## 14. Behavior across NQ and MNQ
+## Proposed small commit sequence (implementation, not yet authorized)
 
-Market Map V1 must be **symbol-agnostic** — it reads only OHLC price action from whatever chart it is applied to (`high`, `low`, `open`, `close`, `time`) and contains no hardcoded ticker, tick size, contract multiplier, or point-value logic. NQ and MNQ (and, incidentally, ES/MES or any other instrument) render structurally identically — same boxes, same lines, same behavior — with values simply reflecting whatever price series is on screen. No special-casing by symbol is required or permitted.
+Each commit is one small, independently visible layer, per "we are developing one clean visual layer at a time." None of these commits happen until Pedro approves this specification and the Phase 0 mock.
 
----
-
-## 15. Behavior across chart timeframes
-
-**Approved (2026-07-19), corrected — tighter supported range.** The original draft's "session boxes render normally up to 1H" was not safe: an 08:30 ET ORB boundary cannot always be reconstructed accurately from coarse bars without lower-timeframe aggregation, which V1 explicitly does not build (see below). Market Map V1 is primarily designed for Pedro's intraday charting, not as a general-purpose any-timeframe tool.
-
-**Accepted V1 support, final:**
-
-- **Full session boxes (Asia/London/ORB) and Hourly High/Low lines** render on **1m, 3m, 5m, and 15m** charts only — this is the supported precision range for session-window calculations in V1.
-- **PDH/PDL** render on all intraday timeframes (1m through, and including, 15m and beyond up to 1D — see §3, unaffected by the session-precision limit since it reads a single daily candle, not an intraday accumulation).
-- **Automatic suppression:** session boxes and hourly levels auto-suppress above 15m (on 30m, 1H, 4H, Daily, etc. charts) — the indicator does not attempt to draw them at all on those timeframes, rather than drawing something inaccurate.
-- **No fake or partially reconstructed session ranges are ever shown.** If a timeframe is too coarse to compute a session window accurately, V1 shows nothing for that level type rather than an approximation.
-- **No lower-timeframe reconstruction (e.g., `request.security` calls to a finer resolution to rebuild an accurate session range on a coarse chart) is introduced in V1**, even though that is technically how such reconstruction would be done — it is explicitly out of scope, to keep V1 simple and matched to Pedro's actual intraday charting use.
-
-This replaces the original draft's 4H-cutoff proposal entirely — 15m is the new, final cutoff, and it is treated as resolved rather than open.
-
----
-
-## 16. Daylight-saving-time handling
-
-Because every session boundary is computed using Pine's timezone-aware time functions against the `"America/New_York"` timezone string (§2) rather than a fixed UTC offset, DST transitions are handled automatically by the TradingView platform — the same Pine code produces correctly-placed boxes and lines at the 08:30–09:30 ET ORB window (and every other level's window) on both sides of a DST changeover, with zero special-case code. This is standard, well-documented Pine behavior, not new logic being introduced by this spec; it's called out explicitly so it's a known, verified property rather than an untested assumption. Acceptance testing (§17) includes an explicit check across a DST transition weekend.
-
----
-
-## 17. Acceptance criteria and visual test cases
-
-**Approved (2026-07-19), corrected to match §3, §6, §8, §11, §15.** Before Phase 1 coding begins, Pedro reviews a static visual mock of the approved-direction style table (§10) — colors, line styles, label placement — against a real chart screenshot, the same way UI mockups are reviewed elsewhere in this project. No Pine is written until that mock is approved.
-
-Once implementation begins, each phase (§19) ends with a manual visual check against these cases:
-
-1. **Live formation across supported timeframes** — apply to an NQ (or MNQ) chart on 1m, 5m, and 15m; confirm session/ORB/hourly levels form and grow correctly on all three.
-2. **Suppression above 15m** — confirm session boxes and hourly levels auto-suppress (draw nothing, not an approximation) on 30m, 1H, 4H, and Daily charts, per §15.
-3. **PDH/PDL accuracy** — confirm the drawn Previous Day High/Low lines exactly match the previous **completed exchange daily futures candle** read directly off the daily chart, per the corrected §3 definition.
-4. **Retention depth** — confirm the default of **3 retained completed sessions per type** (plus the live-forming instance) displays correctly, with older instances visibly faded relative to the most recent completed one, per §6.
-5. **Line termination at 16:00 ET** — confirm Asia/London/ORB boundary lines stop extending at 16:00 ET on their associated NY trading day rather than continuing indefinitely or into the next overnight session, per §5.
-6. **Hourly lines, not boxes** — confirm Hourly High/Low renders as thin line pairs only, with no box or fill of any kind, per §8.
-7. **Default hourly state** — confirm the out-of-the-box default shows the live current hour plus the 2 most recently completed hourly pairs (3 pairs total), per §8/§12.
-8. **No repainting or lookahead in PDH/PDL** — confirm the `request.security` call for PDH/PDL never uses lookahead and the displayed values never shift after the fact on historical bars, per §3.
-9. **No stale objects after toggles or retention rollover** — toggle every input off and on, and let retention rollover happen naturally (new session/hour completing); confirm no orphaned or duplicate objects remain and no runtime object-limit errors occur, per §13.
-10. **DST alignment** — load historical data spanning a DST transition weekend; confirm every level type stays aligned to correct ET wall-clock times before and after, per §16.
-11. **NQ/MNQ consistency** — apply identical settings to NQ, then MNQ (ES/MES as a bonus check); confirm structurally identical rendering, per §14.
-12. **Mobile readability without over-promising** — open the chart in the TradingView mobile app; confirm labels are legible and lines remain visible at default rendering, while accepting (not treating as a failure) that tightly clustered levels may still visually converge, per the corrected §11.
-
----
-
-## 18. Explicit exclusions preventing scope creep
-
-Market Map V1 must never contain, at any point in its lifetime as "V1":
-
-- [ ] No strategies of any kind
-- [ ] No BUY or SELL signals or markers
-- [ ] No trade recommendations, in labels, tooltips, or comments
-- [ ] No `alertcondition()` or any TradingView alert wiring
-- [ ] No scoring, grading, or confidence system
-- [ ] No PROS, ICT, IB, or FVG logic or terminology
-- [ ] No MACD or any other momentum/oscillator indicator
-- [ ] No execution logic of any kind
-- [ ] No broker integration
-- [ ] No canonical-signal system or NOVA Bridge dependency
-- [ ] No Harvey or Market Reality dependency
-- [ ] No NOVA backend dependency — no `request.security` calls to anything other than the chart's own symbol, no webhook, no network call of any kind (Pine cannot make arbitrary network calls, but this rules out any future temptation to bolt one on via a workaround)
-- [ ] No dashboard/table overlay (kept out per §11, mobile readability)
-
-If a future version needs any of the above, that is a new, separately-scoped, separately-approved specification — not a silent addition to Market Map V1.
-
----
-
-## 19. Phased implementation plan with visual verification
-
-**Approved (2026-07-19), corrected to match §5, §6, §8, §15, §17.** Each phase is small, produces something Pedro can look at on a real chart, and requires his go-ahead before the next phase starts. No phase begins without approval of the previous one's visual check.
-
-| Phase | Scope | Visual check |
+| # | Commit | Adds |
 |---|---|---|
-| 0 | Style mock review (§10, §17) — no code | Pedro approves the color/line/label direction or sends back changes |
-| 1 | Skeleton indicator: `//@version=6 indicator(...)` declaration, object-limit safeguards (§13), Previous Day High/Low only (simplest level, no session-window logic; correct exchange-daily-candle definition per §3) | PDH/PDL lines appear correctly on a live NQ chart, on 1m/5m/15m |
-| 2 | ORB box + High/Low lines, live-growing and locking at 09:30 ET, extending only through 16:00 ET per §5/§7 | ORB box forms correctly during a live or replayed 08:30–09:30 ET window; boundary lines stop at 16:00 ET |
-| 3 | ORB optional midpoint toggle | Midpoint line appears only when enabled, styled distinctly from boundary lines |
-| 4 | Asia session box + High/Low, 16:00 ET line termination | Asia box forms across the correct overnight ET window |
-| 5 | London session box + High/Low | London box forms correctly, including the transition boundary into ORB |
-| 6 | Hourly High/Low as **lines only** (no box), rolling retention default 2 completed + live current (§8) | Hourly line pairs roll off correctly; default state shows current + 2 completed, no box or fill anywhere |
-| 7 | Session history retention (§6: default 3 completed per type, 1–5 configurable, older instances faded) + full settings/inputs panel (§12) | Retention depth and fading render correctly at default and at min/max settings; every toggle/color/width input works as documented; no orphaned objects when toggled off |
-| 8 | Timeframe precision range 1m–15m + auto-suppression above 15m (§15) + DST verification (§16) + full acceptance pass (§17, all 12 cases) | All twelve acceptance cases pass; Pedro signs off on V1 as complete |
-
-No phase after 0 begins implementation without this specification being approved first, and no phase after its own number begins without that phase's visual check being explicitly approved by Pedro.
+| 0 | *(not a code commit)* Phase 0 visual mock reviewed and approved | — |
+| 1 | `Add Market Map V1 skeleton (PDH/PDL only)` | File creation, input scaffold, object-limit declaration, PDH/PDL only |
+| 2 | `Add ORB box, levels, and optional midpoint` | ORH/ORL/ORM, ORB box, fixed 08:30–09:30 ET default |
+| 3 | `Add Asia session box and levels` | ASH/ASL, Asia box |
+| 4 | `Add London session box and levels` | LH/LL, London box |
+| 5 | `Add New York session box` | NY box only (no NY H/L level, §3) |
+| 6 | `Add Hourly High/Low (most recent completed hour)` | 1H H/1H L per the §6 definition |
+| 7 | `Add full settings/toggle surface` | Per-level/per-box toggles, label master switch, line/box style groups, session-time configurability |
+| 8 | `Add historical retention and line-lifetime behavior` | §10 default + 1–3 config, §9 line-lifetime modes |
+| 9 | `Validation pass` | Full §13 checklist executed on NQ and MNQ; DST and replay checks; Pedro signs off on V1 as complete |
 
 ---
 
-## Final resolved decisions (2026-07-19)
+## Summary: what still needs Pedro's decision
 
-All seven items originally listed as open in the first draft are now resolved:
+**Final, no further approval needed:**
+- ORB window (08:30–09:30 ET default).
+- The eleven key levels and their exact label text (§3).
+- Four session boxes including the new New York box (§4).
+- Hourly High/Low = single most-recently-completed hourly candle, non-repainting (§6).
+- Per-level and per-box independent visibility toggles (§9).
+- NQ/MNQ as the primary validation instruments (§15).
+- The exclusion list (§1) and all development-safety boundaries (§16 below).
 
-1. **§2** — ET-anchoring for all session windows, regardless of viewer timezone. **Approved.**
-2. **§3** — PDH/PDL definition: previous **completed exchange-defined daily futures candle**, not a custom ET-midnight aggregation. **Approved, corrected.**
-3. **§4** — Live-growing boxes/levels for all windowed types. **Approved.**
-4. **§6** — Retention depth: **3 completed instances per session type by default (1–5 configurable), older instances faded**, not single-most-recent. **Approved, corrected.**
-5. **§8** — Hourly High/Low is **lines only, no boxes**; retention default **2 completed + live current (1–3 configurable)**, not a box-based N-up-to-6 scope. **Approved, corrected.**
-6. **§15** — Timeframe support: **full session/hourly precision on 1m/3m/5m/15m only, auto-suppressed above 15m**; PDH/PDL works on all intraday timeframes. **Approved, corrected** (replaces the original 4H-cutoff proposal).
-7. **§5** (added during correction) — Session boundary lines extend only **through 16:00 ET**, not indefinitely until the next occurrence. **Approved, corrected.**
+**Proposed, awaiting Pedro's approval:**
+1. Asia, London, New York default session times (§4) — the table's values, or Pedro's preferred alternative.
+2. Timezone/session-input mechanism — `input.session()` + timezone string vs. plain hour/minute inputs (§5).
+3. Default colors and the New York color family specifically (§8) — locked at the Phase 0 mock, not here.
+4. Historical retention default — current-session-only (depth 1), configurable 1–3 (§10).
+5. Line-lifetime default — extend-through-NY-close vs. stop-at-session-end (§9).
+6. Proposed Pine filename and indicator title (§2).
+7. The proposed small-commit sequence itself (above) — order and grouping.
 
-## Still pending Pedro's visual approval
+**Deferred, not built in V1 unless Pedro un-defers it (§14):**
+- Continuation-until-touched line behavior.
+- Fully independent per-label toggles beyond the per-level/master-switch model.
+- Retention depth beyond 3, or any non-bounded lookback mode.
 
-Only one item remains open, and it is a visual-design step, not a behavioral one:
+---
 
-- **§10** — The approved-direction color/line-style/label table (purple Asia, blue London, amber/orange ORB more prominent, neutral dashed PDH/PDL, dim teal dotted Hourly, dim amber dotted ORB midpoint, transparent subtle session fills, compact right-edge labels) sets the palette *direction* Pedro confirmed, but exact hex values, precise transparency percentages, and final label text are not yet locked. This is resolved at **Phase 0** (§19) — a rendered mock against a real chart screenshot, reviewed and approved before any Pine is written.
+## Development safety boundaries (unchanged, restated)
 
-Nothing in this document authorizes Pine implementation. Phase 0 (style mock review) is the very next step, and only after Pedro separately approves that mock.
+This is a fresh, standalone visual indicator. It does not reuse or copy logic from the archived ORB signal engine, PROS, ICT, IB, the legacy execution indicator, the canonical BUY/SELL state, the old scoring system, old webhook logic, or old bridge logic — and it is never connected to NOVA execution.
+
+This specification revision touches **only** `nova_knowledge_core/MARKET_MAP_V1_SPECIFICATION.md`. It does not modify, and no future Market Map V1 work will modify without a separate explicit request: Journal, Market/News, NOVA Assistant, broker code, execution code, risk logic, existing historical data, Alerts, the retired trading subsystem, the live TradingView cloud script, the existing archived Pine indicator (`indicators/nova_execution_v1.pine`), the pre-existing Phase 8 `main.py` diff, or the `mcp/tradingview` submodule pointer. No live TradingView automation is used. All work stays local until Pedro manually reviews and approves deployment; nothing is pushed.
+
+Nothing in this document authorizes Pine implementation. Phase 0 (style mock review) is the next step, and only after Pedro approves this specification as a whole.
