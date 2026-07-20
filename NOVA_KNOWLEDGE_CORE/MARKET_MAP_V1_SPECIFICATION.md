@@ -6,7 +6,8 @@ Status: **Specification only. No Pine code exists yet.** This document defines w
 **Revision history:**
 - **2026-07-19, draft 1** (commit `8c88781`): initial specification.
 - **2026-07-19, draft 2** (commit `df13725`): seven corrections — PDH/PDL as exchange daily candle, 3-session retention, hourly-as-lines, category label toggles, 1m–15m timeframe range, 16:00 ET line-lifetime rule.
-- **2026-07-19, draft 3 (this revision):** Pedro finalized a fuller scope after reviewing a reference image and draft 2. **This draft supersedes drafts 1 and 2 wherever they conflict.** Commits `8c88781` and `df13725` remain in git history unamended — they are superseded, not erased. Major changes in this draft: a fourth session box (New York) is added; Hourly High/Low is redefined a second time, now to the single most-recently-**completed** hourly candle (not live-growing, not a multi-instance retention list — draft 2's "lines only, current + N completed" model is replaced); Pedro's exact label text is now locked (`PDH`, `PDL`, `ASH`, `ASL`, `LH`, `LL`, `1H H`, `1H L`, `ORH`, `ORL`, `ORM`); every major level and every session box gets its own independent visibility toggle (this supersedes draft 2's "three category toggles only" label-simplification correction — that correction was about *labels specifically*, and still stands for labels, but level/box *visibility* now requires per-object toggles); session times (Asia/London/New York) become user-configurable inputs with proposed-but-not-yet-approved defaults, rather than silently inherited NOVA convention; session history retention depth (draft 2's "3 completed, faded") is reopened as a proposed-not-final default; line-lifetime (draft 2's fixed "always through 16:00 ET") becomes a configurable choice with a proposed default; NQ/MNQ are named the primary validation instruments (ES/MES compatibility may remain possible but is not the validation target); and a reference image Pedro shared governs visual neatness/layout impression only — never exact colors, branding, or any strategy element.
+- **2026-07-19, draft 3** (commit `40575c2`): Pedro finalized a fuller scope after reviewing a reference image and draft 2 — added the New York session box, redefined Hourly High/Low to the single most-recently-completed candle, locked exact label text, restored per-level/per-box independent visibility toggles, reopened session-time/retention/line-lifetime defaults as proposals, named NQ/MNQ primary validation.
+- **2026-07-19, draft 4 (this revision):** Pedro approved draft 3 in full, including every item draft 3 had listed as "proposed, awaiting approval" — Asia/London/New York default times, the `input.session()` + `America/New_York` mechanism, the current-session-default 1–3 retention range, the extend-through-NY-close default line-lifetime behavior, the filename/title, and the small-commit sequence. All of those move from PROPOSED to FINAL in this revision (§2, §4, §5, §9, §10). Two new requirements are added on top of the now-approved draft 3 baseline: (1) **customizable colors** — every level family and every session box gets a user-configurable color input from TradingView's settings, with Asia/London/ORB using one coordinated family color each (box + lines + labels together) rather than separate colors per High/Low, while PDH/PDL and Hourly keep independent colors and New York keeps its single box-only color; transparency stays independently configurable so color choice never overpowers the chart; no per-historical-instance colors — retained instances just fade automatically (§8, §9); (2) **compact level presentation** — a second reference image clarifies the desired label style: thin lines, short labels positioned directly beside/below the line (never far away, never a large background block, never repeated along the same line), price candles remaining the visual focus, and an explicit note that the image's "AS.L"-style abbreviation is a neatness reference only — the locked label text stays exactly `ASL` (§3, §12). **This draft supersedes drafts 1–3 wherever they conflict.** Commits `8c88781`, `df13725`, and `40575c2` remain in git history unamended — superseded, not erased.
 
 ---
 
@@ -35,9 +36,9 @@ It runs as a completely standalone `//@version=6 indicator(...)` script with zer
 
 ---
 
-## 2. Proposed Pine file name
+## 2. Pine file name
 
-**PROPOSED:** `indicators/nova_market_map_v1.pine`, matching the existing convention (`indicators/nova_execution_v1.pine`). Declared indicator title inside the file: `"NOVA Market Map V1"` (overlay indicator, not a strategy — `indicator(...)`, never `strategy(...)`).
+**FINAL (approved 2026-07-19):** `indicators/nova_market_map_v1.pine`, matching the existing convention (`indicators/nova_execution_v1.pine`). Declared indicator title inside the file: `"NOVA Market Map V1"` (overlay indicator, not a strategy — `indicator(...)`, never `strategy(...)`).
 
 This file does not exist yet and will not be created until Pedro approves this specification and, separately, the Phase 0 visual mock (§13).
 
@@ -61,6 +62,16 @@ This file does not exist yet and will not be created until Pedro approves this s
 
 No other level exists in V1. In particular, **there is no separate New York High/Low level** — New York is a session **box** only (§4); Pedro's key-level list does not include NY High/Low, and none is added here.
 
+**Compact level presentation (FINAL, added this revision):** a second reference image Pedro shared clarifies the desired label style, used for visual neatness only — never for branding, watermark, promotional content, or unrelated chart elements. Each level is presented as a thin, clean horizontal line with a short label positioned **directly beside or just below the line** — never far away from it. Specifically:
+
+- No large label background block.
+- No large text block or verbose description.
+- No label positioned far from its level.
+- No repeated labels along the same line (one label per level instance, not one per bar).
+- Price candles remain the visual focus at all times — levels are reference lines, not the foreground.
+
+**Label text clarification:** the reference image's small `"AS.L"`-style abbreviation is a **style reference only**, illustrating compactness. It does not change the locked label text from §3's table above — the actual label stays exactly `ASL` (and likewise every other label stays exactly as specified: `PDH`, `PDL`, `ASH`, `LH`, `LL`, `1H H`, `1H L`, `ORH`, `ORL`, `ORM`). Compact does not mean abbreviated further or reformatted — it means small, close to the line, and free of clutter.
+
 ---
 
 ## 4. Session boxes
@@ -69,22 +80,22 @@ No other level exists in V1. In particular, **there is no separate New York High
 
 **FINAL — ORB window:** 08:30–09:30 AM Eastern, fixed as the default. This is explicitly restated as final per Pedro's direct instruction, not merely proposed.
 
-**PROPOSED — Asia, London, New York windows.** Per Pedro's explicit instruction not to silently carry old NOVA session definitions into this new, independent indicator, the times below are presented as a starting proposal, most of them (Asia/London) drawn from the existing convention in `core/config.py::session_label()` for consistency with the rest of the product, but requiring Pedro's fresh, explicit approval here rather than being assumed:
+**FINAL — Asia, London, New York windows (approved 2026-07-19).** Draft 3 presented these as a proposal rather than silently carrying old NOVA session definitions into this new, independent indicator; Pedro has now explicitly reviewed and approved all three as final defaults:
 
-| Session | Proposed default window (ET) | Basis for the proposal |
+| Session | Default window (ET) | Basis |
 |---|---|---|
-| Asia | 19:00 – 03:00 | Matches `core/config.py::session_label()`'s existing `ASIA` window — proposed for consistency, not silently assumed. |
-| London | 03:00 – 09:30 | Matches `core/config.py::session_label()`'s existing `LONDON` window — proposed for consistency, not silently assumed. |
-| New York | 09:30 – 16:00 | New box, not present in draft 1/2. Matches `core/config.py::session_label()`'s `NEW_YORK_CASH` window (regular futures/equity trading hours) — proposed as the standard, recognizable "NY session" definition. |
-| ORB | 08:30 – 09:30 | **FINAL**, see above. |
+| Asia | 19:00 – 03:00 | Matches `core/config.py::session_label()`'s existing `ASIA` window. |
+| London | 03:00 – 09:30 | Matches `core/config.py::session_label()`'s existing `LONDON` window. |
+| New York | 09:30 – 16:00 | Matches `core/config.py::session_label()`'s `NEW_YORK_CASH` window (regular futures/equity trading hours). |
+| ORB | 08:30 – 09:30 | Fixed, see above. |
 
-All four windows are **user-configurable inputs** (§9) — the table above is only the shipped default. Pedro can change any of the three proposed windows at approval time, or leave them as proposed, or change them later via the indicator's own settings without needing a new specification.
+All four windows remain **user-configurable inputs** (§9) — the table above is the approved shipped default, not a hardcoded constant. Pedro can still change any of them later via the indicator's own settings without needing a new specification.
 
 ---
 
 ## 5. Timezone behavior
 
-**PROPOSED implementation approach:** a single `input.string` (or equivalent) timezone setting, default `"America/New_York"`, applied to every session/level calculation. Session windows themselves use Pine's native `input.session()` type (TradingView's built-in session-picker widget, producing a `"HHMM-HHMM"` string) paired with `time(timeframe, session, timezone)` — this is idiomatic, safe Pine, gives Pedro a real UI picker rather than four separate hour/minute number inputs, and inherits DST handling automatically from the platform (§11) with zero custom offset math. This is a build-approach proposal, not a locked requirement — an equivalent `input.int` hour/minute pair per session would also satisfy "configurable," but the session-picker approach is recommended as cleaner and less error-prone for Pedro to adjust from the settings menu.
+**FINAL (approved 2026-07-19):** session windows use Pine's native `input.session()` type (TradingView's built-in session-picker widget, producing a `"HHMM-HHMM"` string) paired with `time(timeframe, session, timezone)`, alongside a single timezone setting defaulting to `"America/New_York"`, applied to every session/level calculation. This is idiomatic, safe Pine — it gives Pedro a real UI picker rather than separate hour/minute number inputs per session, and inherits DST handling automatically from the platform (§11) with zero custom offset math.
 
 Regardless of which input mechanism is used, the timezone is never hardcoded to a fixed UTC offset — always resolved through Pine's timezone-aware time functions against the configured timezone string, which is what makes daylight-saving handling automatic (§11).
 
@@ -113,28 +124,55 @@ If Pedro would prefer a different non-repainting definition (e.g., a rolling N-h
 
 ---
 
-## 8. Box creation method
+## 8. Box creation method, and customizable colors
 
-**PROPOSED:** each of the four session boxes (Asia, London, New York, ORB) uses one persistent `box.new(...)` object per box type, updated in place via `box.set_top` / `box.set_bottom` / `box.set_right` while its window is live, rather than deleted-and-recreated every bar (avoids unnecessary object churn and flicker). Box fill is light and transparent by default; border is thin and subtle. Boxes are never filled solid and never visually dominate price action.
+**PROPOSED implementation:** each of the four session boxes (Asia, London, New York, ORB) uses one persistent `box.new(...)` object per box type, updated in place via `box.set_top` / `box.set_bottom` / `box.set_right` while its window is live, rather than deleted-and-recreated every bar (avoids unnecessary object churn and flicker). Box fill is light and transparent by default; border is thin and subtle. Boxes are never filled solid and never visually dominate price action.
 
-**Default colors and transparency (PROPOSED — style-direction only, exact hex/percentages pending the Phase 0 mock, §13):**
+### Customizable colors (FINAL requirement, added this revision)
 
-| Session/level family | Color direction | Notes |
+Every major level family and every session box must have a user-configurable color, changeable from TradingView's indicator settings without editing Pine code. Colors are **coordinated by family**, not assigned one-by-one to every individual line — this is a deliberate simplification Pedro requested after reviewing draft 3's per-level color list:
+
+| Family | Single color input controls | Rationale |
 |---|---|---|
-| Asia | Purple | Box + High/Low lines |
-| London | Blue | Box + High/Low lines |
-| New York | Muted green (working proposal — needs Pedro's confirmation; chosen to be clearly distinct from Asia/London/ORB without implying "bullish," but this is exactly the kind of choice the Phase 0 mock exists to validate) | Box only (no NY H/L level exists, §3) |
-| ORB | Orange/amber, slightly more visually prominent than the other three (most-referenced level) | Box + High/Low lines + optional midpoint (dimmer amber, dotted) |
-| PDH / PDL | Neutral gray/white, dashed | Line only, no box |
-| 1H H / 1H L | Dim teal, dotted, thin — visually subordinate to every other level | Line only, no box |
+| **Asia** | Asia box + `ASH` line + `ASL` line + `ASH` label + `ASL` label | Asia High and Asia Low belong to one session's visual family — no separate ASH-vs-ASL color. |
+| **London** | London box + `LH` line + `LL` line + `LH` label + `LL` label | Same reasoning — no separate LH-vs-LL color. |
+| **ORB** | ORB box + `ORH` + `ORL` + `ORM` (lines and labels) | ORB stays its own coordinated family, per Pedro's explicit instruction. |
+| **New York** | New York box only | Box-only family — no NY High/Low level exists (§3), so there's nothing else to coordinate. |
+| **PDH** | `PDH` line + label | Independent — no box to coordinate with. |
+| **PDL** | `PDL` line + label | Independent — no box to coordinate with. |
+| **Hourly High** | `1H H` line + label | Independent — no box to coordinate with. |
+| **Hourly Low** | `1H L` line + label | Independent — no box to coordinate with. |
 
-Historical retained instances (§10), if any beyond the current one, render in a dimmer/lower-opacity variant of their base color, consistent with the general "recede with age" visual hierarchy from draft 2.
+This yields **8 color inputs total** (Asia, London, ORB, New York, PDH, PDL, Hourly High, Hourly Low) rather than the 15 that a fully individual per-line/per-box color scheme would require — simpler settings menu, same practical control, and it guarantees a session's box and its levels always visually match without Pedro having to manually keep them in sync.
+
+**If Pedro changes a family color** (e.g., Asia) in TradingView's settings, every associated element (box, both lines, both labels) updates automatically to match — this is a single shared color variable feeding every draw call for that family, not four independently-set colors that happen to start equal.
+
+**Labels normally inherit their level's color** (FINAL default, refinable at the Phase 0 mock): a label is drawn in the same color as its line by default. If a neutral, single-color label scheme looks visually cleaner once mocked up against a real chart, that's a legitimate Phase 0 adjustment — but it is not assumed here; color-matched labels are the shipped default.
+
+**Transparency is independently configurable**, separate from color/hue (FINAL): each box has its own transparency input, so selecting a bold color for a family doesn't force the box to overpower the chart — the color controls hue, transparency controls how lightly shaded the box appears. Line color has no separate transparency control (lines are drawn at full opacity, thin and clean, per §12); only boxes need the fill-transparency knob.
+
+**No per-historical-instance colors** (FINAL): retained historical instances of a family (§10) always use that family's one selected color — there is no separate color picker per retained instance. Older instances are simply rendered at lower opacity/faded automatically, exactly as already specified — color choice and "how faded" are two different, non-overlapping controls.
+
+**Default color direction (PROPOSED — style-direction only, exact hex/percentages pending the Phase 0 mock, §13):**
+
+| Family | Color direction | Elements it covers |
+|---|---|---|
+| Asia | Purple | Box + `ASH`/`ASL` lines and labels |
+| London | Blue | Box + `LH`/`LL` lines and labels |
+| New York | Muted green (working proposal — needs Pedro's confirmation; chosen to be clearly distinct from Asia/London/ORB without implying "bullish," but this is exactly the kind of choice the Phase 0 mock exists to validate) | Box only |
+| ORB | Orange/amber, slightly more visually prominent than the other three (most-referenced level) | Box + `ORH`/`ORL`/`ORM` lines and labels |
+| PDH | Neutral gray/white, dashed | Line + label, no box |
+| PDL | Neutral gray/white, dashed (distinguishable from PDH — exact shade pending Phase 0 mock) | Line + label, no box |
+| Hourly High | Dim teal, dotted, thin — visually subordinate to every other level | Line + label, no box |
+| Hourly Low | Dim teal, dotted, thin (distinguishable from Hourly High — exact shade pending Phase 0 mock) | Line + label, no box |
+
+Historical retained instances (§10), if any beyond the current one, render in a dimmer/lower-opacity variant of their family's selected color, consistent with the general "recede with age" visual hierarchy from draft 2 — unchanged by the customizable-color addition.
 
 ---
 
 ## 9. Settings structure
 
-**FINAL requirement, PROPOSED exact layout.** Every item Pedro listed is included; grouped using the existing project's `group=` input convention (as used in `nova_execution_v1.pine`):
+**FINAL.** Every item Pedro listed is included; grouped using the existing project's `group=` input convention (as used in `nova_execution_v1.pine`):
 
 **Group: Level Visibility** (one independent toggle each, FINAL requirement)
 Show/hide PDH · PDL · Asia High · Asia Low · London High · London Low · Hourly High · Hourly Low · ORB High · ORB Low · ORB Midpoint (default off).
@@ -148,18 +186,27 @@ Show/hide Asia box · London box · New York box · ORB box.
 - Label size (Small/Normal/Large).
 - Label position preference where Pine allows it (right-edge of the line is the default and, practically, closest to Pine's native label-anchoring options).
 
+**Group: Colors** (FINAL, added this revision — see §8 for the full family-coordination model)
+- Asia color (box + `ASH`/`ASL` lines and labels)
+- London color (box + `LH`/`LL` lines and labels)
+- New York color (box only)
+- ORB color (box + `ORH`/`ORL`/`ORM` lines and labels)
+- PDH color
+- PDL color
+- Hourly High color
+- Hourly Low color
+
 **Group: Lines**
-- Line color, per level family (§8 defaults).
 - Line thickness.
 - Line style (solid/dashed/dotted per family, §8 defaults).
-- Line-lifetime behavior — **PROPOSED, reopened from draft 2's hardcoded rule:** a choice between "Extend through end of NY trading day" (proposed default, matches draft 2's approved 16:00 ET behavior) and "Stop at session end" (line freezes at the right edge of its own box, does not extend further). Both are simple, purely time-based visual behaviors.
+- Line-lifetime behavior — **FINAL (approved 2026-07-19):** default is "Extend through end of NY trading day" (matching draft 2's original 16:00 ET behavior); "Stop at session end" (line freezes at the right edge of its own box, does not extend further) is available as the alternate configurable mode. Both are simple, purely time-based visual behaviors.
 - "Continuation until touched" — **DEFERRED**, see §14.
 
 **Group: Boxes**
-Box color, box transparency, border visibility, border thickness, historical box limit (§10).
+Box transparency (independently configurable from color, §8), border visibility, border thickness, historical box limit (§10). Box *color* now lives in the Colors group above, shared with that family's lines/labels rather than set separately per box.
 
-**Group: Session Times**
-Timezone (default `America/New_York`), Asia session time, London session time, New York session time (all §4/§5), ORB time (input exists for configurability, but defaults fixed to 08:30–09:30 ET per the FINAL requirement).
+**Group: Session Times** (FINAL — approved 2026-07-19)
+Timezone (default `America/New_York`), Asia session time (default 19:00–03:00 ET), London session time (default 03:00–09:30 ET), New York session time (default 09:30–16:00 ET) — all via `input.session()` per §5 — plus ORB time (input exists for configurability, but defaults fixed to 08:30–09:30 ET per the FINAL requirement, §4).
 
 No input in any group controls trading behavior, alerts, or strategy — every input is purely visual/display scope, consistent with §1.
 
@@ -167,11 +214,11 @@ No input in any group controls trading behavior, alerts, or strategy — every i
 
 ## 10. Historical lookback behavior
 
-**PROPOSED, reopened from draft 2.** Draft 2 had locked a default of "3 completed sessions per type, 1–5 configurable." Pedro's new instruction explicitly reopens this as a proposal requiring fresh approval, with a strong emphasis on keeping the default chart clean and not showing "weeks of old boxes and labels by default."
+**FINAL (approved 2026-07-19).** Draft 2 had locked a default of "3 completed sessions per type, 1–5 configurable"; draft 3 reopened it as a proposal favoring a cleaner default. Pedro has now approved that tighter proposal as final:
 
-**Recommended default: current session only** — i.e., retention depth of **1** (the live-forming instance, plus the most recently completed instance replacing the prior one on rollover, per session type: Asia, London, New York, ORB independently). This is a tighter default than draft 2 proposed, in direct response to "the default chart should remain clean."
+**Default: current session only** — i.e., retention depth of **1** (the live-forming instance, plus the most recently completed instance replacing the prior one on rollover, per session type: Asia, London, New York, ORB independently).
 
-**Configurable range: 1–3** via a `sessionsToKeep` input per the "Previous 1–3 sessions" option Pedro listed — deliberately narrower than draft 2's 1–5, again favoring a clean default surface; older retained instances (when the setting is raised above 1) render faded per §8.
+**Configurable range: 1–3** via a `sessionsToKeep` input per the "Previous 1–3 sessions" option Pedro listed; older retained instances (when the setting is raised above 1) render faded per §8, using their family's selected color.
 
 **Hourly (`1H H`/`1H L`) has no lookback list at all** — per the redefined §6, it is always exactly one completed hour's value, with no retention concept to configure.
 
@@ -194,14 +241,15 @@ This default must remain useful for TradingView Replay (§11) without accumulati
 
 ## 12. Mobile-readability plan
 
-**FINAL requirements, adapted from draft 2's corrections (still valid) plus Pedro's new per-level toggle requirement:**
+**FINAL requirements, adapted from draft 2's corrections (still valid) plus draft 3's per-level toggle requirement plus this revision's compact-presentation clarification (§3):**
 
-- Labels are compact, exact-text (§3), positioned at the right edge of their line by default.
-- Visibility is layered: per-level/per-box toggles (§9, new, FINAL) give coarse control; the master "show all labels" switch (§9) gives a labels-only override; true per-object label toggles beyond that remain deferred (§14) to avoid a bloated settings menu, per Pedro's own "if this can be done cleanly" framing.
-- **No automatic label-collision engine is built in V1** (carried over from draft 2 and reaffirmed by Pedro's new instruction: "Do not build a complex automatic label-collision engine unless separately approved"). Tightly clustered levels (e.g., ORB Low landing very close to PDL) may still visually converge — documented as an accepted V1 limitation, not a bug.
-- No labels are created repeatedly on every bar — every label is a persistent object, created once per level/instance and updated (`label.set_xy`, `label.set_text`, etc.) rather than recreated, which is also what keeps mobile chart performance smooth (§14).
+- Labels are compact, exact-text (§3), positioned **directly beside or just below** their line — not at an arbitrary distance, and never with a large background block behind them.
+- **Compact does not mean illegible.** Labels must stay small and close to the line while remaining readable at normal mobile zoom — the requirement is "small and near," not "as small/faint as possible." If a compact size renders illegibly on a real phone-sized chart during validation (§13), that's a defect to fix, not an acceptable tradeoff.
+- Visibility is layered: per-level/per-box toggles (§9, FINAL) give coarse control; the master "show all labels" switch (§9) gives a labels-only override; true per-object label toggles beyond that remain deferred (§14) to avoid a bloated settings menu, per Pedro's own "if this can be done cleanly" framing.
+- **No automatic label-collision engine is built in V1** (carried over from draft 2 and reaffirmed by draft 3: "Do not build a complex automatic label-collision engine unless separately approved"). Tightly clustered levels (e.g., ORB Low landing very close to PDL) may still visually converge — documented as an accepted V1 limitation, not a bug.
+- No labels are created repeatedly on every bar and none repeat along the same line (§3) — every label is a persistent object, created once per level/instance and updated (`label.set_xy`, `label.set_text`, etc.) rather than recreated, which is also what keeps mobile chart performance smooth (§14).
 - No dashboard/table overlay (`table.new`) — a dense panel reads badly on mobile and isn't needed for a pure levels map.
-- Minimum 1px line width, visible at TradingView mobile's default rendering — no sub-pixel/hairline styles.
+- Minimum 1px line width, visible at TradingView mobile's default rendering — no sub-pixel/hairline styles. Price candles remain the visual focus at every zoom level (§3).
 
 ---
 
@@ -217,13 +265,15 @@ Once implementation begins, validation covers:
 4. **Exact labels** — every visible label reads exactly `PDH`, `PDL`, `ASH`, `ASL`, `LH`, `LL`, `1H H`, `1H L`, `ORH`, `ORL`, or `ORM` — no variants.
 5. **Independent toggles** — every level and every box can be hidden/shown independently of every other; the master label switch hides labels without hiding lines; no toggle has a side effect on an unrelated element.
 6. **Session-time configurability** — changing the Asia/London/New York/ORB session-time inputs correctly moves the corresponding box/levels; the ORB default remains 08:30–09:30 ET until explicitly changed.
-7. **Historical lookback default** — confirms the proposed default (current session only, §10) renders cleanly with no old-session clutter, and that raising the retention input to 2 or 3 fades older instances correctly and never exceeds the configured cap.
+7. **Historical lookback default** — confirms the approved default (current session only, §10) renders cleanly with no old-session clutter, and that raising the retention input to 2 or 3 fades older instances correctly and never exceeds the configured cap.
 8. **Line-lifetime behavior** — both configurable modes (extend-through-NY-close vs. stop-at-session-end, §9) behave as documented; "continuation until touched" is confirmed absent (deferred, §14).
 9. **No stale objects** — toggling any input off/on, and letting retention rollover happen naturally, leaves no orphaned or duplicate objects and triggers no runtime object-limit errors.
 10. **DST alignment** — historical data spanning a DST transition weekend shows every level type staying aligned to correct wall-clock times before and after.
 11. **Replay accuracy** — TradingView Bar Replay through a full session cycle produces identical results to live/historical viewing.
 12. **NQ/MNQ primary validation** — full checklist run on both NQ and MNQ; ES/MES checked only as a bonus, not blocking sign-off (§15).
 13. **Mobile readability** — labels legible, lines visible, no dashboard/table overlay, on a real mobile device or TradingView's mobile emulation.
+14. **Family color coordination** — changing the Asia color input updates the Asia box, `ASH`, `ASL`, and both their labels together; same for London and ORB; PDH, PDL, Hourly High, Hourly Low, and the New York box each change independently without affecting any other element; no color input has an unintended side effect.
+15. **Compact presentation and exact label text** — every visible label reads exactly the locked text (§3, checklist item 4) with no "AS.L"-style reformatting anywhere; labels sit directly beside/below their line with no large background block and no repetition along the line; candles remain visually dominant over the levels at typical zoom.
 
 ---
 
@@ -239,7 +289,7 @@ None of the above is present in the shipped V1 settings menu unless Pedro explic
 
 ## 15. Limitations imposed by Pine or chart timeframe
 
-- **Session-window precision is only accurate on lower timeframes.** An 08:30 ET ORB boundary (or any session boundary) cannot be reliably reconstructed from coarse bars without lower-timeframe aggregation, which V1 does not build. **PROPOSED, carried over from draft 2:** full session-box and hourly precision on **1m, 3m, 5m, and 15m** charts; auto-suppressed (drawing nothing, never an approximation) above 15m. PDH/PDL is unaffected (reads a single daily candle regardless of chart timeframe) and works on any intraday timeframe.
+- **Session-window precision is only accurate on lower timeframes.** An 08:30 ET ORB boundary (or any session boundary) cannot be reliably reconstructed from coarse bars without lower-timeframe aggregation, which V1 does not build. **FINAL, resolved in draft 2 and unchanged since:** full session-box and hourly precision on **1m, 3m, 5m, and 15m** charts; auto-suppressed (drawing nothing, never an approximation) above 15m. PDH/PDL is unaffected (reads a single daily candle regardless of chart timeframe) and works on any intraday timeframe.
 - **Pine's per-indicator object limits** (`max_lines_count`, `max_labels_count`, `max_boxes_count`) are hard platform caps. V1's design (persistent, updated-not-recreated objects; bounded 1–3 retention; no per-bar object creation) keeps real usage far below reasonable declared limits, but the exact declared numbers are an implementation detail to finalize during Phase 1, not this specification.
 - **NQ/MNQ are the primary validation target (FINAL).** ES/MES compatibility may remain possible since the implementation is symbol-agnostic by construction (no hardcoded ticker/tick-size/contract-multiplier logic), but ES/MES is not part of the V1 acceptance bar and any symbol-specific issue there does not block sign-off.
 - **No automatic label-collision avoidance** (§12) — a Pine/complexity limitation accepted by design, not a bug to fix later within V1's scope.
@@ -258,9 +308,9 @@ No other file is created or modified as part of Market Map V1 — not `ui/html.p
 
 ---
 
-## Proposed small commit sequence (implementation, not yet authorized)
+## Small commit sequence (FINAL — approved 2026-07-19; implementation still gated on the Phase 0 mock)
 
-Each commit is one small, independently visible layer, per "we are developing one clean visual layer at a time." None of these commits happen until Pedro approves this specification and the Phase 0 mock.
+Each commit is one small, independently visible layer, per "we are developing one clean visual layer at a time." Pedro has approved this sequence itself; none of these commits happen until the Phase 0 visual mock is separately reviewed and approved.
 
 | # | Commit | Adds |
 |---|---|---|
@@ -279,23 +329,23 @@ Each commit is one small, independently visible layer, per "we are developing on
 
 ## Summary: what still needs Pedro's decision
 
-**Final, no further approval needed:**
-- ORB window (08:30–09:30 ET default).
-- The eleven key levels and their exact label text (§3).
-- Four session boxes including the new New York box (§4).
+**Final, no further approval needed (as of this revision, 2026-07-19):**
+- ORB window (08:30–09:30 ET default) and Asia/London/New York default windows (§4).
+- The eleven key levels and their exact label text, plus the compact-presentation rules and the "AS.L" clarification (§3).
+- Four session boxes including the New York box (§4).
 - Hourly High/Low = single most-recently-completed hourly candle, non-repainting (§6).
 - Per-level and per-box independent visibility toggles (§9).
+- `input.session()` + `America/New_York`-default timezone as the session-input mechanism (§5).
+- Historical retention default — current-session-only (depth 1), configurable 1–3 (§10).
+- Line-lifetime default — extend-through-NY-close, with stop-at-session-end available (§9).
+- Pine filename (`indicators/nova_market_map_v1.pine`) and indicator title (`"NOVA Market Map V1"`) (§2).
+- The small-commit sequence (above).
+- **Customizable colors, structurally** (added this revision): every level family and session box has a user-configurable color; Asia/London/ORB are single coordinated families (box + lines + labels together); PDH, PDL, Hourly High, Hourly Low, and New York each get their own independent color; transparency is independently configurable from color; no per-historical-instance colors (§8, §9).
 - NQ/MNQ as the primary validation instruments (§15).
-- The exclusion list (§1) and all development-safety boundaries (§16 below).
+- The exclusion list (§1) and all development-safety boundaries (below).
 
-**Proposed, awaiting Pedro's approval:**
-1. Asia, London, New York default session times (§4) — the table's values, or Pedro's preferred alternative.
-2. Timezone/session-input mechanism — `input.session()` + timezone string vs. plain hour/minute inputs (§5).
-3. Default colors and the New York color family specifically (§8) — locked at the Phase 0 mock, not here.
-4. Historical retention default — current-session-only (depth 1), configurable 1–3 (§10).
-5. Line-lifetime default — extend-through-NY-close vs. stop-at-session-end (§9).
-6. Proposed Pine filename and indicator title (§2).
-7. The proposed small-commit sequence itself (above) — order and grouping.
+**Proposed, still awaiting Pedro's approval — narrowed to exactly one category:**
+1. **Exact color values** (§8) — the specific hex/percentage defaults for each of the 8 color families (Asia, London, ORB, New York, PDH, PDL, Hourly High, Hourly Low), and whether labels stay color-matched to their line or use a simpler neutral scheme. This locks at the Phase 0 visual mock, not in this document — the *structure* of the color system is final; the *exact values* are not.
 
 **Deferred, not built in V1 unless Pedro un-defers it (§14):**
 - Continuation-until-touched line behavior.
