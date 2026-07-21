@@ -129,7 +129,7 @@ intelligence/
 ├── envelope.py            # shared response envelope dataclass/schema (§11)
 ├── errors.py              # error_code enum + controlled-error construction (§9)
 ├── budget.py              # daily request count + estimated-cost ceiling + circuit breaker + persistent state (§8, §8.1)
-├── cache.py               # input-hash response cache, per-feature TTL (§8.6-8.7)
+├── cache.py               # input-hash response cache, per-feature TTL (§8's #6-#7)
 ├── audit.py               # usage/observability logging, secret-safe (§12)
 ├── model_registry.py      # reviewed table of supported model IDs + per-token pricing (§8.2)
 ├── providers/
@@ -153,7 +153,7 @@ V1 contains **exactly one** provider adapter. There is no `grok_adapter.py`, pre
 | `registry.py` | A single dict/table mapping each of the three V1 feature names to its prompt template module, its input/output schema, its `max_tokens`, its cache TTL, and its timeout — the one place a new feature is "turned on." |
 | `envelope.py` | Defines the shared response shape (§11) every gateway call returns, success or failure. |
 | `errors.py` | Defines the fixed `error_code` vocabulary (§9) and maps provider-specific exceptions to it — the only place that translates "Anthropic raised X" into "NOVA means Y." |
-| `budget.py` | Daily request counter and estimated-cost ceiling (§8.8-8.9), backed by the **persistent** daily-usage state defined in §8.1 (not the in-memory cache — a process restart must not reset today's count), plus the circuit breaker (§8.10). Provider-agnostic, keyed by feature and by day. |
+| `budget.py` | Daily request counter and estimated-cost ceiling (§8's #8-#9), backed by the **persistent** daily-usage state defined in §8.1 (not the in-memory cache — a process restart must not reset today's count), plus the circuit breaker (§8's #10). Performs the atomic pre-call budget reservation described in §8.3 — checking only already-accrued spend is not sufficient, since it does not guarantee the *next* request stays under budget. Provider-agnostic, keyed by feature and by day. |
 | `cache.py` | Input-hash keyed **response** cache (hash of feature + normalized input_data), reusing the existing `core.config.CACHE`/`cache_get`/`cache_set` TTL pattern already used elsewhere in the codebase. This cache is intentionally ephemeral — losing cached responses on restart is acceptable (§8.1 note) — and is a separate concern from `budget.py`'s persistent counters. |
 | `audit.py` | Writes the observability log (§12) to a new `nova_intelligence_usage_log.json`-style file, following the existing `_data_file()` naming convention in `core/config.py`. |
 | `model_registry.py` | A reviewed, manually-maintained table mapping supported `NOVA_AI_MODEL` values to their per-token input/output pricing, used by `budget.py` to compute `estimated_cost_usd`. See §8.2 (fail-closed behavior for unregistered models). |
@@ -206,9 +206,10 @@ Returns the response envelope (§11) — always, on both success and failure. Th
 | 5 | No-retry errors | Billing, authentication, quota/rate-limit errors never retry | Retrying a billing failure just wastes another attempt on a request that cannot succeed — matches the real incident documented in `tests/test_nova_review.py` (Anthropic credit exhaustion). |
 | 6 | Response caching | Input-hash keyed, per §6.1's `cache.py` | Reuses `core.config.CACHE` pattern — ephemeral, restart-safe to lose (§8.1). |
 | 7 | Cache duration by feature | Assistant: **no cache** (conversational, each message is distinct) · Journal Review: **24 hours** (§13 decision 6 — a trade's facts don't change) · Market Summary: **30 minutes** (§13 decision 7) | Both durations are FINAL, not ranges. |
-| 8 | Daily request limit | **20 total paid requests per day, across all three V1 features combined** (§13 decision 4) | Not per-feature — one shared daily counter. |
-| 9 | Daily estimated-cost ceiling | **$0.25 USD per day** (§13 decision 5) | Computed from each response's reported token usage × the active provider's per-token rate, looked up in `model_registry.py` (§8.2) — not fetched live. |
-| 9a | Budget-exceeded behavior | When **either** the daily request limit (#8) **or** the daily cost ceiling (#9) is reached, the gateway returns `BUDGET_EXCEEDED` (§9) **without calling the provider** | Whichever limit trips first wins; checked before every paid call, using the persistent state in §8.1. |
+| 8 | Daily request limit | **20 total provider attempts per day, across all three V1 features combined** (§13 decision 4) | Not per-feature — one shared daily counter. Counts **provider attempts**, not user-visible requests: a cache hit (row #6) makes zero provider calls and never counts; a retry (row #4) is itself a second provider attempt and counts separately from the initial attempt. Enforced via the pre-call reservation in §8.3, not a post-hoc count. |
+| 9 | Daily estimated-cost ceiling | **$0.25 USD per day** (§13 decision 5) | Computed from each response's reported token usage × the active provider's per-token rate, looked up in `model_registry.py` (§8.2) — not fetched live. Enforced via the pre-call reservation in §8.3 using a worst-case *projected* cost, not just already-settled spend, since checking only accrued cost cannot guarantee the next request stays under the ceiling. |
+| 9a | Budget-exceeded behavior | When **either** the daily request limit (#8) **or** the daily cost ceiling (#9) would be exceeded by reserving this request's worst-case attempt count and cost, the gateway returns `BUDGET_EXCEEDED` (§9) **without calling the provider** | Whichever limit trips first wins; checked and reserved atomically, under a single lock, before every paid call (§8.3) — never a check followed by a separate, unlocked reservation step. |
+| 9b | Budget-state failure behavior | If the persistent budget state (§8.1) is corrupt, unreadable, or its lock cannot be acquired, the gateway returns `BUDGET_STATE_UNAVAILABLE` (§9) **without calling the provider** | Fails closed. Never silently resets the daily counters and never proceeds as if budget were unlimited just because the tracking mechanism itself failed (§8.3). |
 | 10 | Circuit breaker | 3 consecutive failures for the same feature within 5 minutes trips the breaker for that feature for 15 minutes, returning a controlled error immediately without attempting the provider | Prevents hammering a down/exhausted provider. |
 | 11 | No background AI calls by default | FINAL, matches §3's "user-initiated only" requirement for all three features | |
 | 12 | Every paid request traceable to a visible user action or explicitly approved schedule | FINAL | No feature may originate a gateway call from a passive page-load or polling loop. |
@@ -218,24 +219,52 @@ Returns the response envelope (§11) — always, on both success and failure. Th
 
 ### 8.1 Durable daily budget state (FINAL)
 
-The daily request counter and estimated-cost ceiling (#8, #9, #9a above) **must not** rely solely on the existing in-memory `core.config.CACHE` — an application restart (deploy, crash, manual restart) would silently reset the count to zero and reopen the budget mid-day, defeating the ceiling entirely.
+The daily request counter and estimated-cost ceiling (#8, #9, #9a, #9b above) **must not** rely solely on the existing in-memory `core.config.CACHE` — an application restart (deploy, crash, manual restart) would silently reset the count to zero and reopen the budget mid-day, defeating the ceiling entirely.
 
 `budget.py` instead maintains a small **persistent** daily-usage state file inside NOVA's existing configured data directory (following the `_data_file()` convention already used throughout `core/config.py`, e.g. `data/nova_intelligence_budget.json`), with:
 
 - **Atomic writes** — write to a temp file and rename, never a partial in-place write, consistent with how other NOVA state files avoid torn writes.
-- **Date-based reset** — the stored record is keyed by date (e.g. `"2026-07-20"`); the first request of a new day finds no matching key and starts both counters at zero, rather than requiring a separate scheduled reset job.
-- **Safe locking appropriate for the current deployment** — NOVA today is a single-process local/Render deployment per feature (§ system architecture in `CLAUDE.md`), so a simple file-lock or atomic-rename-based guard is sufficient; this is not designed for concurrent multi-process writers.
-- **No prompts, responses, API keys, or private Journal content** — the persisted record contains only: date, request count, and estimated cost accrued so far. Nothing else.
+- **Date-based reset** — the stored record is keyed by date (e.g. `"2026-07-20"`); the first request of a new day finds no matching key and starts all counters at zero, rather than requiring a separate scheduled reset job.
+- **Safe locking appropriate for the current deployment** — NOVA today is a single-process local/Render deployment per feature (§ system architecture in `CLAUDE.md`), so a simple file-lock or atomic-rename-based guard is sufficient; this is not designed for concurrent multi-process writers. The lock guards the read-check-reserve sequence in §8.3 as a single atomic unit, not just the write.
+- **No prompts, responses, API keys, or private Journal content** — the persisted record contains only: date, `request_count` (settled provider attempts today), `accrued_cost` (settled actual/worst-case-settled cost today), `reserved_count` (in-flight provider attempts not yet settled), and `reserved_cost` (in-flight worst-case cost not yet settled). See §8.3 for how reservation and settlement move values between these fields. Nothing else is stored.
 
 **External hard backstop:** the provider's own workspace/monthly spend limit (configured directly in the Anthropic console, outside NOVA) must also be documented and set as the true hard backstop. NOVA's $0.25/day application-level ceiling is a **safeguard implemented in NOVA's own code**, not a guarantee against every possible process failure (e.g., a bug in `budget.py` itself, or a corrupted state file bypassing the check). Pedro should set a corresponding monthly cap directly with the provider as defense in depth.
 
-Response caching (`cache.py`, #6-#7 above) is **not** held to this durability requirement — losing cached responses on restart only costs a few redundant paid calls at worst, not a silent budget blowout, so it may continue using the existing ephemeral `CACHE` pattern unchanged.
+Response caching (`cache.py`, #6-#7 above) is **not** held to this durability requirement — losing cached responses on restart only costs a few redundant paid calls at worst, not a silent budget blowout, so it may continue using the existing ephemeral `CACHE` pattern unchanged. A cache hit also never touches the budget state at all (§8.3) — it isn't a provider attempt.
 
 ### 8.2 Supported-model budget safety (FINAL)
 
 The cost calculator in `budget.py` computes `estimated_cost_usd` by looking up the configured `NOVA_AI_MODEL` in `model_registry.py` — a small, manually reviewed table of supported model IDs and their published per-token input/output pricing.
 
 **If `NOVA_AI_MODEL` is set to a model with no entry in `model_registry.py`, the gateway must fail closed**: every paid request returns `error_code: MODEL_NOT_SUPPORTED` (§9) rather than silently proceeding without a cost estimate. An unregistered model must never be allowed to bypass the daily cost ceiling (§8's #9) simply because its price is unknown — "unknown cost" is treated as "cannot verify the budget is respected," not as "assume zero."
+
+### 8.3 Pre-call budget reservation and atomicity (FINAL)
+
+Checking only the already-*accrued* daily cost (§8.1) is not sufficient — it tells you what has already happened, not whether the *next* request will stay under the $0.25 ceiling once it completes. `budget.py` therefore reserves the request's worst-case cost and attempt count **before** calling the provider, not just afterward:
+
+1. **Normalize and validate the bounded input** — the existing input-size guard (§8's #2) runs first, so the reservation estimate is computed from a bounded prompt, not an unbounded one.
+2. **Estimate the request's maximum possible cost**, using:
+   - the bounded estimated input tokens (from step 1),
+   - the feature's maximum output-token allowance (§8's #1), and
+   - the registered price for `NOVA_AI_MODEL` in `model_registry.py` (§8.2) — if the model is unregistered, this step itself fails closed with `MODEL_NOT_SUPPORTED` before any reservation is attempted.
+   - If the request's retry policy (§8's #4) permits one controlled retry, the projection accounts for **up to two provider attempts** (the initial call plus one retry), since a retry is itself a second billable attempt, not a free redo.
+3. **Under a single atomic lock on the persistent budget-state file (§8.1)**:
+   - re-read the current persisted state fresh (`request_count`, `accrued_cost`, `reserved_count`, `reserved_cost`) — never trust a stale in-memory copy, so two simultaneous requests cannot both check against the same remaining budget and both pass;
+   - verify `request_count + reserved_count + (this request's up-to-2 attempts)` remains within the daily limit of 20 (§8's #8);
+   - verify `accrued_cost + reserved_cost + (this request's projected max cost)` remains within $0.25 (§8's #9);
+   - if either check would be exceeded, release the lock and return `BUDGET_EXCEEDED` (§9's #9a) **without calling the provider**;
+   - otherwise, add this request's projected attempt count and projected max cost into `reserved_count` / `reserved_cost`, persist atomically, and release the lock. This reservation is now "in flight."
+4. **Call the provider** (the initial attempt, and the single retry per §8's #4 if it's needed and was already accounted for in step 2's projection).
+5. **After the response** (success, or a final failure after retry is exhausted): under the same lock, remove this request's reservation from `reserved_count`/`reserved_cost` and settle the real outcome into `request_count`/`accrued_cost`:
+   - if the provider reported actual token usage, settle using the **real** cost computed from that usage and the **real** number of attempts actually made (1 or 2);
+   - persist the corrected totals atomically.
+6. **If the provider fails without ever reporting usage** (e.g., a connection error or timeout with no response body) such that the real cost is unknown: settle using the reservation's *projected max cost* as the actual charge, not zero. An unknown, potentially-billable attempt is never assumed to have cost nothing — the worst-case estimate becomes the recorded spend for that attempt.
+7. **If the persistent budget-state file is corrupt, unreadable, or its lock cannot be acquired**: fail closed immediately with `error_code: BUDGET_STATE_UNAVAILABLE` (§9) — do not call the provider, and do not silently reset or recreate the daily counters as though it were a fresh day just because the file couldn't be read.
+
+**Clarifications:**
+- A cache hit (§8's #6) makes zero provider calls and is never checked against, or reserved from, the daily budget — it isn't a provider attempt.
+- Every actual provider attempt counts toward the daily limit, including the single retry (§8's #4) — a visible user request that triggers a retry consumes **two** provider attempts, not one.
+- The check-and-reserve sequence in step 3 is one atomic, locked operation — a budget check that isn't immediately followed by its own reservation, under the same lock, would let two simultaneous requests both observe the same "remaining budget" and both proceed, together exceeding the ceiling.
 
 ---
 
@@ -247,11 +276,12 @@ The cost calculator in `budget.py` computes `estimated_cost_usd` by looking up t
 | `AUTH_FAILED` | Provider rejects the API key | Same user message as above (no key-detail leakage). No retry. |
 | `INSUFFICIENT_CREDITS` | Billing/quota exhausted (the exact incident `test_nova_review.py` documents) | "AI credits are unavailable right now — try again later." No retry. |
 | `RATE_LIMITED` | Provider 429 | "AI is temporarily busy — try again in a moment." No retry (rate limits need real backoff time, not an immediate retry). |
-| `TIMEOUT` | Request exceeded §8.3's timeout | One retry per §8.4, then the same user message as rate-limited if the retry also times out. |
-| `INVALID_PROVIDER_RESPONSE` | Non-2xx or empty response body | Generic "AI request failed" message. No retry beyond §8.4's transient-error allowance. |
-| `MALFORMED_OUTPUT` | Response received but fails schema validation (e.g., NOVA Review's expected section structure) | Generic failure message; the raw response is logged (with prompt/content still excluded per §12) for debugging, never shown raw to the user. |
-| `BUDGET_EXCEEDED` | Daily request limit (20/day) or cost ceiling ($0.25/day) hit (§8, §8.1) | "Today's AI usage limit has been reached." No retry, no override without a config change. |
-| `CIRCUIT_OPEN` | §8.10's breaker is tripped for this feature | "AI is temporarily unavailable — try again shortly." |
+| `TIMEOUT` | Request exceeded §8's #3 timeout | One retry per §8's #4, then the same user message as rate-limited if the retry also times out. |
+| `INVALID_PROVIDER_RESPONSE` | Non-2xx or empty response body | Generic "AI request failed" message. No retry beyond §8's #4 transient-error allowance. |
+| `MALFORMED_OUTPUT` | Response received but fails schema validation (e.g., NOVA Review's expected section structure) | Generic failure message. **The raw or complete response is never logged** (§12 is not overridden by this row) — only `request_id`, `feature`, provider/model, response character length, a response hash (if useful for correlating repeat failures), the schema-validation error category, latency, and token usage when available. If deep debugging of a malformed-output incident ever requires the actual response content, that requires a separate, temporary, Pedro-approved debug mechanism that does not exist in V1 — not a standing log level or an exception to this row. |
+| `BUDGET_EXCEEDED` | Reserving this request's worst-case attempt count or cost would exceed the daily request limit (20/day) or cost ceiling ($0.25/day) (§8, §8.3) | "Today's AI usage limit has been reached." No retry, no override without a config change. |
+| `BUDGET_STATE_UNAVAILABLE` | The persistent budget-state file (§8.1) is corrupt, unreadable, or its lock cannot be acquired (§8.3's step 7) | "AI usage tracking is temporarily unavailable, so no paid request was made." No retry; never proceeds as if budget were unlimited and never silently resets the daily counters. |
+| `CIRCUIT_OPEN` | §8's #10 breaker is tripped for this feature | "AI is temporarily unavailable — try again shortly." |
 | `MODEL_NOT_SUPPORTED` | `NOVA_AI_MODEL` has no entry in `model_registry.py` (§8.2) — cost cannot be verified | "AI is misconfigured — the configured model isn't recognized." No retry; this is a configuration error, not a transient one. |
 
 Every error is surfaced to the user through the existing UI error-handling paths already established during the UI retirement work (e.g., the `_novaReviewError()` toast pattern `test_nova_review.py` already covers) — never a silent empty response, never an infinite retry loop, and never a crash that takes down Journal or Market/News alongside it.
@@ -318,8 +348,9 @@ Logged per request (new file, e.g. `nova_intelligence_usage_log.json`, following
 - Success/failure
 - Error category (`error_code`, not the raw exception text)
 - Estimated cost, when calculable from `model_registry.py` (§8.2)
+- For `MALFORMED_OUTPUT` specifically (§9): response character length and a response hash (if useful for correlating repeat failures) — never the response content itself
 
-**Hard exclusion, no exceptions:** complete prompts and complete responses are never logged by default, at any `NOVA_AI_LOG_LEVEL`. If deep debugging of a malformed-output incident is ever needed, that requires a separate, explicit, temporary debug flag reviewed by Pedro before use — not a standing log level.
+**Hard exclusion, no exceptions:** complete prompts and complete responses are never logged, at any `NOVA_AI_LOG_LEVEL`, under any V1 error condition including `MALFORMED_OUTPUT`. This is not a default that a log-level setting can override. If deep debugging of a malformed-output incident is ever genuinely needed, that requires a separate, temporary, Pedro-approved mechanism that does not exist in V1 — not a standing log level and not a config flag inside this specification's scope.
 
 ---
 
@@ -332,8 +363,8 @@ All ten decisions are now locked. None of them were chosen silently by this docu
 | 1 | First active runtime provider | **Anthropic.** `NOVA_AI_PROVIDER=anthropic` (§10). |
 | 2 | Default model | **`claude-haiku-4-5-20251001`.** `NOVA_AI_MODEL` (§10). |
 | 3 | Separate higher-reasoning model | **Not included in V1.** `NOVA_AI_REASONING_MODEL` is removed from the specification entirely (§10). A stronger model tier requires a future, separately-approved specification. |
-| 4 | Daily request limit | **20 total paid requests per day, across all three V1 features combined.** `NOVA_AI_DAILY_REQUEST_LIMIT=20` (§8, §10). |
-| 5 | Daily estimated-cost ceiling | **$0.25 USD per day.** `NOVA_AI_DAILY_COST_LIMIT_USD=0.25` (§8, §10). When either this or decision 4's limit is reached, the gateway returns `BUDGET_EXCEEDED` without calling the provider (§8's #9a, §9). |
+| 4 | Daily request limit | **20 total provider attempts per day, across all three V1 features combined.** `NOVA_AI_DAILY_REQUEST_LIMIT=20` (§8, §10). Counts provider attempts, not user-visible requests — cache hits don't count, a retry is a second attempt (§8.3). Enforced via pre-call reservation, not a post-hoc count. |
+| 5 | Daily estimated-cost ceiling | **$0.25 USD per day.** `NOVA_AI_DAILY_COST_LIMIT_USD=0.25` (§8, §10). When reserving either this request's worst-case cost or attempt count would exceed decision 4's or this limit, the gateway returns `BUDGET_EXCEEDED` without calling the provider (§8's #9a, §8.3, §9). |
 | 6 | Journal Review cache duration | **24 hours** for identical normalized input (§8's #7). |
 | 7 | Market/News Summary cache duration | **30 minutes** for identical normalized input (§8's #7). |
 | 8 | Market/News summary scheduling | **Manual-only in V1.** Scheduling beyond user-initiated requests is deferred and requires future approval (§3.3, §4). |
@@ -355,8 +386,8 @@ No commit beyond #1 (this document) happens without Pedro's separate go-ahead, m
 | 5 | Migrate NOVA Assistant | `services/assistant.py` calls `request_intelligence("assistant", ...)` instead of `core.config.client` directly; old path removed once verified. Journal-context access follows §13 decision 10 — explicit selection only. |
 | 6 | Migrate Journal NOVA Review | `main.py`'s `/journal/analyze` calls the gateway instead of `core.config.client` directly. |
 | 7 | Migrate Market/News Summary | New feature built against the gateway from the start, manual-only per §13 decision 8. This commit does **not** touch the existing Grok call sites — they are a separate, later commit (#8 below), not part of building this feature. |
-| 8 | Retire Grok (separate, later commit — not bundled with #2-#7) | Only after commits #2-#7 land and the three approved features are confirmed working through the gateway: remove or archive (matching the trading-subsystem retirement's "archive, don't delete" precedent where historically meaningful) the direct-import Grok code in `main.py` (raw HTTP) and `services/news.py` (via `openai`), per §13 decision 9. This commit requires its own separate approval and is explicitly **not** authorized by this specification revision. `engines/engines.py`'s deferred features (§4) are left alone throughout, not touched by this or any other V1 commit. |
-| 9 | Final cost, security, and regression audit | Full test suite, a real (small, Pedro-approved) live smoke test of all three migrated features, confirmation of §15's full test list, confirmation no deferred/retired feature was reactivated. |
+| 8 | Retire Grok (separate, later commit — not bundled with #2-#7) | Only after commits #2-#7 land and the three approved features are confirmed working through the gateway: remove or archive (matching the trading-subsystem retirement's "archive, don't delete" precedent where historically meaningful) the direct-import Grok code in `main.py` (raw HTTP) and `services/news.py` (via `openai`), per §13 decision 9. Removes Grok's entries from the provider-import allowlist (§15.1). This commit requires its own separate approval and is explicitly **not** authorized by this specification revision. `engines/engines.py`'s deferred features (§4) are left alone throughout, not touched by this or any other V1 commit. |
+| 9 | Final cost, security, and regression audit | Full test suite, a real (small, Pedro-approved) live smoke test of all three migrated features, confirmation of §15's full test list including the allowlist-empty check (§15's #25), confirmation no deferred/retired feature was reactivated. |
 
 Each commit is independently revertable and independently testable — no step combines "add the gateway" and "migrate a feature" in one commit. Commit #8 (Grok retirement) in particular must not be pulled earlier or merged into #2-#7: V1's gateway build-out and Grok's removal are two separately-scoped, separately-approved pieces of work.
 
@@ -364,17 +395,27 @@ Each commit is independently revertable and independently testable — no step c
 
 ## 15. Testing requirements (FINAL list)
 
+### 15.1 Provider-import allowlist during migration (FINAL)
+
+Test item 3 below enforces that no file outside `intelligence/providers/*.py` performs a direct AI-provider call. Because Grok's historical call sites — and any not-yet-migrated Anthropic call sites — are intentionally preserved until their own commit lands (§5, §13 decision 9, §14), this rule **cannot** hold repo-wide during commits #2-#7 without forcing the deletion of historical code this specification explicitly preserves. Instead, the check runs against a **shrinking, exact allowlist** for the duration of commits #2-#7:
+
+- **Allowlist entries name an exact file and function/call site — never a broad directory, module, or wildcard glob.** Example starting entries: `main.py`'s Grok raw-HTTP market-sentiment call (§2, finding 7); `services/news.py`'s Grok/OpenAI-compatible headline-classifier call (§2, finding 8); `services/assistant.py:194`'s direct Anthropic call (until commit #5 migrates it); `main.py:3131`'s Journal Review Anthropic call (until commit #6 migrates it). §4's permanently-deferred features (scenario engine, performance-insight one-liner, morning brief, legacy setup grading) remain allowlisted indefinitely, since they are never migrated into V1 at all.
+- **No new direct provider call may ever be added to the allowlist** — it only shrinks as commits land.
+- **Each migration commit that moves a call site behind the gateway removes that exact entry from the allowlist in the same commit.**
+- **After commit #8 (Grok retirement) completes, the allowlist is dropped entirely** and the static check requires zero direct AI-provider calls anywhere outside `intelligence/providers/*.py`.
+- **Commit #9's final audit must explicitly verify the allowlist is empty** before signing off — a non-empty allowlist at that point means unfinished migration work, not a passing state.
+
 1. Provider adapter contract — every adapter implementing `ProviderAdapter` passes the same shared contract test suite (mocked).
 2. One-active-provider enforcement — with `NOVA_AI_PROVIDER=anthropic` (the only valid V1 value, §5/§13 decision 9), every gateway call resolves to the Anthropic adapter and no other provider client is ever constructed.
-3. **Static repo-wide check**: no file outside `intelligence/providers/*.py` contains `import anthropic`, `from openai import`, or a raw `requests`/`httpx` call to a known AI-provider hostname; additionally, no `grok_adapter.py` exists anywhere in `intelligence/` and no test or code path references one — the same style of static audit used throughout this project's retirement work (`grep`-based, run as a test).
-4. Cache behavior — identical `input_data` for the same feature within the TTL window returns `cached: true` and makes zero provider calls (mocked adapter asserts call count).
-5. Daily request limit — the (N+1)th request in a day returns `BUDGET_EXCEEDED` without calling the provider.
-6. Cost-ceiling enforcement — same shape as #5, keyed on estimated cost instead of count.
-7. Retry rules — a mocked transient failure retries exactly once; a mocked billing/auth/quota failure never retries.
+3. **Static repo-wide check (allowlisted during commits #2-#7, per §15.1)**: no file outside `intelligence/providers/*.py`, and outside the current exact allowlist (§15.1), contains `import anthropic`, `from openai import`, or a raw `requests`/`httpx` call to a known AI-provider hostname; no `grok_adapter.py` exists anywhere in `intelligence/` at any point. The test fails if the allowlist contains anything beyond the exact identities recorded in §15.1, and fails if any entry remains once commit #8 has landed.
+4. Cache behavior — identical `input_data` for the same feature within the TTL window returns `cached: true`, makes zero provider calls (mocked adapter asserts call count), and never touches the daily budget state (§8.3) — a cache hit is not a provider attempt.
+5. Daily request limit — the 21st provider-attempt of a day (not the 21st user-visible request — cache hits and reservation-only rejections don't count, §8.3) returns `BUDGET_EXCEEDED` without calling the provider.
+6. Cost-ceiling enforcement — a request whose projected worst-case cost (§8.3) would push `accrued_cost + reserved_cost` over $0.25 returns `BUDGET_EXCEEDED` without calling the provider, even if the actual cost of prior requests turned out lower than their reservations.
+7. Retry rules — a mocked transient failure retries exactly once, and that retry is reserved and settled as a **second** provider attempt against the daily budget (§8.3), not a free redo; a mocked billing/auth/quota failure never retries.
 8. Circuit breaker — 3 consecutive mocked failures within the window trips `CIRCUIT_OPEN`; a request during the open window makes zero provider calls.
 9. Billing-credit failure — mocked `INSUFFICIENT_CREDITS` response produces the correct `error_code` and user message, and the failure is visible (not silently swallowed) — directly extending `test_nova_review.py`'s existing coverage of this exact incident.
 10. Malformed model output — a mocked response that fails schema validation produces `MALFORMED_OUTPUT`, not a crash.
-11. Provider timeout — a mocked hang past §8.3's timeout produces `TIMEOUT` behavior per §9.
+11. Provider timeout — a mocked hang past §8's #3 timeout produces `TIMEOUT` behavior per §9.
 12. Non-AI feature availability during provider failure — Journal CRUD, Market/News data endpoints, and app startup all succeed with the provider fully unavailable (extends the existing `test_intelligence_phase0_safety.py::test_journal_market_assistant_modules_still_import_cleanly` pattern).
 13. Journal Review context boundaries — the gateway call for this feature never receives broker/execution state, only the selected trade + bounded nearby signal-log context per §3.2/§16.
 14. Assistant context boundaries — the gateway call never receives broker credentials or unrelated personal data; Journal access only if §13 decision 10 allows it, and only then in the bounded form it specifies.
@@ -384,6 +425,11 @@ Each commit is independently revertable and independently testable — no step c
 18. **No external API calls in unit tests** — every test in this suite runs fully mocked; a CI-style guard (e.g., a `pytest` fixture that raises if any real network socket is opened during the intelligence test module) enforces this structurally, not just by convention.
 19. Model-registry fail-closed behavior — a mocked `NOVA_AI_MODEL` value with no `model_registry.py` entry produces `MODEL_NOT_SUPPORTED` (§8.2/§9) on every paid-request attempt, without ever falling through to an unverified cost calculation.
 20. Persistent budget survives restart — the daily request count and estimated cost, once written to the §8.1 state file, are correctly re-read (not reset) by a freshly-started process on the same date.
+21. Pre-call reservation occurs before the provider call — a mocked provider adapter asserts that `reserved_count`/`reserved_cost` are written to the budget-state file (§8.1, §8.3) *before* the mocked adapter's `call()` is ever invoked, not only after a response returns.
+22. Reservation settles correctly on every outcome — (a) a successful mocked response settles `accrued_cost` to the real reported usage and releases the unused portion of the reservation; (b) a mocked failure with no reported usage (timeout/connection error) settles `accrued_cost` using the reservation's projected max cost, never zero (§8.3 step 6).
+23. Concurrent-request atomicity — two simulated simultaneous requests that would each individually fit under the remaining budget, but would together exceed it, result in exactly one succeeding and one receiving `BUDGET_EXCEEDED` — never both proceeding against the same stale remaining-budget read (§8.3).
+24. Budget-state failure fails closed — a simulated corrupt/unreadable budget-state file, and a simulated failure to acquire its lock, both produce `BUDGET_STATE_UNAVAILABLE` (§9) without calling the provider and without resetting the file's existing counters.
+25. Allowlist-empty final check (§15.1) — commit #9's final audit re-runs the static provider-import check with zero allowlist entries and confirms it passes, proving no legacy direct-provider call site remains anywhere outside `intelligence/providers/*.py`.
 
 ---
 
@@ -401,7 +447,7 @@ Each commit is independently revertable and independently testable — no step c
 
 ## Summary: what's locked
 
-**Final (structure, scope, and all ten decisions locked):** the three V1 features and their boundaries (§3), the deferred-list (§4), Grok's full retirement from active V1 architecture with historical code preserved for a separate future commit (§5), the one-active-provider rule (§7.2), the cost-control numbers and persistent-budget design (§8, §8.1, §8.2), the error-code vocabulary including `MODEL_NOT_SUPPORTED` (§9), the configuration variable names and locked defaults (§10), the response envelope shape (§11), the observability exclusions (§12), all ten of Pedro's final decisions (§13), the migration commit sequence with Grok removal isolated to its own later, separately-approved commit (§14), the full test list (§15), and the privacy boundaries including Assistant Journal-access being explicit-selection-only (§16).
+**Final (structure, scope, and all ten decisions locked):** the three V1 features and their boundaries (§3), the deferred-list (§4), Grok's full retirement from active V1 architecture with historical code preserved for a separate future commit (§5), the one-active-provider rule (§7.2), the cost-control numbers, persistent-budget design, and atomic pre-call reservation (§8, §8.1, §8.2, §8.3), the error-code vocabulary including `MODEL_NOT_SUPPORTED` and `BUDGET_STATE_UNAVAILABLE` (§9), the never-log-raw-response rule applying to `MALFORMED_OUTPUT` with no exceptions (§9, §12), the configuration variable names and locked defaults (§10), the response envelope shape (§11), the observability exclusions (§12), all ten of Pedro's final decisions (§13), the migration commit sequence with Grok removal isolated to its own later, separately-approved commit (§14), the full test list including the shrinking provider-import allowlist that must reach zero by commit #8 (§15, §15.1), and the privacy boundaries including Assistant Journal-access being explicit-selection-only (§16).
 
 **Still requiring separate future approval before it happens:** nothing in V1's own scope — but commit #2 onward in §14 (writing any `intelligence/` code) still requires Pedro's go-ahead per commit, and Grok's actual removal (§14 commit #8) is explicitly a separate, later, separately-approved piece of work, not part of this specification's authorization.
 
