@@ -10,14 +10,21 @@ Status: **Specification only. No Pine code exists yet.** This document defines w
 - **2026-07-19, draft 4** (commit `fc632a2`): Pedro approved draft 3 in full, including every item draft 3 had listed as "proposed, awaiting approval" — Asia/London/New York default times, the `input.session()` + `America/New_York` mechanism, the current-session-default 1–3 retention range, the extend-through-NY-close default line-lifetime behavior, the filename/title, and the small-commit sequence. All of those moved from PROPOSED to FINAL. Two new requirements were added: (1) **customizable colors** — every level family and every session box gets a user-configurable color input from TradingView's settings, coordinated by family; (2) **compact level presentation** — thin lines, short labels positioned directly beside/below the line, price candles remaining the visual focus, and the "AS.L"-style abbreviation clarified as a neatness reference only.
 - **2026-07-19, draft 5:** two rounds of correction after reviewing the Phase 0 mock. First, Pedro approved the broad color direction (purple Asia, blue London, amber/prominent ORB, muted green New York, neutral PDH/PDL, teal Hourly) and the family-coordination behavior, but required the mock itself be corrected before final Phase 0 sign-off: remove the legend/dashboard entirely (session identity comes from box color + settings, not an on-chart legend); make session-box fills more transparent so candles stay primary; stop using any mock-only label-decluttering — labels must sit at their level's real price, with natural overlap between genuinely close levels accepted as a documented V1 limitation, never faked or hidden; make labels smaller/plainer with no background block; and regenerate the synthetic price path so PDH/PDL sit within a reasonable visible distance of current price (a mock-only data change, not a hint to compress real levels in the eventual indicator). Second, and more significantly, **Pedro issued a final ORB scope correction: ORB becomes box-only**, matching New York's treatment exactly. `ORH`, `ORL`, and `ORM` — their lines, labels, toggles, and dedicated color settings — were removed entirely from every part of this specification. This dropped the key-level count from eleven to eight.
 - **2026-07-19, draft 6** (commit `2da1c22`): **Phase 0 is complete — Pedro approved the revised mock and the full visual direction**, with one final default-style adjustment: the amber ORB box is confirmed to render **slightly more visible** than the Asia/London/New York boxes (still transparent, still subordinate to price) — everything else in the approved direction (compact aligned labels, thin lines, no label backgrounds, purple Asia, blue London, muted green New York, neutral dashed PDH/PDL, dim teal Hourly, candles dominant, all colors/transparency user-configurable) is unchanged from draft 5. This revision's edits were a verification pass confirming `ORH`/`ORL`/`ORM` are fully absent from every section, plus updating every remaining "pending Phase 0" hedge now that Phase 0 had actually concluded. **Phase 0 approval does not itself authorize Pine implementation** — Phase 1 still requires Pedro's separate, explicit go-ahead.
-- **2026-07-19, draft 7 (this revision):** **Technical correction to the non-repainting HTF pattern for PDH/PDL and Hourly High/Low**, caught before Phase 1. Every prior draft paired the `[1]` offset with `lookahead = barmerge.lookahead_off`; TradingView's officially documented non-repainting higher-timeframe idiom instead pairs the `[1]` offset with `lookahead = barmerge.lookahead_on`. Both requests are corrected to:
+- **2026-07-19, draft 7:** **Technical correction to the non-repainting HTF pattern for PDH/PDL and Hourly High/Low**, caught before Phase 1. Every prior draft paired the `[1]` offset with `lookahead = barmerge.lookahead_off`; TradingView's officially documented non-repainting higher-timeframe idiom instead pairs the `[1]` offset with `lookahead = barmerge.lookahead_on`. Both requests are corrected to:
 
     ```
     [previousDayHigh, previousDayLow] = request.security(syminfo.tickerid, "1D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
     [previousHourHigh, previousHourLow] = request.security(syminfo.tickerid, "60", [high[1], low[1]], lookahead = barmerge.lookahead_on)
     ```
 
-  Behavioral requirements are unchanged from every prior draft — PDH/PDL and 1H H/1H L still always represent the previous *completed* candle at their resolution, still behave identically on historical and realtime bars, and no future data leaks into historical bars. The `[1]` offset must never be removed, and `lookahead_on` must never be used without it — removing the offset while keeping `lookahead_on` would leak the developing current HTF candle. **This draft supersedes drafts 1–6 wherever they conflict.** Commits `8c88781`, `df13725`, `40575c2`, `fc632a2`, and `2da1c22` remain in git history unamended — superseded, not erased.
+  Behavioral requirements are unchanged from every prior draft — PDH/PDL and 1H H/1H L still always represent the previous *completed* candle at their resolution, still behave identically on historical and realtime bars, and no future data leaks into historical bars. The `[1]` offset must never be removed, and `lookahead_on` must never be used without it — removing the offset while keeping `lookahead_on` would leak the developing current HTF candle. Commits `8c88781`, `df13725`, `40575c2`, `fc632a2`, and `2da1c22` remain in git history unamended — superseded, not erased.
+
+- **2026-07-21, draft 8 (this revision): draft 5's "ORB becomes box-only" correction is reversed — it was a mistake, not Pedro's intent.** Draft 5 removed `ORH`/`ORL`/`ORM` entirely on the belief that ORB should match New York's plain box-only treatment. Pedro has since clarified that ORB is fundamentally different from a session box and must retain its high/low/mid lines (no labels), matching the archived `nova_execution_v1.pine`'s ORB design exactly — the same indicator this Market Map track was built to cleanly replace, so its ORB design is the correct reference to carry forward, not something to strip out. Two further corrections to the ORB **timing model** itself, which no prior draft got right:
+
+  1. **ORB is not one session window.** It has a short **formation window** (default **08:00–08:15 ET**) during which the range's high/low accumulate live, exactly like Asia/London's accumulators — then the range **freezes** (no more high/low growth).
+  2. **The box and its lines don't stop at the formation window's end.** After the range freezes, the box's right edge and its high/low/mid lines keep extending forward, bar by bar, until a separate, later **Kill Hour** (default **11:00 ET**), at which point everything stops updating and stays visible exactly as last drawn. This two-phase behavior (grow, then freeze-but-keep-extending-right) does not exist anywhere else in this specification — it is unique to ORB and is why ORB was never a good fit for the generic session-box engine that drives Asia/London/New York.
+
+  **Restored, matching `nova_execution_v1.pine` exactly:** ORB High line, ORB Low line, ORB Midpoint line (dashed) — still **no labels**, matching that file's actual design (it draws these three lines with no `label.new()` calls at all). This is not a reintroduction of draft 3/4's original ORB treatment (which this document has no record of specifying labels for either) — it is a deliberate, permanent restoration of the three-line design, on the corrected two-phase timing model above. **This draft supersedes draft 5 and draft 7 wherever they conflict on ORB specifically; all other draft 7 content — the non-repainting HTF pattern for PDH/PDL and Hourly High/Low — is unchanged.** Commits `8c88781`, `df13725`, `40575c2`, `fc632a2`, and `2da1c22` remain in git history unamended — superseded on this point, not erased.
 
 ---
 
@@ -67,10 +74,10 @@ This file does not exist yet. This specification is approved and the Phase 0 vis
 | Hourly High | `1H H` | Show/hide Hourly High |
 | Hourly Low | `1H L` | Show/hide Hourly Low |
 
-No other level exists in V1 — **eight key levels total.** In particular:
+No other *labeled* level exists in V1 — **eight labeled key levels total**, plus ORB's own unlabeled high/low/mid lines (below). In particular:
 
 - **There is no separate New York High/Low level** — New York is a session **box** only (§4); Pedro's key-level list does not include NY High/Low, and none is added here.
-- **ORB is box-only, corrected this revision.** Earlier drafts included `ORH`/`ORL`/`ORM` as separate lines and labels. Pedro's final ORB scope correction removes all three: no ORB High line, no ORB Low line, no ORB Midpoint, and no toggles or color settings for any of them. The completed ORB range remains visible **through the fixed session box itself** — its top and bottom edges visually represent the range, exactly like New York's box-only treatment. See §4, §7, §8, §9 for the full correction.
+- **ORB has its own high/low/mid lines, restored in draft 8 — but deliberately no labels, matching `nova_execution_v1.pine` exactly.** Draft 5 had incorrectly removed `ORH`/`ORL`/`ORM` entirely, believing ORB should be plain-box-only like New York; that removal is reversed (§4, §7, §8, §9). ORB draws an **ORB High line**, an **ORB Low line**, and a dashed **ORB Midpoint line** in addition to its box — but, matching the archived indicator this design is restored from, none of the three get a `label.new()` text label. They are visual lines only, distinguishing ORB from the eight labeled levels above while still giving it more visual information than New York's plain box.
 
 **Compact level presentation (FINAL, added this revision):** a second reference image Pedro shared clarifies the desired label style, used for visual neatness only — never for branding, watermark, promotional content, or unrelated chart elements. Each level is presented as a thin, clean horizontal line with a short label positioned **directly beside or just below the line** — never far away from it. Specifically:
 
@@ -88,9 +95,13 @@ No other level exists in V1 — **eight key levels total.** In particular:
 
 **FINAL:** four session boxes — Asia, London, New York, ORB — each lightly shaded, visually subtle, each with its own independent show/hide toggle. Boxes must not dominate the chart.
 
-**FINAL — ORB is box-only (corrected this revision).** ORB gets exactly one session box, 08:30–09:30 AM Eastern, with a light transparent fill, a thin configurable border, a configurable box color, and its own show/hide toggle — the same treatment New York already had. There is no separate ORB High line, ORB Low line, or ORB Midpoint; the completed range is represented entirely by the box's top and bottom edges. Historical retention follows the same approved session-box setting as every other family (§10). This removes ORB's previous line/label/midpoint treatment from every part of this document — see §3, §7, §8, §9 for the rest of the correction.
+**FINAL — ORB is a box PLUS high/low/mid lines, on its own two-phase timing model (corrected in draft 8; draft 5's box-only correction was a mistake and is reversed).** ORB does not use a single session window the way Asia/London/New York do — it has three separate configurable times:
 
-**FINAL — ORB window:** 08:30–09:30 AM Eastern, fixed as the default. This is explicitly restated as final per Pedro's direct instruction, not merely proposed.
+1. **ORB Start** (default **08:00 ET**) and **ORB End** (default **08:15 ET**) bound the short **formation window**. During this window the range's high/low accumulate live, exactly like Asia/London's accumulators, and the box + lines grow with them in real time.
+2. Once ORB End passes, the range **freezes** — high/low stop changing.
+3. **ORB Kill Hour** (default **11:00 ET**) is when the box's right edge and its high/low/mid lines **stop extending forward**. Between ORB End and Kill Hour, the frozen range's box and lines keep moving right every bar, staying visible at their fixed price levels; at Kill Hour they stop updating entirely and remain on the chart exactly as last drawn.
+
+ORB gets a light transparent fill, a thin configurable border, a configurable box color, an **ORB High** line, an **ORB Low** line, a dashed **ORB Midpoint** line in a separate configurable color, and independent show/hide toggles for the box and the midline (§9) — no labels on any of the three lines, matching `nova_execution_v1.pine`'s actual design exactly (§3). Historical retention follows the same approved setting as every other family (§10), fading the box and all three lines together as one retained instance.
 
 **FINAL — Asia, London, New York windows (approved 2026-07-19).** Draft 3 presented these as a proposal rather than silently carrying old NOVA session definitions into this new, independent indicator; Pedro has now explicitly reviewed and approved all three as final defaults:
 
@@ -99,9 +110,14 @@ No other level exists in V1 — **eight key levels total.** In particular:
 | Asia | 19:00 – 03:00 | Matches `core/config.py::session_label()`'s existing `ASIA` window. |
 | London | 03:00 – 09:30 | Matches `core/config.py::session_label()`'s existing `LONDON` window. |
 | New York | 09:30 – 16:00 | Matches `core/config.py::session_label()`'s `NEW_YORK_CASH` window (regular futures/equity trading hours). |
-| ORB | 08:30 – 09:30 | Fixed, see above. |
 
-All four windows remain **user-configurable inputs** (§9) — the table above is the approved shipped default, not a hardcoded constant. Pedro can still change any of them later via the indicator's own settings without needing a new specification.
+| ORB time | Default (ET) | Role |
+|---|---|---|
+| ORB Start | 08:00 | Formation window begins — high/low start accumulating. |
+| ORB End | 08:15 | Formation window ends — range freezes. |
+| ORB Kill Hour | 11:00 | Box/lines stop extending right and freeze in place entirely. |
+
+All of these remain **user-configurable inputs** (§9) — the tables above are the approved shipped defaults, not hardcoded constants. Pedro can still change any of them later via the indicator's own settings without needing a new specification.
 
 ---
 
@@ -130,7 +146,7 @@ Regardless of which input mechanism is used, the timezone is never hardcoded to 
 
 The `[1]` offset reads the prior, already-completed hourly bar; pairing that offset with `lookahead = barmerge.lookahead_on` is TradingView's documented correct combination for a non-repainting higher-timeframe value — offset-without-lookahead-on is not the officially recommended idiom and is superseded by this pattern everywhere in this specification. This is the same corrected pattern as PDH/PDL (§7), applied at 60-minute resolution instead of daily.
 
-Because this is a single completed value (not an accumulator growing bar-by-bar within the current hour), `1H H`/`1H L` do not "grow live" the way Asia's and London's High/Low levels (and ORB's box top/bottom, internally) do — they are static between hourly updates, then jump to the new completed hour's values at the top of each hour. This is intentional and matches "avoid repainting": the displayed value never changes after it's first shown for that hour.
+Because this is a single completed value (not an accumulator growing bar-by-bar within the current hour), `1H H`/`1H L` do not "grow live" the way Asia's and London's High/Low levels (and ORB's high/low, during its shorter formation window only, §4) do — they are static between hourly updates, then jump to the new completed hour's values at the top of each hour. This is intentional and matches "avoid repainting": the displayed value never changes after it's first shown for that hour.
 
 If Pedro would prefer a different non-repainting definition (e.g., a rolling N-hour window, or the live-current-hour-plus-history model from draft 2), that must be separately documented and approved before implementation — this specification does not silently reintroduce either alternative.
 
@@ -161,7 +177,7 @@ This replaces the earlier drafts' `high[1]/low[1]` paired with `lookahead = barm
 - `lookahead = barmerge.lookahead_on` must never be used *without* that `[1]` offset — doing so would leak the developing current daily candle's values into historical bars, which is exactly the repainting behavior this pattern exists to prevent.
 - PDH/PDL always represent the previous completed daily candle, behave identically on historical and realtime bars, and never shift once shown for the day.
 
-**ORB (box-only, corrected this revision):** ORB's box top/bottom uses the identical running max/min accumulator pattern as Asia/London — it still needs a live high/low internally to size the box correctly — but that high/low is **never exposed as a separate line, label, or midpoint value**. No `ORH`, `ORL`, or `ORM` exist anywhere in V1. The box itself, drawn from the accumulated high/low, is the only visible representation of the completed ORB range.
+**ORB (box + high/low/mid lines, restored in draft 8):** ORB's high/low uses the identical running max/min accumulator pattern as Asia/London, but only during its shorter formation window (ORB Start–ORB End, §4) — once that window closes, the range freezes and the accumulator stops changing. Unlike draft 5's box-only correction (now reversed), that high/low **is** exposed: as the box's top/bottom, as a separate ORB High line, a separate ORB Low line, and a dashed ORB Midpoint line computed as `(orbHigh + orbLow) / 2`. None of the three lines get a text label, matching `nova_execution_v1.pine`'s actual implementation. After the range freezes, the box and all three lines keep extending right every bar until ORB Kill Hour (§4), at which point they stop updating.
 
 ---
 
@@ -177,14 +193,15 @@ Every major level family and every session box must have a user-configurable col
 |---|---|---|
 | **Asia** | Asia box + `ASH` line + `ASL` line + `ASH` label + `ASL` label | Asia High and Asia Low belong to one session's visual family — no separate ASH-vs-ASL color. |
 | **London** | London box + `LH` line + `LL` line + `LH` label + `LL` label | Same reasoning — no separate LH-vs-LL color. |
-| **ORB** | ORB box fill hue + ORB box border **only** | **Corrected this revision:** ORB is now box-only, matching New York's pattern — there are no `ORH`/`ORL`/`ORM` lines or labels left to coordinate. |
+| **ORB** | ORB box fill hue + ORB box border + ORB High line + ORB Low line | **Restored in draft 8** (reversing draft 5's box-only correction): box and both high/low lines share one color, matching `nova_execution_v1.pine`'s single `orbColor`. No labels to coordinate — the lines simply have no label objects. |
+| **ORB Midline** | ORB Midpoint line only | **New, added in draft 8.** A deliberately *separate* color from the ORB family above, matching `nova_execution_v1.pine`'s distinct `midColor` — the dashed midline is meant to visually stand apart from the box/high/low, not blend into them. |
 | **New York** | New York box only | Box-only family — no NY High/Low level exists (§3), so there's nothing else to coordinate. |
 | **PDH** | `PDH` line + label | Independent — no box to coordinate with. |
 | **PDL** | `PDL` line + label | Independent — no box to coordinate with. |
 | **Hourly High** | `1H H` line + label | Independent — no box to coordinate with. |
 | **Hourly Low** | `1H L` line + label | Independent — no box to coordinate with. |
 
-This yields **8 color inputs total** (Asia, London, ORB, New York, PDH, PDL, Hourly High, Hourly Low) — unchanged in count from before the ORB correction, since ORB still gets one color input, it now simply controls a box only (like New York) rather than a box plus three lines and labels. Simpler settings menu, same practical control, and it guarantees a session's box and its levels (where any exist) always visually match without Pedro having to manually keep them in sync.
+This yields **9 color inputs total** (Asia, London, ORB, ORB Midline, New York, PDH, PDL, Hourly High, Hourly Low) — one more than draft 7's count, because draft 8 restores ORB's high/low lines into the ORB family color *and* adds a second, separate color specifically for the midline (matching `nova_execution_v1.pine`'s two distinct ORB colors, `orbColor` and `midColor`).
 
 **If Pedro changes a family color** (e.g., Asia) in TradingView's settings, every associated element (box, both lines, both labels) updates automatically to match — this is a single shared color variable feeding every draw call for that family, not four independently-set colors that happen to start equal.
 
@@ -201,7 +218,8 @@ This yields **8 color inputs total** (Asia, London, ORB, New York, PDH, PDL, Hou
 | Asia | Purple | Box + `ASH`/`ASL` lines and labels |
 | London | Blue | Box + `LH`/`LL` lines and labels |
 | New York | Muted green | Box only |
-| ORB | Orange/amber, **approved to render slightly more visible than the other three boxes** — still transparent, still subordinate to price | Box only — no lines or labels of any kind |
+| ORB | Orange/amber, **approved to render slightly more visible than the other three boxes** — still transparent, still subordinate to price | Box + High line + Low line — no labels |
+| ORB Midline | Yellow, dashed — matching `nova_execution_v1.pine`'s `midColor` (added draft 8) | Midpoint line only — no label |
 | PDH | Neutral gray/white, dashed | Line + label, no box |
 | PDL | Neutral gray/white, dashed (a shade distinguishable from PDH — precise implementation detail, not separately gated) | Line + label, no box |
 | Hourly High | Dim teal, dotted, thin — visually subordinate to every other level | Line + label, no box |
@@ -216,10 +234,10 @@ Historical retained instances (§10), if any beyond the current one, render in a
 **FINAL.** Every item Pedro listed is included; grouped using the existing project's `group=` input convention (as used in `nova_execution_v1.pine`):
 
 **Group: Level Visibility** (one independent toggle each, FINAL requirement)
-Show/hide PDH · PDL · Asia High · Asia Low · London High · London Low · Hourly High · Hourly Low. **No ORB High, ORB Low, or ORB Midpoint toggles exist (corrected this revision)** — ORB has no separate levels to toggle; its box visibility is controlled entirely by the Session Boxes group below.
+Show/hide PDH · PDL · Asia High · Asia Low · London High · London Low · Hourly High · Hourly Low. ORB High/Low/Mid have **no separate entries here** — restored in draft 8, but their visibility is controlled entirely by the two ORB-specific toggles in the Session Boxes group below (box toggle covers box + high/low together; a second toggle covers the midline), not by individual per-line toggles like the eight labeled levels above.
 
-**Group: Session Boxes** (one independent toggle each, FINAL requirement)
-Show/hide Asia box · London box · New York box · ORB box.
+**Group: Session Boxes** (FINAL requirement)
+Show/hide Asia box · London box · New York box · ORB box (covers the box **and** its High/Low lines together, restored in draft 8) · ORB midline (**new, added in draft 8** — separate toggle, since the dashed midline is visually distinct enough from the box/high/low that Pedro may want it hidden independently).
 
 **Group: Labels**
 - Show/hide all labels (master switch, labels only — does not hide the underlying lines).
@@ -227,27 +245,28 @@ Show/hide Asia box · London box · New York box · ORB box.
 - Label size (Small/Normal/Large).
 - Label position preference where Pine allows it (right-edge of the line is the default and, practically, closest to Pine's native label-anchoring options).
 
-**Group: Colors** (FINAL, added this revision — see §8 for the full family-coordination model)
+**Group: Colors** (FINAL — see §8 for the full family-coordination model)
 - Asia color (box + `ASH`/`ASL` lines and labels)
 - London color (box + `LH`/`LL` lines and labels)
 - New York color (box fill hue + box border only)
-- ORB color (box fill hue + box border only — **corrected this revision**: no lines or labels remain to coordinate)
+- ORB color (box fill hue + box border + ORB High line + ORB Low line — **restored in draft 8**, reversing draft 5's box-only correction)
+- ORB Midline color (**new, added in draft 8** — deliberately separate from the ORB color above, matching `nova_execution_v1.pine`'s distinct `midColor`)
 - PDH color
 - PDL color
 - Hourly High color
 - Hourly Low color
 
-**Group: Lines** (applies to Asia, London, PDH, PDL, Hourly High, Hourly Low — the six families that still have lines; ORB and New York are box-only and have no entries here)
+**Group: Lines** (applies to Asia, London, PDH, PDL, Hourly High, Hourly Low — the six families with *configurable* line thickness/style; New York remains box-only with no entries here)
 - Line thickness.
 - Line style (solid/dashed/dotted per family, §8 defaults).
-- Line-lifetime behavior — **FINAL (approved 2026-07-19):** default is "Extend through end of NY trading day" (matching draft 2's original 16:00 ET behavior); "Stop at session end" (line freezes at the right edge of its own box, does not extend further) is available as the alternate configurable mode. Both are simple, purely time-based visual behaviors.
+- Line-lifetime behavior — **FINAL (approved 2026-07-19):** default is "Extend through end of NY trading day" (matching draft 2's original 16:00 ET behavior); "Stop at session end" (line freezes at the right edge of its own box, does not extend further) is available as the alternate configurable mode. Both are simple, purely time-based visual behaviors. **ORB's high/low/mid lines are intentionally excluded from this group** — they follow ORB's own two-phase timing model (§4: grow during formation, then freeze-but-extend-to-Kill-Hour), not this generic session-lifetime mechanism, and their width/style is fixed to match `nova_execution_v1.pine` exactly (solid width 2 for high/low, dashed width 2 for the midline) rather than user-configurable.
 - "Continuation until touched" — **DEFERRED**, see §14.
 
 **Group: Boxes**
 Box transparency (independently configurable from color, §8), border visibility, border thickness, historical box limit (§10) — applies to all four boxes, including ORB. Box *color* now lives in the Colors group above, shared with that family's lines/labels where any exist rather than set separately per box.
 
-**Group: Session Times** (FINAL — approved 2026-07-19)
-Timezone (default `America/New_York`), Asia session time (default 19:00–03:00 ET), London session time (default 03:00–09:30 ET), New York session time (default 09:30–16:00 ET) — all via `input.session()` per §5 — plus ORB time (input exists for configurability, but defaults fixed to 08:30–09:30 ET per the FINAL requirement, §4).
+**Group: Session Times** (FINAL)
+Timezone (default `America/New_York`), Asia session time (default 19:00–03:00 ET), London session time (default 03:00–09:30 ET), New York session time (default 09:30–16:00 ET) — all via `input.session()` per §5 — plus ORB's three separate timing inputs (**restored to a three-input model in draft 8**, reversing draft 5/7's single-window treatment): ORB Start Hour/Minute (default 08:00), ORB End Hour/Minute (default 08:15), and ORB Kill Hour (default 11:00), as plain `input.int()` hour/minute values rather than a single `input.session()` string, since ORB's three-role timing model (§4) can't be expressed as one session window.
 
 No input in any group controls trading behavior, alerts, or strategy — every input is purely visual/display scope, consistent with §1.
 
@@ -271,7 +290,7 @@ This default must remain useful for TradingView Replay (§11) without accumulati
 
 **FINAL requirement.** Two distinct concepts must not be confused, and the spec is explicit about which applies where:
 
-- **Live-growing is expected, not repainting.** Asia's and London's High/Low accumulators (and ORB's internal box-sizing accumulator, §7) are *meant* to update every bar while their window is open — that is the whole point of a live session range. This is not repainting: nothing already-displayed silently changes after the fact; the displayed value (or box edge) is always "the correct running high/low as of the current bar," which is exactly what it claims to be.
+- **Live-growing is expected, not repainting.** Asia's and London's High/Low accumulators, and ORB's High/Low/box during its formation window only (§4, §7), are *meant* to update every bar while their window is open — that is the whole point of a live session range. This is not repainting: nothing already-displayed silently changes after the fact; the displayed value (or box/line edge) is always "the correct running high/low as of the current bar," which is exactly what it claims to be. After ORB's formation window closes, its range is frozen by design (§4) — the box/lines still move right each bar until Kill Hour, but their price levels never change again, which is also not repainting since nothing already-shown is revised.
 - **True repainting — a displayed value silently changing after being shown as final — must never happen**, and is the specific risk for `PDH`/`PDL` and `1H H`/`1H L`, both of which read from an already-completed higher-timeframe candle via `request.security`. Both use the corrected pattern (§6, §7): the `[1]`-offset (prior, completed) bar of their respective resolution **combined with** `lookahead = barmerge.lookahead_on` — TradingView's officially documented non-repainting HTF idiom, not the offset-with-`lookahead_off` pairing earlier drafts incorrectly specified. The offset guarantees no future data leaks into historical bars; `lookahead_on` combined with that offset guarantees the value behaves identically on historical and realtime bars, with the value shown always final for that period and never silently revised.
 
 **Daylight-saving time:** handled automatically because every session boundary is computed via Pine's timezone-aware time functions against the configured timezone string (§5), never a fixed UTC offset — the same code produces correctly-placed boxes/levels on both sides of a DST changeover with zero special-case logic. Included as an explicit case in the validation checklist (§13).
@@ -300,12 +319,12 @@ This default must remain useful for TradingView Replay (§11) without accumulati
 
 Once implementation begins, validation covers:
 
-1. **Live formation** — Asia, London, New York, and ORB boxes all form and grow correctly on NQ and MNQ, on 1m/5m/15m charts.
+1. **Live formation** — Asia, London, New York, and ORB boxes all form and grow correctly on NQ and MNQ, on 1m/5m/15m charts. For ORB specifically, this covers only its formation window (08:00–08:15 default, §4) — item 16 below covers its post-formation freeze-and-extend behavior.
 2. **Hourly correctness** — `1H H`/`1H L` update exactly once per hour, to the just-completed hour's values, with zero mid-hour changes (non-repainting per §6/§11).
 3. **PDH/PDL accuracy** — matches the previous completed daily futures candle exactly; no repaint on historical bars.
-4. **Exact labels** — every visible label reads exactly `PDH`, `PDL`, `ASH`, `ASL`, `LH`, `LL`, `1H H`, or `1H L` — no variants, and no `ORH`/`ORL`/`ORM` labels exist anywhere (ORB is box-only, corrected this revision).
+4. **Exact labels** — every visible label reads exactly `PDH`, `PDL`, `ASH`, `ASL`, `LH`, `LL`, `1H H`, or `1H L` — no variants. ORB's High/Low/Mid lines exist (restored in draft 8) but confirm they draw with **no label objects at all**, matching `nova_execution_v1.pine`.
 5. **Independent toggles** — every level and every box can be hidden/shown independently of every other; the master label switch hides labels without hiding lines; no toggle has a side effect on an unrelated element.
-6. **Session-time configurability** — changing the Asia/London/New York/ORB session-time inputs correctly moves the corresponding box (and, for Asia/London, their High/Low levels); the ORB default remains 08:30–09:30 ET until explicitly changed.
+6. **Session-time configurability** — changing the Asia/London/New York session-time inputs correctly moves the corresponding box (and, for Asia/London, their High/Low levels). Changing any of ORB's three timing inputs (Start, End, Kill Hour, §4/§9) correctly moves the corresponding phase boundary; the ORB defaults remain 08:00 Start / 08:15 End / 11:00 Kill Hour until explicitly changed.
 7. **Historical lookback default** — confirms the approved default (current session only, §10) renders cleanly with no old-session clutter, and that raising the retention input to 2 or 3 fades older instances correctly and never exceeds the configured cap.
 8. **Line-lifetime behavior** — both configurable modes (extend-through-NY-close vs. stop-at-session-end, §9) behave as documented; "continuation until touched" is confirmed absent (deferred, §14).
 9. **No stale objects** — toggling any input off/on, and letting retention rollover happen naturally, leaves no orphaned or duplicate objects and triggers no runtime object-limit errors.
@@ -313,8 +332,9 @@ Once implementation begins, validation covers:
 11. **Replay accuracy** — TradingView Bar Replay through a full session cycle produces identical results to live/historical viewing.
 12. **NQ/MNQ primary validation** — full checklist run on both NQ and MNQ; ES/MES checked only as a bonus, not blocking sign-off (§15).
 13. **Mobile readability** — labels legible, lines visible, no dashboard/table overlay, on a real mobile device or TradingView's mobile emulation.
-14. **Family color coordination** — changing the Asia color input updates the Asia box, `ASH`, `ASL`, and both their labels together; same for London; ORB and New York (both box-only) each update their single box alone; PDH, PDL, Hourly High, and Hourly Low each change independently without affecting any other element; no color input has an unintended side effect.
+14. **Family color coordination** — changing the Asia color input updates the Asia box, `ASH`, `ASL`, and both their labels together; same for London; changing the ORB color updates the ORB box, ORB High line, and ORB Low line together (restored in draft 8); changing the separate ORB Midline color affects only the dashed midpoint line; New York (box-only) updates its single box alone; PDH, PDL, Hourly High, and Hourly Low each change independently without affecting any other element; no color input has an unintended side effect.
 15. **Compact presentation and exact label text** — every visible label reads exactly the locked text (§3, checklist item 4) with no "AS.L"-style reformatting anywhere; labels sit directly beside/below their line with no large background block and no repetition along the line; candles remain visually dominant over the levels at typical zoom.
+16. **ORB two-phase timing behavior (new, draft 8)** — during the formation window (08:00–08:15 default), the box and all three lines grow live with the range, identically to Asia/London's accumulators. The instant the window closes, the range freezes (top/bottom/high/low/mid values stop changing) while the box's right edge and all three lines keep extending forward every bar. At Kill Hour (11:00 default), everything stops updating and remains visible exactly as last drawn — confirmed on historical bars (not just realtime) and confirmed that toggling ORB's box or midline visibility independently doesn't affect the other's timing.
 
 ---
 
@@ -330,7 +350,7 @@ None of the above is present in the shipped V1 settings menu unless Pedro explic
 
 ## 15. Limitations imposed by Pine or chart timeframe
 
-- **Session-window precision is only accurate on lower timeframes.** An 08:30 ET ORB boundary (or any session boundary) cannot be reliably reconstructed from coarse bars without lower-timeframe aggregation, which V1 does not build. **FINAL, resolved in draft 2 and unchanged since:** full session-box and hourly precision on **1m, 3m, 5m, and 15m** charts; auto-suppressed (drawing nothing, never an approximation) above 15m. PDH/PDL is unaffected (reads a single daily candle regardless of chart timeframe) and works on any intraday timeframe.
+- **Session-window precision is only accurate on lower timeframes.** An 08:00 ET ORB boundary (or any session boundary) cannot be reliably reconstructed from coarse bars without lower-timeframe aggregation, which V1 does not build. **FINAL, resolved in draft 2 and unchanged since:** full session-box and hourly precision on **1m, 3m, 5m, and 15m** charts; auto-suppressed (drawing nothing, never an approximation) above 15m. PDH/PDL is unaffected (reads a single daily candle regardless of chart timeframe) and works on any intraday timeframe.
 - **Pine's per-indicator object limits** (`max_lines_count`, `max_labels_count`, `max_boxes_count`) are hard platform caps. V1's design (persistent, updated-not-recreated objects; bounded 1–3 retention; no per-bar object creation) keeps real usage far below reasonable declared limits, but the exact declared numbers are an implementation detail to finalize during Phase 1, not this specification.
 - **NQ/MNQ are the primary validation target (FINAL).** ES/MES compatibility may remain possible since the implementation is symbol-agnostic by construction (no hardcoded ticker/tick-size/contract-multiplier logic), but ES/MES is not part of the V1 acceptance bar and any symbol-specific issue there does not block sign-off.
 - **No automatic label-collision avoidance** (§12) — a Pine/complexity limitation accepted by design, not a bug to fix later within V1's scope.
@@ -357,7 +377,7 @@ Each commit is one small, independently visible layer, per "we are developing on
 |---|---|---|
 | 0 | *(not a code commit)* Phase 0 visual mock reviewed and approved | **Done** — see `nova_knowledge_core/mockups/` |
 | 1 | `Add Market Map V1 skeleton (PDH/PDL only)` | File creation, input scaffold, object-limit declaration, PDH/PDL only |
-| 2 | `Add ORB session box` | ORB box only (no levels, no midpoint — corrected this revision), fixed 08:30–09:30 ET default |
+| 2 | `Add ORB box + high/low/mid lines` | ORB box, High line, Low line, dashed Midline (no labels, restored in draft 8), two-phase timing model (08:00–08:15 formation, extends to 11:00 Kill Hour) |
 | 3 | `Add Asia session box and levels` | ASH/ASL, Asia box |
 | 4 | `Add London session box and levels` | LH/LL, London box |
 | 5 | `Add New York session box` | NY box only (no NY H/L level, §3) |
@@ -370,22 +390,22 @@ Each commit is one small, independently visible layer, per "we are developing on
 
 ## Summary: Phase 0 is complete — nothing remains awaiting visual approval
 
-**Final, no further approval needed (as of this revision, 2026-07-19):**
-- ORB window (08:30–09:30 ET default) and Asia/London/New York default windows (§4).
-- The eight key levels and their exact label text, plus the compact-presentation rules and the "AS.L" clarification (§3).
-- **ORB is box-only** (added this revision) — no `ORH`, `ORL`, or `ORM` line, label, midpoint, toggle, or color setting exists anywhere in V1; the box's top/bottom edges are the only visible representation of the completed range (§3, §4, §7, §8, §9).
+**Final, no further approval needed (as of this revision, 2026-07-21):**
+- ORB's three timing defaults (Start 08:00, End 08:15, Kill Hour 11:00 ET, restored/corrected in draft 8) and Asia/London/New York default windows (§4).
+- The eight labeled key levels and their exact label text, plus the compact-presentation rules and the "AS.L" clarification (§3).
+- **ORB has its own high/low/mid lines, restored in draft 8** — reversing an earlier mistaken "box-only" correction. ORB draws a box, an ORB High line, an ORB Low line, and a dashed ORB Midpoint line, matching `nova_execution_v1.pine`'s design exactly — but still **no labels** on any of the three lines. ORB's timing is its own two-phase model: a short formation window (default 08:00–08:15 ET) during which the range grows live, followed by a frozen range whose box/lines keep extending right until a separate Kill Hour (default 11:00 ET) (§3, §4, §7, §8, §9).
 - Four session boxes including the New York box (§4).
 - Hourly High/Low = single most-recently-completed hourly candle, non-repainting (§6).
-- Per-level and per-box independent visibility toggles (§9).
-- `input.session()` + `America/New_York`-default timezone as the session-input mechanism (§5).
-- Historical retention default — current-session-only (depth 1), configurable 1–3 (§10).
-- Line-lifetime default — extend-through-NY-close, with stop-at-session-end available (§9).
+- Per-level and per-box independent visibility toggles, including ORB's separate box and midline toggles (§9).
+- `input.session()` + `America/New_York`-default timezone as the session-input mechanism for Asia/London/New York; ORB uses three plain hour/minute inputs instead, since its timing model has three roles a single session window can't express (§5, §9).
+- Historical retention default — current-session-only (depth 1), configurable 1–3, applying to ORB's box + all three lines together (§10).
+- Line-lifetime default — extend-through-NY-close, with stop-at-session-end available, for the six families with configurable line lifetime; ORB's lines follow their own two-phase model instead (§9).
 - Pine filename (`indicators/nova_market_map_v1.pine`) and indicator title (`"NOVA Market Map V1"`) (§2).
 - The small-commit sequence (above).
-- **Customizable colors, structurally** (added this revision): every level family and session box has a user-configurable color; Asia and London are single coordinated families (box + lines + labels together); ORB and New York are box-only coordinated families (box color only, corrected this revision for ORB); PDH, PDL, Hourly High, and Hourly Low each get their own independent color; transparency is independently configurable from color; no per-historical-instance colors (§8, §9).
+- **Customizable colors, structurally**: every level family and session box has a user-configurable color; Asia and London are single coordinated families (box + lines + labels together); ORB is a coordinated family (box + High + Low lines, restored in draft 8) with a second, separate color for its midline; New York is box-only (box color only); PDH, PDL, Hourly High, and Hourly Low each get their own independent color; transparency is independently configurable from color; no per-historical-instance colors (§8, §9).
 - NQ/MNQ as the primary validation instruments (§15).
 - The exclusion list (§1) and all development-safety boundaries (below).
-- **Color direction, approved at Phase 0** (§8): purple Asia, blue London, muted green New York (box-only), amber ORB (box-only, approved slightly more visible than the other three boxes), neutral dashed PDH/PDL, dim teal Hourly High/Low; labels color-matched to their line; all boxes transparent and subordinate to candles; no legend or dashboard.
+- **Color direction, approved at Phase 0, ORB extended in draft 8** (§8): purple Asia, blue London, muted green New York (box-only), amber ORB (box + High/Low lines, approved slightly more visible than the other three boxes), yellow dashed ORB Midline, neutral dashed PDH/PDL, dim teal Hourly High/Low; labels color-matched to their line; all boxes transparent and subordinate to candles; no legend or dashboard.
 
 **Nothing remains in the "proposed, awaiting approval" category.** Phase 0 (style mock review) is done. The only things left before Pine exists are (a) Pedro's separate, explicit go-ahead to begin Phase 1, and (b) ordinary implementation-time choices too fine-grained to gate here (e.g., the precise shade distinguishing PDH from PDL within the neutral family) — noted inline in §8 as not separately gated.
 
@@ -400,6 +420,6 @@ Each commit is one small, independently visible layer, per "we are developing on
 
 This is a fresh, standalone visual indicator. It does not reuse or copy logic from the archived ORB signal engine, PROS, ICT, IB, the legacy execution indicator, the canonical BUY/SELL state, the old scoring system, old webhook logic, or old bridge logic — and it is never connected to NOVA execution.
 
-This specification revision touches **only** `nova_knowledge_core/MARKET_MAP_V1_SPECIFICATION.md`. It does not modify, and no future Market Map V1 work will modify without a separate explicit request: Journal, Market/News, NOVA Assistant, broker code, execution code, risk logic, existing historical data, Alerts, the retired trading subsystem, the live TradingView cloud script, the existing archived Pine indicator (`indicators/nova_execution_v1.pine`), the pre-existing Phase 8 `main.py` diff, or the `mcp/tradingview` submodule pointer. No live TradingView automation is used. All work stays local until Pedro manually reviews and approves deployment; nothing is pushed.
+Draft 8 corrects **both** this specification and the corresponding ORB section of `indicators/nova_market_map_v1.pine` (Phase 1 had already progressed past this document's own "file does not exist yet" framing elsewhere — that framing is stale and predates draft 8, not something this correction introduces). Draft 8 does not modify, and no future Market Map V1 work will modify without a separate explicit request: Journal, Market/News, NOVA Assistant, broker code, execution code, risk logic, existing historical data, Alerts, the retired trading subsystem, the live TradingView cloud script, the existing archived Pine indicator (`indicators/nova_execution_v1.pine`), the pre-existing Phase 8 `main.py` diff, or the `mcp/tradingview` submodule pointer. No live TradingView automation is used. All work stays local until Pedro manually reviews and approves deployment; nothing is pushed.
 
 Nothing in this document authorizes Pine implementation. This specification is approved and Phase 0 (style mock review) is complete and approved — but that is still not authorization to begin Phase 1. Pine implementation begins only after Pedro gives a separate, explicit go-ahead.
