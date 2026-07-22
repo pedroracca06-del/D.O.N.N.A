@@ -175,34 +175,48 @@ def test_exactly_one_attempt_on_transient_failure(mock_anthropic_cls):
     mock_anthropic_cls.assert_called_once()
 
 
-# ── 9. Every approved error mapping ─────────────────────────────────────────
+def _status_error_missing_metadata(cls, error_type: str):
+    """A real status-error instance with its status_code mutated away, simulating
+    missing/unusable status metadata (spec: must fail safely as non-retryable)."""
+    exc = _status_error(cls, 500, error_type)
+    exc.status_code = None
+    return exc
+
+
+# ── 9. Every approved error mapping (error_code AND retryable) ─────────────
 @pytest.mark.parametrize(
-    'make_exc, expected_code',
+    'make_exc, expected_code, expected_retryable',
     [
-        (lambda: _status_error(anthropic.AuthenticationError, 401, 'authentication_error'), IntelligenceErrorCode.AUTH_FAILED),
-        (lambda: _status_error(anthropic.PermissionDeniedError, 403, 'billing_error'), IntelligenceErrorCode.INSUFFICIENT_CREDITS),
-        (lambda: _status_error(anthropic.PermissionDeniedError, 403, 'permission_error'), IntelligenceErrorCode.AUTH_FAILED),
-        (lambda: _status_error(anthropic.RateLimitError, 429, 'rate_limit_error'), IntelligenceErrorCode.RATE_LIMITED),
-        (lambda: _status_error(anthropic.APIStatusError, 529, 'overloaded_error'), IntelligenceErrorCode.RATE_LIMITED),
-        (lambda: _connection_error(anthropic.APITimeoutError), IntelligenceErrorCode.TIMEOUT),
-        (lambda: _connection_error(anthropic.APIConnectionError), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE),
-        (lambda: _status_error(anthropic.NotFoundError, 404, 'not_found_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE),
-        (lambda: _status_error(anthropic.APIStatusError, 500, 'api_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE),
+        (lambda: _status_error(anthropic.AuthenticationError, 401, 'authentication_error'), IntelligenceErrorCode.AUTH_FAILED, False),
+        (lambda: _status_error(anthropic.PermissionDeniedError, 403, 'billing_error'), IntelligenceErrorCode.INSUFFICIENT_CREDITS, False),
+        (lambda: _status_error(anthropic.PermissionDeniedError, 403, 'permission_error'), IntelligenceErrorCode.AUTH_FAILED, False),
+        (lambda: _status_error(anthropic.RateLimitError, 429, 'rate_limit_error'), IntelligenceErrorCode.RATE_LIMITED, False),
+        (lambda: _status_error(anthropic.APIStatusError, 529, 'overloaded_error'), IntelligenceErrorCode.RATE_LIMITED, False),
+        (lambda: _connection_error(anthropic.APITimeoutError), IntelligenceErrorCode.TIMEOUT, True),
+        (lambda: _connection_error(anthropic.APIConnectionError), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, True),
+        (lambda: _status_error(anthropic.NotFoundError, 404, 'not_found_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, False),
+        (lambda: _status_error(anthropic.APIStatusError, 500, 'api_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, True),
+        (lambda: _status_error(anthropic.APIStatusError, 503, 'api_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, True),
+        (lambda: _status_error(anthropic.APIStatusError, 400, 'invalid_request_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, False),
+        (lambda: _status_error_missing_metadata(anthropic.APIStatusError, 'api_error'), IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, False),
     ],
     ids=[
-        'AuthenticationError->AUTH_FAILED',
-        'PermissionDenied(billing_error)->INSUFFICIENT_CREDITS',
-        'PermissionDenied(other)->AUTH_FAILED',
-        'RateLimitError->RATE_LIMITED',
-        'APIStatusError(529)->RATE_LIMITED',
-        'APITimeoutError->TIMEOUT',
-        'APIConnectionError->INVALID_PROVIDER_RESPONSE',
-        'NotFoundError->INVALID_PROVIDER_RESPONSE',
-        'APIStatusError(500)->INVALID_PROVIDER_RESPONSE',
+        'AuthenticationError->AUTH_FAILED,non-retryable',
+        'PermissionDenied(billing_error)->INSUFFICIENT_CREDITS,non-retryable',
+        'PermissionDenied(other)->AUTH_FAILED,non-retryable',
+        'RateLimitError->RATE_LIMITED,non-retryable',
+        'APIStatusError(529)->RATE_LIMITED,non-retryable',
+        'APITimeoutError->TIMEOUT,retryable',
+        'APIConnectionError->INVALID_PROVIDER_RESPONSE,retryable',
+        'NotFoundError(404)->INVALID_PROVIDER_RESPONSE,non-retryable',
+        'APIStatusError(500)->INVALID_PROVIDER_RESPONSE,retryable',
+        'APIStatusError(503)->INVALID_PROVIDER_RESPONSE,retryable',
+        'APIStatusError(400)->INVALID_PROVIDER_RESPONSE,non-retryable',
+        'APIStatusError(missing status_code)->INVALID_PROVIDER_RESPONSE,non-retryable',
     ],
 )
 @patch(f'{ADAPTER_MODULE}.anthropic.Anthropic')
-def test_error_mappings(mock_anthropic_cls, make_exc, expected_code):
+def test_error_mappings(mock_anthropic_cls, make_exc, expected_code, expected_retryable):
     _mock_client, mock_timed_client = _patched_client(mock_anthropic_cls)
     mock_timed_client.messages.create.side_effect = make_exc()
 
@@ -210,11 +224,22 @@ def test_error_mappings(mock_anthropic_cls, make_exc, expected_code):
         AnthropicAdapter().call(prompt='hi', max_tokens=400, timeout=30.0)
 
     assert exc_info.value.error_code == expected_code
+    assert exc_info.value.retryable is expected_retryable
 
 
 def test_classify_provider_error_rejects_unknown_kind():
     with pytest.raises(ValueError):
         classify_provider_error('not_a_real_kind')
+
+
+def test_provider_error_exposes_error_code_and_retryable_fields():
+    err = ProviderError(IntelligenceErrorCode.TIMEOUT, True)
+    assert err.error_code == IntelligenceErrorCode.TIMEOUT
+    assert err.retryable is True
+
+    err2 = ProviderError(IntelligenceErrorCode.AUTH_FAILED, False)
+    assert err2.error_code == IntelligenceErrorCode.AUTH_FAILED
+    assert err2.retryable is False
 
 
 # ── 10. Missing API key — never constructs or calls a live client ──────────
@@ -226,6 +251,7 @@ def test_missing_api_key_never_constructs_client(mock_anthropic_cls, monkeypatch
         AnthropicAdapter().call(prompt='hi', max_tokens=400, timeout=30.0)
 
     assert exc_info.value.error_code == IntelligenceErrorCode.PROVIDER_NOT_CONFIGURED
+    assert exc_info.value.retryable is False
     mock_anthropic_cls.assert_not_called()
 
 

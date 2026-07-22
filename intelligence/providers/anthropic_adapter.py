@@ -16,10 +16,16 @@ from ..errors import classify_provider_error
 from .base import AdapterResult, ProviderAdapter, ProviderError
 
 
+def _raise_provider_error(kind: str, cause: BaseException) -> None:
+    classification = classify_provider_error(kind)
+    raise ProviderError(classification.error_code, classification.retryable) from cause
+
+
 class AnthropicAdapter(ProviderAdapter):
     def call(self, prompt: str, max_tokens: int, timeout: float) -> AdapterResult:
         if not config.ANTHROPIC_API_KEY:
-            raise ProviderError(classify_provider_error('missing_config'))
+            classification = classify_provider_error('missing_config')
+            raise ProviderError(classification.error_code, classification.retryable)
 
         client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0)
         try:
@@ -29,21 +35,31 @@ class AnthropicAdapter(ProviderAdapter):
                 messages=[{'role': 'user', 'content': prompt}],
             )
         except anthropic.AuthenticationError as exc:
-            raise ProviderError(classify_provider_error('authentication')) from exc
+            _raise_provider_error('authentication', exc)
         except anthropic.PermissionDeniedError as exc:
             kind = 'permission_denied_billing' if getattr(exc, 'type', None) == 'billing_error' else 'permission_denied_other'
-            raise ProviderError(classify_provider_error(kind)) from exc
+            _raise_provider_error(kind, exc)
         except anthropic.RateLimitError as exc:
-            raise ProviderError(classify_provider_error('rate_limited')) from exc
+            _raise_provider_error('rate_limited', exc)
         except anthropic.NotFoundError as exc:
-            raise ProviderError(classify_provider_error('not_found')) from exc
+            _raise_provider_error('not_found', exc)
         except anthropic.APIStatusError as exc:
-            kind = 'rate_limited' if getattr(exc, 'status_code', None) == 529 else 'status_error'
-            raise ProviderError(classify_provider_error(kind)) from exc
+            status = getattr(exc, 'status_code', None)
+            # 529 (overloaded) keeps the existing RATE_LIMITED mapping, never
+            # the 5xx-retryable path. Anything that isn't a genuine int in
+            # 500-599 fails safely as permanent/non-retryable — an unknown or
+            # missing status must never be assumed retryable.
+            if status == 529:
+                kind = 'rate_limited'
+            elif isinstance(status, int) and not isinstance(status, bool) and 500 <= status <= 599:
+                kind = 'status_error_retryable'
+            else:
+                kind = 'status_error_permanent'
+            _raise_provider_error(kind, exc)
         except anthropic.APITimeoutError as exc:
-            raise ProviderError(classify_provider_error('timeout')) from exc
+            _raise_provider_error('timeout', exc)
         except anthropic.APIConnectionError as exc:
-            raise ProviderError(classify_provider_error('connection_error')) from exc
+            _raise_provider_error('connection_error', exc)
 
         text = ''.join(block.text for block in response.content if block.type == 'text')
         return AdapterResult(

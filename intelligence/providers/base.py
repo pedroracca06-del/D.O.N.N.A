@@ -16,10 +16,17 @@ class AdapterResult:
 
 
 class ProviderError(Exception):
-    """Raised by a ProviderAdapter on a failed call attempt. error_code is one of errors.IntelligenceErrorCode (spec §9)."""
+    """Raised by a ProviderAdapter on a failed call attempt.
 
-    def __init__(self, error_code: IntelligenceErrorCode):
+    error_code is one of errors.IntelligenceErrorCode (spec §9). retryable is
+    decided by the adapter's error classification (errors.classify_provider_error),
+    never inferred downstream — gateway.py reads err.retryable directly and
+    stays provider-agnostic (spec §8 row 4).
+    """
+
+    def __init__(self, error_code: IntelligenceErrorCode, retryable: bool):
         self.error_code = error_code
+        self.retryable = retryable
         super().__init__(error_code.value)
 
 
