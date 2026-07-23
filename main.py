@@ -106,7 +106,7 @@ except Exception as _exec_err:
 from engines.analytics import compute_analytics, validate_trade
 
 from services.assistant import (
-    ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
+    call_assistant_llm, apply_assistant_action,
 )
 from ui.html import DASHBOARD_HTML
 
@@ -2732,31 +2732,19 @@ async def assistant_chat(request: Request):
     if not message:
         raise HTTPException(status_code=400, detail='message is required')
 
-    from core.config import client
-    if not client:
-        risk    = load_risk_state()
-        driver  = build_market_driver_engine(risk)
-        morning = build_morning_edge(risk)
-        sig     = build_session_significance(risk)
-        msg_lower = message.lower()
-        if 'what matters' in msg_lower or 'summary' in msg_lower:
-            reply = f"{driver['dominant_driver']} is in control. {sig['summary']}"
-        elif 'danger' in msg_lower or 'safe' in msg_lower:
-            reply = f"Main threat: {morning['main_threat']}. Open quality: {morning['open_quality']}."
-        elif 'mover' in msg_lower or 'company' in msg_lower:
-            reply = 'Watch NVDA, MSFT, AMZN, AMD, and TSLA first. They have the most index influence right now.'
-        elif 'significant' in msg_lower or 'real' in msg_lower:
-            reply = sig['summary']
-        else:
-            reply = f"NOVA fallback: Bias is {morning['today_bias']}. Focus is {morning['focus']}."
-        return {'status': 'ok', 'action': 'none', 'value': '', 'reply': reply, 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
-
     try:
         result        = call_assistant_llm(message)
         updated_state = apply_assistant_action(result['action'], result['value'])
         return {'status': 'ok', **result, 'assistant': updated_state, 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
-    except Exception as e:
-        return {'status': 'error', 'action': 'none', 'value': '', 'reply': f'Assistant error: {str(e)}', 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
+    except Exception:
+        # Never surface exception detail here -- call_assistant_llm() already
+        # converts every ordinary gateway failure into a safe {action,value,
+        # reply} dict; only a genuinely unexpected failure (e.g. a prompt-
+        # build bug) reaches this except clause, per spec.
+        return {
+            'status': 'error', 'action': 'none', 'value': '', 'reply': 'AI request failed.',
+            'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10],
+        }
 
 
 # ── Journal ────────────────────────────────────────────────────

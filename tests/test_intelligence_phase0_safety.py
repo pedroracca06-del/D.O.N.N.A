@@ -211,7 +211,7 @@ def test_check_credentials_still_reports_discord(monkeypatch):
     assert 'not set' in discord_entries[0]['detail']
 
 
-# ── 5. Journal, Market/News, and NOVA Assistant remain unchanged ──────────
+# ── 5. Journal, Market/News, and NOVA Assistant import cleanly ────────────
 
 def test_journal_market_assistant_modules_still_import_cleanly():
     for module_name in (
@@ -219,7 +219,7 @@ def test_journal_market_assistant_modules_still_import_cleanly():
         'services.finnhub',      # market data
         'services.news',         # news feed (unmodified)
         'services.headlines',    # economic calendar
-        'services.assistant',    # NOVA Assistant (unmodified)
+        'services.assistant',    # NOVA Assistant (migrated to intelligence.gateway, spec §14 commit #5)
         'engines.analytics',     # journal analytics
     ):
         result = _run(f'import {module_name}; print("IMPORT_OK")')
