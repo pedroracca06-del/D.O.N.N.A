@@ -154,10 +154,15 @@ def request_intelligence(feature: str, input_data: dict, user_id: str, request_i
         return response
 
     # 3. Cache lookup -- bypasses circuit breaker, budget, prompt loading, and
-    #    the provider entirely on a hit.
+    #    the provider entirely on a hit. A cache-read failure is treated as a
+    #    miss and never exposed -- cache is an optimization and must not
+    #    block an otherwise valid request.
     cache_enabled_for_feature = feature_config.cache_ttl_seconds is not None and config.NOVA_AI_CACHE_ENABLED
     if cache_enabled_for_feature:
-        cached_response = cache.get_cached_response(feature, input_data)
+        try:
+            cached_response = cache.get_cached_response(feature, input_data)
+        except Exception:
+            cached_response = None
         if cached_response is not None:
             response = _envelope(
                 success=True, cached=True,
@@ -211,14 +216,20 @@ def request_intelligence(feature: str, input_data: dict, user_id: str, request_i
         return response
 
     # 6. Prompt construction -- lazily resolved; if it fails before the
-    #    provider is ever called, release the reservation and let the
-    #    original exception propagate (no §9 code models "prompt build
-    #    failed", and nothing calls this in production yet).
+    #    provider is ever called, release the reservation when the ledger is
+    #    available, write one redacted audit record, and let the original
+    #    exception propagate (no §9 code models "prompt build failed", and
+    #    nothing calls this in production yet). Never records the exception
+    #    text, the prompt, or input_data.
     try:
         prompt_module = import_module(feature_config.prompt_module)
         prompt = prompt_module.build_prompt(input_data)
     except Exception:
-        budget.release_reservation(reservation)
+        try:
+            budget.release_reservation(reservation)
+        except budget.BudgetStateUnavailable:
+            pass  # ledger unavailable -- the reservation stands as a conservative hold
+        _write_audit(_envelope(), input_tokens_estimate=estimated_input_tokens)
         raise
 
     # 7-8. Adapter call, with NOVA's single controlled retry when the
@@ -245,20 +256,45 @@ def request_intelligence(feature: str, input_data: dict, user_id: str, request_i
                     attempts.append(budget.AttemptOutcome(had_usage=False))
                     final_error = retry_exc
     except Exception:
-        # A genuinely unexpected (non-ProviderError) failure -- still release
-        # the reservation before letting it propagate.
-        budget.release_reservation(reservation)
+        # A genuinely unexpected (non-ProviderError) failure -- release the
+        # reservation when the ledger is available, write one redacted audit
+        # record, and let the original exception propagate. Never records
+        # the raw exception, and never invents a §9 error code the spec
+        # doesn't define for this condition.
+        try:
+            budget.release_reservation(reservation)
+        except budget.BudgetStateUnavailable:
+            pass  # ledger unavailable -- the reservation stands as a conservative hold
+        _write_audit(_envelope(), input_tokens_estimate=estimated_input_tokens)
         raise
 
     # 9. Budget settlement.
     try:
         settled_cost = budget.settle(reservation, attempts=attempts, model=model)
     except budget.BudgetStateUnavailable:
-        # Extremely unlikely (the file was readable moments ago at
-        # reservation time) -- the provider call already happened and the
-        # caller must still get the real result, so fall back to the
-        # reservation's own worst-case figure for the recorded cost.
-        settled_cost = reservation.cost_reserved
+        # A provider attempt already happened but the ledger cannot be
+        # durably updated. Fail closed (spec §8.3 step 7 / §9's
+        # BUDGET_STATE_UNAVAILABLE row): never report success, never cache
+        # output, never claim the reservation was released. It is left
+        # exactly as reserve() wrote it -- a conservative fail-closed hold
+        # that keeps counting against both daily limits (accrued + reserved,
+        # per §8.3) until the next America/New_York rollover or a later
+        # successful reconciliation.
+        if final_error is not None:
+            _record_circuit_failure(feature)
+        else:
+            _record_circuit_success(feature)
+        usage = UsageInfo(estimated_cost_usd=reservation.cost_reserved)
+        if result is not None:
+            usage.input_tokens = result.input_tokens
+            usage.output_tokens = result.output_tokens
+        response = _envelope(
+            error_code=IntelligenceErrorCode.BUDGET_STATE_UNAVAILABLE.value,
+            user_message=_USER_MESSAGES[IntelligenceErrorCode.BUDGET_STATE_UNAVAILABLE],
+            usage=usage,
+        )
+        _write_audit(response, input_tokens_estimate=estimated_input_tokens)
+        return response
 
     if final_error is not None:
         _record_circuit_failure(feature)
@@ -296,16 +332,22 @@ def request_intelligence(feature: str, input_data: dict, user_id: str, request_i
         )
         return response
 
-    # 11. Cache write on valid success only.
+    # 11. Cache write on valid success only. A cache-write failure must never
+    #     discard the valid provider result already obtained (and already
+    #     billed) -- swallow it silently and continue to the normal success
+    #     envelope and audit record.
     if cache_enabled_for_feature:
-        cache.store_cached_response(
-            feature, input_data,
-            cache.CachedResponse(
-                content=text, structured_data=structured_data, model=model,
-                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-            ),
-            feature_config.cache_ttl_seconds,
-        )
+        try:
+            cache.store_cached_response(
+                feature, input_data,
+                cache.CachedResponse(
+                    content=text, structured_data=structured_data, model=model,
+                    input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                ),
+                feature_config.cache_ttl_seconds,
+            )
+        except Exception:
+            pass
 
     # 12. Response envelope.
     response = _envelope(

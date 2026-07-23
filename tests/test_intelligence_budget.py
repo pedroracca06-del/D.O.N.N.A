@@ -190,6 +190,64 @@ def test_invalid_field_types_fail_closed(budget_file):
     assert _read_raw(budget_file) == original
 
 
+# ── Settlement failure after a real attempt: corrective commit ─────────────
+def test_settle_raises_on_corrupt_state_and_never_overwrites_it(budget_file):
+    """Corruption arising between reserve() and settle() must fail closed
+    without settle() ever writing over it -- proves the corrective commit's
+    settlement-failure path has nothing to trust on disk to begin with."""
+    reservation = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+    budget_file.write_text('{not valid json at settlement time', encoding='utf-8')
+    corrupted_content = _read_raw(budget_file)
+
+    with pytest.raises(budget.BudgetStateUnavailable):
+        budget.settle(
+            reservation,
+            attempts=[budget.AttemptOutcome(had_usage=True, input_tokens=5, output_tokens=5)],
+            model='claude-haiku-4-5-20251001',
+        )
+
+    assert _read_raw(budget_file) == corrupted_content
+
+
+def test_stuck_reservation_from_settle_failure_counts_against_daily_limits(budget_file, monkeypatch):
+    """When settle() cannot acquire the lock, the reservation reserve() wrote
+    is left exactly as-is -- valid, readable, still fully "reserved" -- and
+    a fresh read (simulating a process restart) still observes it. It must
+    keep consuming both the daily request-count and cost headroom until the
+    next America/New_York rollover (spec §8.3 verified directly here)."""
+    monkeypatch.setattr(config, 'NOVA_AI_DAILY_REQUEST_LIMIT', 2)
+    reservation = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+
+    monkeypatch.setattr(budget, '_LOCK_TIMEOUT_SECONDS', 0.05)
+    acquired = budget._lock.acquire(timeout=1.0)
+    assert acquired
+    try:
+        with pytest.raises(budget.BudgetStateUnavailable):
+            budget.settle(
+                reservation,
+                attempts=[budget.AttemptOutcome(had_usage=True, input_tokens=5, output_tokens=5)],
+                model='claude-haiku-4-5-20251001',
+            )
+    finally:
+        budget._lock.release()
+
+    # Untouched: still the original reservation, valid and readable.
+    state = budget._read_state(budget_file)
+    assert state.reserved_count == reservation.attempts_reserved
+    assert state.reserved_cost == pytest.approx(reservation.cost_reserved)
+    assert state.request_count == 0
+    assert state.accrued_cost == pytest.approx(0.0)
+
+    # A fresh, independent read (simulating a restart) sees the same stuck reservation.
+    restarted_state = budget._read_state(budget_file)
+    assert restarted_state.reserved_count == reservation.attempts_reserved
+
+    # It continues to consume both daily limits: request_count(0) +
+    # reserved_count(2) + 2 > NOVA_AI_DAILY_REQUEST_LIMIT(2) -- blocked.
+    with pytest.raises(budget.BudgetExceeded):
+        budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+
+
 # ── Fail-closed: lock cannot be acquired ────────────────────────────────────
 def test_lock_failure_fails_closed(budget_file, monkeypatch):
     monkeypatch.setattr(budget, '_LOCK_TIMEOUT_SECONDS', 0.05)
