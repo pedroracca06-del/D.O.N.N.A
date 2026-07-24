@@ -108,6 +108,8 @@ from engines.analytics import compute_analytics, validate_trade
 from services.assistant import (
     call_assistant_llm, apply_assistant_action,
 )
+from intelligence.gateway import request_intelligence
+from intelligence.errors import IntelligenceErrorCode
 from ui.html import DASHBOARD_HTML
 
 try:
@@ -3017,8 +3019,7 @@ async def journal_trade_detail(request: Request):
 async def journal_analyze(request: Request):
     """Generate a NOVA AI review for a journal trade entry. Stores result back to the trade."""
     import json as _json
-    from pathlib import Path
-    from core.config import client as _claude, ANTHROPIC_ASSISTANT_MODEL
+    import uuid as _uuid
 
     body      = await request.json()
     trade_idx = int(body.get('index', -1))
@@ -3052,55 +3053,45 @@ async def journal_analyze(request: Request):
         )
     sig_context = '\n'.join(sig_lines) if sig_lines else '  No signal log entries found for this instrument.'
 
-    prompt = f"""TRADE RECORD:
-Instrument: {trade.get('ticker')} {trade.get('direction')}
-Setup: {trade.get('setup_type') or 'unspecified'}
-Entry: {trade.get('entry_price') or '—'} | Exit: {trade.get('exit_price') or '—'} | Stop: {trade.get('stop') or '—'} | TP1: {trade.get('tp1') or '—'}
-Size: {trade.get('size',1)} | R:R: {trade.get('rr') or '—'}
-P&L: {trade.get('realized_pnl')} | Outcome: {trade.get('outcome')}
-Session: {trade.get('session') or '—'} | Macro risk: {trade.get('macro_risk') or '—'}
-Trader notes: {trade.get('notes') or 'none'}
-Emotional state: {trade.get('emotional_state') or 'not reported'}
-Behavioral flags: {', '.join(trade.get('behavioral_flags') or []) or 'none'}
-Reflection: {trade.get('reflection') or 'none'}
-
-NOVA EVALUATION LOG (closest entries for {ticker}):
-{sig_context}
-
-Provide a structured post-trade analysis with these exact sections. Keep each section to 2-4 sentences max. Tactical, operational language only.
-
-QUALIFICATION
-Why this setup did or did not meet execution standards. Reference PROS phase, OTE, IB draw, session quality, confidence score.
-
-EXECUTION
-Entry timing, stop placement, exit management. Execution score: X/100.
-
-OUTCOME ASSESSMENT
-Was the outcome correct given the setup quality? Explain the result.
-
-WHAT SHOULD HAVE HAPPENED
-Validate correct trades. Identify the error on incorrect ones. State the right path.
-
-BEHAVIORAL NOTE
-One sentence on any behavioral pattern if trader notes or flags suggest it. If none, state "No behavioral flags."
-"""
-
-    system = "You are NOVA, an AI trading intelligence system for MES and MNQ micro futures. You give precise, institutional-grade trade reviews. No hedging, no generic advice. Speak directly about this specific trade."
-
-    if not _claude:
-        return {'status': 'error', 'detail': 'Claude API not configured'}
+    # Curated trade fields only -- never nova_review/nova_review_ts (those are
+    # this endpoint's own output, and including them would churn the cache
+    # key on every regeneration) and never the full trade/journal dump.
+    input_data = {
+        'trade': {
+            'ticker': trade.get('ticker'),
+            'direction': trade.get('direction'),
+            'setup_type': trade.get('setup_type'),
+            'entry_price': trade.get('entry_price'),
+            'exit_price': trade.get('exit_price'),
+            'stop': trade.get('stop'),
+            'tp1': trade.get('tp1'),
+            'size': trade.get('size', 1),
+            'rr': trade.get('rr'),
+            'realized_pnl': trade.get('realized_pnl'),
+            'outcome': trade.get('outcome'),
+            'session': trade.get('session'),
+            'macro_risk': trade.get('macro_risk'),
+            'notes': trade.get('notes'),
+            'emotional_state': trade.get('emotional_state'),
+            'behavioral_flags': trade.get('behavioral_flags'),
+            'reflection': trade.get('reflection'),
+        },
+        'nearby_signals': sig_context,
+    }
 
     try:
-        resp = _claude.messages.create(
-            model=ANTHROPIC_ASSISTANT_MODEL,
-            system=system,
-            messages=[{'role': 'user', 'content': prompt}],
-            max_tokens=800,
-        )
-        analysis = resp.content[0].text.strip() if resp.content else ''
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Claude API error: {str(e)[:100]}')
+        response = request_intelligence('journal_review', input_data, user_id='pedro', request_id=str(_uuid.uuid4()))
+    except Exception:
+        # Prompt-build failure or an unexpected non-ProviderError adapter
+        # failure -- never surface exception detail here.
+        raise HTTPException(status_code=500, detail='Journal review failed.')
 
+    if not response.success:
+        if response.error_code == IntelligenceErrorCode.PROVIDER_NOT_CONFIGURED.value:
+            return {'status': 'error', 'detail': response.user_message}
+        raise HTTPException(status_code=500, detail=response.user_message)
+
+    analysis = (response.content or '').strip()
     trades[trade_idx]['nova_review']    = analysis
     trades[trade_idx]['nova_review_ts'] = utc_now_iso()
     save_journal(trades)
