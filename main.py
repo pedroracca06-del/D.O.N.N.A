@@ -16,7 +16,7 @@ from core.config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_MODE, FOREX_FACTORY_NOTES_URL,
     FINNHUB_API_KEY, FMP_API_KEY, ALPHA_VANTAGE_API_KEY,
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE, MACRO_EVENTS_FILE,
-    MORNING_BRIEF_FILE, NY_TZ, GROK_INTEL_FILE,
+    NY_TZ, GROK_INTEL_FILE,
     CACHE, now_ny, utc_now_iso, session_label, safe_float,
     send_telegram_message,
     NOVA_TRADING_SUBSYSTEM_ENABLED,
@@ -33,11 +33,11 @@ from core.state import (
 )
 from engines.engines import (
     build_harvey_payload, build_dashboard_payload,
-    build_scenario_engine, build_performance_memory,
+    build_performance_memory,
     build_market_driver_engine, build_morning_edge, build_session_significance,
     get_live_major_indexes, get_live_market_data, get_live_movers,
     get_live_calendar, get_live_earnings, get_live_news, get_live_futures_macro_pulse,
-    send_morning_brief, get_quote_with_fallback,
+    get_quote_with_fallback,
 )
 from engines.signals import process_signal
 
@@ -308,14 +308,10 @@ async def eod_close_loop():
 async def morning_brief_loop():
     while True:
         try:
-            ny        = now_ny()
-            today_str = ny.strftime('%Y-%m-%d')
-            if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 5:
-                state = read_json_file(MORNING_BRIEF_FILE, {})
-                if state.get('last_sent_date') != today_str:
-                    print(f'DONNA morning brief: sending for {today_str}')
-                    result = await asyncio.to_thread(send_morning_brief)
-                    print(f'DONNA morning brief: {result}')
+            ny = now_ny()
+            # AI-generated Morning Brief (generate_morning_brief/send_morning_brief)
+            # is deferred per NOVA Intelligence V1 spec §4 -- disconnected from this
+            # loop. Only the deterministic compact brief below remains scheduled.
             # Compact intelligence brief -- fires 9:00-9:25 AM, once per day
             if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 25:
                 try:
@@ -960,12 +956,16 @@ async def earnings():
 
 @app.get('/scenario-data')
 async def scenario_data():
-    return build_scenario_engine()
+    """Scenario Engine is deferred per NOVA Intelligence V1 spec §4 -- disconnected
+    from active runtime. Never calls build_scenario_engine()."""
+    return {'status': 'SCENARIO_ENGINE_DISABLED'}
 
 
 @app.post('/scenario-data/refresh')
 async def scenario_data_refresh():
-    return build_scenario_engine(force=True)
+    """Scenario Engine is deferred per NOVA Intelligence V1 spec §4 -- disconnected
+    from active runtime. Never calls build_scenario_engine()."""
+    return {'status': 'SCENARIO_ENGINE_DISABLED'}
 
 
 # ── HARVEY ─────────────────────────────────────────────────────
@@ -1345,6 +1345,60 @@ async def session_memory_endpoint():
         return load_session_memory()
     except Exception as exc:
         return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
+
+
+@app.post('/market-summary')
+async def market_summary_endpoint():
+    """Manual, user-triggered NOVA AI summary of existing stored market/news risk
+    state (spec §14 commit #7). No request body -- input is built exclusively
+    from approved stored data (load_risk_state()), never a live fetch, never a
+    trading signal. Every call must originate from the visible button in the
+    News tab; there is no automatic caller anywhere in the app."""
+    import uuid as _uuid
+
+    risk = load_risk_state()
+
+    snapshot = (risk.get('market_snapshot') or {}).get('NQ')
+    nq_snapshot = None
+    if isinstance(snapshot, dict) and snapshot:
+        nq_snapshot = {
+            'last': snapshot.get('last'),
+            'chg':  snapshot.get('chg'),
+            'pct':  snapshot.get('pct'),
+        }
+
+    # Curated risk-state fields only -- never Journal, broker, Assistant, or
+    # retired-strategy data. See intelligence/prompts/market_summary.py.
+    input_data = {
+        'macro_risk':            risk.get('macro_risk'),
+        'headline_risk':         risk.get('headline_risk'),
+        'market_news_risk':      risk.get('market_news_risk'),
+        'active_warnings':       risk.get('active_warnings') or [],
+        'next_event':            risk.get('next_event'),
+        'event_phase':           risk.get('event_phase'),
+        'last_headline':         risk.get('last_headline'),
+        'headline_guidance':     risk.get('headline_guidance'),
+        'headline_severity':     risk.get('headline_severity'),
+        'last_market_headline':  risk.get('last_market_headline'),
+        'last_market_guidance':  risk.get('last_market_guidance'),
+        'last_market_severity':  risk.get('last_market_severity'),
+        'nq_snapshot':           nq_snapshot,
+    }
+
+    try:
+        response = request_intelligence('market_summary', input_data, user_id='pedro', request_id=str(_uuid.uuid4()))
+    except Exception:
+        # Prompt-build failure or an unexpected non-ProviderError adapter
+        # failure -- never surface exception detail here.
+        raise HTTPException(status_code=500, detail='Market summary failed.')
+
+    if not response.success:
+        if response.error_code == IntelligenceErrorCode.PROVIDER_NOT_CONFIGURED.value:
+            return {'status': 'error', 'detail': response.user_message}
+        raise HTTPException(status_code=500, detail=response.user_message)
+
+    summary = (response.content or '').strip()
+    return {'status': 'ok', 'summary': summary}
 
 
 # ── MCP Snapshot query helpers ────────────────────────────────────────────────
@@ -2401,7 +2455,9 @@ async def system_check():
 
 @app.get('/send-morning-brief')
 async def manual_morning_brief():
-    return await asyncio.to_thread(send_morning_brief)
+    """AI-generated Morning Brief is deferred per NOVA Intelligence V1 spec §4 --
+    disconnected from active runtime. Never calls send_morning_brief()."""
+    return {'status': 'MORNING_BRIEF_DISABLED'}
 
 
 # ── Alert engine ────────────────────────────────────────────────

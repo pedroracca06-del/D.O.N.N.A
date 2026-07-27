@@ -770,57 +770,6 @@ tr:last-child td{border-bottom:none}
   letter-spacing:.5px;
 }
 
-/* ── SCENARIO ENGINE ── */
-.scenario-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-top:16px}
-.scenario-card{
-  padding:20px 22px;border-radius:16px;
-  border:1px solid var(--line);
-  background:var(--panel);
-  position:relative;overflow:hidden;
-  transition:border-color .15s;
-}
-.scenario-card:hover{border-color:var(--muted2)}
-.scenario-card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:16px 16px 0 0;
-}
-.scenario-card.conf-HIGH::before{background:var(--green)}
-.scenario-card.conf-MEDIUM::before{background:var(--yellow)}
-.scenario-card.conf-LOW::before{background:var(--line)}
-.sc-trigger{
-  font-family:'Rajdhani',sans-serif;font-size:17px;font-weight:700;
-  color:var(--yellow);line-height:1.3;margin-bottom:10px;
-}
-.sc-reaction{font-size:13px;color:var(--text);line-height:1.6;margin-bottom:10px}
-.sc-levels{
-  font-family:'Space Mono',monospace;font-size:11px;
-  color:var(--blue);letter-spacing:.5px;margin-bottom:10px;
-  padding:8px 10px;border-radius:8px;background:rgba(37,99,235,.05);
-  border:1px solid rgba(37,99,235,.1);
-}
-.sc-watch{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px}
-.sc-conf{
-  display:inline-flex;align-items:center;gap:6px;
-  font-family:'Space Mono',monospace;font-size:10px;font-weight:700;
-  letter-spacing:1px;padding:4px 10px;border-radius:6px;
-}
-.sc-conf.HIGH{background:var(--green2);color:var(--green);border:1px solid rgba(30,110,65,.2)}
-.sc-conf.MEDIUM{background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.2)}
-.sc-conf.LOW{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
-.sc-conf-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
-.scenario-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
-.scenario-meta{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2);letter-spacing:1px}
-.gen-btn{
-  padding:8px 16px;border-radius:8px;border:1px solid var(--line);
-  background:var(--panel2);color:var(--text);
-  cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;
-  letter-spacing:1px;transition:border-color .15s;white-space:nowrap;
-}
-.gen-btn:hover{border-color:var(--muted2)}
-.gen-btn:disabled{opacity:.5;cursor:not-allowed}
-@keyframes spin{to{transform:rotate(360deg)}}
-.gen-btn.loading::after{content:' ⟳';display:inline-block;animation:spin .7s linear infinite}
-@media(max-width:900px){.scenario-grid{grid-template-columns:1fr}}
-
 /* ── JOURNAL TAB ── */
 .journal-btn{background:var(--panel) !important;border-color:rgba(184,134,11,.3) !important;color:var(--gold) !important}
 .journal-btn.active{background:var(--text) !important;border-color:var(--text) !important;color:var(--panel) !important}
@@ -1700,6 +1649,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
               <span id="sidebarEventPhase" style="font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--yellow)">—</span>
             </div>
             <div id="sidebarNextEvent" style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2)">—</div>
+          </div>
+
+          <!-- 2b. NOVA MARKET SUMMARY (manual-only, NOVA Intelligence V1 -- never auto-called) -->
+          <div class="panel" id="novaMarketSummaryPanel">
+            <div class="kicker" style="margin-bottom:10px">NOVA Market Summary</div>
+            <button class="nova-gen-btn" id="novaMarketSummaryBtn" onclick="generateMarketSummary()">Generate NOVA Summary</button>
+            <div id="novaMarketSummaryLoading" style="display:none;font-size:11px;color:var(--muted);margin-top:8px">Generating summary...</div>
+            <div id="novaMarketSummaryText" style="display:none;font-size:12px;color:var(--text);line-height:1.6;margin-top:8px"></div>
+            <div id="novaMarketSummaryError" style="display:none;font-size:11px;color:#e05252;margin-top:8px"></div>
           </div>
 
           <!-- 3. MACRO RADAR -->
@@ -2933,58 +2891,6 @@ function connectSSE() {
   };
 }
 
-// ════════ SCENARIO ENGINE ════════
-function renderScenarios(data) {
-  const scenarios = data.scenarios || [];
-  const genAt = data.generated_at || '';
-  const source = data.source || '—';
-
-  // Meta line
-  const metaEl = document.getElementById('scenarioMeta');
-  if (metaEl && genAt) {
-    const ts = genAt.substring(0,16).replace('T',' ');
-    metaEl.textContent = `${source.toUpperCase()} · ${ts} UTC`;
-  }
-
-  if (!scenarios.length) {
-    setHtml('scenarioGrid', '<div class="scenario-card"><div class="sc-reaction" style="color:var(--muted2)">No scenarios available. Click GENERATE.</div></div>');
-    return;
-  }
-
-  setHtml('scenarioGrid', scenarios.map((s, i) => {
-    const conf = (s.confidence || 'MEDIUM').toUpperCase();
-    const confDot = conf === 'HIGH' ? '●' : conf === 'MEDIUM' ? '◉' : '○';
-    return `
-      <div class="scenario-card conf-${conf}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
-          <div style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase">Scenario ${i+1}</div>
-          <span class="sc-conf ${conf}"><span class="sc-conf-dot"></span>${conf}</span>
-        </div>
-        <div class="sc-trigger">${s.trigger || '—'}</div>
-        <div class="sc-reaction">${s.expected_reaction || '—'}</div>
-        <div class="sc-levels"><span style="color:var(--muted2);font-size:9px;letter-spacing:1px">KEY LEVELS &nbsp;</span>${s.key_levels || '—'}</div>
-        <div class="sc-watch"><span style="color:var(--muted2);font-size:10px;font-family:Space Mono,monospace;letter-spacing:.5px">WATCH FOR &nbsp;</span>${s.watch_for || '—'}</div>
-      </div>`;
-  }).join(''));
-}
-
-async function refreshScenarios(force = false) {
-  const btn = document.getElementById('scenarioGenBtn');
-  if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = 'GENERATING'; }
-  try {
-    const url = force ? '/scenario-data/refresh' : '/scenario-data';
-    const res = await fetch(url, force ? {method:'POST'} : undefined);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    renderScenarios(data);
-  } catch(e) {
-    console.error('Scenario refresh error:', e);
-  }
-  if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = 'GENERATE'; }
-}
-
-document.getElementById('scenarioGenBtn')?.addEventListener('click', () => refreshScenarios(true));
-
 // ════════ JOURNAL ════════
 // ══════════════════════════════════════════════════════
 // JOURNAL — Intelligence System
@@ -3600,6 +3506,35 @@ async function generateAnalysis(idx) {
 function toggleReview(idx) {
   const body = document.getElementById(`nova-body-${idx}`);
   if (body) body.classList.toggle(\'open\');
+}
+
+async function generateMarketSummary() {
+  // Manual-only: this function is only ever invoked by the button\'s onclick
+  // handler above -- no page-load, refresh, ticker-interval, or background
+  // caller may call this.
+  const btn     = document.getElementById(\'novaMarketSummaryBtn\');
+  const loading = document.getElementById(\'novaMarketSummaryLoading\');
+  const textEl  = document.getElementById(\'novaMarketSummaryText\');
+  const errEl   = document.getElementById(\'novaMarketSummaryError\');
+  if (errEl)  { errEl.style.display = \'none\'; errEl.textContent = \'\'; }
+  if (textEl) { textEl.style.display = \'none\'; textEl.textContent = \'\'; }
+  if (loading) loading.style.display = \'block\';
+  if (btn) { btn.disabled = true; btn.textContent = \'GENERATING...\'; }
+  try {
+    const res  = await fetch(\'/market-summary\', {method: \'POST\'});
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.status === \'ok\') {
+      if (textEl) { textEl.textContent = data.summary; textEl.style.display = \'block\'; }
+    } else {
+      const msg = (data && data.detail) || \'AI request failed.\';
+      if (errEl) { errEl.textContent = msg; errEl.style.display = \'block\'; }
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = \'AI request failed.\'; errEl.style.display = \'block\'; }
+  } finally {
+    if (loading) loading.style.display = \'none\';
+    if (btn) { btn.disabled = false; btn.textContent = \'Generate NOVA Summary\'; }
+  }
 }
 
 async function refreshJournal() {
