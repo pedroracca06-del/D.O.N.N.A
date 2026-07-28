@@ -1,13 +1,34 @@
 """
-test_intelligence_provider_call_allowlist.py — NOVA Intelligence V1 commit #7:
-the repository-wide direct-provider-call static safety check (spec §15,
-test item 3; §15.1a's temporary allowlist; §15.1b's archived-code inventory).
+test_intelligence_provider_call_allowlist.py — NOVA Intelligence V1: the
+repository-wide direct-provider-call static safety check (spec §15, test
+item 3; §15.1a's temporary allowlist; §15.1b's archived-code inventory).
 
-This check was designed in the spec (nova_knowledge_core/NOVA_INTELLIGENCE_V1_SPECIFICATION.md
-§15.1a) as early as commit #2, but was never actually implemented in commits
-#2-#6 -- confirmed by its absence from every existing test file. Added alongside
-the first feature (Market/News Summary) that has no legacy call site of its own
-to migrate.
+COMMIT #8 (this revision, approved by Pedro): Grok is permanently retired
+from NOVA V1. Every call site the allowlist used to hold in reserve for
+commit #8 has now been removed from active production code, not migrated:
+  - main.py::fetch_grok_intelligence and main.py::debug_grok (both raw
+    requests.post to api.x.ai) -- both functions deleted; grok_loop() (their
+    background scheduler) and its startup task deleted; GET /grok-intelligence
+    and GET /debug-grok now return a static {'status': 'GROK_DISABLED'}
+    disabled-feature response and construct no client, read no file, and make
+    no network call.
+  - services/news.py::_llm_classify (openai.OpenAI client, base_url=api.x.ai)
+    -- deleted entirely, along with _GROK_SYSTEM and the `openai` import.
+    process_news_guard_cycle() no longer calls it; News Guard is now fully
+    deterministic (keyword/calendar/severity scoring only), unconditionally.
+No Grok adapter, provider option, fallback, feature flag, prompt module, or
+registry entry was created anywhere in intelligence/ -- Grok was never
+migrated into the gateway at any point in this project.
+
+This commit also fixed a discovered, unrelated production bug while it was
+directly in scope: main.py's `from services.news import process_news_guard_cycle,
+get_grok_intelligence` always raised ImportError (services/news.py never
+defined get_grok_intelligence), which silently fell through to a no-op stub
+-- meaning the real, deterministic News Guard cycle was NOT running in
+production at all before this commit. Fixed by importing only the real,
+existing name; the fallback (kept only for genuine import failures) now
+prints an observable error rather than silently pretending to succeed, and
+still starts no AI provider and makes no external request.
 
 Enforces (§15's test item 3A): no file outside `intelligence/providers/*.py`,
 and outside the current exact temporary allowlist below, may import
@@ -16,23 +37,10 @@ AI-provider hostname (api.anthropic.com, api.x.ai). Also confirms no
 `grok_adapter.py` exists anywhere in `intelligence/` (spec §5, FINAL).
 
 Allowlist entries name an exact file and function -- never a broad
-directory, module, or wildcard glob (spec §15.1a). The allowlist contains
-only the two Grok findings' three call sites, reserved for commit #8:
-  - main.py::fetch_grok_intelligence  (raw requests.post to api.x.ai) -- spec
-    §2 finding #7's production fetch path.
-  - main.py::debug_grok               (its own independent raw requests.post
-    to the same api.x.ai endpoint, for diagnostic probing) -- spec §2 finding
-    #7's second cited line number (main.py:593 in the original audit). The
-    spec's human-readable table collapses both into one "Grok market-sentiment
-    card" row citing two line numbers; this AST-level check keys on
-    (file, enclosing function) pairs, so the same feature correctly yields
-    two separate allowlist entries here.
-  - services/news.py::_llm_classify   (openai.OpenAI client, base_url=api.x.ai)
-    -- spec §2 finding #8, maps 1:1.
-Two spec findings (#7, #8) -> three allowlist entries. Verified by reading
-main.py:220 (fetch_grok_intelligence) and main.py:576 (debug_grok) directly:
-both independently construct a raw POST to https://api.x.ai/v1/chat/completions;
-neither calls the other. Not a miscount, not an undocumented third Grok site.
+directory, module, or wildcard glob (spec §15.1a). As of commit #8, this
+allowlist is permanently empty: it reaches the "empty by the end of commit
+#8" state the spec's §15.1a described from the start, and must never regain
+an entry for Grok or any other retired call site.
 
 The two Anthropic entries this allowlist held during commits #2-#6
 (services/assistant.py's direct call, main.py's Journal Review direct call)
@@ -40,34 +48,18 @@ were removed by commits #5 and #6 respectively and must NEVER reappear here
 -- this file explicitly asserts both call sites are gone, not just silently
 omitted from the allowlist.
 
-CORRECTIVE WORK (this commit, approved by Pedro): building this check
-originally surfaced a pre-existing, unrelated gap -- core/config.py's shared
-Anthropic `client` was being called directly, live, by two of the three
-functions spec §4 lists as "deferred" in engines/engines.py: build_scenario_engine()
-(reachable from GET /dashboard-data, GET /scenario-data, POST /scenario-data/refresh)
-and generate_morning_brief()/send_morning_brief() (reachable from the daily
-morning_brief_loop() background task and from GET /send-morning-brief). Both
-have now been disconnected from active runtime (see _ARCHIVED_CODE_INVENTORY
-below): the dashboard payload no longer calls build_scenario_engine(), the
-three routes above return a static disabled-feature response and never invoke
-their underlying deferred function, and morning_brief_loop() no longer
-contains a send_morning_brief() branch (the unrelated, deterministic
-compute_and_deliver_morning_brief() compact-brief branch is untouched and
-still scheduled). The deferred function bodies themselves, and all historical
-Morning Brief / Scenario Engine data, are preserved unmodified -- this is a
-disconnection from active runtime, not a deletion. See
-nova_knowledge_core/NOVA_INTELLIGENCE_V1_SPECIFICATION.md §15.1b and this
-commit's report for the full writeup.
-
-No reachable Anthropic call site is retained under any "known gap" label as
-of this commit -- see _ARCHIVED_CODE_INVENTORY's docstring for exactly what
-remains and why it is now archived-code, not a pending decision.
+No reachable Anthropic OR xAI/Grok call site is retained under any "known
+gap" or allowlist label as of this commit -- see _ARCHIVED_CODE_INVENTORY's
+docstring for the one remaining (unrelated, pre-existing, Anthropic-only)
+archived-code entry and why it is documentation of dead code, not a pending
+decision.
 
 Run:  python -m pytest tests/test_intelligence_provider_call_allowlist.py -v
 """
 from __future__ import annotations
 
 import ast
+import json
 import os
 import socket
 import sys
@@ -92,13 +84,10 @@ _FORBIDDEN_IMPORT_ROOTS = ('anthropic', 'openai')
 _FORBIDDEN_HOSTNAMES = ('api.anthropic.com', 'api.x.ai')
 
 # (relative file path, exact enclosing function name) -- §15.1a FINAL scope:
-# only the two Grok findings' three call sites remain. Nothing else may be
-# added; this only shrinks, in commit #8.
-_ALLOWLIST: set[tuple[str, str]] = {
-    ('main.py', 'fetch_grok_intelligence'),
-    ('main.py', 'debug_grok'),
-    ('services/news.py', '_llm_classify'),
-}
+# EMPTY as of commit #8. Grok's three call sites are removed from active
+# production code (not migrated), which is what actually empties this list
+# -- not a relaxation of the check. Nothing may ever be added back here.
+_ALLOWLIST: set[tuple[str, str]] = set()
 
 # ── ARCHIVED-CODE INVENTORY (§15.1b, permanent) ──────────────────────────
 #
@@ -269,16 +258,12 @@ def test_allowlist_and_archived_code_never_overlap():
     assert _ALLOWLIST.isdisjoint(_ARCHIVED_CODE_INVENTORY)
 
 
-def test_allowlist_contains_only_the_two_grok_findings_three_entries():
-    """§15.1a FINAL scope -- no fourth entry, no wildcard, no directory-level
-    entry may ever be added here. Exactly three function-level entries,
-    corresponding to the specification's two Grok findings (finding #7's two
-    call sites plus finding #8's one)."""
-    assert _ALLOWLIST == {
-        ('main.py', 'fetch_grok_intelligence'),
-        ('main.py', 'debug_grok'),
-        ('services/news.py', '_llm_classify'),
-    }
+def test_allowlist_is_empty():
+    """§15.1a's terminal state, reached in commit #8: no entry, no wildcard,
+    no directory-level entry may ever be added here again. Grok's three call
+    sites are the allowlist's last members and are now gone from production
+    code entirely -- not migrated, not deferred, removed."""
+    assert _ALLOWLIST == set()
 
 
 def test_every_allowlist_entry_corresponds_to_a_real_reachable_call_site():
@@ -535,3 +520,265 @@ def test_archived_performance_memory_is_currently_dead_code():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert 'build_performance_memory' not in call_names
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# (C) Grok retirement (commit #8) -- permanent removal, not migration
+# ═══════════════════════════════════════════════════════════════════════
+
+def test_grok_loop_and_its_startup_scheduling_are_absent_from_main():
+    """grok_loop() must not exist, and startup() must never schedule it --
+    proven by absence of the name anywhere in main.py, not merely by absence
+    of the asyncio.create_task call (belt and suspenders)."""
+    main_source = (REPO_ROOT / 'main.py').read_text(encoding='utf-8')
+    assert 'grok_loop' not in main_source
+    assert 'fetch_grok_intelligence' not in main_source
+    assert '_GROK_INTEL_PROMPT' not in main_source
+    import main as _main
+    assert not hasattr(_main, 'grok_loop')
+    assert not hasattr(_main, 'fetch_grok_intelligence')
+    startup_source = inspect_source(_main.startup)
+    assert 'grok' not in startup_source.lower()
+
+
+def inspect_source(fn):
+    import inspect
+    return inspect.getsource(fn)
+
+
+def test_grok_intelligence_route_returns_disabled_status_never_live_snapshot():
+    """GET /grok-intelligence must return the established disabled-feature
+    contract and must NEVER return the frozen historical Grok snapshot as if
+    it were current intelligence (explicit Pedro instruction) -- proven at
+    runtime, not just by source inspection."""
+    import main as _main
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_main.app)
+    r = client.get('/grok-intelligence')
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {'status': 'GROK_DISABLED'}
+    # None of the historical snapshot's field names may leak through.
+    for stale_key in ('top_story', 'market_sentiment', 'donna_trade_read',
+                       'key_names_to_watch', 'x_market_chatter', 'fetched_at'):
+        assert stale_key not in body
+
+
+def test_debug_grok_route_disabled_no_probe_stages_no_key_prefix(monkeypatch):
+    """GET /debug-grok must return the disabled-feature contract and must
+    never construct a live client, read GROK_API_KEY, read the historical
+    file, or expose any API-key prefix -- none of the four original
+    diagnostic stages may run. Proven at runtime by making a real network
+    connection raise (via the autouse socket guard) and by asserting the
+    response body carries none of the old stage/key fields."""
+    import main as _main
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv('GROK_API_KEY', 'fake-test-key-should-never-be-read')
+
+    client = TestClient(_main.app)
+    r = client.get('/debug-grok')
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {'status': 'GROK_DISABLED'}
+    for stale_key in ('stage_1_api_key', 'stage_2_file', 'stage_3_api_probe',
+                       'stage_4_endpoint', 'break_point', 'prefix'):
+        assert stale_key not in body
+    assert 'fake-test-key' not in r.text
+
+
+def test_debug_grok_source_contains_no_probe_or_key_logic():
+    """Static confirmation that debug_grok()'s body was actually replaced,
+    not merely short-circuited -- no residual stage/probe/key-prefix code."""
+    import main as _main
+    source = inspect_source(_main.debug_grok)
+    for stale in ('api.x.ai', 'key_prefix', 'stage_3_api_probe', '_GROK_API_KEY', 'requests.post'):
+        assert stale not in source
+
+
+def test_system_check_no_longer_reports_grok_configuration():
+    """grok_connected / last_grok_fetch must not be reported anywhere in
+    environment/status reporting. Note: these two fields actually lived in
+    GET /system-check in the pre-commit-#8 code, not GET /check-env (which
+    never had any Grok field) -- both routes are checked here so the test is
+    correct regardless of which one the fields were really in."""
+    main_source = (REPO_ROOT / 'main.py').read_text(encoding='utf-8')
+    assert 'grok_connected' not in main_source
+    assert 'last_grok_fetch' not in main_source
+
+    import main as _main
+    from fastapi.testclient import TestClient
+    client = TestClient(_main.app)
+
+    r_env = client.get('/check-env')
+    assert r_env.status_code == 200
+    assert 'grok_connected' not in r_env.json()
+    assert 'last_grok_fetch' not in r_env.json()
+
+
+def test_no_openai_import_or_grok_env_read_outside_disabled_scope():
+    """No production file may import openai or actually read the GROK_API_KEY
+    env var anymore -- the classifier and both fetch paths are deleted, not
+    merely disabled. (debug_grok()'s docstring mentions the variable name in
+    prose to document what it no longer does -- that is not a live read, so
+    this checks for the actual os.getenv(...) call pattern, not the bare
+    substring.)"""
+    for rel_path in ('main.py', 'services/news.py'):
+        source = (REPO_ROOT / rel_path).read_text(encoding='utf-8')
+        assert 'import openai' not in source and 'from openai' not in source, rel_path
+        assert "getenv('GROK_API_KEY'" not in source, rel_path
+        assert 'os.environ[\'GROK_API_KEY\']' not in source, rel_path
+
+
+def test_no_grok_adapter_registry_entry_or_prompt_module():
+    """No Grok adapter, provider option, fallback, feature flag, or prompt
+    module exists anywhere under intelligence/ -- Grok was never migrated
+    into the gateway at any point, in any commit."""
+    assert list(INTELLIGENCE_DIR.rglob('*grok*')) == []
+    for py_file in INTELLIGENCE_DIR.rglob('*.py'):
+        source = py_file.read_text(encoding='utf-8')
+        assert 'grok' not in source.lower(), f'unexpected Grok reference in {py_file}'
+
+
+def test_grok_dashboard_card_sidebar_and_branding_absent_from_active_ui():
+    """The 'NOVA's Market Read' card, its 'Powered by Grok' label, the X
+    Sentiment sidebar strip, and every associated CSS class, DOM id,
+    automatic fetch call, and interval must be fully gone -- not hidden, not
+    replaced with fake/placeholder functionality."""
+    from ui.html import DASHBOARD_HTML
+    html = DASHBOARD_HTML
+    assert 'grok' not in html.lower()
+    for marker in (
+        "NOVA's Market Read", 'Powered by Grok', 'X Sentiment',
+        'fetchGrokIntel', 'refreshGrokIntelligence',
+        '_dbGrokCache', '/grok-intelligence',
+    ):
+        assert marker not in html, f'Grok UI reference {marker!r} still present in DASHBOARD_HTML'
+
+
+def test_market_summary_card_still_present_after_grok_removal():
+    """The completed, manual-only Market Summary feature must survive Grok's
+    removal untouched -- confirms the two features were not accidentally
+    coupled in the dashboard markup."""
+    from ui.html import DASHBOARD_HTML
+    assert 'generateMarketSummary' in DASHBOARD_HTML
+    assert 'novaMarketSummaryBtn' in DASHBOARD_HTML
+    assert "fetch('/market-summary'" in DASHBOARD_HTML
+
+
+def test_process_news_guard_cycle_resolves_to_real_implementation_not_stub():
+    """Proves the discovered import-defect fix actually works: main.py's
+    process_news_guard_cycle must be the real function from services.news,
+    not the defensive fallback stub bound into main's own module namespace."""
+    import main as _main
+    assert _main.process_news_guard_cycle.__module__ == 'services.news'
+    source = inspect_source(_main.process_news_guard_cycle)
+    assert 'fallback invoked' not in source
+
+
+def test_main_no_longer_imports_nonexistent_get_grok_intelligence():
+    """The broken `get_grok_intelligence` import name (never defined in
+    services/news.py) must be gone from main.py's import statement."""
+    main_source = (REPO_ROOT / 'main.py').read_text(encoding='utf-8')
+    assert 'get_grok_intelligence' not in main_source
+
+
+def test_news_import_fallback_is_observable_not_silent():
+    """If services.news ever fails to import again, the fallback must print
+    a clear, observable error -- not silently swallow the exception the way
+    the original broken `except Exception: def ...(): return None` did."""
+    main_source = (REPO_ROOT / 'main.py').read_text(encoding='utf-8')
+    idx = main_source.index('from services.news import process_news_guard_cycle')
+    nearby = main_source[idx:idx + 700]
+    assert 'except Exception as _news_err' in nearby
+    assert 'print(' in nearby
+    assert 'News Guard' in nearby
+
+
+def test_llm_classify_and_grok_system_removed_from_services_news():
+    """_llm_classify(), _GROK_SYSTEM, and the raw Grok system-prompt text
+    must be fully gone from services/news.py -- not merely uncalled."""
+    news_source = (REPO_ROOT / 'services' / 'news.py').read_text(encoding='utf-8')
+    for stale in ('_llm_classify', '_GROK_SYSTEM', 'grok-3-mini', 'x.ai'):
+        assert stale not in news_source
+
+    import services.news as _news
+    assert not hasattr(_news, '_llm_classify')
+    assert not hasattr(_news, '_GROK_SYSTEM')
+    assert not hasattr(_news, 'GROK_API_KEY')
+
+
+def test_process_news_guard_cycle_is_deterministic_and_produces_risk_state(monkeypatch, tmp_path):
+    """End-to-end proof that News Guard runs fully deterministically: mocked
+    Finnhub headlines in, a real risk-state write out, with no LLM call
+    anywhere in the path (the autouse socket guard would fail the test if
+    one were attempted)."""
+    import services.news as news_mod
+
+    fake_risk_file = tmp_path / 'risk_state.json'
+    monkeypatch.setattr(news_mod, 'RISK_STATE_FILE', fake_risk_file)
+
+    def _fake_finnhub():
+        return [
+            {'headline': 'Fed holds rates steady', 'summary': 'FOMC decision', 'source': 'test', 'url': '', 'ts': 0},
+            {'headline': 'NVDA beats earnings',     'summary': 'earnings beat', 'source': 'test', 'url': '', 'ts': 0},
+        ]
+
+    monkeypatch.setattr(news_mod, '_fetch_finnhub_news', _fake_finnhub)
+    monkeypatch.setattr(news_mod, '_fetch_fmp_news', lambda: [])
+    monkeypatch.setattr(news_mod, '_get_next_event_from_file', lambda: ('No scheduled event', None))
+
+    news_mod.process_news_guard_cycle()
+
+    assert fake_risk_file.exists()
+    state = json.loads(fake_risk_file.read_text(encoding='utf-8'))
+    assert state.get('last_headline')
+    assert state.get('macro_risk') in ('low', 'medium', 'high')
+    assert state.get('headline_guidance')
+
+
+def test_news_loop_still_calls_process_news_guard_cycle_on_established_schedule():
+    """news_loop() must remain wired to process_news_guard_cycle() at its
+    existing 60s/300s cadence -- News Guard's fix must not have detached it
+    from the schedule that was already correct."""
+    import main as _main
+    source = inspect_source(_main.news_loop)
+    assert 'process_news_guard_cycle' in source
+    assert '_news_sleep_seconds()' in source
+
+
+def test_market_reality_and_directional_pressure_have_no_grok_references():
+    """engines/market_reality.py and engines/directional_pressure.py must no
+    longer read, score, or label anything Grok-specific -- while remaining
+    otherwise unmodified (no engine redesign)."""
+    for rel_path in ('engines/market_reality.py', 'engines/directional_pressure.py'):
+        source = (REPO_ROOT / rel_path).read_text(encoding='utf-8')
+        assert 'grok' not in source.lower(), f'Grok reference remains in {rel_path}'
+
+
+def test_market_reality_route_no_longer_merges_grok_sentiment():
+    """GET /market-reality's V1-fallback merge must no longer forward a
+    grok_sentiment field, while its other V1 fallbacks (weekly_structure,
+    direction, severity) remain untouched."""
+    import main as _main
+    source = inspect_source(_main.market_reality_endpoint)
+    assert 'grok_sentiment' not in source
+    assert 'weekly_structure' in source
+    assert "mr2.setdefault('direction'" in source
+
+
+def test_no_active_code_path_can_write_the_historical_grok_snapshot():
+    """The historical Grok snapshot file (nova_grok_intelligence.json /
+    donna_grok_intelligence.json) must be preserved, never rewritten or
+    deleted by active code. This is proven structurally: main.py no longer
+    imports GROK_INTEL_FILE or constructs any path to it at all, and neither
+    fetch_grok_intelligence() (the only function that ever wrote it) nor
+    grok_loop() (its only caller) exist anymore -- so no reachable code path
+    in the running application can write to that file again."""
+    main_source = (REPO_ROOT / 'main.py').read_text(encoding='utf-8')
+    assert 'GROK_INTEL_FILE' not in main_source
+    import main as _main
+    assert not hasattr(_main, 'fetch_grok_intelligence')
+    assert not hasattr(_main, '_load_cached_grok')
+    assert not hasattr(_main, 'grok_loop')

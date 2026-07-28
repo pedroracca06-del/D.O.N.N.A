@@ -449,70 +449,11 @@ tr:last-child td{border-bottom:none}
   font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--blue);
 }
 
-/* ── GROK INTELLIGENCE ── */
-.grok-card{
-  padding:22px 26px 20px;border-radius:18px;
-  border:1px solid var(--line);background:var(--panel);
-  box-shadow:var(--shadow2);position:relative;overflow:hidden;
-  min-height:120px;
-}
 #hvPlaybook{min-height:80px}
 #hvSignals{min-height:80px}
 #newsList{min-height:120px}
 #hvSectors{min-height:80px}
 #caDivergenceList{min-height:60px}
-.grok-card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,var(--green),var(--gold));
-  border-radius:18px 18px 0 0;
-}
-.grok-card-header{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-.grok-pulse-dot{
-  width:8px;height:8px;border-radius:50%;background:var(--green);
-  animation:pulse 2s ease-in-out infinite;flex-shrink:0;
-}
-.grok-card-title{
-  font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;letter-spacing:.5px;
-  color:var(--text);flex:1;
-}
-.grok-powered-badge{
-  font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;
-  padding:3px 9px;border-radius:5px;
-  background:var(--panel2);color:var(--muted2);border:1px solid var(--line);
-}
-.grok-sentiment-badge{
-  display:inline-flex;align-items:center;
-  padding:4px 12px;border-radius:8px;
-  font-family:'Space Mono',monospace;font-size:9px;font-weight:700;
-  letter-spacing:1.5px;text-transform:uppercase;
-}
-.grok-sentiment-badge.sentiment-BULLISH{background:var(--green2);color:var(--green);border:1px solid rgba(30,110,65,.25)}
-.grok-sentiment-badge.sentiment-BEARISH{background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.25)}
-.grok-sentiment-badge.sentiment-NEUTRAL{background:var(--panel2);color:var(--muted2);border:1px solid var(--line)}
-.grok-sentiment-badge.sentiment-MIXED{background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.25)}
-.grok-headline{
-  font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;
-  line-height:1.15;letter-spacing:.3px;margin-bottom:10px;color:var(--text);
-}
-.grok-summary{font-size:13px;color:var(--muted);line-height:1.65;margin-bottom:10px}
-.grok-sentiment-reason{font-size:12px;color:var(--muted2);line-height:1.5;font-style:italic;margin-bottom:14px}
-.grok-trade-read{
-  padding:13px 16px 13px 18px;
-  border-radius:0 10px 10px 0;
-  background:var(--panel2);
-  border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line);
-  border-left:3px solid var(--gold);
-  font-size:13px;color:var(--text);line-height:1.7;margin-bottom:16px;font-weight:500;
-}
-.grok-names-row{display:flex;flex-wrap:wrap;gap:7px}
-.grok-name-chip{
-  display:inline-block;padding:5px 14px;border-radius:999px;
-  background:var(--panel2);border:1px solid var(--line);
-  font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;
-  color:var(--text);cursor:pointer;transition:all .15s;letter-spacing:.3px;
-  text-decoration:none;
-}
-.grok-name-chip:hover{background:var(--bg2);border-color:var(--muted);color:var(--text);text-decoration:none}
 .breaking-events-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .breaking-event-card{
   padding:14px 16px;border-radius:14px;
@@ -1595,22 +1536,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <!-- ─── LEFT COLUMN ─── -->
         <div class="vstack" style="gap:14px">
 
-          <!-- 1. NOVA'S MARKET READ -->
-          <div class="grok-card">
-            <div class="grok-card-header">
-              <div class="grok-pulse-dot"></div>
-              <div class="grok-card-title">NOVA&#39;s Market Read</div>
-              <div class="grok-powered-badge">Powered by Grok</div>
-              <div id="grokSentimentBadge" class="grok-sentiment-badge sentiment-NEUTRAL">NEUTRAL</div>
-            </div>
-            <div class="grok-headline" id="grokTopStory">Fetching latest market intelligence from Grok...</div>
-            <div class="grok-summary" id="grokSummary" style="min-height:18px"></div>
-            <div class="grok-sentiment-reason" id="grokSentimentReason" style="min-height:14px"></div>
-            <div class="grok-trade-read" id="grokTradeRead" style="min-height:18px"></div>
-            <div class="grok-names-row" id="grokKeyNames"></div>
-          </div>
-
-          <!-- 2. LIVE FEED -->
+          <!-- 1. LIVE FEED -->
           <div class="panel">
             <div class="kicker" style="margin-bottom:12px">Live Feed</div>
             <div id="newsList"><div class="obs-item low"><div class="obs-body">Loading headlines...</div></div></div>
@@ -1621,15 +1547,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
         <!-- ─── RIGHT SIDEBAR 30% ─── -->
         <div class="vstack" style="gap:14px">
 
-          <!-- 1. X SENTIMENT -->
-          <div class="panel">
-            <div class="kicker" style="margin-bottom:10px">X Sentiment</div>
-            <div id="sidebarGrokSentiment" style="margin-bottom:6px">—</div>
-            <div class="donna-read" id="donnaRead">—</div>
-            <div class="grok-names-row" style="margin-top:10px" id="sidebarGrokChips"></div>
-          </div>
-
-          <!-- 2. RISK LEVELS -->
+          <!-- 1. RISK LEVELS -->
           <div class="panel">
             <div class="kicker" style="margin-bottom:10px">Risk Levels</div>
             <div class="risk-level-row">
@@ -2213,11 +2131,9 @@ function updateStrip(items) {
 
 // ════════ DASHBOARD ENGINE ════════
 let _dbStateEngine = null;
-let _dbGrokCache   = null;
 
 function renderDashboard() {
   const se   = _dbStateEngine || {};
-  const grok = _dbGrokCache   || {};
   const risk = (_lastDashData || {}).risk || {};
   const snap = risk.market_snapshot || {};
 
@@ -2285,9 +2201,9 @@ function renderDashboard() {
   if (bullEl) setHtml('dbDriverBullets', bullets.slice(0,3).map(b => `<li>${b}</li>`).join('') || '<li>Awaiting market intelligence...</li>');
 
   // ── CATALYST ──
-  setText('dbCatalystHeadline', grok.top_story || risk.last_headline || '—');
-  setText('dbCatalystSummary',  grok.top_story_summary || grok.sentiment_reason || risk.headline_guidance || '—');
-  const sent    = (grok.market_sentiment || 'NEUTRAL').toUpperCase();
+  setText('dbCatalystHeadline', risk.last_headline || '—');
+  setText('dbCatalystSummary',  risk.headline_guidance || '—');
+  const sent    = 'NEUTRAL';
   const sentEl  = document.getElementById('dbCatalystSentiment');
   if (sentEl) {
     sentEl.textContent      = sent;
@@ -2333,15 +2249,6 @@ async function fetchStateEngine() {
   } catch(e) { console.error('fetchStateEngine:', e); }
 }
 
-async function fetchGrokIntel() {
-  try {
-    const res = await fetch('/grok-intelligence');
-    if (!res.ok) return;
-    const g = await res.json();
-    if (!g.error) { _dbGrokCache = g; renderDashboard(); }
-  } catch(e) { console.error('fetchGrokIntel:', e); }
-}
-
 function dashClock() {
   const el = document.getElementById('dbSessionLabel');
   if (!el) return;
@@ -2352,52 +2259,6 @@ function dashClock() {
   const now = new Date();
   const nyTime = now.toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
   el.textContent = (label ? label + ' · ' : '') + nyTime + ' ET';
-}
-
-// ════════ GROK INTELLIGENCE ════════
-async function refreshGrokIntelligence() {
-  try {
-    const res = await fetch('/grok-intelligence');
-    if (!res.ok) return;
-    const g = await res.json();
-    if (g.error) return; // no cached data yet — keep placeholder text
-
-    const sent = (g.market_sentiment || 'NEUTRAL').toUpperCase();
-
-    // Main card badge
-    const badgeEl = document.getElementById('grokSentimentBadge');
-    if (badgeEl) {
-      badgeEl.textContent = sent;
-      badgeEl.className = 'grok-sentiment-badge sentiment-' + sent;
-    }
-
-    // Main card fields — only update when there's real content
-    if (g.top_story)         setText('grokTopStory',        g.top_story);
-    if (g.top_story_summary) setText('grokSummary',         g.top_story_summary);
-    if (g.donna_trade_read)  setText('grokTradeRead',       g.donna_trade_read);
-    if (g.sentiment_reason)  setText('grokSentimentReason', g.sentiment_reason);
-
-    // Ticker chips (main card + sidebar)
-    const names = Array.isArray(g.key_names_to_watch) ? g.key_names_to_watch : [];
-    const chipsHtml = names.length
-      ? names.map(n => `<a href="https://finance.yahoo.com/quote/${encodeURIComponent(n)}" target="_blank" rel="noopener" class="grok-name-chip">${n}</a>`).join('')
-      : '';
-    const namesEl = document.getElementById('grokKeyNames');
-    if (namesEl && chipsHtml) namesEl.innerHTML = chipsHtml;
-    const sideChipsEl = document.getElementById('sidebarGrokChips');
-    if (sideChipsEl && chipsHtml) sideChipsEl.innerHTML = chipsHtml;
-
-    // Sidebar X Sentiment card
-    const sgEl = document.getElementById('sidebarGrokSentiment');
-    if (sgEl) {
-      const sentColor = sent==='BULLISH' ? 'var(--green)' : sent==='BEARISH' ? 'var(--red)' : sent==='MIXED' ? 'var(--yellow)' : 'var(--muted2)';
-      sgEl.innerHTML = `<span style="font-family:Rajdhani,sans-serif;font-size:22px;font-weight:700;color:${sentColor};letter-spacing:.5px">${sent}</span>`;
-    }
-    if (g.sentiment_reason) setText('donnaRead', g.sentiment_reason);
-
-  } catch(e) {
-    console.error('refreshGrokIntelligence failed:', e);
-  }
 }
 
 // ════════ NEWS FUTURES STRIP ════════
@@ -4067,8 +3928,6 @@ refresh();
 setInterval(refresh, 30000);
 refreshJournal();
 setInterval(refreshJournal, 60000);
-refreshGrokIntelligence();
-setInterval(refreshGrokIntelligence, 5 * 60 * 1000);
 refreshNewsFuturesStrip();
 setInterval(refreshNewsFuturesStrip, 30000);
 refreshTrendingMovers();
@@ -4077,8 +3936,6 @@ refreshEconCalendar();
 setInterval(refreshEconCalendar, 5 * 60 * 1000);
 fetchStateEngine();
 setInterval(fetchStateEngine, 15000);
-fetchGrokIntel();
-setInterval(fetchGrokIntel, 5 * 60 * 1000);
 dashClock();
 setInterval(dashClock, 1000);
 

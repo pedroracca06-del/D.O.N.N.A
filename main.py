@@ -16,7 +16,7 @@ from core.config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_MODE, FOREX_FACTORY_NOTES_URL,
     FINNHUB_API_KEY, FMP_API_KEY, ALPHA_VANTAGE_API_KEY,
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE, MACRO_EVENTS_FILE,
-    NY_TZ, GROK_INTEL_FILE,
+    NY_TZ,
     CACHE, now_ny, utc_now_iso, session_label, safe_float,
     send_telegram_message,
     NOVA_TRADING_SUBSYSTEM_ENABLED,
@@ -113,12 +113,16 @@ from intelligence.errors import IntelligenceErrorCode
 from ui.html import DASHBOARD_HTML
 
 try:
-    from services.news import process_news_guard_cycle, get_grok_intelligence
-except Exception:
+    from services.news import process_news_guard_cycle
+except Exception as _news_err:
+    # Observable failure, never a silent no-op: if the real News Guard
+    # import ever breaks again, this must be visible in logs, not hidden
+    # behind a fallback that looks healthy. The fallback itself starts no
+    # AI provider and makes no external request -- it only logs and skips.
+    print(f'[main] services.news unavailable -- News Guard will NOT run: {_news_err}')
     def process_news_guard_cycle():
+        print('[main] process_news_guard_cycle() fallback invoked -- real News Guard failed to import')
         return None
-    def get_grok_intelligence():
-        return {}
 
 try:
     from engines.risk_engine import (
@@ -177,70 +181,6 @@ except Exception as _se_err:
 
 app = FastAPI(title='NOVA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
-
-_GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
-_GROK_INTEL_FILE   = GROK_INTEL_FILE  # /data/ persistent disk via DONNA_DATA_DIR
-_GROK_INTEL_PROMPT = (
-    'You are a financial markets AI with live access to X/Twitter and current news. '
-    'Return ONLY valid JSON with these fields:\n'
-    '{\n'
-    '  "top_story": "<headline of the single most market-moving story right now>",\n'
-    '  "top_story_summary": "<2-3 sentence summary of that story and its market impact>",\n'
-    '  "market_sentiment": "<one of: BULLISH | BEARISH | NEUTRAL | MIXED>",\n'
-    '  "sentiment_reason": "<1-2 sentences explaining the sentiment>",\n'
-    '  "donna_trade_read": "<actionable trading implication for today — what to watch, avoid, or lean into>",\n'
-    '  "key_names_to_watch": ["TICKER1", "TICKER2", "TICKER3"],\n'
-    '  "x_market_chatter": "<dominant narrative traders and financial accounts are discussing on X/Twitter right now — 1 sentence>",\n'
-    '  "x_stress_signal": "<any unusual fear, panic, risk-off, or market stress signals trending on X/Twitter — or the string none>",\n'
-    '  "x_key_catalyst": "<main catalyst driving market discussion on X right now — Fed, macro, earnings, geopolitical — or none>"\n'
-    '}\n'
-    'No markdown fences, no extra keys, no commentary. Output raw JSON only.'
-)
-
-
-def _load_cached_grok() -> dict:
-    """Return the last saved Grok intelligence file, or an empty dict."""
-    if _GROK_INTEL_FILE.exists():
-        try:
-            return json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            pass
-    return {}
-
-
-def fetch_grok_intelligence() -> dict:
-    if not _GROK_API_KEY:
-        print('[grok_intelligence] GROK_API_KEY not set — skipping fetch')
-        return _load_cached_grok()
-    try:
-        resp = requests.post(
-            'https://api.x.ai/v1/chat/completions',
-            headers={
-                'Authorization': f'Bearer {_GROK_API_KEY}',
-                'Content-Type':  'application/json',
-            },
-            json={
-                'model': 'grok-3-mini',
-                'messages': [
-                    {'role': 'system', 'content': 'You are a concise financial markets intelligence assistant.'},
-                    {'role': 'user',   'content': _GROK_INTEL_PROMPT},
-                ],
-                'temperature':   0.3,
-                'response_format': {'type': 'json_object'},
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        content = resp.json()['choices'][0]['message']['content']
-        result  = json.loads(content)
-        result['fetched_at'] = utc_now_iso()
-        _GROK_INTEL_FILE.write_text(json.dumps(result, indent=2), encoding='utf-8')
-        print(f'[grok_intelligence] Updated — sentiment:{result.get("market_sentiment")}')
-        return result
-    except Exception as e:
-        print(f'[grok_intelligence] Fetch error: {e} — keeping previous cached data')
-        return _load_cached_grok()
-
 
 # ── Background loops ───────────────────────────────────────────
 
@@ -360,19 +300,6 @@ async def finnhub_loop():
         except Exception as e:
             print('Finnhub loop error:', str(e))
         await asyncio.sleep(300)
-
-
-async def grok_loop():
-    while True:
-        try:
-            await asyncio.to_thread(fetch_grok_intelligence)
-        except Exception as e:
-            print('Grok intelligence loop error:', str(e))
-        # Adaptive sleep: 5 min during market hours (9:00–16:30 ET Mon–Fri), 30 min outside
-        ny = now_ny()
-        m  = ny.hour * 60 + ny.minute
-        in_market = ny.weekday() < 5 and 9 * 60 <= m <= 16 * 60 + 30
-        await asyncio.sleep(300 if in_market else 1800)
 
 
 async def macro_discord_loop():
@@ -497,7 +424,6 @@ async def startup():
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
-    asyncio.create_task(grok_loop())
     asyncio.create_task(morning_brief_loop())
     asyncio.create_task(macro_discord_loop())
     if _EXECUTION_AVAILABLE:
@@ -552,63 +478,10 @@ async def debug_paths():
 
 @app.get('/debug-grok')
 async def debug_grok():
-    """Trace every stage of the Grok intelligence pipeline."""
-    import requests as _req
-
-    # Stage 1: API key
-    key_set    = bool(_GROK_API_KEY)
-    key_prefix = (_GROK_API_KEY[:8] + '...') if key_set else 'NOT_SET'
-
-    # Stage 2: File
-    file_path    = str(_GROK_INTEL_FILE)
-    file_exists  = _GROK_INTEL_FILE.exists()
-    file_bytes   = _GROK_INTEL_FILE.stat().st_size if file_exists else -1
-    file_contents = None
-    if file_exists:
-        try:
-            file_contents = json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-        except Exception as _fe:
-            file_contents = f'PARSE_ERROR: {_fe}'
-
-    # Stage 3: Live API probe (only if key is set — single message, minimal cost)
-    api_status  = 'SKIPPED — key not set'
-    api_payload = None
-    if key_set:
-        try:
-            _r = _req.post(
-                'https://api.x.ai/v1/chat/completions',
-                headers={'Authorization': f'Bearer {_GROK_API_KEY}', 'Content-Type': 'application/json'},
-                json={
-                    'model': 'grok-3-mini',
-                    'messages': [
-                        {'role': 'system', 'content': 'You are a test assistant.'},
-                        {'role': 'user',   'content': 'Reply with exactly: {"status":"ok"}'},
-                    ],
-                    'temperature': 0,
-                    'response_format': {'type': 'json_object'},
-                },
-                timeout=15,
-            )
-            api_status  = f'HTTP {_r.status_code}'
-            api_payload = _r.json() if _r.ok else _r.text[:500]
-        except Exception as _ae:
-            api_status  = f'EXCEPTION: {_ae}'
-
-    # Stage 4: Endpoint read
-    endpoint_result = _load_cached_grok()
-
-    return {
-        'stage_1_api_key':      {'set': key_set, 'prefix': key_prefix},
-        'stage_2_file':         {'path': file_path, 'exists': file_exists, 'bytes': file_bytes, 'contents': file_contents},
-        'stage_3_api_probe':    {'status': api_status, 'payload': api_payload},
-        'stage_4_endpoint':     endpoint_result or 'EMPTY — file missing or parse failed',
-        'break_point':          (
-            'STAGE 1 — GROK_API_KEY not set' if not key_set
-            else 'STAGE 2 — file missing (loop not yet run or API failing)' if not file_exists
-            else 'STAGE 4 — endpoint returns empty (file unreadable)' if not endpoint_result
-            else 'NO BREAK DETECTED — pipeline appears healthy'
-        ),
-    }
+    """Grok is permanently retired from NOVA V1 (Intelligence V1 commit #8).
+    Disabled from active runtime -- never makes a provider request, never
+    reads GROK_API_KEY, never exposes a key prefix, never reads any file."""
+    return {'status': 'GROK_DISABLED'}
 
 
 @app.head('/')
@@ -1059,22 +932,10 @@ async def alerts_data():
 
 @app.get('/grok-intelligence')
 async def grok_intelligence():
-    cached = _load_cached_grok()
-    if cached:
-        return cached
-    # No file yet — return a safe skeleton so the frontend never breaks
-    return {
-        'top_story':          '',
-        'top_story_summary':  '',
-        'market_sentiment':   'NEUTRAL',
-        'sentiment_reason':   'Intelligence is being fetched — check back shortly.',
-        'donna_trade_read':   '',
-        'key_names_to_watch': [],
-        'x_market_chatter':   '',
-        'x_stress_signal':    '',
-        'x_key_catalyst':     '',
-        'fetched_at':         None,
-    }
+    """Grok is permanently retired from NOVA V1 (Intelligence V1 commit #8).
+    Disabled from active runtime -- never reads or refreshes the historical
+    snapshot, and never presents it as current NOVA intelligence."""
+    return {'status': 'GROK_DISABLED'}
 
 
 @app.get('/api/governance')
@@ -1266,12 +1127,11 @@ async def market_reality_endpoint():
         from engines.market_reality_v2 import load_market_reality_v2
         mr2 = load_market_reality_v2()
         if mr2 and mr2.get('state'):
-            # Supplement with V1 fields any caller may still expect (weekly_structure, grok)
+            # Supplement with V1 fields any caller may still expect (weekly_structure)
             try:
                 from engines.market_reality import load_market_reality
                 mr1 = load_market_reality()
                 mr2.setdefault('weekly_structure', mr1.get('weekly_structure', ''))
-                mr2.setdefault('grok_sentiment',   mr1.get('grok_sentiment', ''))
                 mr2.setdefault('direction',         mr1.get('direction', ''))
                 mr2.setdefault('severity',          mr1.get('severity', ''))
             except Exception:
@@ -2411,16 +2271,6 @@ async def system_check():
         except Exception:
             pass
 
-    # Grok: last fetch time from cached file
-    grok_connected = bool(os.getenv('GROK_API_KEY', '').strip())
-    last_grok_fetch: str | None = None
-    try:
-        if _GROK_INTEL_FILE.exists():
-            cached = json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-            last_grok_fetch = cached.get('fetched_at')
-    except Exception:
-        pass
-
     # Calendar: last fetch time from macro events file
     last_calendar_fetch: str | None = None
     try:
@@ -2436,7 +2286,6 @@ async def system_check():
     from services.execution import BROKER_MODE as _BROKER_MODE
     return {
         'alpaca_connected':      alpaca_connected,
-        'grok_connected':        grok_connected,
         'finnhub_connected':     bool(FINNHUB_API_KEY),
         'telegram_connected':    bool(TELEGRAM_BOT_TOKEN),
         'daily_trades_taken':    exec_state.get('daily_trades_taken', 0),
@@ -2445,7 +2294,6 @@ async def system_check():
         'open_positions':        open_pos,
         'eod_close_scheduled':   _EXECUTION_AVAILABLE,
         'eod_close_window_now':  eod_close_window,
-        'last_grok_fetch':       last_grok_fetch,
         'last_calendar_fetch':   last_calendar_fetch,
         'broker_mode':           _BROKER_MODE if _EXECUTION_AVAILABLE else 'unavailable',
     }
