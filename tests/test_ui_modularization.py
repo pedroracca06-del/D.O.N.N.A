@@ -100,12 +100,22 @@ def test_html_py_is_a_thin_composer_not_a_monolith():
 # (B) Byte-for-byte equivalence against the commit-#8 baseline
 # ═══════════════════════════════════════════════════════════════════════
 
+# Pinned, immutable commit -- the last commit before the modularization
+# foundation (commit #9), i.e. the final single-file ui/html.py monolith.
+# This must be an exact commit hash, never a moving ref like "HEAD": once
+# commit #9 itself lands, HEAD points at the modularized result, and a
+# "HEAD:ui/html.py" baseline would silently compare the composed output
+# against itself instead of against the pre-modularization monolith.
+_COMMIT_8_BASELINE_REF = '213cca8eb969c73e19b0ea804c7f6bacac8b2707'
+
+
 def _load_baseline_dashboard_html() -> str:
-    """Evaluate HEAD's ui/html.py (the pre-modularization, single-file
-    version) in an isolated namespace to get its DASHBOARD_HTML string,
-    without touching the working tree or importing the current package."""
+    """Evaluate commit #8's ui/html.py (the pre-modularization, single-file
+    version, pinned by exact hash) in an isolated namespace to get its
+    DASHBOARD_HTML string, without touching the working tree or importing
+    the current package."""
     src = subprocess.run(
-        ['git', 'show', 'HEAD:ui/html.py'],
+        ['git', 'show', f'{_COMMIT_8_BASELINE_REF}:ui/html.py'],
         capture_output=True, text=True, encoding='utf-8', cwd=str(REPO_ROOT),
     ).stdout
     ns: dict = {}
