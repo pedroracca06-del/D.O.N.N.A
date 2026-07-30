@@ -1,9 +1,15 @@
-"""ui/pages/nova_ai.py — NOVA AI (assistant) page markup (id="page-assistant"),
-extracted verbatim from ui/html.py during the interface-modularization
-foundation (commit #9). No content, id, class, or copy change — the
-module is renamed for the later IA commit; the page id inside the markup
-deliberately stays "page-assistant" in this commit since renaming it is
-explicitly deferred to the information-architecture commit.
+"""ui/pages/nova_ai.py — NOVA Intelligence (assistant) page markup
+(id="page-assistant", kept unchanged internally -- only the nav's and
+page's visible text changed).
+
+Commit #11 correction: the page's rendered heading (`.donna-logo`, the
+large stylized title at the top of the Command Interface panel) was
+"NOVA" -- it did not match the approved page heading "NOVA Intelligence"
+even though the nav label had already been corrected. Only that one
+text node changed; the per-message chat role tag ("NOVA" as the
+assistant's speaker label inside chat bubbles) and the "NOVA is
+thinking..." typing-indicator copy are conversational identity text, not
+the page heading, and are unchanged.
 """
 NOVA_AI_HTML = '''  <!-- ════════════════════ ASSISTANT ════════════════════ -->
   <div class="page" id="page-assistant">
@@ -14,7 +20,7 @@ NOVA_AI_HTML = '''  <!-- ══════════════════�
 
         <!-- NOVA HEADER -->
         <div class="donna-header">
-          <div class="donna-logo">NOVA</div>
+          <div class="donna-logo">NOVA Intelligence</div>
           <div class="donna-online-row">
             <div class="donna-online-dot"></div>
             <span class="donna-online-text">Online</span>

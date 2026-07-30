@@ -116,9 +116,20 @@ _COMMIT_8_BASELINE_REF = '213cca8eb969c73e19b0ea804c7f6bacac8b2707'
 # from disk) so that comparison stays permanently frozen: it proves what
 # commit #9 changed, once and forever, independent of any later, separately-
 # approved commit (like #10) that legitimately changes ui/html.py further.
-# The commit-#10-specific claim ("what changed since #9") is proven by its
-# own dedicated test/baseline further down this file.
+# The commit-#10-specific claim ("what changed since #9") is proven by
+# comparing this baseline against the commit-#10 baseline below (both
+# pinned), not against live disk -- see
+# test_composed_html_matches_commit9_baseline_except_proven_dead_code_removal.
 _COMMIT_9_BASELINE_REF = '16948fce0f6767f097e81d35a90e91066a0274e4'
+
+# Pinned, immutable commit -- the dead-code-removal commit (#10), i.e. the
+# last commit before commit #11's information-architecture restructuring.
+# Used as the "new" side of the commit-9 comparison below (proving #10's
+# claim, frozen forever) and as the "baseline" side of the commit-11
+# comparison further down (proving #11's claim against live disk, which
+# is the one comparison that legitimately needs to keep tracking new
+# approved commits as they land).
+_COMMIT_10_BASELINE_REF = '79f776a4d097b006d1c8793da348ce2026f08410'
 
 
 def _load_baseline_dashboard_html() -> str:
@@ -403,9 +414,16 @@ _COMMIT_10_CHANGE_CATALOG = (
 
 
 def test_composed_html_matches_commit9_baseline_except_proven_dead_code_removal():
-    """The current, on-disk composed DASHBOARD_HTML must be identical to the
-    commit #9 baseline except for the exact, cataloged dead-code removals
-    above -- proving commit #10 changed nothing else.
+    """Commit #10's own composed output must be identical to the commit #9
+    baseline except for the exact, cataloged dead-code removals above --
+    proving commit #10 changed nothing else.
+
+    Both sides are pinned, immutable commits (not `ui.html.DASHBOARD_HTML`
+    read from disk) -- this comparison is frozen forever and cannot be
+    affected by any later, separately-approved commit (such as #11's
+    information-architecture restructuring) that legitimately changes
+    ui/html.py's content further. That later change is proven by its own
+    dedicated test further down this file.
 
     Same line-level-diff technique as the commit-8/commit-9 comparison
     above, but checked against `_COMMIT_10_CHANGE_CATALOG`'s exact block
@@ -417,7 +435,7 @@ def test_composed_html_matches_commit9_baseline_except_proven_dead_code_removal(
     import difflib
 
     baseline_html = _load_pinned_commit_dashboard_html(_COMMIT_9_BASELINE_REF)
-    from ui.html import DASHBOARD_HTML as new_html
+    new_html = _load_pinned_commit_dashboard_html(_COMMIT_10_BASELINE_REF)
     assert new_html != baseline_html, 'expected the commit #10 dead-code removal, found no difference'
 
     baseline_lines = baseline_html.replace('\r\n', '\n').splitlines()
@@ -445,6 +463,215 @@ def test_composed_html_matches_commit9_baseline_except_proven_dead_code_removal(
     for i, (actual, expected) in enumerate(zip(actual_blocks, expected_blocks)):
         assert actual == expected, (
             f'change-block #{i} ({_COMMIT_10_CHANGE_CATALOG[i]["what"]}) does not match the '
+            f'catalog.\nExpected: {expected}\nActual:   {actual}'
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# (B3) Commit #11: controlled information-architecture restructuring
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Same exact-block-boundary technique as the commit #10 catalog above,
+# now comparing the commit #10 baseline (pinned) against the current,
+# on-disk composed DASHBOARD_HTML -- proving commit #11 changed only the
+# approved nav-label text, Overview restructuring (page identity, Morning
+# Brief, Account Summary, Recent Activity), and Markets sidebar
+# consolidation (single Macro Radar, single NOVA Market Summary, NOVA
+# Says panel removed) cataloged below, and nothing else.
+_COMMIT_11_CHANGE_CATALOG = (
+    {
+     'what': 'Nav button visible text: Dashboard -> Overview (data-page="dashboard" unchanged)',
+     'tag': 'replace', 'first': '        <button class="tab-btn active" data-page="dashboard">Dashboard</button>', 'last': '        <button class="tab-btn active" data-page="dashboard">Dashboard</button>',
+     'count': 1, 'new': ('        <button class="tab-btn active" data-page="dashboard">Overview</button>',),
+    },
+    {
+     'what': 'Nav button visible text: News -> Markets, Assistant -> NOVA Intelligence (data-page unchanged)',
+     'tag': 'replace', 'first': '        <button class="tab-btn" data-page="news">News</button>', 'last': '        <button class="tab-btn" data-page="assistant">Assistant</button>',
+     'count': 2, 'new': ('        <button class="tab-btn" data-page="news">Markets</button>', '        <button class="tab-btn" data-page="assistant">NOVA Intelligence</button>'),
+    },
+    {
+     'what': 'Overview: outer 2-column grid wrapper collapsed to a single vstack, so DOM/visual reading order are identical',
+     'tag': 'replace', 'first': '    <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">', 'last': '    <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">',
+     'count': 1, 'new': ('    <div class="vstack">',),
+    },
+    {
+     'what': 'Overview: removed nested left-column wrapper div, added page-identity kicker+title ("OVERVIEW")',
+     'tag': 'replace', 'first': '      <!-- ── LEFT MAIN COLUMN ── -->', 'last': '      <div class="vstack">',
+     'count': 2, 'new': ('      <!-- 1. PAGE IDENTITY -->', '      <div style="margin-bottom:2px">', '        <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Live Market Intelligence</div>', '        <div style="font-family:\'Rajdhani\',sans-serif;font-size:30px;font-weight:700;letter-spacing:2px;color:var(--text)">OVERVIEW</div>', '      </div>'),
+    },
+    {
+     'what': 'Overview: Hero Banner comment renumbered + de-indented one level (single-column now); content unchanged',
+     'tag': 'replace', 'first': '        <!-- 1. HERO MARKET BANNER -->', 'last': '            </div>',
+     'count': 11, 'new': ('      <!-- 1. HERO MARKET BANNER (current system status) -->', '      <div id="dbHero" class="card" style="padding:22px 26px">', '        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px">', '          <div class="db-hero-left">', '            <div id="dbRegimeText" style="font-size:32px;font-weight:700;font-family:Rajdhani,sans-serif;letter-spacing:.5px;color:var(--muted)">—</div>', '            <div id="dbMarketTone" style="margin-top:5px;font-size:13px;color:var(--muted);line-height:1.4">—</div>', '            <div id="dbSessionLabel" style="margin-top:12px;font-size:11px;color:var(--muted2);font-family:Space Mono,monospace">—</div>', '          </div>', '          <div class="db-hero-right">', '            <div id="dbMacroPosture" class="db-posture-badge">—</div>'),
+    },
+    {
+     'what': 'Overview: closing div for old left-column wrapper removed (structural only, single-column now)',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('      </div>',),
+    },
+    {
+     'what': 'Overview: Risk Badges (unchanged) followed immediately by the new Morning Brief panel (section 2) and the start of Account Summary (section 3), replacing the old right-sidebar Macro Radar placement',
+     'tag': 'replace', 'first': '        <!-- 2. RISK BADGES ROW -->', 'last': '            <div class="db-badge-value" id="dbBadgeMacro" style="color:var(--muted)">—</div>',
+     'count': 5, 'new': ('      <!-- 1. RISK BADGES ROW (current system status) -->', '      <div id="dbBadges" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">', '        <div class="card db-badge-card">', '          <div class="db-badge-label">MACRO RISK</div>', '          <div class="db-badge-value" id="dbBadgeMacro" style="color:var(--muted)">—</div>', '        </div>', '        <div class="card db-badge-card">', '          <div class="db-badge-label">SESSION</div>', '          <div class="db-badge-value" id="dbBadgeSession" style="color:var(--muted)">—</div>', '        </div>', '      </div>', '', '      <!-- 2. DETERMINISTIC MORNING BRIEF (read-only; GET /morning-brief) -->', '      <div id="ovMorningBrief" class="panel">', '        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">', '          <div class="kicker" style="margin-bottom:0">MORNING BRIEF</div>', '          <span id="ovMbDateLabel" style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted2)">—</span>', '        </div>', '        <div id="ovMbLoading" style="font-size:12px;color:var(--muted)">Loading morning brief...</div>', '        <div id="ovMbEmpty" style="display:none;font-size:12px;color:var(--muted2)">No morning brief available yet.</div>', '        <div id="ovMbError" style="display:none;font-size:12px;color:#e05252"></div>', '        <div id="ovMbStale" style="display:none;font-size:10px;color:var(--yellow);margin-bottom:6px;font-family:\'Space Mono\',monospace;letter-spacing:.5px;text-transform:uppercase">Stale — showing last available brief</div>', '        <pre id="ovMbText" style="display:none;white-space:pre-wrap;font-family:\'Space Mono\',monospace;font-size:11px;color:var(--text);line-height:1.7;margin:0"></pre>', '      </div>', '', '      <!-- 3. CORE ACCOUNT / PERFORMANCE SUMMARY (from existing /journal/data) -->', '      <div id="ovAcctSummary" class="panel">', '        <div class="kicker" style="margin-bottom:10px">ACCOUNT SUMMARY</div>', '        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">', '          <div>', '            <div style="font-size:9px;color:var(--muted2);font-family:\'Space Mono\',monospace;letter-spacing:1px;text-transform:uppercase">Today\'s P&amp;L</div>', '            <div id="ovAcctPnl" style="font-size:18px;font-weight:700;font-family:Rajdhani,sans-serif;color:var(--muted2)">—</div>'),
+    },
+    {
+     'what': 'Overview: old right-sidebar risk-badge-card markup lines reflow into the new Account Summary grid (Win Rate/Trades Today/This Week cells)',
+     'tag': 'replace', 'first': '          <div class="card db-badge-card">', 'last': '            <div class="db-badge-value" id="dbBadgeSession" style="color:var(--muted)">—</div>',
+     'count': 3, 'new': ('          <div>', '            <div style="font-size:9px;color:var(--muted2);font-family:\'Space Mono\',monospace;letter-spacing:1px;text-transform:uppercase">Win Rate</div>', '            <div id="ovAcctWinRate" style="font-size:18px;font-weight:700;font-family:Rajdhani,sans-serif;color:var(--muted2)">—</div>', '          </div>', '          <div>', '            <div style="font-size:9px;color:var(--muted2);font-family:\'Space Mono\',monospace;letter-spacing:1px;text-transform:uppercase">Trades Today</div>', '            <div id="ovAcctTrades" style="font-size:18px;font-weight:700;font-family:Rajdhani,sans-serif;color:var(--text)">—</div>', '          </div>', '          <div>', '            <div style="font-size:9px;color:var(--muted2);font-family:\'Space Mono\',monospace;letter-spacing:1px;text-transform:uppercase">This Week</div>', '            <div id="ovAcctWeek" style="font-size:18px;font-weight:700;font-family:Rajdhani,sans-serif;color:var(--muted2)">—</div>'),
+    },
+    {
+     'what': 'Overview: closing div for Account Summary panel',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('      </div>',),
+    },
+    {
+     'what': 'Overview: Market Driver comment renumbered; Recent Activity (section 4) and the Market-Driver/Catalyst "supporting diagnostics" (section 5) header now precede it in source, since Market Board follows',
+     'tag': 'replace', 'first': '        <!-- 3. MARKET DRIVER PANEL -->', 'last': '          </div>',
+     'count': 14, 'new': ('      <!-- 4. RECENT ACTIVITY (from existing /journal/data) -->', '      <div id="ovRecentActivity" class="panel">', '        <div class="kicker" style="margin-bottom:10px">RECENT ACTIVITY</div>', '        <div id="ovRecentTrades" style="font-size:12px;color:var(--muted2)">No trades logged yet.</div>', '      </div>', '', '      <!-- 5. SUPPORTING DIAGNOSTICS: MARKET DRIVER + CATALYST -->', '      <div id="dbDriver" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">', '        <div class="panel">', '          <div class="kicker" style="margin-bottom:10px">MARKET DRIVER</div>', '          <div id="dbDriverPrimary" style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:5px;line-height:1.3">—</div>', '          <div id="dbDriverRegime" style="font-size:11px;color:var(--muted2);margin-bottom:10px;font-family:Space Mono,monospace">—</div>', '          <ul id="dbDriverBullets" style="margin:0;padding-left:16px;font-size:12px;color:var(--muted);line-height:1.7"></ul>'),
+    },
+    {
+     'what': 'Overview: Primary Catalyst panel (unchanged) reflows after the Driver panel now that the 2-column page-level grid is gone (both are inside one "supporting diagnostics" 1fr/1fr grid, unchanged content)',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('        <div class="panel">', '          <div class="kicker" style="margin-bottom:10px">PRIMARY CATALYST</div>', '          <div id="dbCatalystHeadline" style="font-size:14px;font-weight:700;color:var(--text);line-height:1.3;margin-bottom:8px">—</div>', '          <div id="dbCatalystSummary" style="font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:10px">—</div>', '          <div id="dbCatalystSentiment" style="display:inline-block;padding:3px 10px;border-radius:4px;font-family:Space Mono,monospace;font-size:10px;font-weight:700;background:var(--panel2);color:var(--muted2)">—</div>', '        </div>', '      </div>'),
+    },
+    {
+     'what': 'Overview: Market Board comment renumbered (section 5); NQ tile reflows',
+     'tag': 'replace', 'first': '        <!-- 5. MARKET BOARD -->', 'last': '          </div>',
+     'count': 27, 'new': ('      <!-- 5. SUPPORTING DIAGNOSTICS: MARKET BOARD -->', '      <div id="dbMarketBoard" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">', '        <div class="card db-market-tile" data-sym="NQ">', '          <div class="db-tile-sym">NQ</div>', '          <div class="db-tile-val" style="color:var(--text)">—</div>', '          <div class="db-tile-pct" style="color:var(--muted)">—</div>'),
+    },
+    {
+     'what': 'Overview: ES tile reflows (single-column-page indentation only, content unchanged)',
+     'tag': 'replace', 'first': '', 'last': '          <div id="sidebarEconCalendar"></div>',
+     'count': 11, 'new': ('        <div class="card db-market-tile" data-sym="ES">', '          <div class="db-tile-sym">ES</div>', '          <div class="db-tile-val" style="color:var(--text)">—</div>', '          <div class="db-tile-pct" style="color:var(--muted)">—</div>'),
+    },
+    {
+     'what': 'Overview: VIX tile reflows; old sidebar Macro Radar (#sidebarEconCalendar) fully removed',
+     'tag': 'replace', 'first': '', 'last': '          <div id="dbDonnaSaysText" style="font-size:13px;color:var(--text);line-height:1.65">—</div>',
+     'count': 5, 'new': ('        <div class="card db-market-tile" data-sym="VIX">', '          <div class="db-tile-sym">VIX</div>', '          <div class="db-tile-val" style="color:var(--text)">—</div>', '          <div class="db-tile-pct" style="color:var(--muted)">—</div>'),
+    },
+    {
+     'what': 'Overview: DXY/GOLD tiles + closing divs reflow; old sidebar NOVA Says panel (#dbDonnaSaysText) fully removed',
+     'tag': 'replace', 'first': '', 'last': '      </div><!-- end sidebar -->',
+     'count': 2, 'new': ('        <div class="card db-market-tile" data-sym="DXY">', '          <div class="db-tile-sym">DXY</div>', '          <div class="db-tile-val" style="color:var(--text)">—</div>', '          <div class="db-tile-pct" style="color:var(--muted)">—</div>', '        </div>', '        <div class="card db-market-tile" data-sym="GOLD">', '          <div class="db-tile-sym">GOLD</div>', '          <div class="db-tile-val" style="color:var(--text)">—</div>', '          <div class="db-tile-pct" style="color:var(--muted)">—</div>', '        </div>', '      </div>'),
+    },
+    {
+     'what': 'Markets: page-identity heading ("MARKETS") added + section-1 comment header, before the futures ticker',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('      <!-- PAGE IDENTITY -->', '      <div style="margin-bottom:2px">', '        <div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Live Market Intelligence</div>', '        <div style="font-family:\'Rajdhani\',sans-serif;font-size:30px;font-weight:700;letter-spacing:2px;color:var(--text)">MARKETS</div>', '      </div>', '', '      <!-- 1. MARKET SUMMARY & MAJOR MARKET CONTEXT -->', ''),
+    },
+    {
+     'what': 'Markets: old post-ticker/breaking-bar/index-tiles blank-line gap removed (now immediately followed by NOVA Market Summary, not the breaking bar)',
+     'tag': 'delete', 'first': '          </div>', 'last': '            <span class="breaking-item">Loading live headlines...</span>',
+     'count': 10, 'new': (),
+    },
+    {
+     'what': 'Markets: NOVA Market Summary panel moved directly under section 1 (futures ticker + index tiles), replacing the old "MAIN 2-COLUMN GRID" / news-layout wrapper opening',
+     'tag': 'replace', 'first': '      <!-- MAIN 2-COLUMN GRID: 70% left / 30% right -->', 'last': '      <div class="news-layout">',
+     'count': 2, 'new': ('      <!-- MARKET SUMMARY (manual-only, NOVA Intelligence V1 -- never auto-called;', '           the one active NOVA-generated market-interpretation presentation) -->', '      <div class="panel" id="novaMarketSummaryPanel">', '        <div class="kicker" style="margin-bottom:10px">NOVA Market Summary</div>', '        <button class="nova-gen-btn" id="novaMarketSummaryBtn" onclick="generateMarketSummary()">Generate NOVA Summary</button>', '        <div id="novaMarketSummaryLoading" style="display:none;font-size:11px;color:var(--muted);margin-top:8px">Generating summary...</div>', '        <div id="novaMarketSummaryText" style="display:none;font-size:12px;color:var(--text);line-height:1.6;margin-top:8px"></div>', '        <div id="novaMarketSummaryError" style="display:none;font-size:11px;color:#e05252;margin-top:8px"></div>', '      </div>'),
+    },
+    {
+     'what': 'Markets: old left-column wrapper divs replaced by the Macro Radar panel (section 2)',
+     'tag': 'replace', 'first': '        <!-- ─── LEFT COLUMN ─── -->', 'last': '        <div class="vstack" style="gap:14px">',
+     'count': 2, 'new': ('      <!-- 2. MACRO RADAR (the one active Macro Radar presentation) -->', '      <div class="panel">', '        <div class="kicker" style="margin-bottom:10px">Macro Radar</div>', '        <div id="sidebarEconCalendar2"><div class="econ-no-events">Loading events...</div></div>', '      </div>'),
+    },
+    {
+     'what': 'Markets: old "1. LIVE FEED" comment + opening replaced by section-3 header + the Breaking News bar (moved down from the page top into the news-feed section)',
+     'tag': 'replace', 'first': '          <!-- 1. LIVE FEED -->', 'last': '            <div id="newsList"><div class="obs-item low"><div class="obs-body">Loading headlines...</div></div></div>',
+     'count': 4, 'new': ('      <!-- 3. NEWS GUARD / ACTIVE NEWS FEED -->', '', '      <!-- BREAKING NEWS BAR -->', '      <div class="breaking-bar">', '        <div class="breaking-label">Breaking</div>', '        <div class="breaking-ticker-wrap">', '          <div class="breaking-ticker-track" id="breakingTickerTrack">', '            <span class="breaking-item">Loading live headlines...</span>'),
+    },
+    {
+     'what': "Markets: Breaking News bar's closing divs",
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('        </div>', '      </div>'),
+    },
+    {
+     'what': 'Markets: Live Feed panel (moved here, section 3) + Supporting Market Data section-4 header + Risk Levels panel (moved from the old sidebar)',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('      <!-- LIVE FEED -->', '      <div class="panel">', '        <div class="kicker" style="margin-bottom:12px">Live Feed</div>', '        <div id="newsList"><div class="obs-item low"><div class="obs-body">Loading headlines...</div></div></div>', '      </div>', '', '      <!-- 4. SUPPORTING MARKET DATA -->', '      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">', '', '        <!-- RISK LEVELS (News Guard output) -->', '        <div class="panel">', '          <div class="kicker" style="margin-bottom:10px">Risk Levels</div>', '          <div class="risk-level-row">', '            <span class="risk-level-label">Macro</span>', '            <span id="sidebarMacroRisk" class="risk-badge risk-medium">MEDIUM</span>', '          </div>', '          <div class="risk-level-row">', '            <span class="risk-level-label">Headline</span>', '            <span id="sidebarHeadlineRisk" class="risk-badge risk-medium">MEDIUM</span>', '          </div>', '          <div class="risk-level-row">', '            <span class="risk-level-label">Market</span>', '            <span id="sidebarMarketRisk" class="risk-badge risk-medium">MEDIUM</span>', '          </div>', '          <div class="risk-level-row" style="border-bottom:none">', '            <span class="risk-level-label">Event Phase</span>', '            <span id="sidebarEventPhase" style="font-family:\'Rajdhani\',sans-serif;font-size:14px;font-weight:700;color:var(--yellow)">—</span>', '          </div>', '          <div id="sidebarNextEvent" style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2)">—</div>'),
+    },
+    {
+     'what': 'Markets: old right-sidebar wrapper/duplicate-panel scaffolding (Market Summary/Macro Radar/Risk Levels headers previously here) replaced by the Trending Movers panel closing the 1fr/1fr supporting-data row',
+     'tag': 'replace', 'first': '        <!-- ─── RIGHT SIDEBAR 30% ─── -->', 'last': '',
+     'count': 56, 'new': ('        <!-- TRENDING MOVERS (compact vertical list) -->', '        <div class="panel">', '          <div class="kicker" style="margin-bottom:10px">Trending Movers</div>', '          <div class="movers-col-title gainers" style="margin-bottom:6px">▲ Gainers</div>', '          <div id="moversGainers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>', '          <div style="border-top:1px solid var(--line);margin:10px 0"></div>', '          <div class="movers-col-title losers" style="margin-bottom:6px">▼ Losers</div>', '          <div id="moversLosers"><div class="mover-row"><span class="mover-sym" style="color:var(--muted2)">Loading...</span></div></div>'),
+    },
+    {
+     'what': 'NOVA Intelligence: page heading text "NOVA" -> "NOVA Intelligence" (.donna-logo)',
+     'tag': 'replace', 'first': '          <div class="donna-logo">NOVA</div>', 'last': '          <div class="donna-logo">NOVA</div>',
+     'count': 1, 'new': ('          <div class="donna-logo">NOVA Intelligence</div>',),
+    },
+    {
+     'what': 'JS: removed the dead "NOVA SAYS" regime-based canned-text computation block in renderDashboard()',
+     'tag': 'delete', 'first': '', 'last': '',
+     'count': 12, 'new': (),
+    },
+    {
+     'what': 'JS: added _mbResetStates()/_mbShowError()/hardened refreshMorningBrief() (non-2xx handling, JSON-parse-failure handling, state reset before every render, NY-date stale check via nyTodayDateStr())',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('}', '', '// ════════ MORNING BRIEF (Overview -- deterministic, read-only) ════════', '// Reads the existing GET /morning-brief contract (engines/morning_brief.py', '// build_compact_brief()) -- fully deterministic, local-JSON-only, no', '// Claude/provider call, no external network request. Fetched once at', '// boot only (no polling interval): the brief is a once-per-day artifact,', '// and a single read is the minimal frontend behavior this addition needs.', 'function _mbResetStates() {', "  const loadingEl    = document.getElementById('ovMbLoading');", "  const emptyEl      = document.getElementById('ovMbEmpty');", "  const errorEl      = document.getElementById('ovMbError');", "  const staleEl      = document.getElementById('ovMbStale');", "  const textEl       = document.getElementById('ovMbText');", "  const dateLabelEl  = document.getElementById('ovMbDateLabel');", "  if (loadingEl)   loadingEl.style.display = 'none';", "  if (emptyEl)     emptyEl.style.display = 'none';", "  if (errorEl)     { errorEl.style.display = 'none'; errorEl.textContent = ''; }", "  if (staleEl)     staleEl.style.display = 'none';", "  if (textEl)      { textEl.style.display = 'none'; textEl.textContent = ''; }", "  if (dateLabelEl) dateLabelEl.textContent = '—';", '}', '', 'function _mbShowError(msg) {', '  _mbResetStates();', "  const errorEl = document.getElementById('ovMbError');", "  if (errorEl) { errorEl.textContent = msg || 'Morning brief unavailable.'; errorEl.style.display = 'block'; }", '}', '', 'async function refreshMorningBrief() {', '  let res;', '  try {', "    res = await fetch('/morning-brief');", '  } catch (e) {', "    console.error('refreshMorningBrief:', e);", "    _mbShowError('Morning brief unavailable.');", '    return;', '  }', '', '  let data;', '  try {', '    data = await res.json();', '  } catch (e) {', "    console.error('refreshMorningBrief (parse):', e);", "    _mbShowError('Morning brief unavailable.');", '    return;', '  }', '', '  if (!res.ok) {', "    _mbShowError((data && data.brief_text) || 'Morning brief unavailable.');", '    return;', '  }', '  if (data.error) {', "    _mbShowError(data.brief_text || 'Morning brief unavailable.');", '    return;', '  }', '  if (!data.brief_text) {', '    _mbResetStates();', "    const emptyEl = document.getElementById('ovMbEmpty');", "    if (emptyEl) emptyEl.style.display = 'block';", '    return;', '  }', '', '  _mbResetStates();', "  setText('ovMbDateLabel', data.date_label || '—');", '  // NY calendar-date string via Intl formatting -- no Date-reparsing of a', '  // locale string (which can be timezone-ambiguous), just a direct', '  // timezone-aware format of the current instant into "YYYY-MM-DD".', '  const todayNyStr = nyTodayDateStr();', "  const staleEl = document.getElementById('ovMbStale');", "  if (staleEl) staleEl.style.display = (data.date && data.date !== todayNyStr) ? 'block' : 'none';", "  const textEl = document.getElementById('ovMbText');", "  if (textEl) { textEl.textContent = data.brief_text; textEl.style.display = 'block'; }"),
+    },
+    {
+     'what': 'JS: removed the dead "NOVA SAYS" market-guidance-text assignment in renderNews()',
+     'tag': 'delete', 'first': '', 'last': "  if (donnaSays) setText('donnaSaysText', donnaSays);",
+     'count': 4, 'new': (),
+    },
+    {
+     'what': 'JS: added nyTodayDateStr() + reconciled renderOverviewAccountSummary()/renderOverviewRecentActivity() to reuse stats.today_pnl/stats.win_rate/stats.daily_pnl.this_week instead of re-deriving them, plus NY-correct Trades-Today count and date-sorted Recent Activity',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('// ════════ OVERVIEW: ACCOUNT SUMMARY + RECENT ACTIVITY ════════', '// Both read from the same already-active /journal/data payload already', '// fetched by refreshJournal() below -- no new route, no new polling', '// registration; this renders a condensed view of existing data onto', '// Overview.', '//', "// Deliberately reuses the backend's own already-computed stats fields", '// rather than re-deriving P&L/win-rate/weekly-performance client-side --', '// avoiding a second, conflicting definition of any of them:', "//   - Today's P&L  -> stats.today_pnl (main.py /journal/data; computed", '//     with now_ny() -- the correct, NY-based "today" boundary)', '//   - Win Rate     -> stats.win_rate (core/state.py compute_journal_stats;', '//     all-time -- the only win-rate figure the backend establishes; there', '//     is no separate weekly win-rate contract to reuse)', '//   - This Week    -> stats.daily_pnl.this_week (compute_journal_stats)', '// Only "Trades Today" has no backend-computed equivalent to reuse, so it', '// is counted client-side below using the same NY calendar date the', '// backend used for today_pnl (via Intl.DateTimeFormat, which returns an', '// already-formatted date string with no ambiguous Date-reparsing step),', '// and the same REJECTED-exclusion convention already established on the', "// Journal page's own overview strip.", 'function nyTodayDateStr() {', "  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());", '}', '', 'function renderOverviewAccountSummary(data) {', '  const stats  = data.stats  || {};', '  const trades = data.trades || [];', '  const todayStr = nyTodayDateStr();', '', "  const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'REJECTED');", '  const hasTrades = (stats.total || 0) > 0;', '', "  setText('ovAcctTrades', todayTrades.length);", '', "  const pnlEl = document.getElementById('ovAcctPnl');", '  if (pnlEl) {', '    const todayPnl = parseFloat(stats.today_pnl) || 0;', '    pnlEl.textContent = _fmtPnl(todayPnl);', "    pnlEl.style.color = todayPnl > 0 ? 'var(--green)' : todayPnl < 0 ? 'var(--red)' : 'var(--muted2)';", '  }', '', "  const wrEl = document.getElementById('ovAcctWinRate');", '  if (wrEl) {', '    const wr = hasTrades ? stats.win_rate : null;', "    wrEl.textContent = wr !== null ? wr + '%' : '—';", "    wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)';", '  }', '', "  const wkEl = document.getElementById('ovAcctWeek');", '  if (wkEl) {', '    const w = parseFloat((stats.daily_pnl || {}).this_week) || 0;', '    wkEl.textContent = _fmtPnl(w);', "    wkEl.style.color = w > 0 ? 'var(--green)' : w < 0 ? 'var(--red)' : 'var(--muted2)';", '  }', '}', '', 'function renderOverviewRecentActivity(data) {', '  const trades = data.trades || [];', '  if (!trades.length) {', "    setHtml('ovRecentTrades', 'No trades logged yet.');", '    return;', '  }', "  // Sort by trade_date (falling back to timestamp's date portion, same", "  // field precedence Journal's own grouping already uses) descending, so", '  // "recent" reflects actual trade date rather than array insertion order.', '  const dated = trades.map((t, i) => ({', "    t, i, key: t.trade_date || (t.timestamp ? t.timestamp.substring(0, 10) : ''),", '  }));', '  dated.sort((a, b) => (b.key.localeCompare(a.key)) || (b.i - a.i));', '  const recent = dated.slice(0, 3).map(d => d.t);', '', '  const rows = recent.map(t => {', "    const dir      = (t.direction || '').toUpperCase();", "    const dirIcon  = dir === 'LONG' ? '▲' : '▼';", "    const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';", '    const rawPnl   = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl ?? null);', '    const pnl      = rawPnl !== null ? parseFloat(rawPnl) : null;', "    const pnlColor = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';", '    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">', '      <span style="font-size:12px;color:var(--text)">${t.ticker || \'—\'} <span style="color:${dirColor}">${dirIcon}</span></span>', '      <span style="font-size:12px;font-weight:700;color:${pnlColor}">${_fmtPnl(pnl)}</span>', '    </div>`;', "  }).join('');", "  setHtml('ovRecentTrades', rows);", '}', ''),
+    },
+    {
+     'what': 'JS: wired renderOverviewAccountSummary()/renderOverviewRecentActivity() into the existing refreshJournal() poll (unchanged, no new registration)',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('    renderOverviewAccountSummary(data);', '    renderOverviewRecentActivity(data);'),
+    },
+    {
+     'what': 'JS: added the single boot-time call to refreshMorningBrief() (setInterval( count remains 7, unchanged)',
+     'tag': 'insert', 'first': '', 'last': '',
+     'count': 0, 'new': ('refreshMorningBrief();',),
+    },
+)
+
+
+def test_composed_html_matches_commit10_baseline_except_approved_ia_restructuring():
+    """The current, on-disk composed DASHBOARD_HTML must be identical to the
+    commit #10 baseline except for the exact, cataloged information-
+    architecture changes above -- proving commit #11 changed nothing else.
+
+    Same exact-block-boundary diff technique as the commit #9/#10
+    comparison above.
+    """
+    import difflib
+
+    baseline_html = _load_pinned_commit_dashboard_html(_COMMIT_10_BASELINE_REF)
+    from ui.html import DASHBOARD_HTML as new_html
+    assert new_html != baseline_html, 'expected the commit #11 IA restructuring, found no difference'
+
+    baseline_lines = baseline_html.replace('\r\n', '\n').splitlines()
+    new_lines = new_html.replace('\r\n', '\n').splitlines()
+
+    sm = difflib.SequenceMatcher(a=baseline_lines, b=new_lines, autojunk=False)
+    actual_blocks = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == 'equal':
+            continue
+        actual_blocks.append({
+            'tag': tag, 'first': baseline_lines[i1] if i1 < i2 else '',
+            'last': baseline_lines[i2 - 1] if i1 < i2 else '',
+            'count': i2 - i1, 'new': tuple(new_lines[j1:j2]),
+        })
+
+    expected_blocks = [
+        {k: entry[k] for k in ('tag', 'first', 'last', 'count', 'new')}
+        for entry in _COMMIT_11_CHANGE_CATALOG
+    ]
+
+    assert len(actual_blocks) == len(expected_blocks), (
+        f'expected {len(expected_blocks)} cataloged change-blocks, found {len(actual_blocks)}: '
+        f'{actual_blocks}'
+    )
+    for i, (actual, expected) in enumerate(zip(actual_blocks, expected_blocks)):
+        assert actual == expected, (
+            f'change-block #{i} ({_COMMIT_11_CHANGE_CATALOG[i]["what"]}) does not match the '
             f'catalog.\nExpected: {expected}\nActual:   {actual}'
         )
 
@@ -502,13 +729,17 @@ _CRITICAL_DOM_IDS = (
     'dbHero', 'dbRegimeText', 'dbMarketTone', 'dbSessionLabel', 'dbMacroPosture',
     'dbBadgeMacro', 'dbBadgeSession', 'dbDriverPrimary', 'dbDriverRegime', 'dbDriverBullets',
     'dbCatalystHeadline', 'dbCatalystSummary', 'dbCatalystSentiment', 'dbMarketBoard',
-    'sidebarEconCalendar', 'dbDonnaSaysText',
-    # Market & News
+    # Overview: Morning Brief (commit #11, reads existing GET /morning-brief)
+    'ovMorningBrief', 'ovMbDateLabel', 'ovMbLoading', 'ovMbEmpty', 'ovMbError', 'ovMbStale', 'ovMbText',
+    # Overview: Account Summary + Recent Activity (commit #11, reads existing /journal/data)
+    'ovAcctSummary', 'ovAcctPnl', 'ovAcctWinRate', 'ovAcctTrades', 'ovAcctWeek',
+    'ovRecentActivity', 'ovRecentTrades',
+    # Markets (formerly "Market & News")
     'newsFuturesTrack', 'breakingTickerTrack', 'indexTiles', 'newsList',
     'sidebarMacroRisk', 'sidebarHeadlineRisk', 'sidebarMarketRisk', 'sidebarEventPhase', 'sidebarNextEvent',
     'novaMarketSummaryPanel', 'novaMarketSummaryBtn', 'novaMarketSummaryLoading',
     'novaMarketSummaryText', 'novaMarketSummaryError',
-    'sidebarEconCalendar2', 'moversGainers', 'moversLosers', 'donnaSaysText',
+    'sidebarEconCalendar2', 'moversGainers', 'moversLosers',
     # NOVA AI (Assistant)
     'assistantOutput', 'typingIndicator', 'assistantInput', 'assistantSend',
     # Modals (owned by ui/pages/journal.py)
@@ -556,6 +787,9 @@ _ACTIVE_FETCH_TARGETS = (
     '/trending-movers', '/calendar', '/dashboard-data', '/check-env', '/system-health',
     '/assistant/chat', '/journal/trade-detail', '/journal/analyze', '/market-summary',
     '/journal/data', '/journal/signals', '/journal/delete', '/journal/add',
+    # commit #11: the one explicitly-approved new frontend read, against the
+    # existing, unchanged GET /morning-brief backend contract.
+    '/morning-brief',
 )
 
 
@@ -754,3 +988,200 @@ def test_main_py_not_modified_by_this_commit():
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     ).stdout
     assert 'main.py' not in diff.splitlines()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# (I) Commit #11: information-architecture restructuring safety
+# ═══════════════════════════════════════════════════════════════════════
+
+_APPROVED_NAV_LABELS_IN_ORDER = ('Overview', 'Journal', 'Markets', 'NOVA Intelligence', 'Settings')
+
+
+def test_nav_visible_labels_match_approved_ia_order():
+    """Exactly five primary nav controls remain, with the approved visible
+    labels in the approved order -- and the internal data-page keys and
+    page ids are unchanged (only the button text changed)."""
+    from ui.html import DASHBOARD_HTML
+    import re
+
+    buttons = re.findall(
+        r'<button class="tab-btn[^"]*" data-page="([a-z]+)">([^<]+)</button>',
+        DASHBOARD_HTML,
+    )
+    assert len(buttons) == 5, f'expected exactly 5 nav buttons, found {len(buttons)}: {buttons}'
+    data_pages, labels = zip(*buttons)
+    assert data_pages == _ACTIVE_NAV_DATA_PAGES, (
+        f'internal data-page keys/order must stay unchanged, got {data_pages}'
+    )
+    assert labels == _APPROVED_NAV_LABELS_IN_ORDER, (
+        f'visible nav labels/order do not match the approved IA structure: {labels}'
+    )
+
+
+def test_morning_brief_panel_present_on_overview():
+    """The deterministic Morning Brief panel exists on Overview with its
+    loading, empty, error, and stale states, plus the text-display element."""
+    from ui.pages.overview import OVERVIEW_HTML
+    for marker in ('id="ovMorningBrief"', 'id="ovMbDateLabel"', 'id="ovMbLoading"',
+                   'id="ovMbEmpty"', 'id="ovMbError"', 'id="ovMbStale"', 'id="ovMbText"'):
+        assert marker in OVERVIEW_HTML, f'Morning Brief marker missing from Overview: {marker}'
+
+
+def test_morning_brief_uses_only_existing_backend_contract():
+    """refreshMorningBrief() must call exactly the pre-existing, unchanged
+    GET /morning-brief route -- no new route was invented, and the function
+    contains no reference to any other intelligence/provider endpoint."""
+    import ui.scripts
+    script = ui.scripts.DASHBOARD_SCRIPT
+    idx = script.find('async function refreshMorningBrief(')
+    assert idx != -1, 'refreshMorningBrief() not found in DASHBOARD_SCRIPT'
+    window = script[idx: idx + 1500]
+    assert "fetch('/morning-brief')" in window
+    for forbidden in ('/assistant/chat', '/journal/analyze', '/market-summary', 'POST'):
+        assert forbidden not in window, f'refreshMorningBrief() must not reference {forbidden!r}'
+
+
+def test_morning_brief_never_calls_provider_or_external_network():
+    """The Morning Brief frontend function makes exactly one same-origin GET
+    fetch and nothing else -- no method override (which would be required
+    for any provider/model-invoking POST), no external URL, no websocket."""
+    import ui.scripts
+    script = ui.scripts.DASHBOARD_SCRIPT
+    idx = script.find('async function refreshMorningBrief(')
+    end = script.find('\n}', idx) + 2
+    body = script[idx:end]
+    assert body.count('fetch(') == 1, f'expected exactly one fetch() call, found {body.count("fetch(")}'
+    assert 'http://' not in body and 'https://' not in body, 'no absolute/external URL allowed'
+    assert 'WebSocket' not in body and 'EventSource' not in body
+
+
+def test_only_one_macro_radar_presentation_remains():
+    """Exactly one active Macro Radar presentation remains (on Markets);
+    Overview's duplicate copy was removed. The underlying capability
+    (renderEconCalendar/refreshEconCalendar, GET /calendar) is untouched --
+    only the number of DOM targets it can render into changed."""
+    from ui.pages.overview import OVERVIEW_HTML
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    assert 'sidebarEconCalendar"' not in OVERVIEW_HTML and 'id="sidebarEconCalendar"' not in OVERVIEW_HTML
+    assert 'id="sidebarEconCalendar2"' in MARKET_NEWS_HTML
+    import ui.scripts
+    assert "fetch('/calendar')" in ui.scripts.DASHBOARD_SCRIPT, 'Macro Radar backend read must remain active'
+
+
+def test_only_one_nova_market_summary_presentation_remains():
+    """Exactly one active NOVA-generated market-interpretation presentation
+    remains (NOVA Market Summary on Markets); both duplicated deterministic
+    "NOVA Says" panels (Overview + Markets) were removed. Market Summary
+    stays manual-only and its route/trigger are unchanged."""
+    from ui.pages.overview import OVERVIEW_HTML
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    assert 'id="dbDonnaSaysText"' not in OVERVIEW_HTML
+    assert 'id="donnaSaysText"' not in MARKET_NEWS_HTML
+    assert 'donna-says-box' not in MARKET_NEWS_HTML
+    assert 'id="novaMarketSummaryPanel"' in MARKET_NEWS_HTML
+    assert MARKET_NEWS_HTML.count('NOVA Market Summary') == 1
+    import ui.scripts
+    assert "fetch('/market-summary'" in ui.scripts.DASHBOARD_SCRIPT
+    assert "onclick=\"generateMarketSummary()\"" in MARKET_NEWS_HTML
+
+
+def test_removed_donna_says_underlying_data_still_reachable_elsewhere():
+    """Removing the duplicated NOVA Says panels must not remove the
+    underlying guidance-text capability -- risk.headline_guidance /
+    last_headline are still displayed via the Primary Catalyst panel on
+    Overview, which is unchanged by this commit."""
+    import ui.scripts
+    script = ui.scripts.DASHBOARD_SCRIPT
+    assert "setText('dbCatalystSummary',  risk.headline_guidance || '—')" in script
+    assert "setText('dbCatalystHeadline', risk.last_headline || '—')" in script
+
+
+# ── Corrective pass: page headings + Overview/Markets reading order ──────
+
+_APPROVED_PAGE_HEADINGS = {
+    'page-dashboard': 'OVERVIEW',
+    'page-journal':   'JOURNAL',
+    'page-news':      'MARKETS',
+    'page-assistant': 'NOVA Intelligence',
+    'page-settings':  'SETTINGS',
+}
+
+
+def test_every_page_renders_its_approved_heading():
+    """Inspects the rendered heading *inside* every page (not just the nav
+    button) and requires it to match the approved name exactly -- this is
+    the exact defect Pedro's correction request caught: Markets had no
+    heading at all, and NOVA Intelligence's rendered heading was still
+    'NOVA'."""
+    from ui.pages.overview import OVERVIEW_HTML
+    from ui.pages.journal import JOURNAL_HTML
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    from ui.pages.nova_ai import NOVA_AI_HTML
+    from ui.pages.settings import SETTINGS_HTML
+
+    page_html = {
+        'page-dashboard': OVERVIEW_HTML,
+        'page-journal':   JOURNAL_HTML,
+        'page-news':      MARKET_NEWS_HTML,
+        'page-assistant': NOVA_AI_HTML,
+        'page-settings':  SETTINGS_HTML,
+    }
+    for page_id, heading in _APPROVED_PAGE_HEADINGS.items():
+        assert f'>{heading}<' in page_html[page_id], (
+            f'{page_id} does not render the approved heading {heading!r}'
+        )
+
+
+def test_overview_reading_order_matches_approved_hierarchy():
+    """Overview's DOM order (which, in a single vstack, is also its visual
+    reading order) must be: page identity/status -> Morning Brief ->
+    Account Summary -> Recent Activity -> supporting diagnostics. Proven
+    by asserting each anchor id's string offset is strictly increasing."""
+    from ui.pages.overview import OVERVIEW_HTML
+    anchors_in_required_order = (
+        'id="dbHero"',           # 1. status
+        'id="dbBadges"',         # 1. status
+        'id="ovMorningBrief"',   # 2. Morning Brief
+        'id="ovAcctSummary"',    # 3. Account Summary
+        'id="ovRecentActivity"', # 4. Recent Activity
+        'id="dbDriver"',         # 5. supporting diagnostics
+        'id="dbMarketBoard"',    # 5. supporting diagnostics
+    )
+    positions = [OVERVIEW_HTML.index(a) for a in anchors_in_required_order]
+    assert positions == sorted(positions), (
+        f'Overview DOM order does not match the approved hierarchy: {list(zip(anchors_in_required_order, positions))}'
+    )
+
+
+def test_markets_reading_order_matches_approved_hierarchy():
+    """Markets' DOM order must be: market summary & major market context
+    (futures ticker, index tiles, NOVA Market Summary) -> Macro Radar ->
+    News Guard / active news feed (breaking ticker, Live Feed) ->
+    supporting market data (Risk Levels, Trending Movers). Proven the same
+    way as Overview's order, above -- strictly increasing string offsets."""
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    anchors_in_required_order = (
+        'id="newsFuturesTrack"',        # 1. context
+        'id="indexTiles"',               # 1. context
+        'id="novaMarketSummaryPanel"',   # 1. summary
+        'id="sidebarEconCalendar2"',     # 2. Macro Radar
+        'id="breakingTickerTrack"',      # 3. News Guard / feed
+        'id="newsList"',                 # 3. News Guard / feed
+        'id="sidebarMacroRisk"',         # 4. supporting data
+        'id="moversGainers"',            # 4. supporting data
+    )
+    positions = [MARKET_NEWS_HTML.index(a) for a in anchors_in_required_order]
+    assert positions == sorted(positions), (
+        f'Markets DOM order does not match the approved hierarchy: {list(zip(anchors_in_required_order, positions))}'
+    )
+
+
+def test_overview_and_markets_are_single_column_pages():
+    """The prior main-column/sidebar split (a page-level 2-column grid)
+    must be gone from both pages -- confirming sections 2-4 genuinely
+    precede supporting diagnostics in the same reading flow, rather than
+    rendering beside them in a parallel column."""
+    from ui.pages.overview import OVERVIEW_HTML
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    assert 'grid-template-columns:1fr 300px' not in OVERVIEW_HTML
+    assert 'news-layout' not in MARKET_NEWS_HTML

@@ -342,18 +342,6 @@ function renderDashboard() {
     if (pctEl) { pctEl.textContent = data.pct || '—'; pctEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--muted)'; }
   });
 
-
-  // ── NOVA SAYS ──
-  let donnaSays = '';
-  if (!donnaSays) {
-    if (regime === 'TRENDING_UP')        donnaSays = 'Momentum environment. Look for pullbacks to key support. ES and NQ confirming direction.';
-    else if (regime === 'TRENDING_DOWN') donnaSays = 'Trend is down. Avoid chasing longs. Wait for clean setup at key structure.';
-    else if (regime === 'RANGING')       donnaSays = 'Range-bound tape. Reduce size. Fade extremes only.';
-    else if (regime === 'VOLATILE')      donnaSays = 'Volatile conditions. Reduce size. Protect capital above all else.';
-    else donnaSays = 'Connecting to live market intelligence...';
-  }
-  setText('dbDonnaSaysText', donnaSays);
-
   // ── Footer ──
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
 }
@@ -377,6 +365,79 @@ function dashClock() {
   const now = new Date();
   const nyTime = now.toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
   el.textContent = (label ? label + ' · ' : '') + nyTime + ' ET';
+}
+
+// ════════ MORNING BRIEF (Overview -- deterministic, read-only) ════════
+// Reads the existing GET /morning-brief contract (engines/morning_brief.py
+// build_compact_brief()) -- fully deterministic, local-JSON-only, no
+// Claude/provider call, no external network request. Fetched once at
+// boot only (no polling interval): the brief is a once-per-day artifact,
+// and a single read is the minimal frontend behavior this addition needs.
+function _mbResetStates() {
+  const loadingEl    = document.getElementById('ovMbLoading');
+  const emptyEl      = document.getElementById('ovMbEmpty');
+  const errorEl      = document.getElementById('ovMbError');
+  const staleEl      = document.getElementById('ovMbStale');
+  const textEl       = document.getElementById('ovMbText');
+  const dateLabelEl  = document.getElementById('ovMbDateLabel');
+  if (loadingEl)   loadingEl.style.display = 'none';
+  if (emptyEl)     emptyEl.style.display = 'none';
+  if (errorEl)     { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+  if (staleEl)     staleEl.style.display = 'none';
+  if (textEl)      { textEl.style.display = 'none'; textEl.textContent = ''; }
+  if (dateLabelEl) dateLabelEl.textContent = '—';
+}
+
+function _mbShowError(msg) {
+  _mbResetStates();
+  const errorEl = document.getElementById('ovMbError');
+  if (errorEl) { errorEl.textContent = msg || 'Morning brief unavailable.'; errorEl.style.display = 'block'; }
+}
+
+async function refreshMorningBrief() {
+  let res;
+  try {
+    res = await fetch('/morning-brief');
+  } catch (e) {
+    console.error('refreshMorningBrief:', e);
+    _mbShowError('Morning brief unavailable.');
+    return;
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    console.error('refreshMorningBrief (parse):', e);
+    _mbShowError('Morning brief unavailable.');
+    return;
+  }
+
+  if (!res.ok) {
+    _mbShowError((data && data.brief_text) || 'Morning brief unavailable.');
+    return;
+  }
+  if (data.error) {
+    _mbShowError(data.brief_text || 'Morning brief unavailable.');
+    return;
+  }
+  if (!data.brief_text) {
+    _mbResetStates();
+    const emptyEl = document.getElementById('ovMbEmpty');
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+
+  _mbResetStates();
+  setText('ovMbDateLabel', data.date_label || '—');
+  // NY calendar-date string via Intl formatting -- no Date-reparsing of a
+  // locale string (which can be timezone-ambiguous), just a direct
+  // timezone-aware format of the current instant into "YYYY-MM-DD".
+  const todayNyStr = nyTodayDateStr();
+  const staleEl = document.getElementById('ovMbStale');
+  if (staleEl) staleEl.style.display = (data.date && data.date !== todayNyStr) ? 'block' : 'none';
+  const textEl = document.getElementById('ovMbText');
+  if (textEl) { textEl.textContent = data.brief_text; textEl.style.display = 'block'; }
 }
 
 // ════════ NEWS FUTURES STRIP ════════
@@ -693,10 +754,6 @@ function renderNews(d) {
 
   setText('sidebarEventPhase', risk.event_phase || '—');
   setText('sidebarNextEvent',  risk.next_event  || 'No upcoming events');
-
-  // NOVA SAYS — market guidance text
-  const donnaSays = risk.last_market_guidance || risk.headline_guidance || risk.last_headline || '';
-  if (donnaSays) setText('donnaSaysText', donnaSays);
 }
 
 // ════════ SHARED FORMATTERS (used by Journal + Alerts) ════════
@@ -1475,12 +1532,101 @@ async function generateMarketSummary() {
   }
 }
 
+// ════════ OVERVIEW: ACCOUNT SUMMARY + RECENT ACTIVITY ════════
+// Both read from the same already-active /journal/data payload already
+// fetched by refreshJournal() below -- no new route, no new polling
+// registration; this renders a condensed view of existing data onto
+// Overview.
+//
+// Deliberately reuses the backend's own already-computed stats fields
+// rather than re-deriving P&L/win-rate/weekly-performance client-side --
+// avoiding a second, conflicting definition of any of them:
+//   - Today's P&L  -> stats.today_pnl (main.py /journal/data; computed
+//     with now_ny() -- the correct, NY-based "today" boundary)
+//   - Win Rate     -> stats.win_rate (core/state.py compute_journal_stats;
+//     all-time -- the only win-rate figure the backend establishes; there
+//     is no separate weekly win-rate contract to reuse)
+//   - This Week    -> stats.daily_pnl.this_week (compute_journal_stats)
+// Only "Trades Today" has no backend-computed equivalent to reuse, so it
+// is counted client-side below using the same NY calendar date the
+// backend used for today_pnl (via Intl.DateTimeFormat, which returns an
+// already-formatted date string with no ambiguous Date-reparsing step),
+// and the same REJECTED-exclusion convention already established on the
+// Journal page's own overview strip.
+function nyTodayDateStr() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+}
+
+function renderOverviewAccountSummary(data) {
+  const stats  = data.stats  || {};
+  const trades = data.trades || [];
+  const todayStr = nyTodayDateStr();
+
+  const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'REJECTED');
+  const hasTrades = (stats.total || 0) > 0;
+
+  setText('ovAcctTrades', todayTrades.length);
+
+  const pnlEl = document.getElementById('ovAcctPnl');
+  if (pnlEl) {
+    const todayPnl = parseFloat(stats.today_pnl) || 0;
+    pnlEl.textContent = _fmtPnl(todayPnl);
+    pnlEl.style.color = todayPnl > 0 ? 'var(--green)' : todayPnl < 0 ? 'var(--red)' : 'var(--muted2)';
+  }
+
+  const wrEl = document.getElementById('ovAcctWinRate');
+  if (wrEl) {
+    const wr = hasTrades ? stats.win_rate : null;
+    wrEl.textContent = wr !== null ? wr + '%' : '—';
+    wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)';
+  }
+
+  const wkEl = document.getElementById('ovAcctWeek');
+  if (wkEl) {
+    const w = parseFloat((stats.daily_pnl || {}).this_week) || 0;
+    wkEl.textContent = _fmtPnl(w);
+    wkEl.style.color = w > 0 ? 'var(--green)' : w < 0 ? 'var(--red)' : 'var(--muted2)';
+  }
+}
+
+function renderOverviewRecentActivity(data) {
+  const trades = data.trades || [];
+  if (!trades.length) {
+    setHtml('ovRecentTrades', 'No trades logged yet.');
+    return;
+  }
+  // Sort by trade_date (falling back to timestamp's date portion, same
+  // field precedence Journal's own grouping already uses) descending, so
+  // "recent" reflects actual trade date rather than array insertion order.
+  const dated = trades.map((t, i) => ({
+    t, i, key: t.trade_date || (t.timestamp ? t.timestamp.substring(0, 10) : ''),
+  }));
+  dated.sort((a, b) => (b.key.localeCompare(a.key)) || (b.i - a.i));
+  const recent = dated.slice(0, 3).map(d => d.t);
+
+  const rows = recent.map(t => {
+    const dir      = (t.direction || '').toUpperCase();
+    const dirIcon  = dir === 'LONG' ? '▲' : '▼';
+    const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
+    const rawPnl   = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl ?? null);
+    const pnl      = rawPnl !== null ? parseFloat(rawPnl) : null;
+    const pnlColor = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">
+      <span style="font-size:12px;color:var(--text)">${t.ticker || '—'} <span style="color:${dirColor}">${dirIcon}</span></span>
+      <span style="font-size:12px;font-weight:700;color:${pnlColor}">${_fmtPnl(pnl)}</span>
+    </div>`;
+  }).join('');
+  setHtml('ovRecentTrades', rows);
+}
+
 async function refreshJournal() {
   try {
     const res = await fetch('/journal/data');
     if (!res.ok) return;
     const data = await res.json();
     renderJournal(data);
+    renderOverviewAccountSummary(data);
+    renderOverviewRecentActivity(data);
   } catch(e) { console.error('Journal refresh error:', e); }
 }
 
@@ -1601,5 +1747,6 @@ fetchStateEngine();
 setInterval(fetchStateEngine, 15000);
 dashClock();
 setInterval(dashClock, 1000);
+refreshMorningBrief();
 
 '''

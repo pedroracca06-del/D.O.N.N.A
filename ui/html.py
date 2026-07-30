@@ -3,17 +3,19 @@
 Interface-modularization foundation (commit #9): this file used to
 contain the entire ~3900-line dashboard (CSS + HTML + JS) as one inline
 triple-quoted string. It now only assembles DASHBOARD_HTML from the
-modules below — the exported DASHBOARD_HTML contract, every DOM id,
-every request the frontend makes, every polling interval, and all modal/
-form behavior are unchanged. The only intentional content change in this
-commit is documented in ui/pages/settings.py and ui/scripts.py: removal
-of the Settings page's "Trading Subsystem" retirement-status card, per
-Pedro's mandatory correction that the retired Execution Bot / legacy
-trading subsystem must not appear anywhere in Interface V1.
+modules below.
 
-Navigation relabeling, dead-code removal, panel consolidation, the
-Morning Brief addition, visual-system changes, and responsive behavior
-are all deliberately deferred to later, separately-approved commits.
+Commit #11 (information-architecture restructuring): only the nav
+button *visible text* changed here (Dashboard -> Overview, News ->
+Markets, Assistant -> NOVA Intelligence). Every `data-page` value and
+every `id="page-*"` container is unchanged -- the internal navigation
+mechanism, routes, and backend contracts are untouched. See
+ui/pages/overview.py and ui/pages/market_news.py for the rest of
+commit #11's approved restructuring (Morning Brief addition, Macro
+Radar / NOVA Says consolidation).
+
+Visual-system changes and responsive behavior remain deferred to a
+later, separately-approved commit.
 """
 from ui.styles import DASHBOARD_CSS
 from ui.scripts import DASHBOARD_SCRIPT
@@ -47,10 +49,10 @@ DASHBOARD_HTML = (
     </div>
     <div class="top-right">
       <div class="nav">
-        <button class="tab-btn active" data-page="dashboard">Dashboard</button>
+        <button class="tab-btn active" data-page="dashboard">Overview</button>
         <button class="tab-btn" data-page="journal">Journal</button>
-        <button class="tab-btn" data-page="news">News</button>
-        <button class="tab-btn" data-page="assistant">Assistant</button>
+        <button class="tab-btn" data-page="news">Markets</button>
+        <button class="tab-btn" data-page="assistant">NOVA Intelligence</button>
         <button class="tab-btn" data-page="settings">Settings</button>
       </div>
       <div class="status-badge"><span class="dot"></span>ONLINE</div>
