@@ -38,6 +38,29 @@ function formatPrice(val, decimals) {
   return n.toLocaleString('en-US', {minimumFractionDigits: d, maximumFractionDigits: d});
 }
 
+// ── Deterministic display humanizer ──────────────────────────────────────
+// Turns a machine code into readable prose for DISPLAY ONLY: underscores
+// become spaces and each word is title-cased. This is a pure formatting
+// transform -- it never changes, reinterprets or re-grades the underlying
+// value (TRENDING_UP -> "Trending Up", NY CASH -> "NY Cash", LOW -> "Low";
+// a LOW macro risk is never restated as "Normal"). Acronyms that would be
+// mangled by naive title-casing are preserved verbatim.
+const _KEEP_UPPER = new Set(['NY', 'ES', 'NQ', 'US', 'ET', 'VIX', 'DXY', 'ORB', 'IB', 'PDH', 'PDL', 'ONH', 'ONL', 'PWH', 'PWL', 'AM', 'PM', 'EOD', 'CPI', 'FOMC', 'PPI', 'GDP']);
+function humanizeCode(code) {
+  if (code === null || code === undefined || code === '') return '—';
+  return String(code)
+    .replace(/_/g, ' ')
+    .trim()
+    .split(/\\s+/)
+    .map(w => _KEEP_UPPER.has(w.toUpperCase()) ? w.toUpperCase()
+              : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+// Every return carries a `src` tag naming which upstream feed produced the
+// number. Freshness cannot be judged without knowing that: each feed has its
+// own producer timestamp (or none at all). Purely additive -- existing
+// callers read .val/.chg/.pct/.dir and are unaffected.
 function getSymbolData(sym, d) {
   // Always try market_snapshot first for every symbol (yfinance — most accurate)
   const snap = ((d.risk || {}).market_snapshot) || {};
@@ -49,7 +72,8 @@ function getSymbolData(sym, d) {
       return {
         val: disp, chg: s.chg || '—',
         pct: isNaN(p) ? null : (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
-        dir: isNaN(p) ? '' : (p >= 0 ? 'up' : 'down')
+        dir: isNaN(p) ? '' : (p >= 0 ? 'up' : 'down'),
+        src: 'snapshot'
       };
     }
   }
@@ -58,13 +82,14 @@ function getSymbolData(sym, d) {
   if (sym === 'BTC') {
     const q = _liveBtcVix[sym] || {};
     const last = q.last || 0;
-    if (!last) return {val: '—', chg: '—', pct: null, dir: ''};
+    if (!last) return {val: '—', chg: '—', pct: null, dir: '', src: 'none'};
     const p = parseFloat(q.pct || 0);
     return {
       val: last.toLocaleString('en-US', {maximumFractionDigits: 0}),
       chg: (q.chg || 0).toFixed(2),
       pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
-      dir: p >= 0 ? 'up' : 'down'
+      dir: p >= 0 ? 'up' : 'down',
+      src: 'btcvix'
     };
   }
 
@@ -77,7 +102,8 @@ function getSymbolData(sym, d) {
         val: formatPrice(q.last, 2),
         chg: (q.chg || 0).toFixed(2),
         pct: (p >= 0 ? '+' : '') + p.toFixed(2) + '%',
-        dir: p >= 0 ? 'up' : 'down'
+        dir: p >= 0 ? 'up' : 'down',
+        src: 'btcvix'
       };
     }
   }
@@ -86,7 +112,7 @@ function getSymbolData(sym, d) {
   const pulseRow = (d.futures_macro_pulse || []).find(r => r.symbol === sym);
   if (pulseRow && pulseRow.last && pulseRow.last !== '-' && pulseRow.last !== '—') {
     const disp = formatPrice(pulseRow.last, 2);
-    if (disp !== '—') return {val: disp, chg: pulseRow.chg || '—', pct: pulseRow.pct || null, dir: pulseRow.dir || ''};
+    if (disp !== '—') return {val: disp, chg: pulseRow.chg || '—', pct: pulseRow.pct || null, dir: pulseRow.dir || '', src: 'pulse'};
   }
 
   // Major indexes
@@ -95,10 +121,10 @@ function getSymbolData(sym, d) {
   const row = (d.major_indexes || []).find(r => r.symbol === label);
   if (row && row.last && row.last !== '-' && row.last !== '—') {
     const disp = formatPrice(row.last, 2);
-    if (disp !== '—') return {val: disp, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || ''};
+    if (disp !== '—') return {val: disp, chg: row.chg || '—', pct: row.pct || null, dir: row.dir || '', src: 'indexes'};
   }
 
-  return {val: '—', chg: '—', pct: null, dir: ''};
+  return {val: '—', chg: '—', pct: null, dir: '', src: 'none'};
 }
 
 function applyTileData(tileEl, sym, data) {
@@ -194,9 +220,14 @@ function initTileEditors() {
 // ════════ TAB NAVIGATION ════════
 document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn[data-page]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-btn[data-page]').forEach(b => {
+      b.classList.remove('active');
+      b.removeAttribute('aria-current');
+    });
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
+    // Keeps the accessible "you are here" state in sync with the visual one.
+    btn.setAttribute('aria-current', 'page');
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') { refreshJournal(); switchJTab('trades'); }
     if (btn.dataset.page === 'settings') { refreshSettings(); }
@@ -272,75 +303,201 @@ function renderDashboard() {
   const regime = se.market_regime || 'UNKNOWN';
   const macro  = (se.macro_risk || risk.macro_risk || 'low').toLowerCase();
   const session = se.session_state || risk.nova_session || risk.donna_session || '';
+  // Documented regime -> colour mapping. Any code not listed here falls
+  // through to neutral rather than borrowing a meaning it has not earned.
+  const rCol = {
+    TRENDING_UP:   'var(--green)',
+    TRENDING_DOWN: 'var(--red)',
+    RANGING:       'var(--yellow)',
+    MIXED:         'var(--muted)',
+    VOLATILE:      'var(--red)',
+    EVENT_DRIVEN:  'var(--yellow)',
+    UNKNOWN:       'var(--muted)',
+  };
+  const regimeColor = rCol[regime] || 'var(--muted)';
   const regimeEl = document.getElementById('dbRegimeText');
   if (regimeEl) {
-    regimeEl.textContent = regime;
-    const rCol = {TRENDING_UP:'var(--green)',TRENDING_DOWN:'var(--red)',RANGING:'var(--yellow)',VOLATILE:'var(--red)',EVENT_DRIVEN:'var(--yellow)',UNKNOWN:'var(--muted)'};
-    regimeEl.style.color = rCol[regime] || 'var(--muted)';
+    // Display-only humanization -- "TRENDING_UP" reads "Trending Up". The
+    // underlying regime code is unchanged and still drives every colour and
+    // downstream mapping.
+    regimeEl.textContent = humanizeCode(regime);
+    regimeEl.style.color = regimeColor;
   }
+
+  // ── STATUS-RAIL DOTS ──
+  // Painted from live state, never hard-coded in markup. Colour is purely
+  // redundant here: each cell's value line already states its condition in
+  // words, so the rail is fully readable with colour ignored.
+  const macroColor = macro === 'high' ? 'var(--red)' : macro === 'medium' ? 'var(--yellow)' : 'var(--green)';
+  const _setDot = (id, color) => {
+    const el = document.getElementById(id);
+    if (el) el.style.background = color;
+  };
+  _setDot('ovDotMacro', macroColor);
+  _setDot('ovDotRegime', regimeColor);
+  // Market Tone is the same `regime` signal expressed as prose -- it shares
+  // regime's colour precisely because it is not an independent dimension.
+  _setDot('ovDotTone', regimeColor);
   const toneMap = {
     TRENDING_UP:   macro === 'high' ? 'Trending higher — macro conditions elevated, respect event risk' : 'Trending higher — momentum environment, tech leading',
     TRENDING_DOWN: macro === 'high' ? 'Trending lower — macro conditions elevated' : 'Trending lower — respect the tape',
     RANGING:       'Range-bound tape — reduced edge, fade extremes only',
+    MIXED:         'Mixed tape — NQ/ES diverging, no clear directional edge',
     VOLATILE:      'Volatile conditions — reduce size, protect capital',
     EVENT_DRIVEN:  'Macro conditions elevated — respect event risk',
     UNKNOWN:       'Connecting to live market intelligence...',
   };
-  setText('dbMarketTone', toneMap[regime] || '—');
+  setText('dbMarketTone', toneMap[regime] || humanizeCode(regime));
+  // Short one/two-word label for the Overview status rail's "Market Tone"
+  // value slot -- a display-only shorthand for the exact same `regime`
+  // signal driving dbRegimeText/dbMarketTone above, not a new/independent
+  // data dimension.
+  const toneShortMap = {
+    TRENDING_UP: 'Constructive', TRENDING_DOWN: 'Cautious', RANGING: 'Neutral', MIXED: 'Mixed',
+    VOLATILE: 'Elevated Risk', EVENT_DRIVEN: 'Event-Driven', UNKNOWN: 'Connecting…',
+  };
+  setText('dbMarketToneShort', toneShortMap[regime] || humanizeCode(regime));
 
+  // Macro Risk sub-caption. Must NOT restate the value (the cell already
+  // reads "Low"). Uses genuinely distinct red-folder / event-phase state
+  // when risk_state supplies it, otherwise a neutral provenance label --
+  // never an invented descriptive phrase.
   const macroEl = document.getElementById('dbMacroPosture');
   if (macroEl) {
-    macroEl.textContent = 'MACRO ' + macro.toUpperCase();
-    macroEl.style.color      = macro === 'high' ? 'var(--red)' : macro === 'medium' ? 'var(--yellow)' : 'var(--green)';
-    macroEl.style.background = macro === 'high' ? 'var(--red2)' : macro === 'medium' ? 'rgba(255,201,60,.1)' : 'rgba(0,229,160,.1)';
+    const phase = String(risk.event_phase || '').toUpperCase();
+    let sub;
+    if (risk.red_folder_week === true)          sub = 'Red-folder week';
+    else if (phase && phase !== 'NONE')         sub = humanizeCode(phase) + ' phase';
+    else if (risk.red_folder_week === false)    sub = 'No red-folder lock';
+    else                                         sub = 'Deterministic macro feed';
+    macroEl.textContent = sub;
   }
 
   // ── BADGES ──
   const bMacro = document.getElementById('dbBadgeMacro');
-  if (bMacro) { bMacro.textContent = macro.toUpperCase(); bMacro.style.color = macro === 'high' ? 'var(--red)' : macro === 'medium' ? 'var(--yellow)' : 'var(--green)'; }
+  if (bMacro) {
+    // Humanized for display only -- LOW stays LOW in meaning, rendered "Low".
+    bMacro.textContent = humanizeCode(macro);
+    bMacro.style.color = macroColor;
+  }
   const bSess = document.getElementById('dbBadgeSession');
   if (bSess) {
-    const sLbl = {NEW_YORK_CASH:'NY CASH',LONDON:'LONDON',ASIA:'ASIA',OFF_HOURS:'OFF HOURS'};
+    const sLbl = {NEW_YORK_CASH:'NY Cash',LONDON:'London',ASIA:'Asia',OFF_HOURS:'Off Hours'};
     const sCol = {NEW_YORK_CASH:'var(--green)',LONDON:'var(--blue)',ASIA:'var(--yellow)',OFF_HOURS:'var(--muted)'};
-    bSess.textContent = sLbl[session] || session || '—';
+    bSess.textContent = sLbl[session] || humanizeCode(session);
     bSess.style.color = sCol[session] || 'var(--muted)';
   }
 
   // ── DRIVER ──
   const driver = (_lastDashData || {}).driver || {};
   const wm     = (_lastDashData || {}).what_matters_now || {};
-  setText('dbDriverPrimary', driver.dominant_driver || wm.headline || '—');
-  setText('dbDriverRegime',  driver.market_regime   || regime || '—');
+  const driverHeadline = driver.dominant_driver || wm.headline || '';
+  // Approved hierarchy: a visible driver headline above the bullets. This is
+  // the real `dominant_driver` the engine already computes -- previously
+  // written to a hidden node and thrown away.
+  const dhEl = document.getElementById('dbDriverPrimary');
+  if (dhEl) {
+    dhEl.textContent = driverHeadline || 'Driver unavailable';
+    dhEl.style.display = '';
+    dhEl.style.color = driverHeadline ? 'var(--blue)' : 'var(--muted2)';
+  }
+  // Regime cell's sub-caption: the dominant driver is genuinely distinct
+  // information, so it never restates the regime code above it.
+  setText('dbDriverRegime', driverHeadline || 'Deterministic regime engine');
+
   const bullets = [];
   if (driver.market_summary) bullets.push(driver.market_summary);
   if (wm.headline && wm.headline !== driver.dominant_driver) bullets.push(wm.headline);
   if (wm.summary)  bullets.push(wm.summary);
   const bullEl = document.getElementById('dbDriverBullets');
-  if (bullEl) setHtml('dbDriverBullets', bullets.slice(0,3).map(b => `<li>${b}</li>`).join('') || '<li>Awaiting market intelligence...</li>');
+  if (bullEl) {
+    // Exactly as many bullets as the engine genuinely returned -- never
+    // padded to three to resemble the mockup.
+    setHtml('dbDriverBullets', bullets.length
+      ? bullets.slice(0, 3).map(b => `<li>${b}</li>`).join('')
+      : `<li class="ov-none">${_lastDashData ? 'No driver explanation available.' : 'Loading market driver…'}</li>`);
+  }
 
   // ── CATALYST ──
-  setText('dbCatalystHeadline', risk.last_headline || '—');
-  setText('dbCatalystSummary',  risk.headline_guidance || '—');
-  const sent    = 'NEUTRAL';
-  const sentEl  = document.getElementById('dbCatalystSentiment');
+  const catHeadline = risk.last_headline || '';
+  const catSummary  = risk.headline_guidance || '';
+  const chEl = document.getElementById('dbCatalystHeadline');
+  if (chEl) {
+    chEl.textContent = catHeadline || (_lastDashData ? 'No catalyst identified.' : 'Loading catalyst…');
+    chEl.style.color = catHeadline ? 'var(--text)' : 'var(--muted2)';
+  }
+  // Previously rendered a bare "—" whenever guidance was absent. An empty
+  // field now collapses instead of leaving a stray dash on the page.
+  const csEl = document.getElementById('dbCatalystSummary');
+  if (csEl) {
+    csEl.textContent = catSummary;
+    csEl.style.display = catSummary ? '' : 'none';
+  }
+  // NOVA computes no directional bearish<->bullish sentiment for the
+  // catalyst -- this element previously displayed a hard-coded literal
+  // 'NEUTRAL', which was an invented interpretation, not data. risk_state
+  // does carry a genuine headline SEVERITY, so that is shown instead,
+  // explicitly labelled as severity. With no severity, the badge states it
+  // is unavailable rather than implying a neutral reading. The approved
+  // bearish->bullish scale is deliberately NOT drawn: no field supports a
+  // deterministic position on it.
+  const sentEl = document.getElementById('dbCatalystSentiment');
   if (sentEl) {
-    sentEl.textContent      = sent;
-    const sCol = {BULLISH:'var(--green)',BEARISH:'var(--red)',MIXED:'var(--yellow)',NEUTRAL:'var(--muted)'};
-    const sBg  = {BULLISH:'rgba(0,229,160,.1)',BEARISH:'var(--red2)',MIXED:'rgba(255,201,60,.1)',NEUTRAL:'var(--panel2)'};
-    sentEl.style.color      = sCol[sent] || 'var(--muted)';
-    sentEl.style.background = sBg[sent]  || 'var(--panel2)';
+    const sev = String(risk.headline_severity || '').toUpperCase();
+    const sevCol = {HIGH: 'var(--red)', MEDIUM: 'var(--yellow)', LOW: 'var(--green)'};
+    sentEl.textContent = sev ? `Headline risk: ${humanizeCode(sev)}` : 'Sentiment unavailable';
+    sentEl.style.color = sev ? (sevCol[sev] || 'var(--muted)') : 'var(--muted2)';
   }
 
   // ── MARKET BOARD ──
+  // Freshness comes from the authoritative timestamp of whichever upstream
+  // feed actually produced each tile's number -- NOT from the fact that
+  // /dashboard-data returned 200. Tiles can legitimately come from different
+  // feeds (risk_state's market_snapshot vs the dedicated /btc-vix endpoint),
+  // each with its own timestamp, so every tile is scored individually and the
+  // board chip reports the LEAST-CURRENT of them.
+  const _dbd = _lastDashData || {};
+  const _snapTs = ((_dbd.risk || {}).market_snapshot || {})._updated_at
+                  || (_dbd.risk || {}).last_updated || null;
+  const _srcFreshness = {
+    // Written by services/finnhub.py on every snapshot refresh.
+    snapshot: _ovAgeState(_snapTs),
+    // Written by the /btc-vix endpoint's own cache.
+    btcvix:   _ovAgeState((_liveBtcVix || {}).fetched_at),
+    // futures_macro_pulse and major_indexes are assembled per-request with no
+    // producer timestamp of their own -- their age is genuinely unknowable
+    // from here, which is exactly what 'nofresh' says.
+    pulse:    'nofresh',
+    indexes:  'nofresh',
+    none:     'unavailable',
+  };
+  const _boardStates = [];
   ['NQ','ES','VIX','DXY','GOLD'].forEach(sym => {
-    const data = getSymbolData(sym, _lastDashData || {});
+    const data = getSymbolData(sym, _dbd);
     const tile = document.querySelector(`.db-market-tile[data-sym="${sym}"]`);
     if (!tile) return;
+    const st = _srcFreshness[data.src || 'none'] || 'nofresh';
+    _boardStates.push(st);
+    tile.dataset.fresh = st;
+    tile.setAttribute('title', `${sym} — ${_OV_FRESH_LABEL[st] || 'Unavailable'}`);
     const valEl = tile.querySelector('.db-tile-val');
     const pctEl = tile.querySelector('.db-tile-pct');
-    if (valEl) { valEl.textContent = data.val || '—'; valEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--text)'; }
-    if (pctEl) { pctEl.textContent = data.pct || '—'; pctEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--muted)'; }
+    // Approved treatment: the PRICE stays neutral (a price is not good or
+    // bad), and semantic green/red is reserved for the change, which is the
+    // only part that actually carries direction. The arrow glyph repeats
+    // that direction in text, so the meaning survives without colour.
+    if (valEl) { valEl.textContent = data.val || '—'; valEl.style.color = 'var(--text)'; }
+    if (pctEl) {
+      const arrow = data.dir === 'up' ? '▲ ' : data.dir === 'down' ? '▼ ' : '';
+      pctEl.textContent = data.pct ? arrow + data.pct : '—';
+      pctEl.style.color = data.dir === 'up' ? 'var(--green)' : data.dir === 'down' ? 'var(--red)' : 'var(--muted)';
+    }
   });
+  if (_boardStates.length) {
+    const worst = _ovWorstFreshness(_boardStates);
+    const detail = _snapTs ? `Market snapshot last updated ${new Date(_snapTs).toLocaleString()}` : 'No producer timestamp available';
+    _ovSetFreshness('ovBoardFresh', worst, detail);
+  }
 
   // ── Footer ──
   setText('lastUpdated', `Last sync: ${new Date().toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'})} ET`);
@@ -379,13 +536,158 @@ function _mbResetStates() {
   const errorEl      = document.getElementById('ovMbError');
   const staleEl      = document.getElementById('ovMbStale');
   const textEl       = document.getElementById('ovMbText');
+  const headEl       = document.getElementById('ovMbHeadline');
+  const footEl       = document.getElementById('ovMbFooter');
   const dateLabelEl  = document.getElementById('ovMbDateLabel');
   if (loadingEl)   loadingEl.style.display = 'none';
   if (emptyEl)     emptyEl.style.display = 'none';
   if (errorEl)     { errorEl.style.display = 'none'; errorEl.textContent = ''; }
   if (staleEl)     staleEl.style.display = 'none';
-  if (textEl)      { textEl.style.display = 'none'; textEl.textContent = ''; }
+  if (textEl)      { textEl.style.display = 'none'; textEl.innerHTML = ''; }
+  if (headEl)      { headEl.style.display = 'none'; headEl.textContent = ''; }
+  if (footEl)      { footEl.style.display = 'none'; footEl.innerHTML = ''; }
   if (dateLabelEl) dateLabelEl.textContent = '—';
+}
+
+// Splits the engine's plain brief_text into paragraphs for proportional
+// rendering. Blank-line separated blocks become <p>; a block whose lines all
+// start with a bullet marker becomes a <ul>. Single newlines inside a
+// paragraph are soft-wrapped rather than preserved, because brief_text is
+// hard-wrapped prose, not preformatted layout.
+// Display-only de-duplication of the brief body.
+//
+// build_compact_brief() assembles brief_text from five labelled lines
+// (THESIS / DRAW / PARTICIPATION / MACRO / WATCH) whose values it ALSO
+// returns as separate structured fields. Overview renders `thesis` as the
+// headline and `liquidity_draw` / `key_question` / `confidence` as the facts
+// footer, so three of those five lines restate, verbatim, something already
+// on screen inches away.
+//
+// This drops a body line only when its value is genuinely already rendered,
+// compared after whitespace normalisation. The THESIS line additionally
+// carries the thesis STATE ("CONTESTED [MEDIUM] -- <thesis>"), which appears
+// nowhere else, so the duplicated sentence is cut out of it and the state is
+// kept rather than dropping the whole line. Nothing is reworded or invented,
+// and PARTICIPATION / MACRO -- the lines with no duplicate -- always survive.
+function _mbDedupeBody(text, headline, shown) {
+  if (!text) return '';
+  const norm = (s) => String(s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const headNorm = norm(headline);
+  const shownSet = new Set((shown || []).map(norm).filter(Boolean));
+
+  // Collapse runs of whitespace and shave connective punctuation left dangling
+  // at either end once something has been cut out of the middle of a line.
+  const tidy = (s) => String(s)
+    .replace(/\\s+/g, ' ')
+    .replace(/(^[\\s\\-–—:;,.]+)|([\\s\\-–—:;,.]+$)/g, '')
+    .trim();
+
+  // build_compact_brief() stamps the confidence grade into the THESIS line as
+  // a bracketed token ("CONTESTED [MEDIUM] -- ...") AND returns it as the
+  // `confidence` field, which Overview renders in the facts footer inches
+  // away ("Confidence Medium"). Drop the bracketed copy when -- and only when
+  // -- that exact value is already on screen in the footer. Square brackets
+  // only: parenthesised groups ("(RVOL 0.32x)") carry measurement context
+  // that appears nowhere else and must survive untouched.
+  const stripShownTokens = (s) => String(s).replace(/\\[([^\\]]+)\\]/g,
+    (whole, inner) => shownSet.has(norm(inner)) ? ' ' : whole);
+
+  // tidy() is applied ONLY when a token was actually removed. Running it
+  // unconditionally would shave the trailing period off any engine line that
+  // simply ends in one, silently editing prose this function is supposed to
+  // pass through untouched.
+  const dropShownTokens = (s) => {
+    const stripped = stripShownTokens(s);
+    return stripped === s ? s : tidy(stripped);
+  };
+
+  const kept = text.split('\\n').map(rawLine => {
+    const line = rawLine.replace(/\\s+$/, '');
+    if (!line.trim()) return '';
+
+    const m = line.match(/^([A-Z][A-Z0-9]{2,})\\s+(.+)$/);
+    const label = m ? m[1] : null;
+    const value = m ? m[2] : line;
+    const valNorm = norm(value);
+    if (!valNorm) return '';
+
+    // Already rendered verbatim as the headline or as a facts-footer value.
+    if (valNorm === headNorm || shownSet.has(valNorm)) return '';
+
+    // Contains the headline sentence plus additional context: cut the
+    // duplicate out and keep whatever genuinely-new text remains.
+    if (headNorm && valNorm.indexOf(headNorm) !== -1) {
+      const idx = valNorm.indexOf(headNorm);
+      const remainder = tidy(value.slice(0, idx) + ' ' + value.slice(idx + headline.trim().length));
+      const trimmed = dropShownTokens(remainder);
+      if (!trimmed) return '';
+      if (shownSet.has(norm(trimmed))) return '';
+      return label ? label + ' ' + trimmed : trimmed;
+    }
+
+    // No headline overlap, but the line may still carry a bracketed token
+    // whose value the facts footer is already showing.
+    const cleaned = dropShownTokens(value);
+    if (!cleaned || shownSet.has(norm(cleaned))) return '';
+    if (cleaned !== value) return label ? label + ' ' + cleaned : cleaned;
+    return line;
+  }).filter(Boolean);
+
+  // Blank-line separated, so _mbRenderBody() gives each surviving line its own
+  // paragraph. Joined by a single newline they would soft-wrap into one run-on
+  // block and read as a single garbled phrase ("CONTESTED [MEDIUM]
+  // PARTICIPATION WEAK ..."), which is not how the approved brief reads.
+  return kept.join('\\n\\n');
+}
+
+// build_compact_brief() emits its body as labelled lines -- "THESIS <value>",
+// "PARTICIPATION <value>", "MACRO <value>". Those prefixes are structured
+// engine output, not prose, so they are parsed into a real description list:
+// the label becomes a <dt> (a genuine label, semantically and visually) and
+// the value a <dd> that reads as proportional prose.
+//
+// Display transform is confined to the LABEL -- "PARTICIPATION" renders
+// "Participation". The VALUE is emitted byte-for-byte as the engine produced
+// it: nothing is reworded, reordered, summarised or invented, and a line the
+// engine did not label still renders as a plain paragraph.
+const _MB_SECTION = /^([A-Z][A-Z0-9]{2,})\\s+(\\S.*)$/;
+
+function _mbRenderBody(text) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const out = [];
+  let rows = [];
+  const flushRows = () => {
+    if (!rows.length) return;
+    out.push('<dl class="ov-mb-sections">' + rows.join('') + '</dl>');
+    rows = [];
+  };
+
+  text.split(/\\n\\s*\\n/).forEach(block => {
+    const lines = block.split('\\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+
+    const bullety = lines.every(l => /^[-•*·]\\s+/.test(l));
+    if (bullety) {
+      flushRows();
+      out.push('<ul class="ov-mb-list">' +
+        lines.map(l => `<li>${esc(l.replace(/^[-•*·]\\s+/, ''))}</li>`).join('') + '</ul>');
+      return;
+    }
+
+    const joined = lines.join(' ');
+    const m = joined.match(_MB_SECTION);
+    if (m) {
+      const label = m[1].charAt(0) + m[1].slice(1).toLowerCase();
+      rows.push(`<dt>${esc(label)}</dt><dd>${esc(m[2])}</dd>`);
+      return;
+    }
+
+    flushRows();
+    out.push(`<p>${esc(joined)}</p>`);
+  });
+
+  flushRows();
+  return out.join('');
 }
 
 function _mbShowError(msg) {
@@ -436,8 +738,296 @@ async function refreshMorningBrief() {
   const todayNyStr = nyTodayDateStr();
   const staleEl = document.getElementById('ovMbStale');
   if (staleEl) staleEl.style.display = (data.date && data.date !== todayNyStr) ? 'block' : 'none';
+
+  // ── Headline ──
+  // build_compact_brief() emits a real `thesis` field -- that IS the brief's
+  // headline, so it is used verbatim when present. With no thesis, the first
+  // meaningful line of brief_text is promoted deterministically, but only
+  // when it is structurally headline-shaped (a single short sentence
+  // followed by more content). Nothing is ever invented or rewritten.
+  let body = data.brief_text;
+  let headline = (data.thesis || '').trim();
+  if (!headline) {
+    const blocks = body.split(/\\n\\s*\\n/);
+    const first = (blocks[0] || '').split('\\n').map(l => l.trim()).filter(Boolean).join(' ');
+    if (blocks.length > 1 && first && first.length <= 160 && (first.match(/\\./g) || []).length <= 1) {
+      headline = first;
+      body = blocks.slice(1).join('\\n\\n');
+    }
+  }
+  const headEl = document.getElementById('ovMbHeadline');
+  if (headEl && headline) { headEl.textContent = headline; headEl.style.display = 'block'; }
+
+  // ── Footer ──
+  // Built ONLY from fields build_compact_brief() genuinely returns
+  // (liquidity_draw, key_question, confidence). Any field the engine omits
+  // is simply absent -- no placeholder, no invented "next event".
+  // Computed BEFORE the body renders, because the body is de-duplicated
+  // against whatever the footer is about to show.
+  const bits = [];
+  if (data.liquidity_draw) bits.push(['Draw', data.liquidity_draw]);
+  if (data.key_question)   bits.push(['Watch', data.key_question]);
+  if (data.confidence)     bits.push(['Confidence', humanizeCode(data.confidence)]);
+
   const textEl = document.getElementById('ovMbText');
-  if (textEl) { textEl.textContent = data.brief_text; textEl.style.display = 'block'; }
+  if (textEl) {
+    const deduped = _mbDedupeBody(body, headline, bits.map(b => b[1]));
+    if (deduped) {
+      textEl.innerHTML = _mbRenderBody(deduped);
+      textEl.style.display = 'block';
+    } else {
+      // Everything the body carried is already on screen as the headline and
+      // the facts footer. Collapse it rather than render an empty block.
+      textEl.innerHTML = '';
+      textEl.style.display = 'none';
+    }
+  }
+
+  const footEl = document.getElementById('ovMbFooter');
+  if (footEl && bits.length) {
+    footEl.innerHTML = bits.map(([k, v]) =>
+      `<span class="ov-mb-fact"><b>${k}</b> ${String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>`).join('');
+    footEl.style.display = '';
+  }
+}
+
+// ════════ OVERVIEW: SESSION STRUCTURE (Overview hero, right pane) ════════
+// Reads the existing GET /market-structure (engines/market_structure.py) and
+// GET /liquidity (engines/liquidity.py) contracts -- both already active,
+// already polled elsewhere in the app; Overview did not consume them
+// before this addition. Deterministic, local-JSON-only, no Claude/provider
+// call, no external network request beyond the two same-origin GETs.
+// Refreshed on the existing shared 30s dashboard cycle (called from
+// refresh(); no new setInterval registration). Both routes are pure reads
+// of engine-written JSON files, so the cadence costs no provider traffic --
+// and unlike a single boot-time fetch, it guarantees the level ladder,
+// swept/untapped classifications and primary draw keep tracking the engine
+// instead of freezing for the browser's entire lifetime.
+let _lastMarketStructure = null;
+let _lastLiquidity = null;
+let _structureFetchFailed = false;
+
+// ── Authoritative freshness ──────────────────────────────────────────────
+// A 200 response only proves the SERVER answered; it says nothing about how
+// old the DATA inside that response is. Every label below is therefore
+// derived from a timestamp emitted by the producing engine, or from an
+// explicit cache flag -- never from the fact that a fetch resolved.
+//
+// The age thresholds mirror health/health.py::_check_market_data() exactly
+// (<15 min fresh / 15-30 aging / >30 stale) so the Overview and the system
+// health page can never disagree about whether the same feed is current.
+const _OV_FRESH_LABEL = {
+  loading:     'Checking…',
+  live:        'Live',
+  cached:      'Cached',
+  delayed:     'Delayed',
+  stale:       'Stale',
+  nofresh:     'Freshness unavailable',
+  failure:     'Connection failed',
+  unavailable: 'Unavailable',
+};
+
+// Severity order, used to collapse several sources into one honest
+// board-level state: a board may never look fresher than its least-current
+// source. 'nofresh' outranks 'stale' because a source whose age cannot be
+// determined at all cannot be certified as merely-stale either.
+const _OV_FRESH_RANK = {
+  loading: -1, live: 0, cached: 1, delayed: 2, stale: 3,
+  nofresh: 4, failure: 5, unavailable: 6,
+};
+
+function _ovAgeMinutes(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return (Date.now() - t) / 60000;
+}
+
+// Age -> state using the health.py ladder. A missing or unparseable
+// timestamp yields 'nofresh' ("Freshness unavailable"), never 'live'.
+function _ovAgeState(iso) {
+  const age = _ovAgeMinutes(iso);
+  if (age === null) return 'nofresh';
+  if (age < 15) return 'live';
+  if (age < 30) return 'delayed';
+  return 'stale';
+}
+
+function _ovWorstFreshness(states) {
+  let worst = 'live';
+  (states || []).forEach(s => {
+    const r = _OV_FRESH_RANK[s];
+    if (r !== undefined && r > (_OV_FRESH_RANK[worst] ?? 0)) worst = s;
+  });
+  return worst;
+}
+
+function _ovSetFreshness(elId, state, detail) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  Object.keys(_OV_FRESH_LABEL).forEach(s => el.classList.remove(s));
+  el.classList.add(state);
+  const label = _OV_FRESH_LABEL[state] || _OV_FRESH_LABEL.unavailable;
+  // The label itself is the state -- colour is decoration only, never the
+  // sole carrier of meaning.
+  setHtml(elId, `<span class="fd"></span>${label}`);
+  el.setAttribute('title', detail || label);
+  el.setAttribute('aria-label', `Data freshness: ${label}${detail ? ' — ' + detail : ''}`);
+}
+
+// ── Connection state (sidebar footer + Overview page identity) ───────────
+// This reports exactly one thing that NOVA can honestly establish from the
+// browser: whether the last /dashboard-data cycle reached the backend. It is
+// deliberately NOT phrased as "All systems normal" -- the frontend has no
+// basis for a whole-system health claim, and the mockup's wording would have
+// been a hard-coded assertion. Before the first cycle resolves it stays
+// "Connecting…", never a green all-clear.
+const _OV_CONN = {
+  connecting: {text: 'Connecting…',      cls: 'connecting'},
+  online:     {text: 'Connected',        cls: 'online'},
+  offline:    {text: 'Connection failed', cls: 'offline'},
+};
+function _ovSetConnection(state) {
+  const s = _OV_CONN[state] || _OV_CONN.connecting;
+  ['sidebarStatus', 'ovIdentityStatus'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('connecting', 'online', 'offline');
+    el.classList.add(s.cls);
+    const dot = el.querySelector('.d');
+    el.textContent = s.text;
+    if (dot) el.prepend(dot);
+    el.setAttribute('title', `Backend connection: ${s.text}`);
+  });
+}
+
+function _ovStructureFreshnessState(ms) {
+  // `last_updated` records when engines/market_structure.py last COMPUTED
+  // this state file -- but the structural levels inside it come from a
+  // SEPARATE in-memory yfinance cache with a 30-minute TTL, and
+  // `levels_cached: true` means this response reused those cached levels
+  // instead of re-fetching them. A freshly-computed response carrying
+  // cached levels is therefore not live: the levels may be up to the full
+  // cache TTL old. Honour the flag explicitly so a recently-requested
+  // cached level set can never be labelled "Live".
+  if (!ms) return 'unavailable';
+  const ageState = _ovAgeState(ms.last_updated);
+  if (ageState === 'nofresh') return 'nofresh';
+  if (ms.levels_cached === true) return _ovWorstFreshness(['cached', ageState]);
+  return ageState;
+}
+
+async function refreshMarketStructure() {
+  try {
+    const [ms, liq] = await Promise.all([
+      fetch('/market-structure').then(r => r.json()),
+      fetch('/liquidity').then(r => r.json()),
+    ]);
+    _lastMarketStructure = ms || {};
+    _lastLiquidity = liq || {};
+    _structureFetchFailed = false;
+  } catch (e) {
+    console.error('refreshMarketStructure:', e);
+    // Keep the last good payload on screen rather than blanking it, but
+    // record that this cycle failed so the freshness chip says so.
+    _structureFetchFailed = true;
+  }
+  renderSessionStructure();
+}
+
+function renderSessionStructure() {
+  const ms  = _lastMarketStructure;
+  const liq = _lastLiquidity;
+  const ladderEl = document.getElementById('ovLadder');
+
+  if (!ms || ms.error || !liq || liq.error || !(ms.nq && Object.keys(ms.nq).length)) {
+    _ovSetFreshness('ovStructFresh', _structureFetchFailed ? 'failure' : 'unavailable');
+    setText('ovStructPx', '—');
+    setText('ovStructChg', '');
+    if (ladderEl) {
+      setHtml('ovLadder', `<div style="font-size:13px;color:var(--muted2);padding-top:8px">${
+        _structureFetchFailed ? 'Could not reach the session-structure engine.' : 'Session structure unavailable.'}</div>`);
+    }
+    return;
+  }
+
+  // A failed cycle means what is on screen came from an EARLIER cycle, so it
+  // can never be labelled better than 'failure' regardless of the payload's
+  // own timestamp.
+  _ovSetFreshness(
+    'ovStructFresh',
+    _structureFetchFailed ? 'failure' : _ovStructureFreshnessState(ms),
+    ms.levels_cached === true ? 'Structural levels served from the engine cache (up to 30 min old)' : null,
+  );
+
+  // Current price: reuse the already-fetched live dashboard snapshot (same
+  // helper the Market Board tiles use) so this never re-derives its own
+  // price formatting; fall back to the structure engine's own snapshot
+  // only if the live dashboard price isn't available yet.
+  const liveNq = getSymbolData('NQ', _lastDashData || {});
+  const nqLevelsSrc = (liq.nq || {});
+  const enginePrice = parseFloat(nqLevelsSrc.price) || parseFloat((ms.nq || {}).current_price) || null;
+  const havePriceStr = liveNq && liveNq.val && liveNq.val !== '—';
+  const price = havePriceStr ? parseFloat(String(liveNq.val).replace(/,/g, '')) : enginePrice;
+
+  setText('ovStructPx', havePriceStr ? liveNq.val : (price ? price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'));
+  const chgEl = document.getElementById('ovStructChg');
+  if (chgEl) {
+    chgEl.textContent = havePriceStr ? (liveNq.pct || '') : '';
+    chgEl.style.color = havePriceStr && liveNq.dir === 'up' ? 'var(--green)' : havePriceStr && liveNq.dir === 'down' ? 'var(--red)' : 'var(--muted)';
+  }
+
+  // Levels + their UNTAPPED/SWEPT classification and primary_draw selection
+  // all come directly from engines/liquidity.py -- reused as-is, not
+  // re-derived here.
+  const levels = nqLevelsSrc.levels || [];
+  if (!levels.length || !price) {
+    if (ladderEl) setHtml('ovLadder', '<div style="font-size:13px;color:var(--muted2);padding-top:8px">No structural levels available yet.</div>');
+    return;
+  }
+  const draw = nqLevelsSrc.primary_draw || null;
+  const fmtPx = (v) => v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  // Row placement is by PRICE ORDER (rank), not physically proportional to
+  // the price gap between levels. Real intraday levels frequently cluster
+  // within a few points of each other (e.g. current price sitting almost
+  // exactly on an overnight high) -- a proportional layout would stack
+  // those rows on top of each other and render overlapping, unreadable
+  // text. Evenly-spaced rank order keeps every row legible while still
+  // preserving the correct high-to-low reading order.
+  // Display formatting only (not a data change): engines/liquidity.py emits
+  // raw keys like 'monthly_open' alongside already-terse codes like 'PDH' --
+  // normalize to the same underscore-free, uppercase presentation so every
+  // row's label reads consistently regardless of the source key's length.
+  const _fmtLevelLabel = (raw) => (raw || '').replace(/_/g, ' ').toUpperCase();
+  const merged = levels.map(l => ({
+    label: _fmtLevelLabel(l.label), price: l.price, isNow: false,
+    isDraw: !!(draw && draw.label === l.label && draw.price === l.price),
+    status: l.status,
+  }));
+  merged.push({label: 'NOW', price: price, isNow: true, isDraw: false, status: ''});
+  merged.sort((a, b) => b.price - a.price);
+
+  const PAD = 6;
+  const n = merged.length;
+  const step = n > 1 ? (100 - 2 * PAD) / (n - 1) : 0;
+
+  let html = '';
+  merged.forEach((row, i) => {
+    const top = (PAD + i * step).toFixed(1);
+    if (row.isNow) {
+      html += `<div class="ov-lvl now" style="top:${top}%">` +
+              `<span class="tick"></span><span class="nm">NOW</span>` +
+              `<span class="pr">${fmtPx(row.price)}</span><span class="st"></span></div>`;
+      return;
+    }
+    const cls = row.isDraw ? 'draw' : (row.status === 'SWEPT' ? 'swept' : 'untapped');
+    const statusLabel = row.isDraw ? 'Draw · Untapped' : (row.status === 'SWEPT' ? 'Swept' : 'Untapped');
+    html += `<div class="ov-lvl ${cls}" style="top:${top}%">` +
+            `<span class="tick"></span><span class="nm">${row.label}</span>` +
+            `<span class="pr">${fmtPx(row.price)}</span><span class="st">${statusLabel}</span></div>`;
+  });
+  if (ladderEl) setHtml('ovLadder', html);
 }
 
 // ════════ NEWS FUTURES STRIP ════════
@@ -786,10 +1376,26 @@ async function refresh() {
     _lastDashData = d;
     try { renderDashboard(); } catch(e) { console.error('renderDashboard failed:', e); }
     try { renderNews(d); } catch(e) { console.error('renderNews failed:', e); }
+    // renderDashboard() sets the Market Board freshness chip from the
+    // producer timestamps inside `d` -- deliberately NOT set here, because
+    // reaching this line only proves the request succeeded.
+    _ovSetConnection('online');
   } catch(err) {
     console.error('NOVA refresh error:', err);
     setText('lastUpdated', 'Sync error — retrying...');
+    // Whatever is on screen came from an earlier cycle; say so.
+    _ovSetFreshness('ovBoardFresh', 'failure', 'Last /dashboard-data request failed');
+    _ovSetConnection('offline');
   }
+  // Session structure rides the same shared 30s cycle as the rest of the
+  // dashboard. Both GET /market-structure and GET /liquidity are pure reads
+  // of engine-written JSON files (engines/market_structure.py
+  // load_market_structure(), engines/liquidity.py load_liquidity() -- both
+  // documented "No network calls"), so this adds zero provider traffic while
+  // guaranteeing swept/untapped state, primary draw and the level ladder
+  // cannot sit frozen for the browser's entire lifetime. No new setInterval
+  // is registered: this reuses the existing refresh() registration.
+  try { await refreshMarketStructure(); } catch(e) { console.error('refreshMarketStructure failed:', e); }
 }
 
 // ════════ SETTINGS ════════
@@ -1577,8 +2183,13 @@ function renderOverviewAccountSummary(data) {
   const wrEl = document.getElementById('ovAcctWinRate');
   if (wrEl) {
     const wr = hasTrades ? stats.win_rate : null;
-    wrEl.textContent = wr !== null ? wr + '%' : '—';
-    wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)';
+    const n  = stats.total || 0;
+    // Sample size is shown alongside the rate itself, not in a separate
+    // element a viewer could miss -- a 100% rate from n=1 must never read
+    // as a dominant, unqualified headline number.
+    wrEl.textContent = wr !== null ? `${wr}% (n=${n})` : '—';
+    wrEl.style.color = (n < 5) ? 'var(--muted2)'
+      : wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)';
   }
 
   const wkEl = document.getElementById('ovAcctWeek');
@@ -1607,13 +2218,14 @@ function renderOverviewRecentActivity(data) {
   const rows = recent.map(t => {
     const dir      = (t.direction || '').toUpperCase();
     const dirIcon  = dir === 'LONG' ? '▲' : '▼';
-    const dirColor = dir === 'LONG' ? 'var(--green)' : 'var(--red)';
+    const dirClass = dir === 'LONG' ? 'up' : 'dn';
     const rawPnl   = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl ?? null);
     const pnl      = rawPnl !== null ? parseFloat(rawPnl) : null;
-    const pnlColor = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">
-      <span style="font-size:12px;color:var(--text)">${t.ticker || '—'} <span style="color:${dirColor}">${dirIcon}</span></span>
-      <span style="font-size:12px;font-weight:700;color:${pnlColor}">${_fmtPnl(pnl)}</span>
+    const pnlClass = pnl > 0 ? 'up' : pnl < 0 ? 'dn' : '';
+    return `<div class="ov-act-row">
+      <span class="sym">${t.ticker || '—'}</span>
+      <span class="dir ${dirClass}">${dirIcon} ${dir || '—'}</span>
+      <span class="amt ${pnlClass}">${_fmtPnl(pnl)}</span>
     </div>`;
   }).join('');
   setHtml('ovRecentTrades', rows);
@@ -1748,5 +2360,7 @@ setInterval(fetchStateEngine, 15000);
 dashClock();
 setInterval(dashClock, 1000);
 refreshMorningBrief();
+// Session structure is fetched by refresh() (already called above) and on
+// every subsequent 30s cycle -- no separate boot call, no extra timer.
 
 '''

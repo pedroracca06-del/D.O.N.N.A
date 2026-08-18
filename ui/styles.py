@@ -5,83 +5,124 @@ was previously inline inside DASHBOARD_HTML's <style> block.
 """
 DASHBOARD_CSS = '''*{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#f7f5f2;
-  --bg2:#edeae5;
-  --panel:#ffffff;
-  --panel2:#fafaf9;
-  --line:#e8e2d9;
-  --line2:#f0ebe4;
-  --text:#1a1a1a;
-  --muted:#6b5e50;
-  --muted2:#9a8e80;
-  --blue:#2563eb;
-  --blue2:#1d4ed8;
-  --green:#1e6e41;
-  --green2:rgba(30,110,65,.08);
-  --yellow:#b8860b;
-  --red:#c0392b;
-  --red2:rgba(192,57,43,.08);
-  --gold:#b8860b;
-  --shadow:0 1px 3px rgba(0,0,0,.07);
-  --shadow2:0 1px 2px rgba(0,0,0,.05);
+  --bg:#080b12;
+  --bg2:#0d1420;
+  --panel:#10161f;
+  --panel2:#131b29;
+  --line:#232b3a;
+  --line2:#1c2330;
+  --text:#f3f6fb;
+  --muted:#a7b1c2;
+  --muted2:#828ca0;
+  --blue:#4f8dff;
+  --blue2:#3b82f6;
+  --blue-text:#8fb8ff;
+  --green:#3ddc97;
+  --green2:rgba(61,220,151,.12);
+  --yellow:#fbbf24;
+  --red:#ff6b6b;
+  --red2:rgba(255,107,107,.12);
+  --gold:#e0ab4e;
+  --ai:#9b8cff;
+  --ai2:rgba(155,140,255,.13);
+  --shadow:0 1px 4px rgba(0,0,0,.45);
+  --shadow2:0 2px 8px rgba(0,0,0,.35);
   --radius:16px;
   --radius2:10px;
+  --sidebar-w:224px;
+  --tablet-nav-h:60px;
+  --mobile-nav-h:64px;
 }
-@media(prefers-color-scheme:dark){
+@media(prefers-color-scheme:light){
   :root{
-    --bg:#0d0d0d;
-    --bg2:#111111;
-    --panel:#161616;
-    --panel2:#1c1c1c;
-    --line:#262626;
-    --line2:#1e1e1e;
-    --text:#f0f0f0;
-    --muted:#888888;
-    --muted2:#555555;
-    --blue:#60a5fa;
-    --blue2:#3b82f6;
-    --green:#4ade80;
-    --green2:rgba(74,222,128,.1);
-    --yellow:#fbbf24;
-    --red:#ff6b6b;
-    --red2:rgba(255,107,107,.1);
-    --gold:#fbbf24;
-    --shadow:0 1px 4px rgba(0,0,0,.4);
-    --shadow2:0 1px 3px rgba(0,0,0,.3);
+    --bg:#f7f5f2;
+    --bg2:#edeae5;
+    --panel:#ffffff;
+    --panel2:#fafaf9;
+    --line:#e8e2d9;
+    --line2:#f0ebe4;
+    --text:#1a1a1a;
+    --muted:#6b5e50;
+    --muted2:#9a8e80;
+    --blue:#2563eb;
+    --blue2:#1d4ed8;
+    --green:#1e6e41;
+    --green2:rgba(30,110,65,.08);
+    --yellow:#b8860b;
+    --red:#c0392b;
+    --red2:rgba(192,57,43,.08);
+    --gold:#b8860b;
+    --ai:#6d28d9;
+    --ai2:rgba(109,40,217,.08);
+    --shadow:0 1px 3px rgba(0,0,0,.07);
+    --shadow2:0 1px 2px rgba(0,0,0,.05);
   }
 }
 
 html,body{min-height:100%;background:var(--bg)}
 body{
-  font-family:system-ui,-apple-system,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   color:var(--text);
   background:var(--bg);
-  padding:20px 24px 40px;
+  padding:0;
 }
-.wrap{max-width:1560px;margin:0 auto}
+.wrap{max-width:1560px;margin:0 auto;padding:20px 24px 40px}
 
-/* ── TOPBAR ── */
-.topbar{
+/* ── APP SHELL ── */
+.app-shell{display:flex;align-items:stretch;min-height:100vh}
+.main-content{flex:1;min-width:0}
+
+/* ── SIDEBAR / RESPONSIVE NAV ── */
+.sidebar{
+  flex-shrink:0;width:var(--sidebar-w);
+  display:flex;flex-direction:column;gap:24px;
+  padding:20px 14px;
+  background:var(--bg2);border-right:1px solid var(--line);
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.sidebar-brand{display:flex;align-items:center;gap:10px;padding:0 8px}
+.sidebar-mark{
+  width:26px;height:26px;border-radius:7px;flex-shrink:0;
+  background:linear-gradient(135deg,var(--blue),var(--ai));
+}
+.sidebar-brand-text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.sidebar-wordmark{
+  font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700;
+  letter-spacing:4px;color:var(--text);line-height:1.05;
+}
+/* Approved brand subtitle. "Market Intelligence" names what the product is,
+   so it is meaningful text and sits on the 11px floor like every other
+   meaningful label -- not the 10px optional-kicker exception it previously
+   claimed. Letter-spacing tightened so it still fits the 224px sidebar on
+   one line at the larger size. */
+.sidebar-subtitle{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.9px;
+  color:var(--muted2);text-transform:uppercase;white-space:nowrap;
+}
+/* Backend connection state -- never a hard-coded "All systems normal". */
+.sidebar-status{
+  margin-top:auto;display:flex;align-items:center;gap:8px;
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.4px;
+  padding:8px 10px;border-radius:8px;background:var(--panel2);
+  color:var(--muted2);
+}
+.sidebar-status .d{width:7px;height:7px;border-radius:50%;background:var(--muted2);flex-shrink:0}
+.sidebar-status.online{color:var(--green)}.sidebar-status.online .d{background:var(--green)}
+.sidebar-status.offline{color:var(--red)}.sidebar-status.offline .d{background:var(--red)}
+.sidebar-status.connecting{color:var(--muted2)}.sidebar-status.connecting .d{background:var(--muted2)}
+.content-header{
   display:flex;justify-content:space-between;align-items:center;
   gap:16px;flex-wrap:wrap;margin-bottom:16px;
-}
-.brand{display:flex;align-items:baseline;gap:16px}
-.brand h1{
-  font-family:'Rajdhani',sans-serif;
-  font-size:42px;font-weight:700;letter-spacing:6px;
-  color:var(--text);
-  line-height:1;
 }
 .brand-tag{
   font-family:'Space Mono',monospace;
   font-size:10px;color:var(--muted2);letter-spacing:1px;
   border:1px solid var(--line);padding:4px 8px;border-radius:6px;
 }
-.top-right{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .status-badge{
   display:flex;align-items:center;gap:8px;
   padding:8px 14px;border-radius:999px;
-  background:var(--green2);border:1px solid rgba(30,110,65,.2);
+  background:var(--green2);border:1px solid rgba(52,211,153,.25);
   font-family:'Space Mono',monospace;font-size:11px;color:var(--green);font-weight:700;
   letter-spacing:1px;
 }
@@ -90,17 +131,33 @@ body{
   animation:pulse 2s ease-in-out infinite;
 }
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.85)}}
-.nav{display:flex;gap:6px}
+.nav{display:flex;flex-direction:column;gap:4px;flex:1}
+/* Sentence case per the approved design family (was uppercase). min-height
+   44px meets the touch-target floor without changing the nav's layout. */
 .tab-btn{
-  font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;letter-spacing:.5px;
-  border:1px solid var(--line);padding:8px 16px;border-radius:8px;
-  background:var(--panel);color:var(--muted);
-  cursor:pointer;transition:all .15s ease;text-transform:uppercase;
+  display:flex;align-items:center;gap:10px;
+  font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;letter-spacing:.3px;
+  border:1px solid transparent;padding:11px 12px;border-radius:8px;min-height:44px;
+  background:transparent;color:var(--muted);text-align:left;
+  cursor:pointer;transition:all .15s ease;
 }
-.tab-btn:hover{color:var(--text);border-color:var(--muted2)}
+.tab-btn::before{
+  content:'';display:block;flex-shrink:0;width:18px;height:18px;
+  background-color:currentColor;
+  -webkit-mask-image:var(--icon);mask-image:var(--icon);
+  -webkit-mask-size:contain;mask-size:contain;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+  -webkit-mask-position:center;mask-position:center;
+}
+.tab-btn[data-page="dashboard"]{--icon:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Crect x=%223%22 y=%223%22 width=%228%22 height=%228%22 rx=%221.5%22/%3E%3Crect x=%2213%22 y=%223%22 width=%228%22 height=%225%22 rx=%221.5%22/%3E%3Crect x=%2213%22 y=%2212%22 width=%228%22 height=%229%22 rx=%221.5%22/%3E%3Crect x=%223%22 y=%2215%22 width=%228%22 height=%226%22 rx=%221.5%22/%3E%3C/svg%3E')}
+.tab-btn[data-page="journal"]{--icon:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V3Z%22/%3E%3Cpath d=%22M6 3a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2%22/%3E%3Cline x1=%229%22 y1=%228%22 x2=%2214%22 y2=%228%22/%3E%3Cline x1=%229%22 y1=%2212%22 x2=%2214%22 y2=%2212%22/%3E%3C/svg%3E')}
+.tab-btn[data-page="news"]{--icon:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpolyline points=%223 17 9 11 13 15 21 6%22/%3E%3Cpolyline points=%2215 6 21 6 21 12%22/%3E%3C/svg%3E')}
+.tab-btn[data-page="assistant"]{--icon:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z%22/%3E%3Cpath d=%22M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z%22/%3E%3C/svg%3E')}
+.tab-btn[data-page="settings"]{--icon:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%223%22/%3E%3Cpath d=%22M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z%22/%3E%3C/svg%3E')}
+.tab-btn:hover{color:var(--text);background:var(--panel2)}
 .tab-btn.active{
-  background:var(--text);
-  border-color:var(--text);color:var(--panel);
+  background:rgba(79,141,255,.14);
+  border-color:rgba(79,141,255,.35);color:#dce9ff;
 }
 
 /* ── LIVE STRIP ── */
@@ -174,6 +231,7 @@ td{
   font-size:14px;font-weight:600;
 }
 tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--panel2)}
 .up{color:var(--green)}.dn{color:var(--red)}
 .neutral{color:var(--muted)}
 
@@ -304,7 +362,6 @@ tr:last-child td{border-bottom:none}
 }
 .index-tile.up{border-left:3px solid var(--green)}
 .index-tile.dn{border-left:3px solid var(--red)}
-.news-layout{display:grid;grid-template-columns:7fr 3fr;gap:16px;align-items:start}
 .feature-story{
   padding:20px 22px;border-radius:16px;
   border:1px solid var(--line);
@@ -575,11 +632,15 @@ tr:last-child td{border-bottom:none}
 .del-btn:hover{background:var(--red2);color:var(--red)}
 
 
-/* ── FOOTER ── */
+/* ── FOOTER ──
+   Both halves are meaningful: the left names the running build, the right
+   (#lastUpdated) is the page's freshness statement -- the only place the
+   last successful sync time is reported. Neither is decorative, so both sit
+   on the 11px meaningful-text floor rather than the former 10px. */
 .footer{
   margin-top:24px;display:flex;justify-content:space-between;
   gap:12px;flex-wrap:wrap;
-  font-family:'Space Mono',monospace;font-size:10px;color:var(--muted2);
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);
   letter-spacing:.5px;
 }
 
@@ -764,15 +825,66 @@ tr:last-child td{border-bottom:none}
 ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.12);border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.2)}
 
-/* ── RESPONSIVE ── */
-@media(max-width:1200px){
+/* ── RESPONSIVE SHELL ── */
+@media(max-width:1023px){
+  .app-shell{flex-direction:column}
+  .sidebar{
+    position:sticky;top:0;left:0;right:0;height:auto;width:100%;
+    flex-direction:row;align-items:center;gap:8px;
+    padding:8px 12px;overflow-x:auto;overflow-y:visible;
+    z-index:500;
+  }
+  .sidebar-brand{display:none}
+  .nav{flex-direction:row;flex:1;gap:6px}
+  .tab-btn{
+    flex-direction:column;gap:4px;padding:8px 6px;font-size:11px;
+    white-space:normal;text-align:center;flex:1;justify-content:center;
+  }
   .main-grid,.stat-grid{grid-template-columns:1fr 1fr}
   .stat-grid{grid-template-columns:repeat(2,1fr)}
 }
-@media(max-width:760px){
-  body{padding:12px}
-  .brand h1{font-size:32px}
+@media(max-width:767px){
+  .wrap{padding:14px 14px 88px}
+  .sidebar{
+    position:fixed;top:auto;bottom:0;left:0;right:0;
+    height:var(--mobile-nav-h);
+    border-right:none;border-top:1px solid var(--line);
+    box-shadow:0 -2px 10px rgba(0,0,0,.3);
+  }
+  /* 11px is the meaningful-label typography floor. Navigation labels are
+     meaningful labels, not optional kickers, so they may not sit at 9px.
+     Letter-spacing is tightened so "NOVA Intelligence" still fits. */
+  .tab-btn{font-size:11px;padding:6px 3px;letter-spacing:0;line-height:1.15}
+  .tab-btn::before{width:17px;height:17px}
+  /* The sidebar's connection chip is a SIDEBAR footer element. Once the
+     sidebar becomes the fixed 5-item bottom bar there is no room left for a
+     sixth item, and the chip was rendering 21px past the right edge of a
+     390px viewport -- its label visibly cut ("Connecte"). The approved
+     mobile composition shows five nav items in that bar and nothing else.
+     Hidden, not removed: _ovSetConnection() still writes this element's
+     class and text every cycle, and the same genuine connection state stays
+     visible on Overview itself (#ovIdentityStatus) and, on every other
+     page, in the shared .content-header. No state is lost, only the
+     duplicate that had nowhere to fit. */
+  .sidebar-status{display:none}
   .main-grid,.stat-grid,.live-strip-row{grid-template-columns:1fr}
+  /* Minimum compatibility fix: Overview's Account Summary (4 equal
+     columns) and Markets' index-tiles row (5 equal columns) are fixed via
+     inline style/CSS and fit their former fixed-width desktop shell, but
+     overflow a 390px viewport -- collapse them to 2 columns here without
+     touching any page's markup, ids, or labels.
+
+     #dbMarketBoard is deliberately NOT in this list. It is the Overview
+     Market Board, whose approved mobile treatment is one full-width quote
+     row per instrument (symbol / value / signed change), set further down
+     with `.ov-quotes`. Forcing two columns here beat that rule on ID +
+     !important and crowded each pair, so a tile's symbol collided with the
+     preceding tile's percentage (`+0.95%DXY`). */
+  #ovAcctSummary>div,#indexTiles{grid-template-columns:1fr 1fr!important}
+  /* .donna-logo's fixed 52px size + 12px letter-spacing (NOVA Intelligence
+     page heading) overflows a 390px viewport regardless of live data,
+     since the heading text itself is static -- shrink it here only. */
+  .donna-logo{font-size:23px;letter-spacing:2px}
 }
 
 /* ── RISK BAR PULSE ── */
@@ -789,14 +901,379 @@ tr:last-child td{border-bottom:none}
 
 @keyframes donnaFadeIn { from { opacity: 0 } to { opacity: 1 } }
 body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
-.db-market-tile{padding:14px 16px;text-align:center}
-.db-tile-sym{font-size:9px;font-family:Space Mono,monospace;letter-spacing:1.5px;color:var(--muted2);margin-bottom:5px}
-.db-tile-val{font-size:22px;font-weight:700;font-family:Rajdhani,sans-serif;line-height:1}
-.db-tile-pct{font-size:11px;font-family:Space Mono,monospace;margin-top:3px}
-.db-hero-left{flex:1}
-.db-hero-right{text-align:right;min-width:220px}
-.db-posture-badge{display:inline-block;padding:3px 10px;border-radius:4px;font-family:Space Mono,monospace;font-size:10px;font-weight:700;margin-top:6px}
-.db-badge-card{padding:14px 16px}
-.db-badge-label{font-size:9px;font-family:Space Mono,monospace;letter-spacing:1.2px;color:var(--muted2);margin-bottom:6px}
-.db-badge-value{font-size:16px;font-weight:700;font-family:Rajdhani,sans-serif}
+
+/* ═══════════════════════ OVERVIEW (approved composition) ═══════════════════════
+   Command-center hierarchy: page identity -> flat status rail -> hero (Morning
+   Brief + session structure) -> secondary band (Performance / Market Driver /
+   Primary Catalyst) -> quote board. New rules only -- .panel/.card/.kicker
+   above are untouched shared primitives still used by other pages. */
+
+/* ── DESKTOP FIT (1440x1000, DPR 1) ────────────────────────────────────────
+   Overview must fit the viewport without vertical scrolling. The dominant
+   waste was double spacing: `.vstack` already applies `gap:16px` between its
+   children, yet every Overview band ALSO carried its own margin-bottom, so
+   each seam was spaced twice (~72px of pure duplication). Collapsing the
+   redundant margins and letting the grid gap own the rhythm removes that
+   without shrinking a single component or losing any content.
+   Scoped to Overview so no other page's spacing changes. */
+#page-dashboard .vstack{gap:14px}
+#page-dashboard .ov-page-id,
+#page-dashboard .ov-rail,
+#page-dashboard .ov-hero,
+#page-dashboard .ov-second,
+#page-dashboard .ov-board{margin-bottom:0}
+/* The shared shell reserves 40px below the footer and 24px above it, which
+   is generous scroll padding -- unnecessary on a page designed to fit.
+   Desktop only: below 768px the nav is FIXED to the bottom edge, and the
+   mobile `.wrap` rule's 88px of bottom padding is what keeps the last row
+   (Market Board's final tile) from sitting underneath it. This override is
+   declared after that media block, so leaving it unscoped would win the
+   cascade on mobile and re-occlude the tile by ~14px. */
+@media(min-width:768px){
+  .wrap:has(> #page-dashboard.active){padding-bottom:18px}
+}
+.wrap:has(> #page-dashboard.active) > .footer{margin-top:12px}
+
+/* Region titles are now semantic h2/h3 rather than styled divs. Reset the
+   UA's default margin/size so promoting the tag changed no visual. */
+.ov-sl .name,.ov-region .rl,.ov-board .bl h2{margin:0;font-size:inherit;font-weight:inherit}
+.ov-board .bl h2{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit}
+
+.ov-page-id{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;margin-bottom:12px;
+}
+.ov-id-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:3px}
+/* Genuine backend connection state, mirrored from the sidebar. */
+.ov-conn{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase;color:var(--muted2);
+}
+.ov-conn .d{width:7px;height:7px;border-radius:50%;background:var(--muted2);flex-shrink:0}
+.ov-conn.online{color:var(--green)}.ov-conn.online .d{background:var(--green)}
+.ov-conn.offline{color:var(--red)}.ov-conn.offline .d{background:var(--red)}
+/* Application version -- optional uppercase kicker, so 10px is permitted. */
+/* Version/build identity is meaningful metadata, not an optional kicker, so it
+   sits on the 11px floor. Letter-spacing eased 1px -> .8px so the longer glyph
+   run still fits beside the connection badge without wrapping the identity row. */
+.ov-ver{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.8px;
+  color:var(--muted2);text-transform:uppercase;
+}
+.ov-page-id .ov-kicker{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:7px;
+}
+.ov-page-id h1{
+  font-size:30px;font-weight:700;letter-spacing:.2px;margin:0;
+  font-family:'Rajdhani',sans-serif;color:var(--text);
+}
+
+/* ── STATUS RAIL: flat terminal band, not KPI cards ── */
+.ov-rail{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line2);
+  margin-bottom:16px;
+}
+.ov-rail .ri{padding:12px 18px 13px}
+.ov-rail .ri + .ri{border-left:1px solid var(--line2)}
+.ov-rail .ri:first-child{padding-left:2px}
+.ov-rail .ri .l{
+  display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:1px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
+}
+.ov-rail .ri .l .d{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.ov-rail .ri .v{font-size:18px;font-weight:700;line-height:1.2;font-family:'Rajdhani',sans-serif}
+/* The rail's supporting line is explanatory prose ("Trending higher --
+   momentum environment, tech leading"), not a label or a kicker, so it takes
+   the 13px reading floor rather than the 11px label floor. */
+.ov-rail .ri .s{font-size:13px;color:var(--muted);margin-top:3px;line-height:1.4}
+
+/* ── HERO: one surface, two panes -- Morning Brief (primary) + session structure ── */
+.ov-hero{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:0 12px 32px rgba(0,0,0,.35);
+  display:grid;grid-template-columns:1.5fr 1fr;
+  margin-bottom:16px;overflow:hidden;
+}
+.ov-brief{padding:20px 26px 16px;display:flex;flex-direction:column;min-width:0}
+.ov-brief .ov-sl{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.ov-brief .ov-sl .name{
+  font-family:'Space Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:1.6px;
+  color:var(--gold);text-transform:uppercase;
+}
+.ov-brief .ov-sl .meta{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+/* Brief headline -- the engine's real `thesis`, given the approved
+   editorial weight instead of being buried in a monospace block. */
+.ov-mb-headline{
+  font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700;
+  line-height:1.26;color:var(--text);margin:0 0 8px;letter-spacing:.2px;
+}
+/* Proportional body (was a monospace <pre>): real paragraphs and lists. */
+.ov-brief-body{font-size:13.5px;line-height:1.6;color:var(--muted);margin:0}
+.ov-brief-body p{margin:0 0 8px}
+.ov-brief-body p:last-child{margin-bottom:0}
+.ov-brief-body .ov-mb-list{list-style:none;margin:0 0 8px;padding:0}
+.ov-brief-body .ov-mb-list li{padding:3px 0 3px 14px;position:relative}
+.ov-brief-body .ov-mb-list li::before{content:'';position:absolute;left:2px;top:11px;width:5px;height:1.5px;background:var(--blue)}
+/* Structured engine sections (THESIS / PARTICIPATION / MACRO). The engine
+   emits these as labelled lines; rendering them as a description list makes
+   the label a real label -- semantically and visually -- and lets the value
+   read as proportional prose instead of a machine-style run-on. Only the
+   LABEL is transformed for display (title case); the value is rendered
+   exactly as the engine emitted it. */
+.ov-brief-body .ov-mb-sections{
+  display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:0 0 8px;
+}
+.ov-brief-body .ov-mb-sections dt{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.7px;
+  color:var(--muted2);text-transform:uppercase;font-weight:700;
+  white-space:nowrap;line-height:1.55;
+}
+.ov-brief-body .ov-mb-sections dd{margin:0;font-size:13.5px;line-height:1.55;color:var(--muted)}
+/* Facts footer -- only fields the endpoint genuinely returned. */
+/* The facts carry full sentences ("Contest resolves bullish if PDH holds and
+   RVOL expands above 1.0"), so the VALUE side is reading content and takes the
+   13px floor. Their `b` labels stay on the 11px label floor above. */
+.ov-mb-footer{
+  margin-top:9px;padding-top:8px;border-top:1px solid var(--line2);
+  display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;line-height:1.45;color:var(--muted);
+}
+/* Draw / Watch / Confidence each name the value beside them, so they are
+   meaningful labels and take the 11px floor -- not the 10.5px they carried,
+   which an element-only audit had missed because the text sits in a bare <b>. */
+.ov-mb-fact b{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.7px;
+  color:var(--muted2);text-transform:uppercase;font-weight:700;margin-right:5px;
+}
+/* The provenance disclosure previously lived here as its own content line.
+   It now rides the section kicker's meta span (approved treatment), so this
+   rule has no element left to style and is removed rather than left dead. */
+.ov-structure{
+  border-left:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(79,141,255,.04),transparent 40%);
+  padding:20px 24px 16px;display:flex;flex-direction:column;min-width:0;
+}
+/* Approved treatment: a mono uppercase blue kicker, matching MORNING BRIEF's
+   gold one on the other side of the same surface. The Morning Brief rule is
+   scoped to `.ov-brief`, so `.ov-structure`'s heading was inheriting nothing
+   but the size reset and rendering as proportional sentence case. */
+.ov-structure .ov-sl .name{
+  font-family:'Space Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:1.6px;
+  color:var(--blue-text);text-transform:uppercase;
+}
+.ov-px-now{display:flex;align-items:baseline;gap:12px;margin:2px 0 4px;flex-wrap:wrap}
+/* Freshness chip flush right on the price row. `margin-left:auto` only
+   applies once it shares that row; if the row wraps on a narrow viewport the
+   chip simply drops beneath the price rather than overlapping it. */
+.ov-px-now .ov-fresh{margin-left:auto;align-self:center}
+.ov-px-now .sym{font-size:12px;letter-spacing:1.5px;color:var(--muted2);font-family:'Space Mono',monospace}
+.ov-px-now .px{font-family:'Space Mono',monospace;font-size:28px;font-weight:700;letter-spacing:-.5px}
+.ov-px-now .chg{font-family:'Space Mono',monospace;font-size:13px;font-weight:700}
+.ov-ladder{position:relative;flex:1;min-height:190px;margin:12px 0 4px}
+.ov-ladder::before{content:'';position:absolute;left:7px;top:6px;bottom:6px;width:1px;background:var(--line2)}
+.ov-lvl{position:absolute;left:0;right:0;display:flex;align-items:center;gap:10px;transform:translateY(-50%)}
+.ov-lvl .tick{width:15px;height:1px;background:var(--line2);flex-shrink:0}
+.ov-lvl .nm{font-family:'Space Mono',monospace;font-size:11.5px;letter-spacing:.7px;color:var(--muted);width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+.ov-lvl .pr{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--muted);flex:1}
+.ov-lvl .st{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.7px;text-transform:uppercase}
+.ov-lvl.draw .nm,.ov-lvl.draw .pr{color:var(--gold);font-weight:700}
+.ov-lvl.draw .st{color:var(--gold)}
+.ov-lvl.swept .st{color:var(--muted2)}
+.ov-lvl.untapped .st{color:var(--green)}
+.ov-lvl.now .tick{width:15px;height:3px;background:var(--blue);box-shadow:0 0 8px rgba(79,141,255,.8)}
+.ov-lvl.now .nm{color:var(--blue-text);font-weight:700}
+.ov-lvl.now .pr{color:var(--text);font-weight:700}
+
+/* ── SECONDARY BAND: Performance | Market Driver | Primary Catalyst ── */
+.ov-second{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  display:grid;grid-template-columns:1.15fr 1fr 1fr;margin-bottom:16px;
+}
+.ov-region{padding:16px 22px 14px;min-width:0}
+.ov-region + .ov-region{border-left:1px solid var(--line)}
+.ov-region .rl{
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:1.4px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:12px;
+}
+.ov-pnl-line{display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap}
+.ov-pnl-line .big{font-family:'Space Mono',monospace;font-size:24px;font-weight:700}
+.ov-pnl-line .lab{font-size:11px;letter-spacing:.7px;color:var(--muted2);text-transform:uppercase}
+.ov-perf-sub{font-size:12.5px;color:var(--muted);margin-bottom:11px}
+.ov-perf-sub b{color:var(--text);font-family:'Space Mono',monospace;font-weight:700}
+.ov-act-list{border-top:1px solid var(--line2);padding-top:4px}
+.ov-act-row{
+  display:flex;align-items:center;gap:10px;padding:7px 0;
+  border-bottom:1px solid var(--line2);font-size:13px;
+}
+.ov-act-row:last-child{border-bottom:none;padding-bottom:0}
+.ov-act-row .sym{font-weight:700;width:30px}
+.ov-act-row .dir{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.6px;width:50px}
+.ov-act-row .amt{margin-left:auto;font-family:'Space Mono',monospace;font-size:13px;font-weight:700}
+.ov-regime-line{font-size:15.5px;font-weight:700;color:var(--blue-text);margin-bottom:10px}
+/* Restored approved hierarchy: driver headline above its bullets. */
+.ov-drv-head{
+  font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;
+  color:var(--blue-text);line-height:1.3;margin-bottom:8px;
+}
+.ov-drv{list-style:none;margin:0;padding:0}
+.ov-drv li{font-size:13px;color:var(--muted);line-height:1.5;padding:4px 0 4px 15px;position:relative}
+.ov-drv li::before{content:'';position:absolute;left:2px;top:11px;width:5px;height:1.5px;background:var(--blue)}
+/* Empty / unavailable / loading copy. 13px = the explanatory-content floor. */
+.ov-drv li.ov-none::before{display:none}
+.ov-none{font-size:13px;color:var(--muted2);line-height:1.5}
+.ov-err{font-size:13px;color:var(--red);line-height:1.5}
+.ov-cat-h{font-size:14px;font-weight:700;color:var(--text);line-height:1.38;margin-bottom:6px}
+.ov-cat-p{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:10px}
+.ov-senti{height:5px;border-radius:3px;background:var(--panel2);overflow:hidden;margin-bottom:6px}
+.ov-senti .fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--ai))}
+.ov-senti-l{font-size:11px;color:var(--muted2);display:flex;justify-content:space-between}
+.ov-senti-l .mid{color:var(--muted)}
+
+/* ── QUOTE BOARD: flat rail, not cards-in-a-card ──
+   Styles the EXISTING .db-market-tile/.db-tile-* hooks that renderDashboard()
+   in ui/scripts.py already targets via querySelector -- no JS change needed,
+   only the visual treatment of the tile the script already fills in. */
+.ov-board{border-top:1px solid var(--line2);padding-top:12px;margin-bottom:12px}
+.ov-board .bl{
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:1.4px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:11px;
+  display:flex;gap:12px;align-items:center;
+}
+.ov-quotes{display:grid;grid-template-columns:repeat(5,1fr)}
+.ov-quotes .db-market-tile{padding:2px 22px 4px;position:relative;text-align:left}
+.ov-quotes .db-market-tile + .db-market-tile{border-left:1px solid var(--line2)}
+.ov-quotes .db-market-tile:first-child{padding-left:2px}
+.ov-quotes .db-tile-sym{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.1px;color:var(--muted2);margin-bottom:6px}
+.ov-quotes .db-tile-val{font-family:'Space Mono',monospace;font-size:21px;font-weight:700;letter-spacing:-.3px;line-height:1.1}
+.ov-quotes .db-tile-pct{font-family:'Space Mono',monospace;font-size:12px;font-weight:700;margin-top:4px}
+
+/* ── Catalyst sentiment badge: base look here, JS sets color/background per data ── */
+.ov-sent-badge{
+  display:inline-block;padding:3px 10px;border-radius:4px;
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  background:var(--panel2);color:var(--muted2);
+}
+
+/* ── DATA-FRESHNESS TAGS: shared vocabulary for current/delayed/stale/unavailable/prototype ── */
+.ov-fresh{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.5px;padding:2px 8px;
+  border-radius:5px;text-transform:uppercase;font-weight:700;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.ov-fresh .fd{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+/* Freshness states. The chip's TEXT always names the state; these colours
+   are redundant reinforcement only, never the sole carrier of meaning.
+   'cached', 'nofresh' and 'failure' are distinct from 'live' by design --
+   cached/undetermined data must never be able to render as live. */
+.ov-fresh.live{background:var(--green2);color:var(--green)}.ov-fresh.live .fd{background:var(--green)}
+.ov-fresh.cached{background:rgba(79,141,255,.12);color:var(--blue)}.ov-fresh.cached .fd{background:var(--blue)}
+.ov-fresh.stale{background:rgba(224,171,78,.12);color:var(--gold)}.ov-fresh.stale .fd{background:var(--gold)}
+.ov-fresh.delayed{background:rgba(224,171,78,.12);color:var(--gold)}.ov-fresh.delayed .fd{background:var(--gold)}
+.ov-fresh.nofresh{background:var(--panel2);color:var(--muted)}.ov-fresh.nofresh .fd{background:var(--muted)}
+.ov-fresh.failure{background:var(--red2);color:var(--red)}.ov-fresh.failure .fd{background:var(--red)}
+.ov-fresh.loading{background:var(--panel2);color:var(--muted2)}.ov-fresh.loading .fd{background:var(--muted2)}
+.ov-fresh.unavailable{background:var(--panel2);color:var(--muted2)}.ov-fresh.unavailable .fd{background:var(--muted2)}
+.ov-fresh.proto{background:var(--ai2);color:#c3b8ff}.ov-fresh.proto .fd{background:var(--ai)}
+
+/* Status-rail dots have no colour of their own -- renderDashboard() paints
+   each from the state it represents. Neutral is the honest resting value
+   before any state has arrived, and the fixed value for Session (which is
+   informational, not a good/bad grade). */
+.ov-rail .ri .l .d{background:var(--muted2)}
+.ov-rail .ri .l .d.neutral{background:var(--blue)}
+/* "derived from Regime" states where Market Tone comes from, which makes it
+   source/provenance information rather than an optional kicker -- so it takes
+   the 11px floor. It stays visually subordinate to the cell's own label through
+   colour and weight, not through undersized type. */
+.ov-rail .ri .l .drv{
+  font-size:11px;letter-spacing:.3px;color:var(--muted2);
+  text-transform:uppercase;font-weight:600;margin-left:6px;
+}
+
+/* ── Overview-only suppression of the legacy shell chrome ──────────────────
+   `.content-header` (v5.0 // LIVE MARKET CORE + ONLINE badge) and
+   `.live-strip-row` (ticker + session chip) are rendered by the shared shell
+   above EVERY page, but neither appears in Overview's approved composition --
+   Overview opens on its own page-identity block. They are hidden here for
+   Overview only, via :has() on the active page, so they remain present and
+   fully functional on Journal / Markets / NOVA Intelligence / Settings.
+   Hidden rather than removed: renderDashboard() still writes to #liveStrip
+   and #sessionVal, and those writes must keep succeeding. */
+.wrap:has(> #page-dashboard.active) > .content-header,
+.wrap:has(> #page-dashboard.active) > .live-strip-row{display:none}
+
+@media(max-width:1023px){
+  .ov-rail{grid-template-columns:1fr 1fr}
+  .ov-rail .ri:nth-child(2n+1){padding-left:2px}
+  .ov-rail .ri:nth-child(2n){border-left:1px solid var(--line2)}
+  .ov-rail .ri:nth-child(1),.ov-rail .ri:nth-child(2){border-bottom:1px solid var(--line2)}
+  .ov-hero{grid-template-columns:1fr}
+  .ov-structure{border-left:none;border-top:1px solid var(--line)}
+  .ov-second{grid-template-columns:1fr}
+  .ov-region + .ov-region{border-left:none;border-top:1px solid var(--line)}
+}
+@media(max-width:767px){
+  .ov-brief{padding:16px 18px 14px}
+  .ov-structure{padding:16px 18px 14px}
+  .ov-px-now .px{font-size:24px}
+  /* A 390px column is too narrow for a label/value pair side by side once
+     the label is "PARTICIPATION", so the sections stack: label above value.
+     Neither is shrunk -- the label stays on the 11px floor and the value on
+     the 13.5px reading size. */
+  .ov-brief-body .ov-mb-sections{grid-template-columns:1fr;gap:0}
+  .ov-brief-body .ov-mb-sections dd{margin-bottom:8px}
+  .ov-brief-body .ov-mb-sections dd:last-child{margin-bottom:0}
+  /* In the 2-up rail the cell is too narrow to hold "MARKET TONE" and its
+     provenance on one line, so the two interleaved mid-phrase. Giving the
+     provenance its own line keeps both readable without dropping the
+     disclosure or shrinking it below the 11px floor.
+     `.l` is a flex row, so `display:block` alone still left the provenance
+     as a flex sibling that wrapped mid-phrase beside the label
+     ("MARKET | DERIVED / TONE | FROM / | REGIME"). `flex:0 0 100%` on a
+     wrapping row is what actually breaks it onto its own line. */
+  .ov-rail .ri .l{flex-wrap:wrap}
+  .ov-rail .ri .l .drv{display:block;flex:0 0 100%;margin-left:0;margin-top:2px}
+  /* Approved mobile quote board: one full-width row per instrument --
+     symbol rail left, value carrying the row, signed change flush right.
+     Every part is nowrap and the value column is the only flexible one, so
+     a long value pushes the row's own spacing rather than overrunning the
+     change beside it. Touch-safe row height comes from the 10px padding. */
+  .ov-quotes{grid-template-columns:1fr}
+  .ov-quotes .db-market-tile{
+    display:flex;align-items:baseline;gap:12px;padding:10px 2px;
+    border-left:none !important;border-bottom:1px solid var(--line2);
+  }
+  .ov-quotes .db-market-tile:last-child{border-bottom:none}
+  .ov-quotes .db-tile-sym{margin-bottom:0;width:46px;flex:none;white-space:nowrap}
+  .ov-quotes .db-tile-val{font-size:19px;flex:1;min-width:0;white-space:nowrap}
+  .ov-quotes .db-tile-pct{margin-top:0;flex:none;text-align:right;white-space:nowrap}
+}
+
+/* ── FOCUS STATE (kept last so it wins over any earlier outline:none) ── */
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+/* ── REDUCED MOTION ────────────────────────────────────────────────────────
+   The interface runs several INFINITE animations (the status-dot `pulse`,
+   the `tickerMove` marquees, `_mrePulse`, `blink`). Continuous motion that
+   never stops is exactly what prefers-reduced-motion exists to suppress, and
+   the stylesheet previously honoured that preference nowhere.
+
+   This block has zero effect for anyone who has not asked their OS for
+   reduced motion, so it changes no approved visual. Transitions are reduced
+   to a near-zero duration rather than removed outright, so state changes
+   still land instantly instead of appearing broken; infinite animations are
+   stopped on their first frame. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+    scroll-behavior:auto !important;
+  }
+  /* The marquees translate as their whole reason for existing -- pin them to
+     their start position so the text stays readable and still. */
+  .ticker-track,.news-ticker-track{animation:none !important;transform:none !important}
+}
 '''
