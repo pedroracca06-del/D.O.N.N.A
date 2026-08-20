@@ -760,9 +760,15 @@ _CRITICAL_DOM_IDS = (
     # Settings (post-correction: no setTradingStatus)
     'setIntegrations', 'setChatModel', 'setFastModel', 'setServerTime',
     # Journal
-    'jOpenModal', 'jOverviewStrip', 'jOvTrades', 'jOvPnl', 'jOvEvals', 'jOvWinRate', 'jOvPF', 'jOvWeek',
-    'jTab-trades', 'jTab-signals', 'jTab-analytics',
-    'jPanel-trades', 'jPanel-signals', 'jPanel-analytics',
+    'jOpenModal', 'jOvTrades', 'jOvPnl', 'jOvEvals', 'jOvWinRate', 'jOvPF', 'jOvWeek',
+    # The approved Journal composition (artifact b22fcc6b frame 2) replaced the
+    # sub-tab shell -- jOverviewStrip, jTab-*, jPanel-* -- with a master-detail
+    # ledger. Those ids are gone by design, so the contract now pins the
+    # regions that actually exist instead of the ones that were removed.
+    'jnRail', 'jnNetPnl', 'jnWeekPnl', 'jnProfitFactor', 'jnAvgWL', 'jnWinRate',
+    'jnRailNote', 'jnLedger', 'jnLedgerBody', 'jnLedgerFoot',
+    'jnByRegime', 'jnBySession', 'jnByDirection', 'jnBySetup',
+    'jnDaily', 'jnReview', 'jnReviewInner', 'jnIdentityStatus',
     'journalCardList', 'jSignalFeedList',
     'setupTypeGrid', 'sessionBreakdownGrid', 'regimeBreakdownGrid',
     'behavioralAnalyticsGrid', 'emotionalAnalyticsGrid',
@@ -1147,7 +1153,7 @@ _APPROVED_PAGE_HEADINGS = {
     # visual-implementation pass -- Journal/Markets/Settings remain
     # untouched by that pass and keep their pre-existing all-caps headings.
     'page-dashboard': 'Overview',
-    'page-journal':   'JOURNAL',
+    'page-journal':   'Journal',
     'page-news':      'MARKETS',
     'page-assistant': 'NOVA Intelligence',
     'page-settings':  'SETTINGS',

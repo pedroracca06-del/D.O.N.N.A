@@ -1202,7 +1202,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
    Hidden rather than removed: renderDashboard() still writes to #liveStrip
    and #sessionVal, and those writes must keep succeeding. */
 .wrap:has(> #page-dashboard.active) > .content-header,
-.wrap:has(> #page-dashboard.active) > .live-strip-row{display:none}
+.wrap:has(> #page-dashboard.active) > .live-strip-row,
+.wrap:has(> #page-journal.active) > .content-header,
+.wrap:has(> #page-journal.active) > .live-strip-row{display:none}
 
 @media(max-width:1023px){
   .ov-rail{grid-template-columns:1fr 1fr}
@@ -1249,6 +1251,487 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   .ov-quotes .db-tile-sym{margin-bottom:0;width:46px;flex:none;white-space:nowrap}
   .ov-quotes .db-tile-val{font-size:19px;flex:1;min-width:0;white-space:nowrap}
   .ov-quotes .db-tile-pct{margin-top:0;flex:none;text-align:right;white-space:nowrap}
+}
+
+/* ═══════════════════════ JOURNAL (approved composition) ═══════════════════
+   Mirrors artifact b22fcc6b frame 2 (desktop) and f1b6ec63 frames 4-6
+   (mobile): identity row -> flat performance rail -> filter chips -> two
+   balanced columns (ledger + breakdown + daily P&L on the left, sticky trade
+   review on the right). New `.jn-*` rules only; the legacy `.j-*`/`.jtd-*`
+   primitives are untouched because the Log Trade and Trade Detail modals
+   still use them. */
+
+.jn-sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}
+
+/* ── DESKTOP FIT (1440x1000, DPR 1) ───────────────────────────────────────
+   `.vstack` already applies gap:16px between its children, so a band that
+   ALSO carries its own margin-bottom is spaced twice -- the same duplication
+   Overview had. Four seams were costing ~110px instead of ~56px. Collapsing
+   the redundant margins and letting the grid gap own the rhythm recovers the
+   difference without shrinking a single component or dropping any content.
+   Scoped to Journal so no other page's spacing changes. */
+#page-journal .vstack{gap:14px}
+#page-journal > .vstack > .jn-page-id,
+#page-journal > .vstack > .jn-rail,
+#page-journal > .vstack > .jn-rail-note,
+#page-journal > .vstack > .jn-filters{margin-bottom:0}
+#page-journal > .vstack > .jn-rail-note{margin-top:0}
+/* Journal is a scrolling page, not a fits-in-one-screen page, so it keeps the
+   shared shell's scroll padding rather than Overview's tightened value. */
+
+/* ── Identity row ── */
+.jn-page-id{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;margin-bottom:12px;
+}
+.jn-page-id .jn-id-left{margin-right:auto}
+.jn-kicker{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
+}
+.jn-page-id h1{
+  font-family:'Rajdhani',sans-serif;font-size:34px;font-weight:700;
+  letter-spacing:.5px;margin:0;line-height:1.05;color:var(--text);
+}
+.jn-id-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:3px}
+.jn-conn{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--muted2);
+}
+.jn-conn .d{width:7px;height:7px;border-radius:50%;background:var(--muted2);flex-shrink:0}
+.jn-conn.online{color:var(--green)}.jn-conn.online .d{background:var(--green)}
+.jn-conn.offline{color:var(--red)}.jn-conn.offline .d{background:var(--red)}
+.jn-ver{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  color:var(--muted2);text-transform:uppercase;
+}
+.jn-action{
+  font-family:'Space Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:1.2px;
+  text-transform:uppercase;padding:11px 20px;min-height:44px;
+  border-radius:9px;border:1px solid var(--blue);background:rgba(79,141,255,.1);
+  color:var(--blue-text);cursor:pointer;transition:background .15s;
+}
+.jn-action:hover{background:rgba(79,141,255,.18)}
+
+/* ── Performance rail ── */
+.jn-rail{
+  display:grid;grid-template-columns:repeat(5,1fr);
+  border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);
+  margin-bottom:12px;
+}
+.jn-rail .ri{padding:12px 18px 13px}
+.jn-rail .ri + .ri{border-left:1px solid var(--line2)}
+.jn-rail .ri:first-child{padding-left:2px}
+.jn-rail .ri .l{
+  font-size:11px;letter-spacing:1px;color:var(--muted2);
+  text-transform:uppercase;margin-bottom:5px;
+}
+.jn-rail .ri .v{
+  font-family:'Space Mono',monospace;font-size:21px;font-weight:700;
+  line-height:1.2;letter-spacing:-.3px;color:var(--text);
+}
+.jn-rail .ri .v.up{color:var(--green)}
+.jn-rail .ri .v.down{color:var(--red)}
+.jn-rail .ri .v.flat{color:var(--muted)}
+/* A small-sample reading is never given the confident treatment. */
+.jn-rail .ri .v.lowsample{color:var(--muted)}
+.jn-rail .ri .s{font-size:13px;color:var(--muted);margin-top:3px;line-height:1.4}
+/* The caveat repeats what the rail already says, so it is a footnote hanging
+   off the rail -- one line, no fill, no card. The leading marker carries the
+   warning without relying on colour. */
+.jn-rail-note{
+  font-size:13px;color:var(--muted);line-height:1.45;margin:-6px 0 10px;
+  padding:0 2px;display:flex;align-items:baseline;gap:7px;
+}
+.jn-rail-note::before{
+  /* Literal glyph rather than a CSS hex escape: this stylesheet lives
+     inside a Python string, where a backslash followed by digits is read
+     as an octal escape and the marker arrives mangled. */
+  content:'⚠';font-size:12px;color:var(--gold);flex-shrink:0;line-height:1;
+}
+
+/* ── Filter chips ── */
+.jn-filters{display:flex;flex-wrap:wrap;gap:8px 18px;margin-bottom:14px;align-items:center}
+.jn-fgroup{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.jn-fglabel{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--muted2);margin-right:3px;
+}
+/* A dimension the records cannot support is shown, disabled, with the reason
+   stated -- never hidden silently and never filled with invented options. */
+.jn-fgroup.is-disabled{opacity:.75}
+.jn-fnone{font-size:12.5px;color:var(--muted2);font-style:italic}
+.jn-chip{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.8px;
+  padding:8px 14px;min-height:36px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+  cursor:pointer;transition:all .15s;
+}
+.jn-chip:hover{border-color:var(--muted2);color:var(--text)}
+.jn-chip.active{background:rgba(79,141,255,.14);border-color:var(--blue);color:var(--blue-text);font-weight:700}
+
+/* ── Two-column body ── */
+.jn-main{display:grid;grid-template-columns:1.55fr 1fr;gap:16px;align-items:start}
+.jn-left{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+/* ── Ledger ── */
+.jn-ledger-wrap{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:6px 0 0;overflow:hidden;
+}
+.jn-ledger-scroll{overflow-x:auto}
+.jn-ledger{width:100%;border-collapse:collapse;font-size:13px;min-width:0}
+.jn-ledger thead th{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--muted2);font-weight:700;text-align:left;
+  padding:9px 12px;border-bottom:1px solid var(--line2);white-space:nowrap;
+}
+.jn-ledger th.num,.jn-ledger td.num{text-align:right}
+.jn-ledger td{padding:10px 12px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.jn-ledger tbody tr:last-child td{border-bottom:none}
+.jn-row{cursor:pointer;transition:background .12s;position:relative}
+.jn-row:hover{background:var(--panel2)}
+.jn-row.selected{background:rgba(79,141,255,.09)}
+/* Selection is carried by a left rail AND a background, so it never depends
+   on colour perception alone. */
+.jn-row.selected td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
+.jn-row .jn-d{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--text);display:block}
+.jn-row .jn-t{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);display:block;margin-top:2px}
+.jn-instr{font-weight:700;font-size:13.5px}
+.jn-dir{
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.8px;
+  padding:2px 7px;border-radius:4px;
+}
+.jn-dir.long{background:var(--green2);color:var(--green)}
+.jn-dir.short{background:var(--red2);color:var(--red)}
+.jn-res{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;white-space:nowrap}
+.jn-res.up,.up{color:var(--green)}
+.jn-res.down,.down{color:var(--red)}
+.jn-res.flat,.flat{color:var(--muted)}
+.jn-mark{margin-right:4px;font-size:11px}
+.jn-ledger td.ses{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-align:right;white-space:nowrap}
+.jn-th-abbr{display:none}
+.jn-dim{color:var(--muted2)}
+.jn-none{font-size:13px;color:var(--muted2);line-height:1.5;padding:18px 12px;text-align:center}
+.jn-err{font-size:13px;color:var(--red);line-height:1.5;padding:18px 12px;text-align:center}
+.jn-ledger-foot{
+  font-size:12.5px;color:var(--muted);padding:10px 12px;
+  border-top:1px solid var(--line2);
+}
+.jn-ledger-foot b{font-family:'Space Mono',monospace}
+
+/* ── Breakdown ── */
+.jn-breakdown,.jn-daily{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:14px 18px 16px;
+}
+.jn-sec-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--line2);
+}
+.jn-sec-head h2{
+  font-family:'Space Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:1.6px;
+  color:var(--gold);text-transform:uppercase;margin:0;
+}
+.jn-sec-head .meta{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+.jn-bd-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 22px}
+.jn-bd-block h3{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--muted2);margin:0 0 8px;font-weight:700;
+}
+.jn-bars{display:flex;flex-direction:column;gap:6px}
+.jn-bar-row{display:grid;grid-template-columns:minmax(60px,auto) 1fr auto;gap:10px;align-items:center}
+.jn-bar-lab{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jn-bar-lab.jn-absent{font-style:italic;color:var(--muted2)}
+.jn-bar-track{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
+.jn-bar-fill{height:100%;background:var(--blue);border-radius:3px}
+.jn-bar-fill.up{background:var(--green)}
+.jn-bar-fill.down{background:var(--red)}
+.jn-bar-val{font-family:'Space Mono',monospace;font-size:12.5px;font-weight:700;white-space:nowrap;color:var(--text)}
+.jn-n{font-size:11px;color:var(--muted2);font-weight:400;margin-left:3px}
+.jn-bd-note{font-size:13px;color:var(--muted2);line-height:1.5;margin-top:8px}
+
+/* ── Daily P&L ── */
+/* ── Daily Net P&L ──────────────────────────────────────────────────────
+   A plotting surface rather than a row of bars: gridlines on the quarters, a
+   heavier zero line, axis values only where the scale actually reaches, and
+   dates along the bottom. The aggregation behind it is unchanged -- the chart
+   draws the sessions that exist and leaves the rest of the timeline alone. */
+.jn-daily-chart{
+  display:grid;grid-template-columns:auto minmax(0,1fr);
+  grid-template-rows:auto auto;column-gap:10px;
+}
+.jn-daily-chart.is-empty{display:block}
+
+/* Y axis */
+.jn-dp-yax{grid-column:1;grid-row:1;padding:20px 0;display:flex;align-items:stretch}
+.jn-dp-yin{position:relative;width:100%;height:var(--plot-h,168px)}
+.jn-dp-yin span{
+  position:absolute;right:0;transform:translateY(-50%);
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);
+  white-space:nowrap;letter-spacing:.2px;
+}
+
+/* The surface itself: seated slightly below the card, not floating on it. */
+.jn-dp-surface{
+  grid-column:2;grid-row:1;position:relative;padding:20px 12px;
+  border:1px solid var(--line2);border-radius:10px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,0) 42%),
+    var(--panel2);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+}
+.jn-dp-inner{position:relative;height:var(--plot-h,168px)}
+.jn-dp-gl{position:absolute;left:0;right:0;height:1px;background:var(--line2);opacity:.55}
+/* The baseline is the one line that carries meaning, so it outweighs the grid. */
+.jn-zero{position:absolute;left:0;right:0;top:var(--pos,100%);height:1px;background:var(--muted2);z-index:2}
+
+/* Bars. One column per genuine session -- one session centres in the full
+   width, ten spread across it -- with the width capped so a sparse chart
+   still reads as deliberate. */
+.jn-dp-bars{position:absolute;inset:0;display:grid;grid-template-columns:repeat(var(--n,1),minmax(0,1fr));z-index:1}
+.jn-dp-bar{
+  grid-column:var(--i);position:relative;display:block;
+  background:none;border:0;padding:0;margin:0 auto;width:100%;max-width:78px;
+  cursor:pointer;font:inherit;color:inherit;
+}
+.jn-dp-bar .jn-col-plot{
+  display:grid;grid-template-rows:var(--pos,100%) var(--neg,0%);height:100%;
+  padding:0 12px;
+}
+.jn-col-pos{position:relative;display:flex;align-items:flex-end;justify-content:center}
+.jn-col-neg{position:relative;display:flex;align-items:flex-start;justify-content:center}
+.jn-dbar{
+  width:100%;display:block;
+  transition:filter .15s, transform .15s;
+}
+.jn-dbar.up{
+  height:var(--mag);min-height:3px;border-radius:4px 4px 0 0;
+  background:linear-gradient(180deg, var(--green), color-mix(in srgb, var(--green) 68%, #0b111c));
+}
+.jn-dbar.down{
+  height:var(--mag);min-height:3px;border-radius:0 0 4px 4px;
+  background:linear-gradient(0deg, var(--red), color-mix(in srgb, var(--red) 68%, #0b111c));
+}
+/* Breakeven is a real session with no magnitude: a flat neutral tick, never a
+   bar with invented height. */
+.jn-dbar.flat{height:3px;background:var(--muted2);border-radius:2px;opacity:.9}
+
+/* Per-bar value, parked just outside the plot in the surface padding so a
+   full-height bar never collides with it. */
+.jn-dp-v{
+  position:absolute;left:-6px;right:-6px;bottom:100%;margin-bottom:5px;
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  text-align:center;white-space:nowrap;
+}
+.jn-col-neg .jn-dp-v{bottom:auto;top:100%;margin:5px 0 0}
+.jn-dp-v.up{color:var(--green)}
+.jn-dp-v.down{color:var(--red)}
+.jn-dp-v.flat{color:var(--muted2)}
+.jn-dp-vm,.jn-dp-d{display:none}
+
+/* X axis */
+.jn-dp-xax{
+  grid-column:2;grid-row:2;display:grid;
+  grid-template-columns:repeat(var(--n,1),minmax(0,1fr));padding:8px 12px 0;
+}
+.jn-dp-xax span{
+  grid-column:var(--i);text-align:center;
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);white-space:nowrap;
+}
+
+/* Hover / focus */
+.jn-dp-bar:hover .jn-dbar{filter:brightness(1.14)}
+.jn-dp-bar:focus-visible{outline:none}
+.jn-dp-bar:focus-visible .jn-col-plot{
+  outline:2px solid var(--blue);outline-offset:1px;border-radius:6px;
+}
+.jn-dp-tip{
+  position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);
+  display:none;flex-direction:column;gap:2px;z-index:5;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:8px 11px;box-shadow:0 8px 22px -10px rgba(0,0,0,.75);
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);
+  white-space:nowrap;pointer-events:none;
+}
+.jn-dp-tip b{color:var(--text);font-size:11px}
+.jn-dp-tip .up{color:var(--green)}
+.jn-dp-tip .down{color:var(--red)}
+.jn-dp-tip .flat{color:var(--muted2)}
+.jn-dp-bar:hover .jn-dp-tip,.jn-dp-bar:focus-visible .jn-dp-tip{display:flex}
+
+/* Compact computed context under the heading -- four figures, no second rail. */
+.jn-dp-ctx{
+  display:flex;flex-wrap:wrap;gap:6px 26px;margin:-2px 0 14px;
+}
+.jn-dp-ci{display:flex;align-items:baseline;gap:7px}
+.jn-dp-ci .k{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--muted2);
+}
+.jn-dp-ci .v{
+  font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--text);
+  display:flex;align-items:baseline;gap:5px;
+}
+.jn-dp-ci .v.up{color:var(--green)}
+.jn-dp-ci .v.down{color:var(--red)}
+.jn-dp-ci .v i{font-style:normal;font-size:11px;font-weight:400;color:var(--muted2)}
+
+/* ── Review panel ── */
+.jn-review{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 20px 18px;position:sticky;top:16px;min-width:0;
+}
+.jn-review-empty{padding:44px 12px}
+.jn-rv-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.jn-rv-title{font-family:'Rajdhani',sans-serif;font-size:23px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;gap:9px}
+.jn-rv-pnl{font-family:'Space Mono',monospace;font-size:21px;font-weight:700;white-space:nowrap}
+.jn-rv-sub{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:3px}
+.jn-kv-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:11px 18px;
+  margin:14px 0 4px;padding-top:13px;border-top:1px solid var(--line2);
+}
+.jn-kv .k{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.8px;
+  text-transform:uppercase;color:var(--muted2);margin-bottom:2px;
+}
+.jn-kv .v{font-size:13.5px;color:var(--text);font-weight:600;word-break:break-word}
+.jn-rv-block{margin-top:16px}
+.jn-rv-block h3{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--muted2);margin:0 0 8px;font-weight:700;
+}
+.jn-rv-block p{font-size:13px;color:var(--muted);line-height:1.55;margin:0}
+.jn-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.jn-tl li{position:relative;padding-left:15px}
+.jn-tl li::before{content:'';position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:var(--blue)}
+.jn-tl-t{display:block;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+.jn-tl-c{display:block;font-size:13px;color:var(--muted);line-height:1.5;margin-top:2px}
+.jn-quote{
+  margin:0;padding:11px 14px;border-left:2px solid var(--blue);
+  background:rgba(79,141,255,.06);border-radius:0 7px 7px 0;
+  font-size:13px;color:var(--muted);line-height:1.55;
+}
+/* Approved explicit unavailable state -- a stated absence, not a blank. */
+.jn-empty-box{
+  border:1px dashed var(--line2);border-radius:9px;padding:16px 14px;text-align:center;
+  font-size:13px;color:var(--muted);line-height:1.5;
+}
+.jn-empty-box span{display:block;font-size:11px;color:var(--muted2);margin-top:5px}
+.jn-shot{width:100%;height:auto;border-radius:8px;border:1px solid var(--line2);display:block}
+
+/* ── Tablet ── */
+@media(max-width:1023px){
+  .jn-main{grid-template-columns:1fr}
+  .jn-review{position:static}
+  .jn-rail{grid-template-columns:repeat(3,1fr)}
+  .jn-rail .ri:nth-child(3n+1){padding-left:2px;border-left:none}
+  .jn-rail .ri:nth-child(n+4){border-top:1px solid var(--line2)}
+}
+
+/* ── Mobile: the approved compact treatment (frames 4-6) ── */
+@media(max-width:767px){
+  /* The approved mobile reference has no full-width action band. Log Trade
+     becomes a compact action beside the title; the connection/version meta
+     drops to its own line beneath. Touch target stays at 44px. */
+  .jn-page-id{
+    display:grid;grid-template-columns:1fr auto;align-items:center;
+    grid-template-areas:'title action' 'meta meta';gap:6px 12px;
+  }
+  .jn-page-id h1{font-size:27px}
+  .jn-id-left{grid-area:title;margin-right:0}
+  .jn-action{grid-area:action;width:auto;padding:11px 14px;min-height:44px;font-size:11px;letter-spacing:.8px}
+  .jn-id-meta{grid-area:meta;padding-bottom:0;gap:9px}
+  .jn-filters{gap:8px 12px}
+  .jn-fglabel{font-size:11px}
+  .jn-rail-note{font-size:13px;margin:-4px 0 8px}
+  .jn-rail{grid-template-columns:1fr 1fr}
+  .jn-rail .ri{padding:11px 14px}
+  .jn-rail .ri:nth-child(2n+1){padding-left:2px;border-left:none}
+  .jn-rail .ri:nth-child(n+3){border-top:1px solid var(--line2)}
+  .jn-rail .ri .v{font-size:19px}
+  /* Entry and Exit are dropped so the remaining columns stay legible at
+     390px -- both values are still shown in full in the review panel. */
+  .jn-ledger th:nth-child(4),.jn-ledger td:nth-child(4),
+  .jn-ledger th:nth-child(5),.jn-ledger td:nth-child(5){display:none}
+  /* Five columns need 368.8px of min-content in the 360px the card offers,
+     so the table was spilling ~9px past its own card and relying on the
+     scroll wrapper to hide it. Tighter gutters make it fit outright. */
+  .jn-ledger td{padding:12px 7px}
+  .jn-row{min-height:44px}
+  /* Session/Regime is the widest column; letting it -- and its header --
+     wrap is what keeps the whole ledger inside 390px instead of pushing
+     the table into a horizontal scroll. */
+  .jn-ledger th.ses,.jn-ledger td.ses{white-space:normal;text-align:right;font-size:11px}
+  .jn-th-full{display:none}
+  .jn-th-abbr{display:inline}
+  .jn-ledger thead th{padding:9px 6px}
+  .jn-chip{min-height:44px;padding:11px 16px}
+  .jn-bd-grid{grid-template-columns:1fr;gap:16px}
+  .jn-breakdown,.jn-daily,.jn-review{padding:14px 16px 16px}
+  /* At 390px ten labelled columns cannot carry a signed dollar value at 11px,
+     so the module turns on its side: date, structured track, value. Same
+     surface, same semantics, same zero origin -- read left to right. */
+  .jn-daily-chart{grid-template-columns:minmax(0,1fr);row-gap:0}
+  .jn-dp-yax,.jn-dp-xax{display:none}
+  .jn-dp-surface{grid-column:1;padding:12px 13px}
+  .jn-dp-inner{height:auto}
+  .jn-dp-gl{display:none}
+  .jn-dp-bars{position:static;display:flex;flex-direction:column;gap:2px}
+  .jn-dp-bar{
+    display:grid;grid-template-columns:38px minmax(0,1fr) auto;
+    align-items:center;gap:10px;max-width:none;
+    /* Each row is a real button, so it carries a real touch target. The track
+       stays 14px; the rest of the 44px is hit area around it. */
+    min-height:44px;
+  }
+  .jn-dp-d{
+    display:block;font-family:'Space Mono',monospace;font-size:11px;
+    color:var(--muted2);text-align:left;
+  }
+  /* The track is drawn, not implied -- the bar extends inside a visible rail
+     from a zero origin that stays put whatever the data does. */
+  .jn-dp-bar .jn-col-plot{
+    position:relative;padding:0;height:14px;
+    grid-template-rows:none;grid-template-columns:var(--neg,0%) var(--pos,100%);
+    background:var(--panel);border:1px solid var(--line2);border-radius:4px;
+  }
+  .jn-col-neg{grid-column:1;align-items:center;justify-content:flex-end}
+  .jn-col-pos{grid-column:2;align-items:center;justify-content:flex-start}
+  .jn-dbar{height:8px}
+  .jn-dbar.up{width:var(--mag);height:8px;min-width:3px;border-radius:0 3px 3px 0;
+    background:linear-gradient(90deg, color-mix(in srgb, var(--green) 74%, #0b111c), var(--green))}
+  .jn-dbar.down{width:var(--mag);height:8px;min-width:3px;border-radius:3px 0 0 3px;
+    background:linear-gradient(270deg, color-mix(in srgb, var(--red) 74%, #0b111c), var(--red))}
+  .jn-dbar.flat{width:3px;height:8px}
+  .jn-dp-v{display:none}
+  .jn-dp-vm{
+    display:block;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+    text-align:right;white-space:nowrap;min-width:62px;
+  }
+  .jn-dp-vm.up{color:var(--green)}
+  .jn-dp-vm.down{color:var(--red)}
+  .jn-dp-vm.flat{color:var(--muted2)}
+  .jn-zero{left:var(--neg,0%);right:auto;top:0;bottom:0;width:1px;height:auto;z-index:2}
+  .jn-dp-bar:focus-visible .jn-col-plot{outline:2px solid var(--blue);outline-offset:2px}
+  .jn-dp-tip{display:none!important}
+  .jn-dp-ctx{gap:5px 18px;margin-bottom:12px}
+  .jn-dp-ci .v{font-size:12.5px}
+  .jn-kv-grid{grid-template-columns:1fr 1fr;gap:10px 14px}
+  /* Three stacked unavailable sections should not read as three empty cards.
+     They stay explicit -- name, message and reason -- but compact. */
+  .jn-rv-block{margin-top:13px}
+  .jn-empty-box{
+    padding:9px 11px;text-align:left;border-radius:7px;
+    font-size:12.5px;line-height:1.45;
+  }
+  .jn-empty-box span{font-size:11px;margin-top:2px}
+  .jn-rv-title{font-size:21px}
+  .jn-rv-pnl{font-size:19px}
 }
 
 /* ── FOCUS STATE (kept last so it wins over any earlier outline:none) ── */

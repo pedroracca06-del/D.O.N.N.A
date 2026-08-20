@@ -889,7 +889,8 @@ const _OV_CONN = {
 };
 function _ovSetConnection(state) {
   const s = _OV_CONN[state] || _OV_CONN.connecting;
-  ['sidebarStatus', 'ovIdentityStatus'].forEach(id => {
+  // Journal carries the same genuine connection state in its identity row.
+  ['sidebarStatus', 'ovIdentityStatus', 'jnIdentityStatus'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.classList.remove('connecting', 'online', 'offline');
@@ -1522,9 +1523,15 @@ document.getElementById('jOpenModal').addEventListener('click', openJModal);
 
 function switchJTab(tab) {
   _jActiveTab = tab;
+  // The approved Journal composition has no sub-tab shell, so these elements
+  // no longer exist. Guarded rather than removed: the nav handler still calls
+  // this on every Journal activation, and renderSignalFeed() is still the
+  // owner of the evaluation feed.
   ['trades','signals','analytics'].forEach(t => {
-    document.getElementById('jPanel-' + t).style.display = t === tab ? '' : 'none';
-    document.getElementById('jTab-' + t).classList.toggle('active', t === tab);
+    const panel = document.getElementById('jPanel-' + t);
+    const btn   = document.getElementById('jTab-' + t);
+    if (panel) panel.style.display = t === tab ? '' : 'none';
+    if (btn) btn.classList.toggle('active', t === tab);
   });
   if (tab === 'signals' && !_signalData) refreshSignals();
 }
@@ -1553,295 +1560,643 @@ function setSigFilter(f) {
   if (_signalData) renderSignalFeed(_signalData);
 }
 
-// ── Trade card renderer ──────────────────────────────────────
+// ── JOURNAL (approved composition) ────────────────────────────────────────
+// Reads GET /journal/data only: `trades` are the genuine stored records and
+// `stats` is core.state.compute_journal_stats(). Nothing here invents a
+// figure; every region that the stored records cannot support renders an
+// explicit unavailable state instead.
+//
+// INCLUSION RULES -- deliberately identical to compute_journal_stats() so the
+// rail (backend) and the ledger/analytics (frontend) can never disagree:
+//   * outcome REJECTED (governance-blocked, never executed) and OPEN (no
+//     realized outcome yet) are excluded from EVERY metric and from the
+//     ledger.
+//   * EOD_CLOSE is a real close and is classified WIN / LOSS / BREAKEVEN by
+//     the sign of its P&L.
+//   * P&L prefers `realized_pnl`; with none it is derived from entry/exit and
+//     size, signed by direction. A non-numeric value counts as 0.
+//   * BREAKEVEN counts toward the total but toward neither wins nor losses.
+//   * A record with no usable LONG/SHORT direction is excluded from
+//     By-Direction only, and the exclusion is stated on screen.
+//   * A record with no valid YYYY-MM-DD trade_date is excluded from Daily
+//     P&L only, and that exclusion is stated on screen too.
+const _JN_EXCLUDED_OUTCOMES = ['REJECTED', 'OPEN'];
+const _JN_LOW_SAMPLE = 20;
+
+let _jnSelectedKey = null;
+let _jnRows = [];
+
+function _jnNum(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Stable identity for a record so selection survives a refresh.
+function _jnKey(t, i) {
+  return String(t.order_id || `${t.trade_date || '?'}|${t.ticker || '?'}|${t.entry_price || '?'}|${i}`);
+}
+
+function _jnOutcome(t) {
+  const raw = String(t.outcome || '').toUpperCase();
+  if (raw !== 'EOD_CLOSE') return raw;
+  const p = _jnPnl(t);
+  return p > 0 ? 'WIN' : (p < 0 ? 'LOSS' : 'BREAKEVEN');
+}
+
+function _jnPnl(t) {
+  const realized = _jnNum(t.realized_pnl != null ? t.realized_pnl : t.pnl);
+  if (realized !== null) return realized;
+  const entry = _jnNum(t.entry_price), exit = _jnNum(t.exit_price), size = _jnNum(t.size);
+  if (entry === null || exit === null) return 0;
+  const s = size === null ? 1 : size;
+  return String(t.direction || '').toUpperCase() === 'SHORT' ? (entry - exit) * s : (exit - entry) * s;
+}
+
+function _jnClosed(trades) {
+  return (trades || []).filter(t => _JN_EXCLUDED_OUTCOMES.indexOf(String(t.outcome || '').toUpperCase()) === -1);
+}
+
+function _jnDir(t) {
+  const d = String(t.direction || '').toUpperCase();
+  return (d === 'LONG' || d === 'SHORT') ? d : null;
+}
+
+function _jnEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _jnMoney(v) {
+  const n = _jnNum(v);
+  if (n === null) return '—';
+  return (n >= 0 ? '+$' : '-$') + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function _jnPnlClass(n) {
+  return n > 0 ? 'up' : (n < 0 ? 'down' : 'flat');
+}
+
+// Direction-neutral, colour-independent marker so P&L never relies on hue.
+function _jnPnlMark(n) {
+  return n > 0 ? '▲' : (n < 0 ? '▼' : '—');
+}
+
+function _jnValidDate(s) {
+  return /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || ''));
+}
+
+// compute_journal_stats() buckets an absent regime/session under the literal
+// 'UNKNOWN', and an absent setup under 'Untagged'. Those are storage keys, not
+// language: shown verbatim they read as a real category. 'Untagged' is the
+// established Journal vocabulary for setups and is kept; everything else that
+// means "the record does not carry this" is stated as such.
+const _JN_ABSENT_KEYS = ['UNKNOWN', 'NONE', 'NULL', ''];
+// Daily P&L keeps ten session slots open. Slots beyond the sessions that
+// genuinely exist stay empty -- the chart never invents a day to fill them.
+const _JN_DAILY_SLOTS = 10;
+// Axis ticks are read at a glance, so they drop the cents the bar labels keep.
+function _jnMoneyAxis(v) {
+  const a = Math.abs(v);
+  if (a < 0.005) return '$0';
+  const sign = v < 0 ? '-' : '+';
+  if (a >= 10000) return sign + '$' + (a / 1000).toFixed(1) + 'k';
+  return sign + '$' + Math.round(a).toLocaleString('en-US');
+}
+// Above this many sessions the column form cannot hold a signed dollar value
+// per slot at 11px on a 390px screen, so mobile switches to the row form.
+const _JN_DAILY_DENSE = 6;
+function _jnBucketLabel(key, kind) {
+  const k = String(key == null ? '' : key).trim();
+  if (kind === 'setup' && k.toUpperCase() === 'UNTAGGED') return 'Untagged';
+  if (_JN_ABSENT_KEYS.indexOf(k.toUpperCase()) !== -1) return 'Not recorded';
+  return k;
+}
+function _jnIsAbsentBucket(key, kind) {
+  return _jnBucketLabel(key, kind) === 'Not recorded';
+}
+
+// ── Region renderers ──────────────────────────────────────────────────────
+
+function _jnRenderRail(stats, closed) {
+  const total = closed.length;
+  const wins = closed.filter(t => _jnOutcome(t) === 'WIN').length;
+  const losses = closed.filter(t => _jnOutcome(t) === 'LOSS').length;
+  const net = closed.reduce((s, t) => s + _jnPnl(t), 0);
+
+  const setCell = (id, val, sub, cls) => {
+    const v = document.getElementById(id), s = document.getElementById(id + 'Sub');
+    if (v) { v.textContent = val; v.className = 'v' + (cls ? ' ' + cls : ''); }
+    if (s) s.textContent = sub;
+  };
+
+  setCell('jnNetPnl', total ? _jnMoney(net) : '—',
+    total ? `${total} closed trade${total === 1 ? '' : 's'}` : 'No closed trades yet',
+    total ? _jnPnlClass(net) : '');
+
+  const week = _jnNum((stats.daily_pnl || {}).this_week);
+  setCell('jnWeekPnl', week === null ? '—' : _jnMoney(week),
+    week === null ? 'Not available' : 'Week to date', week === null ? '' : _jnPnlClass(week));
+
+  // compute_journal_stats() returns profit_factor 0.0 when there are no
+  // losing trades. Rendering "0.00" would read as catastrophic rather than
+  // "not yet meaningful", so that case is stated in words instead.
+  const pf = _jnNum(stats.profit_factor);
+  if (!total) setCell('jnProfitFactor', '—', 'No closed trades yet');
+  else if (losses === 0) setCell('jnProfitFactor', '—', `No losing trades yet (${wins} win${wins === 1 ? '' : 's'})`);
+  else setCell('jnProfitFactor', pf === null ? '—' : pf.toFixed(2), `gross wins ÷ gross losses · ${total} trades`);
+
+  const aw = _jnNum(stats.avg_win), al = _jnNum(stats.avg_loss);
+  if (!total) setCell('jnAvgWL', '—', 'No closed trades yet');
+  else setCell('jnAvgWL',
+    (aw ? _jnMoney(aw) : '—') + ' / ' + (al ? '-$' + Math.abs(al).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'),
+    `${wins} win${wins === 1 ? '' : 's'} · ${losses} loss${losses === 1 ? '' : 'es'}`);
+
+  // Win rate NEVER appears without its sample size, and a small sample is
+  // labelled as such rather than presented as a headline number.
+  if (!total) setCell('jnWinRate', '—', 'No closed trades yet');
+  else {
+    const wr = (wins / total * 100);
+    const low = total < _JN_LOW_SAMPLE;
+    setCell('jnWinRate', wr.toFixed(total < 10 ? 0 : 1) + '%',
+      `n=${total}` + (low ? ' · low sample, not yet meaningful' : ''), low ? 'lowsample' : '');
+  }
+
+  const note = document.getElementById('jnRailNote');
+  if (note) {
+    if (total && total < _JN_LOW_SAMPLE) {
+      note.textContent = `Every figure above is computed from ${total} closed trade${total === 1 ? '' : 's'}. Treat them as provisional until the sample grows.`;
+      note.style.display = '';
+    } else { note.style.display = 'none'; note.textContent = ''; }
+  }
+}
+
+function _jnRenderLedger(rows, allClosedCount) {
+  const body = document.getElementById('jnLedgerBody');
+  const foot = document.getElementById('jnLedgerFoot');
+  if (!body) return;
+
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="jn-none">${allClosedCount
+      ? 'No trades match this filter.' : 'No trades logged yet.'}</td></tr>`;
+    if (foot) foot.textContent = allClosedCount
+      ? `0 shown · filtered from ${allClosedCount} closed`
+      : 'Log a trade, or let the execution path record one automatically.';
+    return;
+  }
+
+  body.innerHTML = rows.map((r, i) => {
+    const t = r.trade, p = r.pnl;
+    const sel = r.key === _jnSelectedKey;
+    const dir = _jnDir(t);
+    const ses = _jnEsc(t.session || ''), reg = _jnEsc(t.active_regime || '');
+    const sesReg = (ses || reg) ? [ses, reg].filter(Boolean).join(' · ') : '<span class="jn-dim">Not recorded</span>';
+    return `<tr class="jn-row${sel ? ' selected' : ''}" data-key="${_jnEsc(r.key)}"
+      tabindex="${sel || (i === 0 && !_jnSelectedKey) ? '0' : '-1'}" aria-selected="${sel}">
+      <td><span class="jn-d">${_jnEsc(t.trade_date || '—')}</span>${t.exit_time ? `<span class="jn-t">${_jnEsc(t.exit_time)}</span>` : ''}</td>
+      <td class="jn-instr">${_jnEsc(t.ticker || '—')}</td>
+      <td>${dir ? `<span class="jn-dir ${dir.toLowerCase()}">${dir}</span>` : '<span class="jn-dim">—</span>'}</td>
+      <td class="num">${t.entry_price != null ? _jnEsc(t.entry_price) : '—'}</td>
+      <td class="num">${t.exit_price != null ? _jnEsc(t.exit_price) : '—'}</td>
+      <td class="num jn-res ${_jnPnlClass(p)}"><span class="jn-mark">${_jnPnlMark(p)}</span>${_jnMoney(p)}</td>
+      <td class="ses">${sesReg}</td>
+    </tr>`;
+  }).join('');
+
+  if (foot) {
+    const net = rows.reduce((s, r) => s + r.pnl, 0);
+    foot.innerHTML = `${rows.length} closed trade${rows.length === 1 ? '' : 's'} shown` +
+      (rows.length !== allClosedCount ? ` · filtered from ${allClosedCount} all-time` : '') +
+      ` · net <b class="${_jnPnlClass(net)}">${_jnMoney(net)}</b>`;
+  }
+}
+
+function _jnRenderReview(row) {
+  const host = document.getElementById('jnReviewInner');
+  if (!host) return;
+  if (!row) {
+    host.innerHTML = '<div class="jn-none jn-review-empty">Select a trade to review it.</div>';
+    return;
+  }
+  const t = row.trade, p = row.pnl, dir = _jnDir(t);
+  const kv = (lab, val, dim) => `<div class="jn-kv"><div class="k">${lab}</div><div class="v${dim ? ' jn-dim' : ''}">${val}</div></div>`;
+  const or = (v, fallback) => (v == null || v === '') ? `<span class="jn-dim">${fallback}</span>` : _jnEsc(v);
+
+  // Optional narrative fields render only when the record genuinely has them.
+  const timeline = Array.isArray(t.reasoning_timeline) ? t.reasoning_timeline : [];
+  const review = t.nova_review || t.review || '';
+  const snapshot = t.chart_snapshot || t.screenshot || '';
+  const notes = t.notes || '';
+
+  host.innerHTML = `
+    <div class="jn-rv-head">
+      <div class="jn-rv-title">${_jnEsc(t.ticker || '—')}${dir ? ` <span class="jn-dir ${dir.toLowerCase()}">${dir}</span>` : ''}</div>
+      <div class="jn-rv-pnl ${_jnPnlClass(p)}"><span class="jn-mark">${_jnPnlMark(p)}</span>${_jnMoney(p)}</div>
+    </div>
+    <div class="jn-rv-sub">${_jnEsc(t.trade_date || '—')}${t.exit_time ? ' · ' + _jnEsc(t.exit_time) : ''}${t.size != null ? ' · ' + _jnEsc(t.size) + ' unit' + (Number(t.size) === 1 ? '' : 's') : ''}</div>
+    <div class="jn-kv-grid">
+      ${kv('Entry', or(t.entry_price, 'Not recorded'))}
+      ${kv('Exit', or(t.exit_price, 'Not recorded'))}
+      ${kv('Size', or(t.size, 'Not recorded'))}
+      ${kv('Setup', or(t.setup_type, 'Not recorded'))}
+      ${kv('Regime at entry', or(t.active_regime, 'Not recorded'))}
+      ${kv('Session', or(t.session, 'Not recorded'))}
+    </div>
+    ${notes ? `<div class="jn-rv-block"><h3>Notes</h3><p>${_jnEsc(notes)}</p></div>` : ''}
+    <div class="jn-rv-block">
+      <h3>Reasoning Timeline</h3>
+      ${timeline.length ? `<ol class="jn-tl">${timeline.map(e => `<li><span class="jn-tl-t">${_jnEsc(e.time || '')}</span><span class="jn-tl-c">${_jnEsc(e.text || e.note || '')}</span></li>`).join('')}</ol>`
+        : '<div class="jn-empty-box">No reasoning timeline stored for this trade.<span>Trades taken through the execution path record their reasoning automatically.</span></div>'}
+    </div>
+    <div class="jn-rv-block">
+      <h3>NOVA Review</h3>
+      ${review ? `<blockquote class="jn-quote">${_jnEsc(review)}</blockquote>`
+        : '<div class="jn-empty-box">No NOVA review stored for this trade.<span>Reviews are generated on request and saved with the record.</span></div>'}
+    </div>
+    <div class="jn-rv-block">
+      <h3>Chart Snapshot</h3>
+      ${snapshot ? `<img class="jn-shot" src="${_jnEsc(snapshot)}" alt="Chart snapshot for this trade">`
+        : '<div class="jn-empty-box">No chart image attached to this trade.<span>Trades taken through the execution path attach the live chart automatically.</span></div>'}
+    </div>`;
+}
+
+function _jnRenderBreakdown(stats, closed) {
+  const bars = (host, items, fmt, emptyMsg) => {
+    const el = document.getElementById(host);
+    if (!el) return;
+    if (!items.length) { el.innerHTML = `<div class="jn-none">${emptyMsg}</div>`; return; }
+    const max = Math.max.apply(null, items.map(i => Math.abs(i.weight))) || 1;
+    el.innerHTML = items.map(i => `<div class="jn-bar-row">
+      <div class="jn-bar-lab${i.absent ? ' jn-absent' : ''}">${_jnEsc(i.label)}</div>
+      <div class="jn-bar-track"><div class="jn-bar-fill ${i.cls || ''}" style="width:${Math.max(2, Math.abs(i.weight) / max * 100).toFixed(1)}%"></div></div>
+      <div class="jn-bar-val ${i.cls || ''}">${fmt(i)}</div>
+    </div>`).join('');
+  };
+
+  const byBucket = (obj, mapper) => Object.keys(obj || {}).map(k => mapper(k, obj[k]))
+    .filter(Boolean).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight)).slice(0, 6);
+
+  bars('jnByRegime', byBucket(stats.by_regime, (k, v) => {
+    const n = (v.wins || 0) + (v.losses || 0) + (v.breakevens || 0);
+    return n ? {label: _jnBucketLabel(k, 'regime'), absent: _jnIsAbsentBucket(k, 'regime'),
+                weight: v.win_rate || 0, n: n, wr: v.win_rate || 0} : null;
+  }), i => `${i.n} trade${i.n === 1 ? '' : 's'} · ${i.wr.toFixed(0)}% win rate`, 'No regime recorded on any trade.');
+
+  bars('jnBySession', byBucket(stats.by_session, (k, v) => {
+    const n = (v.wins || 0) + (v.losses || 0) + (v.breakevens || 0);
+    return n ? {label: _jnBucketLabel(k, 'session'), absent: _jnIsAbsentBucket(k, 'session'),
+                weight: v.pnl || 0, cls: _jnPnlClass(v.pnl || 0), pnl: v.pnl || 0, n: n} : null;
+  }), i => `${i.n} trade${i.n === 1 ? '' : 's'} · ${_jnMoney(i.pnl)}`, 'No session recorded on any trade.');
+
+  bars('jnBySetup', byBucket(stats.by_setup_type, (k, v) => {
+    const n = (v.wins || 0) + (v.losses || 0) + (v.breakevens || 0);
+    return n ? {label: _jnBucketLabel(k, 'setup'), absent: _jnIsAbsentBucket(k, 'setup'),
+                weight: n, n: n} : null;
+  }), i => `${i.n} trade${i.n === 1 ? '' : 's'}`, 'No setup recorded on any trade.');
+
+  // By-Direction has no backend equivalent, so it is grouped here under the
+  // same inclusion rules compute_journal_stats() applies.
+  const dirs = {LONG: {n: 0, w: 0, pnl: 0}, SHORT: {n: 0, w: 0, pnl: 0}};
+  let noDir = 0;
+  closed.forEach(t => {
+    const d = _jnDir(t);
+    if (!d) { noDir++; return; }
+    dirs[d].n++; dirs[d].pnl += _jnPnl(t);
+    if (_jnOutcome(t) === 'WIN') dirs[d].w++;
+  });
+  const dirItems = ['LONG', 'SHORT'].filter(d => dirs[d].n)
+    .map(d => ({label: d === 'LONG' ? 'Long' : 'Short', weight: dirs[d].n, n: dirs[d].n,
+                wr: dirs[d].w / dirs[d].n * 100}));
+  bars('jnByDirection', dirItems,
+    i => `${i.n} trade${i.n === 1 ? '' : 's'} · ${i.wr.toFixed(0)}% win rate`,
+    'No trade carries a usable direction.');
+
+  const dnote = document.getElementById('jnByDirectionNote');
+  if (dnote) {
+    const parts = [];
+    if (dirItems.length === 1) parts.push(`Only ${dirItems[0].label.toLowerCase()} trades recorded so far.`);
+    if (noDir) parts.push(`${noDir} record${noDir === 1 ? '' : 's'} excluded — no usable direction.`);
+    dnote.textContent = parts.join(' ');
+    dnote.style.display = parts.length ? '' : 'none';
+  }
+
+  const meta = document.getElementById('jnBreakdownMeta');
+  if (meta) meta.textContent = closed.length
+    ? `${closed.length} closed trade${closed.length === 1 ? '' : 's'} · all-time`
+    : 'No closed trades yet';
+}
+
+function _jnRenderDaily(closed) {
+  const host = document.getElementById('jnDaily');
+  const meta = document.getElementById('jnDailyMeta');
+  const note = document.getElementById('jnDailyNote');
+  const ctx = document.getElementById('jnDailyCtx');
+  if (!host) return;
+
+  // ── Aggregation (verified; unchanged) ────────────────────────────────────
+  // Real closed-trade P&L netted per trading date. Several trades on one date
+  // collapse into that date's net. Undated records are excluded and counted.
+  const byDate = {}, tradesOn = {};
+  let badDate = 0;
+  closed.forEach(t => {
+    if (!_jnValidDate(t.trade_date)) { badDate++; return; }
+    byDate[t.trade_date] = (byDate[t.trade_date] || 0) + _jnPnl(t);
+    tradesOn[t.trade_date] = (tradesOn[t.trade_date] || 0) + 1;
+  });
+  const allDays = Object.keys(byDate).sort();
+  const days = allDays.slice(-_JN_DAILY_SLOTS);
+
+  const notes = [];
+  if (badDate) notes.push(badDate + ' record' + (badDate === 1 ? '' : 's') + ' excluded — missing or invalid date.');
+
+  if (!days.length) {
+    host.className = 'jn-daily-chart is-empty';
+    host.removeAttribute('data-dense');
+    host.innerHTML = '<div class="jn-none">' + (closed.length
+      ? 'No closed trade carries a usable date.' : 'No closed trades yet.') + '</div>';
+    if (meta) meta.textContent = '—';
+    if (ctx) { ctx.innerHTML = ''; ctx.style.display = 'none'; }
+    if (note) {
+      note.textContent = notes.join(' ');
+      note.style.display = notes.length ? '' : 'none';
+    }
+    return;
+  }
+
+  const vals = days.map(d => byDate[d]);
+  const flat = v => Math.abs(v) < 0.005;
+  const maxPos = vals.reduce((m, v) => Math.max(m, v > 0 ? v : 0), 0);
+  const maxNeg = vals.reduce((m, v) => Math.max(m, v < 0 ? -v : 0), 0);
+  const span = (maxPos + maxNeg) || 1;
+  const posPct = (maxPos === 0 && maxNeg === 0) ? 100 : (maxPos / span * 100);
+  const flatSide = posPct > 0 ? 'pos' : 'neg';
+
+  host.className = 'jn-daily-chart';
+  if (days.length > _JN_DAILY_DENSE) host.setAttribute('data-dense', '1');
+  else host.removeAttribute('data-dense');
+  host.style.setProperty('--pos', posPct.toFixed(3) + '%');
+  host.style.setProperty('--neg', (100 - posPct).toFixed(3) + '%');
+  // Adaptive spacing: the track carries exactly as many columns as there are
+  // genuine sessions, so one session centres and ten fill the timeline. Bar
+  // width is capped so a sparse chart reads as deliberate, not stretched.
+  host.style.setProperty('--n', String(days.length));
+  host.style.setProperty('--rows', String(days.length));
+
+  // ── Y axis: only the values the scale actually reaches ───────────────────
+  const yTicks = [];
+  if (maxPos > 0) yTicks.push({ at: 0, label: _jnMoneyAxis(maxPos) });
+  yTicks.push({ at: posPct, label: '$0' });
+  if (maxNeg > 0) yTicks.push({ at: 100, label: _jnMoneyAxis(-maxNeg) });
+
+  const yax = yTicks.map(t =>
+    '<span style="top:' + t.at.toFixed(3) + '%">' + _jnEsc(t.label) + '</span>').join('');
+
+  // Gridlines sit on quarters of the plot; the zero line is drawn separately
+  // and heavier so the baseline never reads as just another gridline.
+  const grid = [0, 25, 50, 75, 100].map(q =>
+    '<i class="jn-dp-gl" style="top:' + q + '%"></i>').join('');
+
+  const bars = days.map((d, i) => {
+    const v = byDate[d];
+    const n = tradesOn[d] || 0;
+    const cls = flat(v) ? 'flat' : _jnPnlClass(v);
+    const label = d.slice(5).replace('-', '/');
+    // A breakeven session is neither a gain nor a loss, so it carries no sign.
+    const money = flat(v) ? '$0.00' : _jnMoney(v);
+    const a11y = d + ', net ' + money + ', ' + n + ' closed trade' + (n === 1 ? '' : 's');
+    const mag = flat(v) ? '' : ' style="--mag:' +
+      (v > 0 ? (v / maxPos * 100) : (-v / maxNeg * 100)).toFixed(2) + '%"';
+    const fill = '<i class="jn-dbar ' + cls + '"' + mag + '></i>';
+    const posCell = '<span class="jn-col-pos">' +
+      ((v > 0 || (flat(v) && flatSide === 'pos')) ? fill : '') +
+      '<span class="jn-dp-v ' + cls + '">' + _jnEsc(money) + '</span></span>';
+    const negCell = '<span class="jn-col-neg">' +
+      ((v < 0 || (flat(v) && flatSide === 'neg')) ? fill : '') + '</span>';
+    return '<button type="button" class="jn-dp-bar" style="--i:' + (i + 1) + '"' +
+      ' aria-label="' + _jnEsc(a11y) + '">' +
+      '<span class="jn-dp-d" aria-hidden="true">' + _jnEsc(label) + '</span>' +
+      '<span class="jn-col-plot">' + posCell + negCell + '</span>' +
+      '<span class="jn-dp-vm ' + cls + '" aria-hidden="true">' + _jnEsc(money) + '</span>' +
+      '<span class="jn-dp-tip" aria-hidden="true"><b>' + _jnEsc(d) + '</b>' +
+      '<span class="' + cls + '">' + _jnEsc(money) + '</span>' +
+      '<span>' + n + ' closed trade' + (n === 1 ? '' : 's') + '</span></span>' +
+      '</button>';
+  }).join('');
+
+  const xax = days.map((d, i) =>
+    '<span style="--i:' + (i + 1) + '">' + _jnEsc(d.slice(5).replace('-', '/')) + '</span>').join('');
+
+  host.innerHTML =
+    '<div class="jn-dp-yax" aria-hidden="true"><div class="jn-dp-yin">' + yax + '</div></div>' +
+    '<div class="jn-dp-surface"><div class="jn-dp-inner">' + grid +
+      '<i class="jn-zero"></i><div class="jn-dp-bars">' + bars + '</div>' +
+    '</div></div>' +
+    '<div class="jn-dp-xax" aria-hidden="true">' + xax + '</div>';
+
+  // ── Header scope + computed context, all from the sessions themselves ────
+  const total = allDays.reduce((a, d) => a + byDate[d], 0);
+  const avg = total / allDays.length;
+  let bestD = allDays[0], worstD = allDays[0];
+  allDays.forEach(d => {
+    if (byDate[d] > byDate[bestD]) bestD = d;
+    if (byDate[d] < byDate[worstD]) worstD = d;
+  });
+  const short = d => d.slice(5).replace('-', '/');
+  if (meta) meta.textContent = 'All time · ' + allDays.length +
+    ' session' + (allDays.length === 1 ? '' : 's');
+  if (ctx) {
+    ctx.style.display = '';
+    ctx.innerHTML =
+      '<div class="jn-dp-ci"><span class="k">Sessions</span><span class="v">' + allDays.length + '</span></div>' +
+      '<div class="jn-dp-ci"><span class="k">Avg / session</span><span class="v ' + _jnPnlClass(avg) + '">' + _jnEsc(_jnMoney(avg)) + '</span></div>' +
+      '<div class="jn-dp-ci"><span class="k">Best day</span><span class="v ' + _jnPnlClass(byDate[bestD]) + '">' + _jnEsc(_jnMoney(byDate[bestD])) + '<i>' + _jnEsc(short(bestD)) + '</i></span></div>' +
+      '<div class="jn-dp-ci"><span class="k">Worst day</span><span class="v ' + _jnPnlClass(byDate[worstD]) + '">' + _jnEsc(_jnMoney(byDate[worstD])) + '<i>' + _jnEsc(short(worstD)) + '</i></span></div>';
+  }
+
+  if (allDays.length > days.length)
+    notes.push('Showing the most recent ' + days.length + ' of ' + allDays.length + ' sessions.');
+  else if (days.length < 5)
+    notes.push('Additional sessions will populate this history.');
+
+  if (note) {
+    note.textContent = notes.join(' ');
+    note.style.display = notes.length ? '' : 'none';
+  }
+}
+
+// ── Selection ─────────────────────────────────────────────────────────────
+
+function _jnSelect(key, focusRow) {
+  _jnSelectedKey = key;
+  const row = _jnRows.filter(r => r.key === key)[0] || null;
+  _jnRenderReview(row);
+  const body = document.getElementById('jnLedgerBody');
+  if (!body) return;
+  Array.prototype.forEach.call(body.querySelectorAll('.jn-row'), tr => {
+    const on = tr.dataset.key === key;
+    tr.classList.toggle('selected', on);
+    tr.setAttribute('aria-selected', on ? 'true' : 'false');
+    tr.tabIndex = on ? 0 : -1;
+    if (on && focusRow) tr.focus();
+  });
+}
+
+function _jnBindLedger() {
+  const body = document.getElementById('jnLedgerBody');
+  if (!body || body.dataset.bound === '1') return;
+  body.dataset.bound = '1';
+  body.addEventListener('click', e => {
+    const tr = e.target.closest ? e.target.closest('.jn-row') : null;
+    if (tr) _jnSelect(tr.dataset.key, false);
+  });
+  body.addEventListener('keydown', e => {
+    const tr = e.target.closest ? e.target.closest('.jn-row') : null;
+    if (!tr) return;
+    const rows = Array.prototype.slice.call(body.querySelectorAll('.jn-row'));
+    const i = rows.indexOf(tr);
+    let next = null;
+    if (e.key === 'ArrowDown') next = rows[Math.min(rows.length - 1, i + 1)];
+    else if (e.key === 'ArrowUp') next = rows[Math.max(0, i - 1)];
+    else if (e.key === 'Home') next = rows[0];
+    else if (e.key === 'End') next = rows[rows.length - 1];
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _jnSelect(tr.dataset.key, true); return; }
+    if (next) { e.preventDefault(); _jnSelect(next.dataset.key, true); }
+  });
+}
+
+// ── Main renderer ─────────────────────────────────────────────────────────
+
+// Filter dimensions. Outcome and period are fixed vocabularies the data always
+// supports; instrument and regime are built from the values the records
+// genuinely carry, so an option that cannot match is never offered. A dimension
+// with no usable recorded values renders disabled with a stated reason rather
+// than being hidden silently or filled with invented entries.
+const _JN_OUTCOMES = {all: 'All', wins: 'Wins', losses: 'Losses'};
+const _JN_PERIODS = {all: 'All time', week: 'This week', month: 'This month'};
+let _jnInstrument = 'all';
+let _jnPeriod = 'all';
+let _jnRegime = 'all';
+
+function _jnDistinct(rows, pick) {
+  const seen = [];
+  rows.forEach(t => {
+    const v = pick(t);
+    if (v && seen.indexOf(v) === -1) seen.push(v);
+  });
+  return seen.sort();
+}
+
+function _jnFilterGroup(label, name, options, active, disabledReason) {
+  const id = 'jnfg-' + name;
+  if (disabledReason) {
+    return '<div class="jn-fgroup is-disabled"><span class="jn-fglabel" id="' + id + '">' +
+      _jnEsc(label) + '</span><span class="jn-fnone">' + _jnEsc(disabledReason) + '</span></div>';
+  }
+  return '<div class="jn-fgroup" role="group" aria-labelledby="' + id + '">' +
+    '<span class="jn-fglabel" id="' + id + '">' + _jnEsc(label) + '</span>' +
+    Object.keys(options).map(k =>
+      '<button type="button" class="jn-chip' + (active === k ? ' active' : '') + '"' +
+      ' data-fdim="' + name + '" data-fval="' + _jnEsc(k) + '"' +
+      ' aria-pressed="' + (active === k) + '">' + _jnEsc(options[k]) + '</button>').join('') +
+    '</div>';
+}
+
 function renderJournal(data) {
   _journalData = data;
-  const stats  = data.stats  || {};
+  const stats = data.stats || {};
   const trades = data.trades || [];
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const closed = _jnClosed(trades);
 
-  // Overview strip — exclude REJECTED (governance-blocked, never executed)
-  const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'REJECTED');
-  const todayPnl = todayTrades
-    .filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS' || t.outcome === 'EOD_CLOSE' || t.outcome === 'BREAKEVEN')
-    .reduce((s, t) => s + (parseFloat(t.realized_pnl ?? t.pnl ?? 0) || 0), 0);
-  const closed = trades.filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS');
-  const wins   = closed.filter(t => t.outcome === 'WIN').length;
-  const wr     = closed.length > 0 ? (wins / closed.length * 100).toFixed(1) : null;
-  const pf     = stats.profit_factor || 0;
-  const weekPnl = (stats.daily_pnl || {}).this_week || 0;
-
-  setText('jOvTrades', todayTrades.length);
-  const pnlEl = document.getElementById('jOvPnl');
-  if (pnlEl) {
-    pnlEl.textContent = _fmtPnl(todayPnl);
-    pnlEl.style.color = todayPnl > 0 ? 'var(--green)' : todayPnl < 0 ? 'var(--red)' : 'var(--muted2)';
-  }
-  const wrEl = document.getElementById('jOvWinRate');
-  if (wrEl) {
-    wrEl.textContent = wr !== null ? wr + '%' : '—';
-    wrEl.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)';
-  }
-  const pfEl = document.getElementById('jOvPF');
-  if (pfEl) {
-    pfEl.textContent = pf > 0 ? pf.toFixed(2) : '—';
-    pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : pf > 0 ? 'var(--red)' : 'var(--muted2)';
-  }
-  const wkEl = document.getElementById('jOvWeek');
-  if (wkEl) {
-    const w = parseFloat(weekPnl) || 0;
-    wkEl.textContent = _fmtPnl(w);
-    wkEl.style.color = w > 0 ? 'var(--green)' : w < 0 ? 'var(--red)' : 'var(--muted2)';
-  }
-
-  // Trade count badge
   setText('jTabCount-trades', trades.length);
 
-  // ── Analytics stats ──────────────────────────────────────────
-  setText('jaTotalTrades', stats.total || 0);
-  const jaWR = document.getElementById('jaWinRate');
-  if (jaWR) { jaWR.textContent = wr !== null ? wr + '%' : '—'; jaWR.style.color = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yellow)' : wr !== null ? 'var(--red)' : 'var(--muted2)'; }
-  setText('jaWRSub', `${stats.wins||0}W · ${stats.losses||0}L · ${stats.breakevens||0}BE`);
-  const jaPF = document.getElementById('jaPF');
-  if (jaPF) { jaPF.textContent = pf > 0 ? pf.toFixed(2) : '—'; jaPF.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yellow)' : pf > 0 ? 'var(--red)' : 'var(--muted2)'; }
-  setText('jaBestRegime', stats.best_regime || '—');
-  setText('jaWorstRegime', 'Worst: ' + (stats.worst_regime || '—'));
-  setText('jAvgWinLoss', `Avg W: ${stats.avg_win ? _fmtUsd(stats.avg_win) : '—'} / Avg L: ${stats.avg_loss ? _fmtUsd(stats.avg_loss) : '—'}`);
+  _jnRenderRail(stats, closed);
+  _jnRenderBreakdown(stats, closed);
+  _jnRenderDaily(closed);
 
-  // Expectancy
-  const exp = stats.expectancy;
-  const expEl = document.getElementById('jaExpectancy');
-  if (expEl && exp !== undefined) {
-    expEl.textContent = _fmtPnl(exp);
-    expEl.style.color = exp > 0 ? 'var(--green)' : exp < 0 ? 'var(--red)' : 'var(--muted2)';
-  }
-  const avgWinEl = document.getElementById('jaAvgWin');
-  if (avgWinEl) { avgWinEl.textContent = stats.avg_win ? _fmtPnl(stats.avg_win) : '—'; }
-  const avgLossEl = document.getElementById('jaAvgLoss');
-  if (avgLossEl) { avgLossEl.textContent = 'Avg L: ' + (stats.avg_loss ? _fmtUsd(stats.avg_loss) : '—'); }
-
-  // Helper: render a breakdown grid
-  function renderBreakdownGrid(elId, data, colorMap) {
-    const entries = Object.entries(data || {}).sort((a,b) => b[1].win_rate - a[1].win_rate);
-    if (!entries.length) { setHtml(elId, '<div class="regime-card"><div class="rc-sub">No data yet.</div></div>'); return; }
-    setHtml(elId, entries.map(([key, v]) => {
-      const wrc = v.win_rate >= 55 ? 'var(--green)' : v.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)';
-      const borderC = (colorMap && colorMap[key]) || 'var(--line)';
-      const total = (v.wins||0) + (v.losses||0) + (v.breakevens||0);
-      const pnlStr = v.pnl !== undefined ? ` · ${_fmtPnl(v.pnl)}` : '';
-      return `<div class="regime-card" style="border-color:${borderC}44">
-        <div class="rc-name" style="color:${borderC};font-size:13px">${key.replace(/_/g,' ')}</div>
-        <div class="rc-wr" style="color:${wrc}">${v.win_rate}%</div>
-        <div class="rc-sub">${v.wins}W · ${v.losses}L · ${total} trades${pnlStr}</div>
-      </div>`;
-    }).join(''));
-  }
-
-  const regimeColorMap = {TRENDING:'var(--green)',RANGING:'var(--blue)',EVENT_DRIVEN:'var(--yellow)',RISK_OFF:'var(--red)',CONSOLIDATING:'var(--muted2)'};
-  renderBreakdownGrid('regimeBreakdownGrid', stats.by_regime, regimeColorMap);
-  renderBreakdownGrid('sessionBreakdownGrid', stats.by_session, null);
-  renderBreakdownGrid('setupTypeGrid', stats.by_setup_type, null);
-
-  // Behavioral error frequency
-  const bfreq = stats.behavioral_frequency || {};
-  const berr  = stats.behavioral_error_count || 0;
-  const bEntries = Object.entries(bfreq);
-  const bEl = document.getElementById('behavioralAnalyticsGrid');
-  if (bEl) {
-    if (!bEntries.length) {
-      bEl.innerHTML = '<div style="font-size:12px;color:var(--muted2);padding:12px 0">No behavioral flags recorded yet.</div>';
-    } else {
-      const maxCount = Math.max(...bEntries.map(([,c]) => c));
-      bEl.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${berr} trade${berr!==1?'s':''} had at least one flag</div>`
-        + bEntries.map(([flag, count]) => {
-          const pct = Math.round(count / maxCount * 100);
-          return `<div style="margin-bottom:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-              <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--text)">${flag.replace(/_/g,' ')}</span>
-              <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted2)">${count}×</span>
-            </div>
-            <div style="height:4px;background:var(--line);border-radius:2px;overflow:hidden">
-              <div style="height:100%;width:${pct}%;background:var(--red);border-radius:2px;transition:width .4s"></div>
-            </div>
-          </div>`;
-        }).join('');
-    }
-  }
-
-  // Emotional state performance
-  const byEmotion = stats.by_emotional_state || {};
-  const eEntries  = Object.entries(byEmotion).sort((a,b) => b[1].win_rate - a[1].win_rate);
-  const eEl = document.getElementById('emotionalAnalyticsGrid');
-  if (eEl) {
-    if (!eEntries.length) {
-      eEl.innerHTML = '<div style="font-size:12px;color:var(--muted2);padding:8px 0">No emotional state data yet. Tag your trades to build this profile.</div>';
-    } else {
-      const stateColor = {CALM:'var(--green)',CONFIDENT:'var(--green)',ANXIOUS:'var(--yellow)',HESITANT:'var(--yellow)',IMPULSIVE:'var(--red)',FRUSTRATED:'var(--red)'};
-      eEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">`
-        + eEntries.map(([state, v]) => {
-          const wrc = v.win_rate >= 55 ? 'var(--green)' : v.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)';
-          const sc  = stateColor[state] || 'var(--muted2)';
-          const total = (v.wins||0) + (v.losses||0) + (v.breakevens||0);
-          const pnlStr = v.pnl !== undefined ? _fmtPnl(v.pnl) : '—';
-          return `<div class="regime-card" style="border-color:${sc}33">
-            <div class="rc-name" style="color:${sc};font-size:13px">${state}</div>
-            <div class="rc-wr" style="color:${wrc}">${v.win_rate}%</div>
-            <div class="rc-sub">${v.wins}W · ${v.losses}L · ${total} trades</div>
-            <div class="rc-sub" style="margin-top:4px">${pnlStr}</div>
-          </div>`;
-        }).join('') + '</div>';
-    }
-  }
-
-  // Filter bar
-  const filterLabels = {all:'All Time', week:'This Week', month:'This Month'};
-  setHtml('jFilterBar', '<span style="font-size:9px;color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase;font-family:Space Mono,monospace">Filter:</span>'
-    + Object.entries(filterLabels).map(([f,label]) =>
-        `<button class="j-filter-btn${journalFilter===f?' active':''}" onclick="setJournalFilter('${f}')">${label}</button>`
-      ).join(''));
-
-  // Filter trades by period
-  const now = new Date();
-  const indexed = trades.map((t, i) => ({t, origIdx: i}));
-  const filtered = indexed.filter(({t}) => {
-    if (journalFilter === 'all') return true;
-    const ds = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : '');
-    if (!ds) return true;
-    const d = new Date(ds + 'T12:00:00');
-    if (journalFilter === 'week') {
-      const mon = new Date(now); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7)); mon.setHours(0,0,0,0);
-      return d >= mon;
-    }
-    if (journalFilter === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    return true;
+  // Instrument and regime options come from the real records, never a literal.
+  const instruments = _jnDistinct(closed, t => String(t.ticker || '').trim().toUpperCase());
+  const regimes = _jnDistinct(closed, t => {
+    const r = String(t.active_regime || '').trim();
+    return (r && !_jnIsAbsentBucket(r, 'regime')) ? r : null;
   });
+  if (_jnInstrument !== 'all' && instruments.indexOf(_jnInstrument) === -1) _jnInstrument = 'all';
+  if (_jnRegime !== 'all' && regimes.indexOf(_jnRegime) === -1) _jnRegime = 'all';
 
-  // Group by date
-  const grouped = {};
-  filtered.forEach(({t, origIdx}) => {
-    const dk = t.trade_date || (t.timestamp ? t.timestamp.substring(0,10) : 'Unknown');
-    if (!grouped[dk]) grouped[dk] = [];
-    grouped[dk].push({t, origIdx});
-  });
-  const sortedDates = Object.keys(grouped).sort((a,b) => b.localeCompare(a));
-
-  let cards = '';
-  if (sortedDates.length === 0) {
-    cards = `<div style="text-align:center;padding:48px;color:var(--muted2);font-size:13px">${trades.length ? 'No trades in this period.' : 'No trades logged yet. Click <strong>+ LOG TRADE</strong> to add your first entry.'}</div>`;
-  } else {
-    sortedDates.forEach(dk => {
-      const dayItems = grouped[dk].slice().reverse();
-      const count = dayItems.length;
-      const dayPnl = dayItems.reduce((s, {t}) => {
-        const v = parseFloat(t.realized_pnl ?? t.pnl ?? 0) || 0;
-        return (t.outcome === 'WIN' || t.outcome === 'LOSS') ? s + v : s;
-      }, 0);
-      const dayPnlStr = dayPnl !== 0 ? `<span style="color:${dayPnl>0?'var(--green)':'var(--red)'};margin-left:10px;font-weight:400">${_fmtPnl(dayPnl)}</span>` : '';
-      cards += `<div class="j-date-group"><div class="j-date-label">${fmtDateHeader(dk)}<span style="opacity:.5;font-weight:400;margin-left:10px">· ${count} trade${count!==1?'s':''}</span>${dayPnlStr}</div>`;
-      dayItems.forEach(({t, origIdx}) => {
-        const outcome    = (t.outcome || 'OPEN').toUpperCase();
-        const dir        = (t.direction || '').toUpperCase();
-        const dirClass   = dir === 'LONG' ? 'long' : 'short';
-        const dirIcon    = dir === 'LONG' ? '▲' : '▼';
-        const rawPnl     = t.realized_pnl !== undefined && t.realized_pnl !== null ? t.realized_pnl : (t.pnl || 0);
-        const pnl        = parseFloat(rawPnl) || 0;
-        const pnlStr     = _fmtPnl(pnl);
-        const pnlColor   = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
-        const timeStr    = fmtTimeET(t.timestamp);
-        const grade      = (t.grade || t.tier || '').toUpperCase();
-        const gradeClass = grade === 'A' ? 'b-grade-a' : grade === 'B' ? 'b-grade-b' : 'b-grade-c';
-        const sessLabel  = (t.session || '').replace(/_/g, ' ');
-        const setupLabel = t.setup_type || '';
-        const isAuto     = ['NOVA_AUTO','DONNA_AUTO','NOVA_AUTO_RECONSTRUCTED','DONNA_AUTO_RECONSTRUCTED'].includes(t.source);
-
-        // Badges
-        let badges = '';
-        if (t.ticker) badges += `<span class="itc-badge b-nova">${t.ticker}</span>`;
-        if (dir) badges += `<span class="itc-badge" style="color:${dir==='LONG'?'var(--green)':'var(--red)'}">${dirIcon} ${dir}</span>`;
-        if (setupLabel) badges += `<span class="itc-badge">${setupLabel.replace(/_/g,' ')}</span>`;
-        if (sessLabel) badges += `<span class="itc-badge b-session-a">${sessLabel}</span>`;
-        if (grade) badges += `<span class="itc-badge ${gradeClass}">Grade ${grade}</span>`;
-        if (isAuto) badges += `<span class="itc-badge b-nova">AUTO</span>`;
-
-        // Execution row
-        const hasEntry = t.entry_price != null;
-        const hasExit  = t.exit_price  != null;
-        let execItems = '';
-        if (hasEntry) execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Entry</div><div class="itc-exec-val">${parseFloat(t.entry_price).toLocaleString()}</div></div>`;
-        if (hasExit)  execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Exit</div><div class="itc-exec-val">${parseFloat(t.exit_price).toLocaleString()}</div></div>`;
-        if (t.stop)   execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Stop</div><div class="itc-exec-val" style="color:var(--red)">${parseFloat(t.stop).toLocaleString()}</div></div>`;
-        if (t.tp1)    execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">TP1</div><div class="itc-exec-val" style="color:var(--green)">${parseFloat(t.tp1).toLocaleString()}</div></div>`;
-        if (t.rr)     execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">R:R</div><div class="itc-exec-val">${t.rr}</div></div>`;
-        if (t.size)   execItems += `<div class="itc-exec-item"><div class="itc-exec-lab">Size</div><div class="itc-exec-val">${t.size}</div></div>`;
-
-        // NOVA intelligence block (from signal log notes)
-        let novaBlock = '';
-        if (t.notes || t.action) {
-          const novaText = t.action || t.notes || '';
-          novaBlock = `<div class="itc-nova"><div class="itc-nova-label">NOVA Assessment</div>${escHtml(novaText.substring(0,280))}${novaText.length>280?'…':''}</div>`;
-        }
-
-        // Behavioral tracking block
-        let behavioralBlock = '';
-        const bflags = t.behavioral_flags || [];
-        const estate = t.emotional_state || '';
-        const reflect = t.reflection || '';
-        if (estate || bflags.length || reflect) {
-          let bContent = '';
-          if (estate) bContent += `<div class="beh-state">${estate}</div>`;
-          if (bflags.length) bContent += `<div class="beh-flags">${bflags.map(f => `<span class="beh-flag">${f.replace(/_/g,' ')}</span>`).join('')}</div>`;
-          if (reflect) bContent += `<div class="beh-reflection">"${escHtml(reflect)}"</div>`;
-          behavioralBlock = `<div class="itc-behavioral"><div class="itc-beh-label">Behavioral</div>${bContent}</div>`;
-        }
-
-        // NOVA Review panel (AI analysis)
-        let reviewBlock = '';
-        if (t.nova_review) {
-          const ts = t.nova_review_ts ? fmtTimeET(t.nova_review_ts) : '';
-          reviewBlock = `<div class="itc-review">
-  <div class="itc-review-hdr" id="nova-hdr-${origIdx}" onclick="toggleReview(${origIdx})">
-    <span class="itc-review-hdr-label">NOVA Review</span>
-    <span class="itc-review-hdr-ts">${ts} ▾</span>
-  </div>
-  <div class="itc-review-body" id="nova-body-${origIdx}">${escHtml(t.nova_review)}</div>
-</div>`;
-        } else {
-          reviewBlock = `<button class="nova-gen-btn" id="nova-gen-${origIdx}" onclick="generateAnalysis(${origIdx})">Generate NOVA Review</button>`;
-        }
-
-        // Context row
-        let ctxItems = '';
-        if (t.macro_risk || t.active_regime) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Macro</div><div class="itc-ctx-val">${(t.macro_risk||'—').toUpperCase()}</div></div>`;
-        if (t.vix)  ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">VIX</div><div class="itc-ctx-val">${parseFloat(t.vix).toFixed(1)}</div></div>`;
-        if (t.regime || t.active_regime) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Regime</div><div class="itc-ctx-val">${(t.regime||t.active_regime||'—').replace(/_/g,' ')}</div></div>`;
-        if (t.pros_phase) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">PROS</div><div class="itc-ctx-val">${t.pros_phase.replace(/_/g,' ')}</div></div>`;
-        if (t.ib_draw) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">IB Draw</div><div class="itc-ctx-val">${t.ib_draw}</div></div>`;
-        if (t.nova_conf) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Confidence</div><div class="itc-ctx-val">${t.nova_conf}</div></div>`;
-        if (t.session_quality) ctxItems += `<div class="itc-ctx-item"><div class="itc-ctx-lab">Session Q</div><div class="itc-ctx-val" style="color:${t.session_quality==='A'?'var(--green)':'var(--yellow)'}">Grade ${t.session_quality}</div></div>`;
-
-        cards += `<div class="itc outcome-${outcome}">
-  <div class="itc-header">
-    <div class="itc-badges">${badges}</div>
-    <div><div class="itc-pnl" style="color:${pnlColor}">${pnlStr}</div><div class="itc-time">${timeStr}</div></div>
-  </div>
-  ${execItems ? `<div class="itc-exec">${execItems}</div>` : ''}
-  ${novaBlock}
-  ${ctxItems ? `<div class="itc-ctx">${ctxItems}</div>` : ''}
-  ${behavioralBlock}
-  ${reviewBlock}
-  <div class="itc-footer">
-    <span class="itc-outcome-badge ${outcome}">${outcome}</span>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button style="font-family:\'Space Mono\',monospace;font-size:8px;letter-spacing:1px;padding:4px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;text-transform:uppercase" onclick="openTradeDetail(${origIdx})">Review</button>
-      <button class="del-btn" onclick="deleteTrade(${origIdx})" title="Delete">✕</button>
-    </div>
-  </div>
-</div>`;
+  const bar = document.getElementById('jFilterBar');
+  if (bar) {
+    const instOpts = {all: 'All'};
+    instruments.forEach(i => { instOpts[i] = i; });
+    const regOpts = {all: 'All regimes'};
+    regimes.forEach(r => { regOpts[r] = _jnBucketLabel(r, 'regime'); });
+    bar.innerHTML =
+      _jnFilterGroup('Outcome', 'outcome', _JN_OUTCOMES, journalFilter, '') +
+      _jnFilterGroup('Instrument', 'instrument', instOpts, _jnInstrument,
+        instruments.length ? '' : 'No instrument recorded') +
+      _jnFilterGroup('Period', 'period', _JN_PERIODS, _jnPeriod, '') +
+      _jnFilterGroup('Regime', 'regime', regOpts, _jnRegime,
+        regimes.length ? '' : 'No regime recorded on any trade');
+    if (bar.dataset.bound !== '1') {
+      bar.dataset.bound = '1';
+      bar.addEventListener('click', e => {
+        const b = e.target.closest ? e.target.closest('[data-fdim]') : null;
+        if (!b) return;
+        const dim = b.dataset.fdim, val = b.dataset.fval;
+        if (dim === 'outcome') journalFilter = val;
+        else if (dim === 'instrument') _jnInstrument = val;
+        else if (dim === 'period') _jnPeriod = val;
+        else if (dim === 'regime') _jnRegime = val;
+        if (_journalData) renderJournal(_journalData);
       });
-      cards += '</div>';
-    });
+    }
   }
-  setHtml('journalCardList', cards);
+
+  // Build ledger rows newest-first, applying the active filter.
+  const since = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const weekAgo = since(7), monthAgo = since(30);
+  _jnRows = closed.map((t, i) => ({key: _jnKey(t, i), trade: t, pnl: _jnPnl(t), outcome: _jnOutcome(t)}))
+    .filter(r => {
+      if (journalFilter === 'wins' && r.outcome !== 'WIN') return false;
+      if (journalFilter === 'losses' && r.outcome !== 'LOSS') return false;
+      if (_jnInstrument !== 'all' &&
+          String(r.trade.ticker || '').trim().toUpperCase() !== _jnInstrument) return false;
+      if (_jnPeriod === 'week' &&
+          !(_jnValidDate(r.trade.trade_date) && r.trade.trade_date >= weekAgo)) return false;
+      if (_jnPeriod === 'month' &&
+          !(_jnValidDate(r.trade.trade_date) && r.trade.trade_date >= monthAgo)) return false;
+      if (_jnRegime !== 'all' && String(r.trade.active_regime || '').trim() !== _jnRegime) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.trade.trade_date || '').localeCompare(String(a.trade.trade_date || '')));
+
+  // Selection survives a refresh when the trade still exists; otherwise it
+  // falls back to the first visible row, or to the empty state.
+  if (!_jnRows.some(r => r.key === _jnSelectedKey)) {
+    _jnSelectedKey = _jnRows.length ? _jnRows[0].key : null;
+  }
+
+  _jnRenderLedger(_jnRows, closed.length);
+  _jnBindLedger();
+  _jnRenderReview(_jnRows.filter(r => r.key === _jnSelectedKey)[0] || null);
+}
+
+// Honest failure state for every Journal region.
+function _jnRenderFailure(msg) {
+  const text = msg || 'Journal unavailable — the last request failed.';
+  ['jnNetPnl', 'jnWeekPnl', 'jnProfitFactor', 'jnAvgWL', 'jnWinRate'].forEach(id => {
+    const v = document.getElementById(id), s = document.getElementById(id + 'Sub');
+    if (v) { v.textContent = '—'; v.className = 'v'; }
+    if (s) s.textContent = 'Unavailable';
+  });
+  const note = document.getElementById('jnRailNote');
+  if (note) { note.textContent = text; note.style.display = ''; }
+  const body = document.getElementById('jnLedgerBody');
+  if (body) body.innerHTML = `<tr><td colspan="7" class="jn-err">${_jnEsc(text)}</td></tr>`;
+  const foot = document.getElementById('jnLedgerFoot');
+  if (foot) foot.textContent = '';
+  ['jnByRegime', 'jnBySession', 'jnByDirection', 'jnBySetup', 'jnDaily'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<div class="jn-err">Unavailable</div>';
+  });
+  _jnRenderReview(null);
 }
 
 // ── Signal feed renderer ──────────────────────────────────────
@@ -2232,14 +2587,32 @@ function renderOverviewRecentActivity(data) {
 }
 
 async function refreshJournal() {
+  // A failed request must not leave the previous cycle's figures on screen
+  // looking current -- every Journal region states that it is unavailable.
+  // Overview's own Journal-fed regions keep their existing behaviour.
+  let res;
   try {
-    const res = await fetch('/journal/data');
-    if (!res.ok) return;
-    const data = await res.json();
-    renderJournal(data);
-    renderOverviewAccountSummary(data);
-    renderOverviewRecentActivity(data);
-  } catch(e) { console.error('Journal refresh error:', e); }
+    res = await fetch('/journal/data');
+  } catch (e) {
+    console.error('Journal refresh error:', e);
+    _jnRenderFailure('Journal unavailable — the request could not be made.');
+    return;
+  }
+  if (!res.ok) {
+    _jnRenderFailure('Journal unavailable — server responded ' + res.status + '.');
+    return;
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    console.error('Journal refresh error:', e);
+    _jnRenderFailure('Journal unavailable — the response could not be read.');
+    return;
+  }
+  try { renderJournal(data); } catch(e) { console.error('renderJournal failed:', e); }
+  try { renderOverviewAccountSummary(data); } catch(e) { console.error('renderOverviewAccountSummary failed:', e); }
+  try { renderOverviewRecentActivity(data); } catch(e) { console.error('renderOverviewRecentActivity failed:', e); }
 }
 
 async function refreshSignals() {
@@ -2330,8 +2703,11 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('jSubmitBtn').click(); });
 });
 
-// refresh signals when switching to signals tab
-document.getElementById('jTab-signals').addEventListener('click', () => refreshSignals());
+// refresh signals when switching to signals tab. The approved Journal
+// composition has no sub-tab bar, so this button may not exist -- an
+// unguarded bind threw a TypeError at script load on every page view.
+const _jSignalsTab = document.getElementById('jTab-signals');
+if (_jSignalsTab) _jSignalsTab.addEventListener('click', () => refreshSignals());
 
 // ════════ BOOT ════════
 function todayDateStr() {
