@@ -1154,7 +1154,7 @@ _APPROVED_PAGE_HEADINGS = {
     # untouched by that pass and keep their pre-existing all-caps headings.
     'page-dashboard': 'Overview',
     'page-journal':   'Journal',
-    'page-news':      'MARKETS',
+    'page-news':      'Markets',
     'page-assistant': 'NOVA Intelligence',
     'page-settings':  'SETTINGS',
 }
@@ -1214,26 +1214,64 @@ def test_overview_reading_order_matches_approved_hierarchy():
 
 
 def test_markets_reading_order_matches_approved_hierarchy():
-    """Markets' DOM order must be: market summary & major market context
-    (futures ticker, index tiles, NOVA Market Summary) -> Macro Radar ->
-    News Guard / active news feed (breaking ticker, Live Feed) ->
-    supporting market data (Risk Levels, Trending Movers). Proven the same
-    way as Overview's order, above -- strictly increasing string offsets."""
+    """Markets' DOM order must follow the approved composition (artifact
+    55c387a4): identity/freshness -> session and risk rail -> Cross-Asset
+    Pulse -> Volatility & Direction -> News & Catalysts -> Market Structure
+    -> sources. Proven the same way as Overview's order -- strictly
+    increasing string offsets.
+
+    Desktop places Market Structure across both columns beneath Pulse; mobile
+    stacks in this same DOM order with Structure pinned ahead of News by CSS
+    `order`, which one column cannot express through document order alone."""
     from ui.pages.market_news import MARKET_NEWS_HTML
     anchors_in_required_order = (
-        'id="newsFuturesTrack"',        # 1. context
-        'id="indexTiles"',               # 1. context
-        'id="novaMarketSummaryPanel"',   # 1. summary
-        'id="sidebarEconCalendar2"',     # 2. Macro Radar
-        'id="breakingTickerTrack"',      # 3. News Guard / feed
-        'id="newsList"',                 # 3. News Guard / feed
-        'id="sidebarMacroRisk"',         # 4. supporting data
-        'id="moversGainers"',            # 4. supporting data
+        'id="mkFresh"',        # 1. identity + freshness
+        'id="mkRail"',         # 2. session and risk rail
+        'id="mkPulseBody"',    # 3. Cross-Asset Pulse
+        'id="mkVolBody"',      # 4. Volatility & Direction
+        'id="mkNewsBody"',     # 5. News & Catalysts
+        'id="mkStructBody"',   # 6. Market Structure
+        'id="mkProv"',         # 7. sources / provenance
     )
     positions = [MARKET_NEWS_HTML.index(a) for a in anchors_in_required_order]
     assert positions == sorted(positions), (
         f'Markets DOM order does not match the approved hierarchy: {list(zip(anchors_in_required_order, positions))}'
     )
+
+
+def test_markets_preserves_every_legacy_write_target():
+    """renderNews(), refreshTilePrefs(), renderEconCalendar() and
+    refreshTrendingMovers() run on the global loops and also feed Overview.
+    The approved composition removed their visible surfaces, so every id they
+    write to is kept in the hidden #mkLegacy block -- without it those
+    functions start throwing on every cycle."""
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    for legacy_id in (
+        'newsFuturesTrack', 'indexTiles', 'sidebarEconCalendar2',
+        'breakingTickerTrack', 'newsList', 'sidebarMacroRisk',
+        'sidebarHeadlineRisk', 'sidebarMarketRisk', 'sidebarEventPhase',
+        'sidebarNextEvent', 'moversGainers', 'moversLosers',
+    ):
+        assert f'id="{legacy_id}"' in MARKET_NEWS_HTML, legacy_id
+    assert 'id="mkLegacy"' in MARKET_NEWS_HTML
+    assert MARKET_NEWS_HTML.index('id="mkLegacy"') > MARKET_NEWS_HTML.index('id="mkProv"')
+
+
+def test_markets_keeps_the_manual_only_market_summary():
+    """POST /market-summary is a real supported capability. The approved
+    composition has no panel for it, so it survives as a page-level action
+    whose result area is hidden until the reader asks for one."""
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    assert 'onclick="generateMarketSummary()"' in MARKET_NEWS_HTML
+    assert 'id="novaMarketSummaryPanel"' in MARKET_NEWS_HTML
+    panel = MARKET_NEWS_HTML[MARKET_NEWS_HTML.index('id="novaMarketSummaryPanel"'):][:200]
+    # collapsed with `hidden`, which the handler removes -- never a permanent
+    # display:none, which would make the button's output unreachable
+    assert ' hidden>' in panel, 'the summary must not occupy the grid at rest'
+    assert 'display:none' not in panel, 'a permanently hidden panel has no visible output'
+    assert 'aria-expanded="false"' in MARKET_NEWS_HTML
+    assert 'aria-controls="novaMarketSummaryPanel"' in MARKET_NEWS_HTML
+    assert 'aria-live="polite"' in MARKET_NEWS_HTML
 
 
 def test_overview_and_markets_are_single_column_pages():

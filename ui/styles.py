@@ -1204,7 +1204,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .wrap:has(> #page-dashboard.active) > .content-header,
 .wrap:has(> #page-dashboard.active) > .live-strip-row,
 .wrap:has(> #page-journal.active) > .content-header,
-.wrap:has(> #page-journal.active) > .live-strip-row{display:none}
+.wrap:has(> #page-journal.active) > .live-strip-row,
+.wrap:has(> #page-news.active) > .content-header,
+.wrap:has(> #page-news.active) > .live-strip-row{display:none}
 
 @media(max-width:1023px){
   .ov-rail{grid-template-columns:1fr 1fr}
@@ -1758,5 +1760,358 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   /* The marquees translate as their whole reason for existing -- pin them to
      their start position so the text stays readable and still. */
   .ticker-track,.news-ticker-track{animation:none !important;transform:none !important}
+}
+
+/* ═══════════════════════ MARKETS (approved composition) ═══════════════════
+   Artifact 55c387a4 — screenshot #1 live, #3 cached. One analytical grid:
+   Cross-Asset Pulse spans both right-hand rows, Market Structure spans the
+   full width beneath, and whichever upper card is shorter stretches its
+   surface so the two columns always terminate on the same line.
+
+   Typography note: this page uses the same 'Space Mono' / 'Rajdhani'
+   declarations the rest of the app already carries. NOVA ships no font link,
+   so both fall back — deliberately not changed here, because adding a font
+   CDN would alter Overview and Journal too. */
+
+#page-news .mk-wrap{max-width:1400px}
+
+/* ── identity ── */
+.mk-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}
+.mk-kicker{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
+}
+.mk-title{
+  font-family:'Rajdhani',sans-serif;font-size:31px;font-weight:700;
+  letter-spacing:1.5px;margin:0;line-height:1;color:var(--text);
+}
+.mk-id-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:3px}
+.mk-clock{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+/* One freshness vocabulary for the whole page. */
+.mk-fresh{
+  display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;
+  font-size:11px;padding:4px 9px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+}
+.mk-fresh::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted2)}
+.mk-fresh.live{color:#7ee3b4;border-color:rgba(61,220,151,.32);background:rgba(61,220,151,.10)}
+.mk-fresh.live::before{background:var(--green)}
+.mk-fresh.stale{color:#f3cd7a;border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.10)}
+.mk-fresh.stale::before{background:var(--yellow)}
+.mk-fresh.down{color:#ff9d9d;border-color:rgba(255,107,107,.34);background:rgba(255,107,107,.10)}
+.mk-fresh.down::before{background:var(--red)}
+.mk-fresh.loading::before,.mk-fresh.connecting::before{animation:mkPulse 1.4s ease-in-out infinite}
+@keyframes mkPulse{0%,100%{opacity:.35}50%{opacity:1}}
+.mk-action{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.8px;
+  padding:9px 14px;min-height:36px;border-radius:8px;cursor:pointer;
+  border:1px solid rgba(155,140,255,.36);background:var(--ai2);color:#c3b9ff;
+}
+.mk-action:hover{border-color:var(--ai);color:#d6cfff}
+.mk-action:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+
+/* on-demand summary — hidden until asked for, so it never disturbs the grid */
+.mk-summary{
+  background:var(--panel);border:1px solid rgba(155,140,255,.28);
+  border-radius:var(--radius2);padding:14px 16px;margin-bottom:12px;
+}
+.mk-sum-head{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.8px;
+  text-transform:uppercase;color:#c3b9ff;margin-bottom:9px;
+}
+#novaMarketSummaryLoading{font-size:13px;color:var(--muted)}
+#novaMarketSummaryText{font-size:13px;color:var(--text);line-height:1.6}
+/* Empty and error are different outcomes and must not share a treatment: a
+   summary the model declined to produce is not a failed request. */
+/* var(--red), not a hard-coded hex: this carries forward the intent of the
+   uncommitted working-tree edit, whose literal line no longer exists because
+   the summary markup was rewritten. 6.54:1 on --panel. */
+#novaMarketSummaryError.mk-sum-err{font-size:13px;color:var(--red)}
+#novaMarketSummaryError.mk-sum-empty{font-size:13px;color:var(--muted)}
+.mk-action[aria-expanded="true"]{background:rgba(155,140,255,.22);color:#d6cfff}
+
+/* ── the grid ── */
+.mk-grid{
+  display:grid;
+  grid-template-columns:minmax(0,2fr) minmax(300px,1fr);
+  grid-template-areas:
+    "rail       rail"
+    "pulse      volatility"
+    "pulse      news"
+    "structure  structure"
+    "prov       prov";
+  gap:12px;align-items:start;
+}
+.mk-rail{grid-area:rail}
+.mk-pulse{grid-area:pulse;align-self:stretch;display:flex;flex-direction:column}
+.mk-vol{grid-area:volatility}
+/* Both stretch: whichever is shorter grows its surface while its content stays
+   anchored at the top, so an empty state is never inflated and no bare page is
+   ever exposed above Market Structure. */
+.mk-news{grid-area:news;align-self:stretch}
+.mk-struct{grid-area:structure}
+.mk-prov{grid-area:prov}
+
+.mk-panel{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius2);padding:14px 16px 15px;min-width:0;
+}
+.mk-pulse{padding:14px 0 0}
+.mk-pulse .mk-ph{padding:0 16px}
+.mk-pulse-body{min-width:0}
+.mk-ph{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:11px}
+.mk-ph h2{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.8px;
+  text-transform:uppercase;color:var(--blue-text);margin:0;font-weight:700;
+}
+.mk-sub{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+.mk-foot{
+  margin-top:auto;padding:9px 16px 12px;border-top:1px solid var(--line2);
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);line-height:1.5;
+}
+.mk-foot code,.mk-lad-note code,.mk-vnote code,.mk-prov code{
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);
+}
+
+/* ── session + risk rail ── */
+.mk-rail{
+  display:grid;grid-template-columns:200px repeat(3,minmax(0,1fr)) 226px;
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius2);overflow:hidden;
+}
+.mk-cell{padding:11px 15px;border-right:1px solid var(--line2);min-width:0}
+.mk-cell:last-child{border-right:0}
+.mk-ck{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.6px;
+  text-transform:uppercase;color:var(--muted2);margin-bottom:5px;
+}
+.mk-cv{font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700;line-height:1.05;letter-spacing:.5px;color:var(--text)}
+.mk-cv-sm{font-size:17px}
+.mk-cv small{
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:400;
+  color:var(--muted);letter-spacing:0;display:block;margin-top:4px;
+}
+.mk-badge{
+  display:inline-block;font-family:'Space Mono',monospace;font-size:11px;
+  font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:6px;text-transform:uppercase;
+}
+.mk-badge.low{color:#7ee3b4;background:rgba(61,220,151,.13);box-shadow:inset 0 0 0 1px rgba(61,220,151,.3)}
+.mk-badge.medium{color:#f3cd7a;background:rgba(251,191,36,.13);box-shadow:inset 0 0 0 1px rgba(251,191,36,.3)}
+.mk-badge.high{color:#ff9d9d;background:rgba(255,107,107,.13);box-shadow:inset 0 0 0 1px rgba(255,107,107,.32)}
+.mk-badge.none{color:var(--muted);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--line)}
+
+/* ── cross-asset table ── */
+table.mk-xa{width:100%;border-collapse:collapse;font-size:13px}
+table.mk-xa thead th{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;
+  text-transform:uppercase;color:var(--muted2);font-weight:700;text-align:left;
+  padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel2);
+}
+table.mk-xa th.n,table.mk-xa td.n{text-align:right}
+table.mk-xa th.mvc,table.mk-xa td.mvc{width:120px;padding-left:14px}
+table.mk-xa td{padding:7px 10px;border-bottom:1px solid var(--line2);vertical-align:middle}
+table.mk-xa tbody tr:last-child td{border-bottom:0}
+.mk-row{transition:background .12s;cursor:pointer}
+.mk-row:hover{background:rgba(79,141,255,.055)}
+.mk-row.is-sel{background:rgba(79,141,255,.11);box-shadow:inset 2px 0 0 var(--blue)}
+.mk-row:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.mk-row.mk-muted .mk-last,.mk-row.mk-muted .mk-pct{color:var(--muted)}
+.mk-row.mk-muted .mk-mv i{opacity:.45}
+.mk-sym{font-family:'Space Mono',monospace;font-size:12.5px;font-weight:700;letter-spacing:.6px;color:var(--text)}
+.mk-grp{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted2)}
+.mk-last{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)}
+.mk-pct{font-family:'Space Mono',monospace;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.mk-last.up,.mk-pct.up{color:var(--green)}
+.mk-last.dn,.mk-pct.dn{color:var(--red)}
+.mk-last.flat,.mk-pct.flat{color:var(--muted2)}
+/* magnitude only — a restatement of the percentage in the same row */
+.mk-mv{
+  display:inline-block;position:relative;height:9px;width:104px;
+  background:#0a0f18;border:1px solid var(--line2);border-radius:3px;overflow:hidden;
+}
+.mk-mv::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--muted2);opacity:.55}
+.mk-mv i{position:absolute;top:0;bottom:0;left:50%;display:block}
+.mk-mv i.up{background:linear-gradient(90deg,rgba(61,220,151,.55),var(--green));border-radius:0 3px 3px 0}
+.mk-mv i.dn{background:linear-gradient(270deg,rgba(255,107,107,.55),var(--red));border-radius:3px 0 0 3px}
+
+/* ── volatility & direction ── */
+.mk-vrow{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line2)}
+.mk-vrow:last-child{border-bottom:0}
+.mk-vrow-block{display:block}
+.mk-vhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.mk-vk{font-size:13px;color:var(--muted)}
+.mk-vv{font-family:'Space Mono',monospace;font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)}
+.mk-vv.up{color:var(--green)} .mk-vv.dn{color:var(--red)}
+.mk-vsub{color:var(--muted2);font-weight:400}
+.mk-na{color:var(--muted2);font-weight:400;font-size:13px}
+.mk-breadth{display:flex;gap:3px;margin-top:9px}
+.mk-breadth i{height:7px;flex:1;border-radius:2px;background:var(--line)}
+.mk-breadth i.up{background:var(--green)} .mk-breadth i.dn{background:var(--red)}
+.mk-vnote{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:7px;line-height:1.5}
+
+/* ── news & catalysts ── */
+.mk-cat{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--line2);align-items:flex-start}
+.mk-cat:last-child{border-bottom:0}
+.mk-cat-t{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);min-width:44px;padding-top:1px;font-variant-numeric:tabular-nums}
+.mk-cat-b{min-width:0}
+.mk-cat-h{font-size:13px;line-height:1.45;color:var(--text);display:block}
+.mk-cat-m{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:3px;display:block}
+.mk-imp{display:inline-block;width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0;background:var(--muted2)}
+.mk-imp.high{background:var(--red)} .mk-imp.medium{background:var(--yellow)}
+
+/* ── notes / skeletons ── */
+.mk-note{
+  font-size:13px;color:var(--muted);line-height:1.5;padding:13px 14px;
+  border:1px dashed var(--line);border-radius:8px;background:rgba(255,255,255,.012);
+}
+.mk-pulse .mk-note{margin:0 16px 14px}
+.mk-note b{display:block;color:var(--text);font-size:13px;margin-bottom:3px}
+.mk-note.err{border-color:rgba(255,107,107,.34);background:rgba(255,107,107,.06)}
+.mk-note.err b{color:#ff9d9d}
+.mk-skel-rows{display:flex;flex-direction:column;gap:9px;padding:2px 0 6px}
+.mk-pulse .mk-skel-rows{padding:2px 16px 14px}
+.mk-skel-rows i{
+  display:block;height:12px;border-radius:5px;
+  background:linear-gradient(90deg,var(--panel2) 25%,#182034 50%,var(--panel2) 75%);
+  background-size:200% 100%;animation:mkSk 1.3s linear infinite;
+}
+.mk-skel-rows i:nth-child(2){width:70%} .mk-skel-rows i:nth-child(4){width:55%}
+@keyframes mkSk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ── market structure ── */
+.mk-switch{display:inline-flex;gap:5px;background:var(--panel2);padding:3px;border-radius:8px;border:1px solid var(--line2)}
+.mk-switch button{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  padding:6px 15px;min-height:44px;min-width:52px;border:0;border-radius:6px;
+  background:none;color:var(--muted2);cursor:pointer;font-weight:700;
+}
+.mk-switch button:hover{color:var(--text)}
+.mk-switch button[aria-pressed="true"]{background:rgba(79,141,255,.16);color:var(--blue-text);box-shadow:inset 0 0 0 1px rgba(79,141,255,.3)}
+.mk-switch button:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.mk-lad{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 10px}
+.mk-lad-y{position:relative;width:74px}
+.mk-lad-y span{
+  position:absolute;right:0;transform:translateY(-50%);
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);
+  white-space:nowrap;font-variant-numeric:tabular-nums;
+}
+.mk-lad-plot{
+  position:relative;height:250px;overflow:hidden;
+  border:1px solid var(--line2);border-radius:8px;
+  background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0) 46%),var(--panel2);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+}
+.mk-gl{position:absolute;left:0;right:0;height:1px;background:var(--line2);opacity:.6}
+.mk-lvl{position:absolute;left:0;right:0;height:0;display:flex;align-items:center}
+.mk-lvl-bar{position:absolute;left:0;right:0;height:1px}
+.mk-lvl.untapped .mk-lvl-bar{background:repeating-linear-gradient(90deg,var(--blue) 0 6px,transparent 6px 11px);opacity:.85}
+.mk-lvl.swept .mk-lvl-bar{background:var(--line);opacity:.9}
+.mk-lvl.unknown .mk-lvl-bar{background:repeating-linear-gradient(90deg,var(--muted2) 0 4px,transparent 4px 9px);opacity:.6}
+/* Lane placement: --lane is set per level by the renderer, and the lane width
+   is a token so mobile can use a narrower one without the renderer knowing
+   anything about breakpoints. */
+.mk-lvl-tag{
+  position:relative;z-index:2;
+  margin-left:calc(9px + var(--lane,0) * var(--mk-lane-w,272px));
+  font-family:'Space Mono',monospace;font-size:11px;
+  padding:2px 8px;border-radius:5px;background:var(--panel);border:1px solid var(--line);
+  color:var(--muted);white-space:nowrap;
+}
+.mk-lvl.untapped .mk-lvl-tag{color:var(--blue-text);border-color:rgba(79,141,255,.4)}
+.mk-lvl-px{
+  font-variant-numeric:tabular-nums;color:var(--muted2);margin-left:10px;
+  padding-left:10px;border-left:1px solid var(--line2);
+}
+.mk-lvl-px em{font-style:normal;color:var(--muted);margin-left:8px}
+.mk-lad-now{position:absolute;left:0;right:0;height:2px;background:var(--green);z-index:3;box-shadow:0 0 0 1px rgba(61,220,151,.25)}
+.mk-lad-now b{
+  position:absolute;right:8px;top:-10px;font-family:'Space Mono',monospace;font-size:11px;
+  font-weight:700;color:#0b1a14;background:var(--green);padding:2px 7px;border-radius:5px;
+  font-variant-numeric:tabular-nums;
+}
+/* A snapshot price is degraded data. It never wears the live green: the line
+   and its label go amber, the same colour the freshness chip uses for cached. */
+.mk-lad-now.is-fallback{background:var(--yellow);box-shadow:0 0 0 1px rgba(251,191,36,.25)}
+.mk-lad-now.is-fallback b{background:var(--yellow);color:#241c05}
+.mk-lg.f i{background:var(--yellow)}
+.mk-lad-note.degraded{
+  border-top-color:rgba(251,191,36,.34);color:var(--muted);
+  background:rgba(251,191,36,.06);border-radius:0 0 8px 8px;padding:11px 12px;margin-top:11px;
+}
+.mk-lad-note.degraded b{color:#f3cd7a}
+.mk-lad-legend{display:flex;gap:16px;margin-top:10px;flex-wrap:wrap}
+.mk-lg{display:inline-flex;align-items:center;gap:7px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+.mk-lg i{width:16px;height:2px;display:block}
+.mk-lg.u i{background:repeating-linear-gradient(90deg,var(--blue) 0 4px,transparent 4px 7px)}
+.mk-lg.s i{background:var(--line)}
+.mk-lg.n i{background:repeating-linear-gradient(90deg,var(--muted2) 0 4px,transparent 4px 7px)}
+.mk-lg.p i{background:var(--green)}
+.mk-lad-note{
+  font-size:13px;color:var(--muted);line-height:1.5;margin-top:11px;
+  border-top:1px solid var(--line2);padding-top:11px;
+}
+
+/* ── provenance ── */
+.mk-prov{
+  display:flex;flex-wrap:wrap;gap:8px 22px;font-family:'Space Mono',monospace;
+  font-size:11px;color:var(--muted2);padding:11px 16px;
+  border:1px solid var(--line2);border-radius:var(--radius2);background:var(--panel);
+}
+.mk-prov b{color:var(--muted);font-weight:400}
+
+/* ── mobile: approved order, stacked ── */
+@media(max-width:767px){
+  .mk-id{display:block;margin-bottom:12px}
+  .mk-title{font-size:27px}
+  .mk-id-meta{margin-top:9px;padding-bottom:0;gap:10px}
+  .mk-action{min-height:44px;padding:12px 14px}
+  /* Areas reset to one column; order pinned explicitly because desktop spans
+     Market Structure across both columns, which one column cannot express
+     through document order alone. */
+  .mk-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:none}
+  .mk-grid > *{grid-area:auto;grid-column:1}
+  .mk-pulse{align-self:auto;display:block;padding:14px 0 0}
+  .mk-news{align-self:auto}
+  .mk-foot{margin-top:0}
+  .mk-rail{order:1} .mk-pulse{order:2} .mk-vol{order:3}
+  .mk-struct{order:4} .mk-news{order:5} .mk-prov{order:6}
+  .mk-rail{grid-template-columns:1fr 1fr}
+  .mk-cell{border-right:1px solid var(--line2);border-bottom:1px solid var(--line2)}
+  .mk-cell:nth-child(2n){border-right:0}
+  .mk-cell:nth-child(1){grid-column:1/-1;border-right:0}
+  .mk-cell:last-child{grid-column:1/-1;border-bottom:0}
+  /* Five labelled columns need ~445px at 390px wide. Rather than scroll or
+     clip, each row becomes its own small layout: instrument over asset class,
+     last over change, percent held right. Only the move bar is dropped,
+     because it restates the percentage beside it. */
+  table.mk-xa,table.mk-xa thead,table.mk-xa tbody{display:block}
+  table.mk-xa thead tr,table.mk-xa tbody tr{
+    display:grid;grid-template-columns:minmax(0,1fr) auto 72px;
+    column-gap:10px;align-items:center;padding:6px 10px;
+  }
+  table.mk-xa thead tr{grid-template-areas:'sym last pct'}
+  table.mk-xa tbody tr{
+    grid-template-areas:'sym last pct' 'grp chg pct';
+    min-height:44px;border-bottom:1px solid var(--line2);
+  }
+  table.mk-xa tbody tr:last-child{border-bottom:0}
+  table.mk-xa thead th,table.mk-xa tbody td{padding:0;border:0}
+  table.mk-xa thead th:nth-child(1){grid-area:sym}
+  table.mk-xa thead th:nth-child(3){grid-area:last;text-align:right}
+  table.mk-xa thead th:nth-child(5){grid-area:pct;text-align:right}
+  table.mk-xa thead th:nth-child(2),table.mk-xa thead th:nth-child(4),
+  table.mk-xa thead th:nth-child(6),table.mk-xa tbody td:nth-child(6){display:none}
+  table.mk-xa tbody td:nth-child(1){grid-area:sym}
+  table.mk-xa tbody td:nth-child(2){grid-area:grp;font-size:11px}
+  table.mk-xa tbody td:nth-child(3){grid-area:last;text-align:right}
+  table.mk-xa tbody td:nth-child(4){grid-area:chg;text-align:right;font-size:11px}
+  table.mk-xa tbody td:nth-child(5){grid-area:pct;text-align:right}
+  .mk-lad-plot{height:210px}
+  .mk-lad-y{width:58px}
+  /* At 260px of plot the price and the status word cannot ride along; the
+     line style and legend carry status, and the level name carries identity. */
+  .mk-lvl-px,.mk-lvl-st{display:none}
+  .mk-lad-plot{--mk-lane-w:62px}
+  .mk-prov{gap:6px 16px}
 }
 '''

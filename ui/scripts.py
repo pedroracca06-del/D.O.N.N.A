@@ -807,6 +807,26 @@ let _lastMarketStructure = null;
 let _lastLiquidity = null;
 let _structureFetchFailed = false;
 
+// ── Markets page state ───────────────────────────────────────────────────
+// Every value the Markets page draws comes from one of these, and each one
+// records whether its own fetch succeeded. A region that could not be fetched
+// says so rather than leaving the previous cycle's number on screen.
+let _mkQuotes = null;          // merged, de-duplicated instrument rows
+let _mkQuotesFailed = false;
+let _mkQuotesAt = null;        // when the merge last succeeded
+let _mkIndexRows = null;       // /major-indexes rows, for equity-index direction
+let _mkSym = 'NQ';             // Market Structure instrument
+const _MK_GROUPS = {
+  NQ: 'Futures', ES: 'Futures',
+  NASDAQ: 'Index', 'S&P 500': 'Index', SPX: 'Index', DJIA: 'Index', RUSSELL: 'Index',
+  VIX: 'Volatility', US10Y: 'Rates', DXY: 'FX',
+  GOLD: 'Commodity', SILVER: 'Commodity', OIL: 'Commodity', BTC: 'Crypto',
+};
+// The three equity indexes. Direction is counted across these alone -- folding
+// VIX, DXY or rates into an "advancing" tally would make the number a lie.
+const _MK_EQUITY = ['NASDAQ', 'S&P 500', 'DJIA'];
+
+
 // ── Authoritative freshness ──────────────────────────────────────────────
 // A 200 response only proves the SERVER answered; it says nothing about how
 // old the DATA inside that response is. Every label below is therefore
@@ -934,6 +954,7 @@ async function refreshMarketStructure() {
     _structureFetchFailed = true;
   }
   renderSessionStructure();
+  renderMarkets();
 }
 
 function renderSessionStructure() {
@@ -1087,7 +1108,19 @@ async function refreshNewsFuturesStrip() {
     });
     const track = document.getElementById('newsFuturesTrack');
     if (track && html) track.innerHTML = html + html;
-  } catch(e) { console.error('refreshNewsFuturesStrip:', e); }
+    // Markets consumes the same three routes, merged and de-duplicated.
+    _mkQuotes = _mkMergeQuotes(pulseRes.rows, idxRes.rows, bvRes);
+    _mkIndexRows = idxRes.rows || [];
+    _mkQuotesFailed = false;
+    _mkQuotesAt = new Date().toISOString();
+    renderMarkets();
+  } catch(e) {
+    console.error('refreshNewsFuturesStrip:', e);
+    // Keep whatever was last good on screen, but mark it cached so it can
+    // never be read as the current market.
+    _mkQuotesFailed = true;
+    renderMarkets();
+  }
 }
 
 // ════════ TRENDING MOVERS ════════
@@ -1297,6 +1330,7 @@ function renderNews(d) {
   // Populate index tiles from user prefs
   _lastDashData = d;
   refreshTilePrefs(d);
+  renderMarkets();
 
   // Feature story — top macro headline
   const featureText = risk.last_headline || news[0]?.headline || '—';
@@ -2469,18 +2503,30 @@ async function generateMarketSummary() {
   // handler above -- no page-load, refresh, ticker-interval, or background
   // caller may call this.
   const btn     = document.getElementById(\'novaMarketSummaryBtn\');
+  const panel   = document.getElementById(\'novaMarketSummaryPanel\');
   const loading = document.getElementById(\'novaMarketSummaryLoading\');
   const textEl  = document.getElementById(\'novaMarketSummaryText\');
   const errEl   = document.getElementById(\'novaMarketSummaryError\');
-  if (errEl)  { errEl.style.display = \'none\'; errEl.textContent = \'\'; }
+  // Revealed before anything is written, so the polite live region is in
+  // the accessibility tree by the time the result arrives.
+  if (panel) panel.hidden = false;
+  if (btn) btn.setAttribute(\'aria-expanded\', \'true\');
+  if (errEl)  { errEl.style.display = \'none\'; errEl.textContent = \'\'; errEl.className = \'mk-sum-err\'; }
   if (textEl) { textEl.style.display = \'none\'; textEl.textContent = \'\'; }
   if (loading) loading.style.display = \'block\';
   if (btn) { btn.disabled = true; btn.textContent = \'GENERATING...\'; }
   try {
     const res  = await fetch(\'/market-summary\', {method: \'POST\'});
     const data = await res.json().catch(() => ({}));
-    if (res.ok && data.status === \'ok\') {
+    const summary = (data && typeof data.summary === \'string\') ? data.summary.trim() : \'\';
+    if (res.ok && data.status === \'ok\' && summary) {
       if (textEl) { textEl.textContent = data.summary; textEl.style.display = \'block\'; }
+    } else if (res.ok && data.status === \'ok\') {
+      // Answered, with nothing to say. An empty result is not a failure
+      // and must not be dressed as one.
+      if (errEl) { errEl.className = \'mk-sum-empty\';
+        errEl.textContent = \'NOVA returned no summary for the current market.\';
+        errEl.style.display = \'block\'; }
     } else {
       const msg = (data && data.detail) || \'AI request failed.\';
       if (errEl) { errEl.textContent = msg; errEl.style.display = \'block\'; }
@@ -2701,6 +2747,509 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
 ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('jSubmitBtn').click(); });
+});
+
+
+// ═════════════════════════ MARKETS ═════════════════════════════════════════
+
+function _mkEsc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+// Symbols arrive spelled differently by route -- /futures-macro-pulse says
+// US10Y, /major-indexes says "US 10Y". Without this they de-duplicate to two
+// instruments instead of one.
+function _mkNorm(sym) {
+  const s = String(sym || '').trim().toUpperCase();
+  if (s === 'US 10Y' || s === 'US10Y') return 'US10Y';
+  if (s === 'SPX') return 'S&P 500';
+  return s;
+}
+function _mkPctNum(v) {
+  const n = parseFloat(String(v == null ? '' : v).replace(/[%+,]/g, ''));
+  return isFinite(n) ? n : null;
+}
+function _mkDir(pct) {
+  const n = _mkPctNum(pct);
+  if (n === null) return '';
+  return n > 0 ? 'up' : (n < 0 ? 'dn' : 'flat');
+}
+function _mkAge(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!isFinite(t)) return null;
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.round(s / 60) + 'm';
+  if (s < 86400) return Math.round(s / 3600) + 'h';
+  return Math.round(s / 86400) + 'd';
+}
+function _mkFmt(v, dp) {
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, ''));
+  if (!isFinite(n)) return String(v == null ? '—' : v);
+  return n.toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
+}
+function _mkSigned(v, dp) {
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[,+]/g, ''));
+  if (!isFinite(n)) return '—';
+  return (n > 0 ? '+' : '') + _mkFmt(n, dp);
+}
+
+// Merge the supported quote routes into one de-duplicated instrument list.
+// /btc-vix legitimately returns {"BTC":{},"VIX":{}} -- an empty object is not a
+// price, so BTC is simply absent rather than estimated or carried forward.
+function _mkMergeQuotes(pulseRows, indexRows, btcVix) {
+  const out = [];
+  const seen = {};
+  const push = (row) => {
+    const sym = _mkNorm(row.symbol);
+    if (!sym || seen[sym]) return;
+    const pct = row.pct;
+    if (row.last == null || row.last === '' || row.last === '—') return;
+    seen[sym] = true;
+    out.push({
+      symbol: sym,
+      group: _MK_GROUPS[sym] || 'Other',
+      last: row.last,
+      chg: row.chg,
+      pct: pct,
+      dir: row.dir || _mkDir(pct),
+    });
+  };
+  (pulseRows || []).forEach(push);
+  (indexRows || []).forEach(push);
+  const btc = (btcVix || {}).BTC || {};
+  if (btc.last != null && btc.last !== '') {
+    push({symbol: 'BTC', last: btc.last, chg: btc.chg, pct: btc.pct});
+  }
+  return out;
+}
+
+function _mkQuoteState() {
+  if (_mkQuotesFailed && !_mkQuotes) return 'error';
+  if (!_mkQuotes) return 'loading';
+  if (!_mkQuotes.length) return 'empty';
+  if (_mkQuotesFailed) return 'stale';
+  return 'live';
+}
+
+function _mkSetFresh() {
+  const el = document.getElementById('mkFresh');
+  if (!el) return;
+  const st = _mkQuoteState();
+  const age = _mkAge(_mkQuotesAt);
+  const map = {
+    live: ['live', age ? 'Live · updated ' + age + ' ago' : 'Live'],
+    stale: ['stale', age ? 'Cached · ' + age + ' old' : 'Cached'],
+    loading: ['loading', 'Loading…'],
+    empty: ['live', age ? 'Live · updated ' + age + ' ago' : 'Live'],
+    error: ['down', 'Unavailable'],
+  };
+  const [cls, text] = map[st] || map.loading;
+  el.className = 'mk-fresh ' + cls;
+  el.textContent = text;
+}
+
+function _mkRenderRail(risk, session) {
+  const set = (id, html) => { const e = document.getElementById(id); if (e) e.innerHTML = html; };
+  const badge = (v) => {
+    const t = String(v == null ? '' : v).trim();
+    if (!t) return '<span class="mk-badge none">Not available</span>';
+    const k = t.toLowerCase();
+    const cls = (k === 'low' || k === 'high' || k === 'medium') ? k : 'none';
+    return '<span class="mk-badge ' + cls + '">' + _mkEsc(t) + '</span>';
+  };
+  const sess = document.getElementById('mkSession');
+  if (sess) {
+    const s = session || '—';
+    sess.innerHTML = _mkEsc(s) + '<small id="mkSessionSub">' +
+      (risk && risk.session_note ? _mkEsc(risk.session_note) : '') + '</small>';
+  }
+  set('mkMacroRisk', badge((risk || {}).macro_risk));
+  set('mkHeadlineRisk', badge((risk || {}).headline_risk));
+  set('mkMarketRisk', badge((risk || {}).market_news_risk));
+  const ep = document.getElementById('mkEventPhase');
+  if (ep) {
+    const phase = (risk || {}).event_phase || '—';
+    const nxt = (risk || {}).next_event || '';
+    ep.innerHTML = _mkEsc(phase) + '<small id="mkNextEvent">' + _mkEsc(nxt) + '</small>';
+  }
+}
+
+function _mkRenderPulse() {
+  const body = document.getElementById('mkPulseBody');
+  const meta = document.getElementById('mkPulseMeta');
+  const foot = document.getElementById('mkPulseFoot');
+  if (!body) return;
+  const st = _mkQuoteState();
+  const rows = _mkQuotes || [];
+
+  if (foot) {
+    foot.innerHTML = 'Merged from <code>/futures-macro-pulse</code> and <code>/major-indexes</code>, ' +
+      'de-duplicated on symbol. <code>/btc-vix</code> supplies BTC only when it returns a price.';
+  }
+  if (meta) {
+    meta.textContent = st === 'loading' ? 'loading'
+      : st === 'error' ? 'unavailable'
+      : st === 'empty' ? '0 instruments'
+      : rows.length + ' instrument' + (rows.length === 1 ? '' : 's') +
+        (st === 'stale' ? ' · cached' : ' · live');
+  }
+  if (st === 'loading') {
+    body.innerHTML = '<div class="mk-skel-rows"><i></i><i></i><i></i><i></i><i></i></div>';
+    return;
+  }
+  if (st === 'error') {
+    body.innerHTML = '<div class="mk-note err"><b>Cross-asset pulse unavailable</b>' +
+      'The quote service did not respond. No prices are shown rather than showing the last ' +
+      'known values as if they were current.</div>';
+    return;
+  }
+  if (st === 'empty') {
+    body.innerHTML = '<div class="mk-note"><b>No instruments returned</b>' +
+      'The quote service responded and returned no rows. Nothing is charted rather than ' +
+      'filling the table with placeholders.</div>';
+    return;
+  }
+
+  const mags = rows.map(r => Math.abs(_mkPctNum(r.pct) || 0));
+  const max = Math.max.apply(null, mags.concat([0.01]));
+  const muted = st === 'stale' ? ' mk-muted' : '';
+  const html = ['<table class="mk-xa"><thead><tr>' +
+    '<th scope="col">Instrument</th><th scope="col">Group</th>' +
+    '<th scope="col" class="n">Last</th><th scope="col" class="n">Chg</th>' +
+    '<th scope="col" class="n">%</th><th scope="col" class="mvc">Move</th>' +
+    '</tr></thead><tbody>'];
+  rows.forEach((r, i) => {
+    const d = r.dir || _mkDir(r.pct);
+    const w = Math.min(100, Math.abs(_mkPctNum(r.pct) || 0) / max * 100);
+    const sel = (_mkNorm(r.symbol) === _mkSym) ? ' is-sel' : '';
+    const lab = r.symbol + ', ' + r.group + ', last ' + (r.last == null ? 'not available' : r.last) +
+      ', change ' + (r.pct || 'not available');
+    html.push('<tr tabindex="0" class="mk-row' + sel + muted + '" data-mk-row="' + _mkEsc(r.symbol) + '"' +
+      ' aria-label="' + _mkEsc(lab) + '">' +
+      '<td class="mk-sym">' + _mkEsc(r.symbol) + '</td>' +
+      '<td class="mk-grp">' + _mkEsc(r.group) + '</td>' +
+      '<td class="n mk-last">' + _mkEsc(typeof r.last === 'number' ? _mkFmt(r.last, 2) : r.last) + '</td>' +
+      '<td class="n mk-last ' + d + '">' + (r.chg == null ? '—' : _mkEsc(_mkSigned(r.chg, 2))) + '</td>' +
+      '<td class="n mk-pct ' + d + '">' + _mkEsc(r.pct == null ? '—' : r.pct) + '</td>' +
+      '<td class="mvc"><span class="mk-mv"><i class="' + d + '" style="width:' + w.toFixed(1) + '%"></i></span></td>' +
+      '</tr>');
+  });
+  html.push('</tbody></table>');
+  if (st === 'stale') {
+    const age = _mkAge(_mkQuotesAt) || 'some time';
+    html.push('<div class="mk-note"><b>These are cached prices, ' + age + ' old</b>' +
+      'The quote service has not returned since. Values are shown in muted type and must not ' +
+      'be read as the current market.</div>');
+  }
+  body.innerHTML = html.join('');
+}
+
+function _mkRenderVol() {
+  const body = document.getElementById('mkVolBody');
+  const meta = document.getElementById('mkVolMeta');
+  if (!body) return;
+  const st = _mkQuoteState();
+  if (meta) meta.textContent = st === 'loading' ? 'loading' : st === 'error' ? 'unavailable' : st;
+  if (st === 'loading') { body.innerHTML = '<div class="mk-skel-rows"><i></i><i></i><i></i></div>'; return; }
+  if (st === 'error') {
+    body.innerHTML = '<div class="mk-note err"><b>Unavailable</b>' +
+      'Volatility and index direction both derive from the quote service, which did not respond.</div>';
+    return;
+  }
+  if (st === 'empty') {
+    body.innerHTML = '<div class="mk-note"><b>Nothing to derive</b>' +
+      'Volatility and direction are computed from the instrument table, which returned no rows.</div>';
+    return;
+  }
+  const rows = _mkQuotes || [];
+  const find = (sym) => rows.filter(r => _mkNorm(r.symbol) === sym)[0] || null;
+  const vix = find('VIX');
+  const btc = find('BTC');
+  const row = (k, v, cls) =>
+    '<div class="mk-vrow"><span class="mk-vk">' + k + '</span>' +
+    '<span class="mk-vv ' + (cls || '') + '">' + v + '</span></div>';
+
+  let html = '';
+  html += row('VIX', vix
+    ? _mkEsc(typeof vix.last === 'number' ? _mkFmt(vix.last, 2) : vix.last) +
+      ' <span class="mk-vsub">' + _mkEsc(vix.pct || '') + '</span>'
+    : '<span class="mk-na">Not available</span>', vix ? _mkDir(vix.pct) : '');
+  if (vix) {
+    const lv = parseFloat(String(vix.last).replace(/,/g, ''));
+    const regime = !isFinite(lv) ? 'Not available'
+      : lv < 20 ? 'Below 20 · calm'
+      : lv < 30 ? '20–30 · elevated' : 'Above 30 · stressed';
+    html += row('VIX regime', '<span class="mk-vsub">' + regime + '</span>');
+  }
+  // /btc-vix returning {} is a real state: absent, never invented.
+  html += row('BTC · risk proxy', btc
+    ? _mkEsc(btc.pct || '—') : '<span class="mk-na">Not available</span>', btc ? _mkDir(btc.pct) : '');
+
+  const eq = (_mkIndexRows || []).filter(r => _MK_EQUITY.indexOf(_mkNorm(r.symbol)) !== -1);
+  if (eq.length) {
+    const up = eq.filter(r => (r.dir || _mkDir(r.pct)) === 'up').length;
+    html += '<div class="mk-vrow mk-vrow-block">' +
+      '<div class="mk-vhead"><span class="mk-vk">Index direction</span>' +
+      '<span class="mk-vv"><span class="up">' + up + '</span> ' +
+      '<span class="mk-vsub">of ' + eq.length + ' advancing</span></span></div>' +
+      '<div class="mk-breadth" aria-hidden="true">' +
+        eq.map(r => '<i class="' + ((r.dir || _mkDir(r.pct)) === 'up' ? 'up' : 'dn') + '"></i>').join('') +
+      '</div>' +
+      '<div class="mk-vnote">' + eq.map(r => _mkEsc(r.symbol)).join(', ') +
+      ' — the equity indexes <code>/major-indexes</code> returns. Not an exchange breadth feed.</div>' +
+      '</div>';
+  } else {
+    html += row('Index direction', '<span class="mk-na">Not available</span>');
+  }
+  body.innerHTML = html;
+}
+
+function _mkRenderNews(dash) {
+  const body = document.getElementById('mkNewsBody');
+  const meta = document.getElementById('mkNewsMeta');
+  if (!body) return;
+  if (!dash) {
+    body.innerHTML = '<div class="mk-skel-rows"><i></i><i></i><i></i></div>';
+    if (meta) meta.textContent = 'loading';
+    return;
+  }
+  const news = dash.news || [];
+  const events = ((dash.calendar || {}).events) || [];
+  if (meta) {
+    meta.textContent = events.length
+      ? events.length + ' event' + (events.length === 1 ? '' : 's')
+      : (news.length ? news.length + ' headline' + (news.length === 1 ? '' : 's') : 'nothing scheduled');
+  }
+  let html = '';
+  events.slice(0, 4).forEach(e => {
+    const imp = String(e.importance || 'low').toLowerCase();
+    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(e.time_et || '—') + '</span>' +
+      '<span class="mk-imp ' + _mkEsc(imp) + '" aria-hidden="true"></span>' +
+      '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(e.title || 'Untitled event') + '</span>' +
+      '<span class="mk-cat-m">' + _mkEsc([e.category, e.currency, imp, e.source].filter(Boolean).join(' · ')) +
+      '</span></span></div>';
+  });
+  news.slice(0, 4).forEach(n => {
+    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(n.time || '') + '</span>' +
+      '<span class="mk-imp ' + _mkEsc(String(n.severity || 'low').toLowerCase()) + '" aria-hidden="true"></span>' +
+      '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(n.headline || '') + '</span>' +
+      '<span class="mk-cat-m">' + _mkEsc(n.source || '') + '</span></span></div>';
+  });
+  if (!news.length) {
+    html += '<div class="mk-note"' + (events.length ? ' style="margin-top:11px"' : '') + '>' +
+      '<b>No headlines in the feed</b>The news service returned zero articles. Nothing is shown ' +
+      'rather than repeating an older headline as if it had just broken.</div>';
+  }
+  if (!events.length && !news.length) {
+    html = '<div class="mk-note"><b>Nothing scheduled and no headlines</b>' +
+      'Both sources answered and both were empty. This is a quiet tape, not a failure.</div>';
+  }
+  body.innerHTML = html;
+}
+
+// Market Structure. Levels come from /market-structure, sweep status from
+// /liquidity. If liquidity is missing the levels still draw, but every one is
+// marked unclassified -- a guessed sweep state would be worse than none.
+function _mkRenderStructure() {
+  const body = document.getElementById('mkStructBody');
+  const symEl = document.getElementById('mkStructSym');
+  if (!body) return;
+  if (symEl) symEl.textContent = _mkSym;
+  document.querySelectorAll('.mk-switch [data-mk-sym]').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.dataset.mkSym === _mkSym));
+  });
+
+  const ms = _lastMarketStructure;
+  const liq = _lastLiquidity;
+  if (!ms) {
+    body.innerHTML = _structureFetchFailed
+      ? '<div class="mk-note err"><b>Structure unavailable</b><code>/market-structure</code> did not ' +
+        'respond. No levels are drawn — a level ladder with no price reference would mislead.</div>'
+      : '<div class="mk-skel-rows"><i></i><i></i><i></i></div>';
+    return;
+  }
+  const key = _mkSym.toLowerCase();
+  const d = ms[key] || {};
+  const lq = (liq || {})[key] || {};
+  // The last price lives on /liquidity. When that route is down the dashboard
+  // payload's market_snapshot carries the same quote -- but only as DEGRADED
+  // data: it is used solely when its own freshness can be established, and it
+  // is never presented as the live price.
+  const riskObj = (_lastDashData || {}).risk || {};
+  const snap = riskObj.market_snapshot || {};
+  const snapPx = (snap[_mkSym] || {}).last;
+  const snapAt = riskObj.last_updated || null;
+  let price = null, priceSrc = 'liquidity', priceAge = null;
+  if (lq.price != null) {
+    price = lq.price;
+  } else if (snapPx != null && snapAt && _mkAge(snapAt)) {
+    // A snapshot whose age cannot be established is not trustworthy enough to
+    // anchor a level ladder, so it is refused rather than shown.
+    price = snapPx;
+    priceSrc = 'snapshot';
+    priceAge = _mkAge(snapAt);
+  }
+  const levels = [];
+  const add = (label, v) => { if (v != null && isFinite(v)) levels.push({label: label, price: +v}); };
+  add('ONH', d.onh); add('ONL', d.onl); add('Daily open', d.daily_open);
+  add('PDH', d.pdh); add('PDL', d.pdl); add('PWH', d.pwh); add('PWL', d.pwl);
+
+  if (!levels.length || price == null || !isFinite(price)) {
+    const noPrice = levels.length && price == null;
+    body.innerHTML = noPrice
+      ? '<div class="mk-note err"><b>Last price unavailable</b>' +
+        '<code>/liquidity</code> did not respond and no snapshot with an establishable age is ' +
+        'available, so the levels are not drawn against a price that cannot be trusted.</div>'
+      : '<div class="mk-note"><b>No levels recorded yet</b>' +
+        'The structure engine has not produced overnight or prior-session levels for ' +
+        _mkEsc(_mkSym) + '. The ladder populates once a session completes.</div>';
+    return;
+  }
+
+  const status = {};
+  ((lq.levels) || []).forEach(l => { status[String(l.label).toUpperCase()] = String(l.status || '').toUpperCase(); });
+  const haveStatus = Object.keys(status).length > 0;
+
+  const all = levels.map(l => l.price).concat([price]);
+  let hi = Math.max.apply(null, all), lo = Math.min.apply(null, all);
+  const pad = Math.max((hi - lo) * 0.08, Math.abs(price) * 0.0005) || 1;
+  hi += pad; lo -= pad;
+  const span = (hi - lo) || 1;
+  const pos = (v) => ((hi - v) / span * 100);
+
+  const ticks = [0, 20, 40, 60, 80, 100].map(q => ({
+    at: q, val: hi - (span * q / 100),
+  }));
+  const dp = Math.abs(price) < 100 ? 2 : 2;
+
+  // Collision handling. A label is ~20px tall, and real level sets cluster --
+  // ONH and the daily open can sit 4px apart. Each label takes the first lane
+  // whose previous occupant is far enough away, so a run of three tight levels
+  // spreads across three lanes instead of two of them landing on each other.
+  const PLOT = 250, MIN = 22, LANES = 3;
+  const drawn = levels.map(l => ({...l, at: pos(l.price)}))
+    .sort((a, b) => a.at - b.at);
+  const lastInLane = new Array(LANES).fill(-999);
+  drawn.forEach(l => {
+    const px = l.at / 100 * PLOT;
+    let lane = 0;
+    while (lane < LANES - 1 && (px - lastInLane[lane]) < MIN) lane++;
+    l.lane = lane;
+    lastInLane[lane] = px;
+  });
+
+  let html = '<div class="mk-lad">';
+  html += '<div class="mk-lad-y">' + ticks.map(t =>
+    '<span style="top:' + t.at + '%">' + _mkFmt(t.val, 0) + '</span>').join('') + '</div>';
+  html += '<div class="mk-lad-plot">';
+  html += ticks.map(t => '<i class="mk-gl" style="top:' + t.at + '%"></i>').join('');
+  drawn.forEach(l => {
+    const raw = status[l.label.toUpperCase()] || '';
+    const cls = !haveStatus ? 'unknown' : (raw === 'SWEPT' ? 'swept' : 'untapped');
+    const word = !haveStatus ? 'unclassified' : (raw === 'SWEPT' ? 'swept' : 'untapped');
+    const dist = Math.round(l.price - price);
+    // One pill per level. Placing a single element is what makes the lane
+    // assignment sufficient; a separate right-anchored price would collide
+    // again on its own axis.
+    html += '<div class="mk-lvl ' + cls + '" style="top:' + l.at.toFixed(2) + '%;--lane:' + l.lane + '">' +
+      '<i class="mk-lvl-bar"></i>' +
+      '<span class="mk-lvl-tag">' + _mkEsc(l.label) +
+      '<span class="mk-lvl-st"> · ' + word + '</span>' +
+      '<span class="mk-lvl-px">' + _mkFmt(l.price, dp) +
+      '<em>' + (dist >= 0 ? '+' : '−') + Math.abs(dist).toLocaleString('en-US') + ' pts</em></span>' +
+      '</span></div>';
+  });
+  const fb = priceSrc === 'snapshot';
+  html += '<div class="mk-lad-now' + (fb ? ' is-fallback' : '') + '" style="top:' + pos(price).toFixed(2) + '%">' +
+    '<b>' + _mkFmt(price, dp) + (fb ? ' · Snapshot' : '') + '</b></div>';
+  html += '</div></div>';
+  html += '<div class="mk-lad-legend">' +
+    '<span class="mk-lg ' + (fb ? 'f' : 'p') + '"><i></i>' +
+      (fb ? 'Last price · snapshot, ' + priceAge + ' old' : 'Last price') + '</span>' +
+    (haveStatus
+      ? '<span class="mk-lg u"><i></i>Untapped level</span><span class="mk-lg s"><i></i>Swept level</span>'
+      : '<span class="mk-lg n"><i></i>Level · sweep status unavailable</span>') +
+    '</div>';
+
+  const narrative = (liq && liq.narrative) || ms.narrative || '';
+  if (narrative || !haveStatus || fb) {
+    html += '<div class="mk-lad-note' + (fb ? ' degraded' : '') + '">' +
+      (fb
+        ? '<b>Degraded — last price is a snapshot, not live.</b> <code>/liquidity</code> did not respond, ' +
+          'so the price shown comes from the dashboard <code>market_snapshot</code> taken ' +
+          _mkEsc(priceAge) + ' ago, and sweep status is withdrawn: every level is drawn unclassified. '
+        : (!haveStatus
+          ? 'Levels rendered from <code>/market-structure</code>. Sweep status unavailable — ' +
+            '<code>/liquidity</code> did not respond, so every level is drawn unclassified. '
+          : '')) +
+      _mkEsc(String(narrative).split('|')[0].trim()) + '</div>';
+  }
+  body.innerHTML = html;
+}
+
+function _mkRenderProv() {
+  const el = document.getElementById('mkProv');
+  if (!el) return;
+  const q = _mkQuoteState();
+  const qAge = _mkAge(_mkQuotesAt);
+  const item = (k, v) => '<span>' + k + ' <b>' + _mkEsc(v) + '</b></span>';
+  const msAge = _mkAge((_lastMarketStructure || {}).last_updated);
+  const lqAge = _mkAge((_lastLiquidity || {}).last_updated);
+  el.innerHTML =
+    item('Quotes', q === 'live' ? 'live · ' + (qAge || 'now')
+      : q === 'stale' ? 'cached · ' + (qAge || 'unknown age')
+      : q === 'loading' ? 'loading' : q === 'error' ? 'unavailable' : 'live') +
+    item('Structure', '/market-structure' + (msAge ? ' · ' + msAge + ' old' : '')) +
+    item('Liquidity', '/liquidity' + (lqAge ? ' · ' + lqAge + ' old' : '')) +
+    item('Calendar', ((_lastDashData || {}).calendar || {}).source || 'not available') +
+    item('News', 'Finnhub') +
+    item('Risk', 'News Guard');
+}
+
+function renderMarkets() {
+  const clk = document.getElementById('mkClock');
+  if (clk) {
+    try {
+      clk.textContent = 'NY ' + new Date().toLocaleTimeString('en-US',
+        {timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false}) + ' ET';
+    } catch (e) { clk.textContent = ''; }
+  }
+  const dash = _lastDashData;
+  const risk = (dash || {}).risk || {};
+  _mkSetFresh();
+  // Session comes from the News Guard payload (risk.donna_session); the state
+  // engine is the fallback. Neither is invented when both are absent.
+  const sess = risk.donna_session || ((_dbStateEngine || {}).session) || '—';
+  _mkRenderRail(risk, sess);
+  _mkRenderPulse();
+  _mkRenderVol();
+  _mkRenderNews(dash);
+  _mkRenderStructure();
+  _mkRenderProv();
+}
+
+// NQ/ES switch and row selection. Selecting an instrument retargets the ladder
+// when that instrument has structure; otherwise the selection is visual only.
+document.addEventListener('click', (e) => {
+  const t = e.target.closest ? e.target.closest('.mk-switch [data-mk-sym]') : null;
+  if (t) { _mkSym = t.dataset.mkSym; _mkRenderStructure(); _mkRenderPulse(); return; }
+  const row = e.target.closest ? e.target.closest('[data-mk-row]') : null;
+  if (row) {
+    const sym = _mkNorm(row.dataset.mkRow);
+    if (sym === 'NQ' || sym === 'ES') { _mkSym = sym; _mkRenderStructure(); }
+    document.querySelectorAll('[data-mk-row]').forEach(r => r.classList.remove('is-sel'));
+    row.classList.add('is-sel');
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest ? e.target.closest('[data-mk-row]') : null;
+  if (!row) return;
+  e.preventDefault();
+  row.click();
 });
 
 // refresh signals when switching to signals tab. The approved Journal
