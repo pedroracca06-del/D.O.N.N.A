@@ -2631,6 +2631,18 @@ async def assistant_clear_reminders():
     return {'status': 'ok', 'assistant': state}
 
 
+# `status` must never say "ok" about something that is not an answer. Each
+# outcome from call_assistant_llm() gets its own status so the frontend can
+# render unavailable / empty / malformed distinctly instead of printing a
+# failure string in NOVA's voice. 'error' is reserved for the except branch.
+_ASSISTANT_CHAT_STATUS = {
+    'ok':          'ok',
+    'empty':       'empty',
+    'malformed':   'malformed',
+    'unavailable': 'unavailable',
+}
+
+
 @app.post('/assistant/chat')
 async def assistant_chat(request: Request):
     body    = await request.json()
@@ -2639,16 +2651,31 @@ async def assistant_chat(request: Request):
         raise HTTPException(status_code=400, detail='message is required')
 
     try:
-        result        = call_assistant_llm(message)
-        updated_state = apply_assistant_action(result['action'], result['value'])
-        return {'status': 'ok', **result, 'assistant': updated_state, 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
+        result  = call_assistant_llm(message)
+        outcome = str(result.get('outcome') or 'ok')
+
+        # Only a real answer is allowed to mutate working memory. A failure,
+        # an empty reply, or a malformed payload carries no trustworthy
+        # action, so state is read rather than written.
+        if outcome == 'ok':
+            updated_state = apply_assistant_action(result['action'], result['value'])
+        else:
+            updated_state = load_assistant_state()
+
+        return {
+            'status': _ASSISTANT_CHAT_STATUS.get(outcome, 'error'),
+            **result,
+            'outcome': outcome,
+            'assistant': updated_state, 'risk': load_risk_state(), 'alerts': load_alert_history()[:10],
+        }
     except Exception:
         # Never surface exception detail here -- call_assistant_llm() already
         # converts every ordinary gateway failure into a safe {action,value,
-        # reply} dict; only a genuinely unexpected failure (e.g. a prompt-
-        # build bug) reaches this except clause, per spec.
+        # reply,outcome} dict; only a genuinely unexpected failure (e.g. a
+        # prompt-build bug) reaches this except clause, per spec.
         return {
-            'status': 'error', 'action': 'none', 'value': '', 'reply': 'AI request failed.',
+            'status': 'error', 'outcome': 'error', 'error_code': None, 'cached': False,
+            'action': 'none', 'value': '', 'reply': 'AI request failed.',
             'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10],
         }
 

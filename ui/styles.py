@@ -1206,7 +1206,10 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .wrap:has(> #page-journal.active) > .content-header,
 .wrap:has(> #page-journal.active) > .live-strip-row,
 .wrap:has(> #page-news.active) > .content-header,
-.wrap:has(> #page-news.active) > .live-strip-row{display:none}
+.wrap:has(> #page-news.active) > .live-strip-row,
+.wrap:has(> #page-assistant.active) > .content-header,
+.wrap:has(> #page-assistant.active) > .live-strip-row,
+.wrap:has(> #page-assistant.active) > .footer{display:none}
 
 @media(max-width:1023px){
   .ov-rail{grid-template-columns:1fr 1fr}
@@ -2113,5 +2116,250 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
   .mk-lvl-px,.mk-lvl-st{display:none}
   .mk-lad-plot{--mk-lane-w:62px}
   .mk-prov{gap:6px 16px}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   NOVA INTELLIGENCE  (#page-assistant)
+   Every rule below is scoped to #page-assistant, or to `.app-shell:has()` /
+   `.wrap:has()` on the active page, so nothing here can reach Overview,
+   Journal, Markets or Settings.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── page identity ── */
+#page-assistant .ni-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}
+#page-assistant .ni-kicker{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
+}
+#page-assistant .ni-id h1{
+  font-family:'Rajdhani',sans-serif;font-size:31px;font-weight:700;
+  letter-spacing:1.5px;margin:0;line-height:1;
+}
+#page-assistant .ni-id-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:3px}
+/* one freshness vocabulary, matching Overview / Journal / Markets */
+#page-assistant .ni-fresh{
+  display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:11px;
+  padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+}
+#page-assistant .ni-fresh::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted2)}
+#page-assistant .ni-fresh.ok{color:#7ee3b4;border-color:rgba(61,220,151,.32);background:rgba(61,220,151,.10)}
+#page-assistant .ni-fresh.ok::before{background:var(--green)}
+#page-assistant .ni-fresh.stale{color:#f3cd7a;border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.10)}
+#page-assistant .ni-fresh.stale::before{background:var(--yellow)}
+#page-assistant .ni-fresh.down{color:#ff9d9d;border-color:rgba(255,107,107,.34);background:rgba(255,107,107,.10)}
+#page-assistant .ni-fresh.down::before{background:var(--red)}
+#page-assistant .ni-fresh.busy::before{animation:niPulse 1.4s ease-in-out infinite}
+@keyframes niPulse{0%,100%{opacity:.35}50%{opacity:1}}
+
+/* ── grid ── */
+#page-assistant .ni-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:12px;min-height:0}
+#page-assistant .ni-thread{display:flex;flex-direction:column;min-width:0;min-height:0}
+#page-assistant .ni-rail{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0}
+#page-assistant .ni-panel{padding:14px 16px 15px;border-radius:var(--radius2)}
+#page-assistant .ni-ph{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:11px}
+#page-assistant .ni-ph h2{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.8px;text-transform:uppercase;
+  color:#c3b9ff;margin:0;font-weight:700;
+}
+#page-assistant .ni-sub{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+
+/* ── conversation ── */
+#page-assistant .ni-log{
+  flex:1;min-height:0;overflow-y:auto;padding:2px 2px 4px;
+  display:flex;flex-direction:column;gap:14px;
+}
+#page-assistant .ni-log:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+#page-assistant .ni-turn{display:flex;flex-direction:column;gap:9px}
+#page-assistant .ni-q{
+  align-self:flex-end;max-width:78%;background:rgba(79,141,255,.13);border:1px solid rgba(79,141,255,.28);
+  border-radius:12px 12px 4px 12px;padding:10px 14px;font-size:13px;line-height:1.5;
+}
+#page-assistant .ni-q .ni-who{
+  display:block;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;
+  color:var(--blue-text);margin-bottom:4px;
+}
+#page-assistant .ni-a{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px 12px 12px 4px;overflow:hidden;
+}
+#page-assistant .ni-a-head{display:flex;align-items:center;gap:9px;padding:10px 14px 0;flex-wrap:wrap}
+#page-assistant .ni-a-who{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;color:#c3b9ff;font-weight:700;
+}
+#page-assistant .ni-a-body{padding:7px 14px 12px;font-size:13px;line-height:1.62;color:var(--text);max-width:74ch}
+#page-assistant .ni-a-body p{margin:0 0 .85em}
+#page-assistant .ni-a-body p:last-child{margin:0}
+
+/* Grounding strip. Two different facts, kept apart deliberately:
+   AVAILABILITY + AGE of each source is provable -- eight GET routes return the
+   data and seven carry last_updated. WHETHER THE ASSISTANT INCORPORATED a
+   source is NOT reported by /assistant/chat, and cannot be inferred from a
+   200: summarize_system_context() wraps each optional context line in a bare
+   except, so a healthy route can still be absent from the prompt. The strip
+   therefore says "available", never "used". */
+#page-assistant .ni-ground{border-top:1px solid var(--line2);background:var(--panel2);padding:9px 14px 10px}
+#page-assistant .ni-ground-k{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+  color:var(--muted2);margin-bottom:6px;
+}
+#page-assistant .ni-chips{display:flex;flex-wrap:wrap;gap:5px}
+#page-assistant .ni-chip{
+  font-family:'Space Mono',monospace;font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid var(--line);
+  background:var(--panel);color:var(--muted);display:inline-flex;align-items:center;gap:5px;
+}
+#page-assistant .ni-chip::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--muted2)}
+#page-assistant .ni-chip.on{color:#7ee3b4;border-color:rgba(61,220,151,.30)}
+#page-assistant .ni-chip.on::before{background:var(--green)}
+#page-assistant .ni-chip.stale{color:#f3cd7a;border-color:rgba(251,191,36,.30)}
+#page-assistant .ni-chip.stale::before{background:var(--yellow)}
+#page-assistant .ni-chip.off{color:var(--muted2);border-style:dashed}
+#page-assistant .ni-chip.off::before{background:transparent;box-shadow:inset 0 0 0 1px var(--muted2)}
+#page-assistant .ni-ground-note{font-size:12.5px;color:var(--muted2);line-height:1.45;margin-top:8px}
+#page-assistant .ni-ground-note b{color:var(--muted);font-weight:400}
+
+/* honest classification of what a line is */
+#page-assistant .ni-kind{
+  font-family:'Space Mono',monospace;font-size:11px;padding:2px 7px;border-radius:5px;letter-spacing:.6px;
+}
+#page-assistant .ni-kind.infer{color:#c3b9ff;background:var(--ai2);box-shadow:inset 0 0 0 1px rgba(155,140,255,.3)}
+#page-assistant .ni-kind.na{color:var(--muted2);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--line)}
+#page-assistant .ni-kind.warn{color:#f3cd7a;background:rgba(251,191,36,.12);box-shadow:inset 0 0 0 1px rgba(251,191,36,.32)}
+#page-assistant .ni-kind.bad{color:#ff9d9d;background:rgba(255,107,107,.12);box-shadow:inset 0 0 0 1px rgba(255,107,107,.34)}
+#page-assistant .ni-a-note{
+  display:flex;gap:8px;align-items:flex-start;padding:9px 14px;background:rgba(155,140,255,.06);
+  border-top:1px solid rgba(155,140,255,.2);font-size:12.5px;color:var(--muted);line-height:1.45;
+}
+
+/* states inside the log */
+#page-assistant .ni-state-note{
+  font-size:13px;color:var(--muted);line-height:1.55;padding:14px;border:1px dashed var(--line);
+  border-radius:10px;background:rgba(255,255,255,.012);
+}
+#page-assistant .ni-state-note b{display:block;color:var(--text);margin-bottom:4px}
+#page-assistant .ni-state-note code{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
+#page-assistant .ni-state-note.err{border-color:rgba(255,107,107,.34);background:rgba(255,107,107,.06)}
+#page-assistant .ni-state-note.err b{color:#ff9d9d}
+#page-assistant .ni-state-note.warn{border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.06)}
+#page-assistant .ni-state-note.warn b{color:#f3cd7a}
+#page-assistant .ni-skel{display:flex;flex-direction:column;gap:8px}
+#page-assistant .ni-skel i{
+  display:block;height:11px;border-radius:5px;
+  background:linear-gradient(90deg,var(--panel2) 25%,#182034 50%,var(--panel2) 75%);
+  background-size:200% 100%;animation:niSk 1.3s linear infinite;
+}
+#page-assistant .ni-skel i:nth-child(2){width:82%}
+#page-assistant .ni-skel i:nth-child(3){width:58%}
+@keyframes niSk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+#page-assistant .ni-thinking{
+  display:inline-flex;align-items:center;gap:8px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);
+}
+#page-assistant .ni-thinking i{
+  width:5px;height:5px;border-radius:50%;background:var(--ai);display:inline-block;animation:niBlink 1.2s infinite;
+}
+#page-assistant .ni-thinking i:nth-child(2){animation-delay:.2s}
+#page-assistant .ni-thinking i:nth-child(3){animation-delay:.4s}
+@keyframes niBlink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+/* ── composer ── */
+#page-assistant .ni-composer{
+  margin-top:12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius2);padding:11px 12px;
+}
+#page-assistant .ni-suggest{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+#page-assistant .ni-sg{
+  font-family:'Space Mono',monospace;font-size:11px;padding:8px 12px;min-height:36px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;
+}
+#page-assistant .ni-sg:hover{border-color:var(--muted2);color:var(--text)}
+#page-assistant .ni-sg:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+#page-assistant .ni-sg[disabled]{opacity:.5;cursor:default}
+#page-assistant .ni-crow{display:flex;gap:9px;align-items:flex-end}
+#page-assistant .ni-cfield{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+#page-assistant .ni-cfield label{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);
+}
+#page-assistant .ni-cinput{
+  width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  padding:11px 12px;font-size:13px;color:var(--text);min-height:44px;line-height:1.5;
+}
+#page-assistant .ni-cinput::placeholder{color:var(--muted2)}
+/* A real outline, not a box-shadow standing in for one: outline survives
+   forced-colors mode and is what an audit can actually measure. */
+#page-assistant .ni-cinput:focus-visible{outline:2px solid var(--blue);outline-offset:1px;border-color:var(--blue)}
+#page-assistant .ni-cinput:focus{border-color:var(--blue)}
+#page-assistant .ni-ask{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;padding:12px 18px;min-height:44px;
+  border-radius:8px;cursor:pointer;background:rgba(155,140,255,.16);color:#c3b9ff;
+  border:1px solid rgba(155,140,255,.34);font-weight:700;
+}
+#page-assistant .ni-ask:hover{background:rgba(155,140,255,.24)}
+#page-assistant .ni-ask:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+#page-assistant .ni-ask[disabled]{opacity:.55;cursor:default}
+#page-assistant .ni-chint{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:7px}
+
+/* ── rail ── */
+#page-assistant .ni-srow{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 0;border-bottom:1px solid var(--line2);
+}
+#page-assistant .ni-srow:last-child{border-bottom:0}
+#page-assistant .ni-sk{font-size:13px;color:var(--muted)}
+#page-assistant .ni-sv{font-family:'Space Mono',monospace;font-size:12px;color:var(--muted2);white-space:nowrap}
+#page-assistant .ni-sv.on{color:#7ee3b4}
+#page-assistant .ni-sv.stale{color:#f3cd7a}
+#page-assistant .ni-sv.off{color:var(--muted2)}
+#page-assistant .ni-rail-note{
+  font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);line-height:1.5;margin-top:9px;
+  padding-top:9px;border-top:1px solid var(--line2);
+}
+#page-assistant .ni-rail-note b{color:var(--muted);font-weight:400}
+#page-assistant .ni-rail-note code{font-size:11px}
+#page-assistant .ni-rail-empty{font-size:13px;color:var(--muted2)}
+#page-assistant .ni-task{
+  display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line2);
+  font-size:13px;color:var(--muted);
+}
+#page-assistant .ni-task:last-child{border-bottom:0}
+#page-assistant .ni-task::before{
+  content:'';width:5px;height:5px;border-radius:50%;background:var(--muted2);margin-top:7px;flex-shrink:0;
+}
+#page-assistant .ni-focus-line{font-size:13px;color:var(--text);line-height:1.5}
+#page-assistant .ni-lim{font-size:12.5px;color:var(--muted2);line-height:1.5}
+#page-assistant .ni-lim b{color:var(--muted);font-weight:400}
+#page-assistant .ni-lim-open{color:#f3cd7a}
+#page-assistant .ni-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ── desktop workspace ──────────────────────────────────────────────────────
+   The composer must be reachable without scrolling the page, so on desktop the
+   shell becomes a fixed-height workspace and the two columns scroll inside
+   themselves. Deliberately inside min-width:768px: an unscoped fit rule placed
+   after the mobile media block wins on mobile too and collapses the page. */
+@media(min-width:768px){
+  .app-shell:has(> .main-content #page-assistant.active){height:100vh;min-height:100vh;overflow:hidden}
+  .app-shell:has(> .main-content #page-assistant.active) .main-content{
+    min-height:0;display:flex;flex-direction:column;overflow:hidden;
+  }
+  .app-shell:has(> .main-content #page-assistant.active) > .main-content > .wrap{
+    flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:20px;
+  }
+  #page-assistant.active{flex:1;min-height:0;display:flex;flex-direction:column}
+  #page-assistant .ni-grid{flex:1;min-height:0}
+  #page-assistant .ni-rail{overflow-y:auto}
+}
+
+/* ── mobile ── */
+@media(max-width:767px){
+  #page-assistant .ni-id{display:block;margin-bottom:12px}
+  #page-assistant .ni-id h1{font-size:27px}
+  #page-assistant .ni-id-meta{margin-top:9px;padding-bottom:0}
+  /* Single column, and the context rail moves BELOW the conversation: the
+     answer is the reason the page exists, so it leads. */
+  #page-assistant .ni-grid{grid-template-columns:minmax(0,1fr);gap:12px}
+  #page-assistant .ni-log{overflow:visible}
+  #page-assistant .ni-q{max-width:88%}
+  #page-assistant .ni-a-body{max-width:none}
+  /* 44px floor for every touch target on the page. */
+  #page-assistant .ni-sg{min-height:44px;padding:12px 14px}
+  #page-assistant .ni-crow{flex-direction:column;align-items:stretch;gap:9px}
+  #page-assistant .ni-ask{width:100%;padding:12px 16px}
 }
 '''

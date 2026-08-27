@@ -163,10 +163,26 @@ def apply_assistant_action(action, value):
 
 def call_assistant_llm(message: str) -> dict:
     """Call NOVA Intelligence for assistant chat, via the gateway (spec §14 commit #5).
-    Returns {'action', 'value', 'reply'} on both success and every ordinary
-    gateway failure -- callers never see a raw exception or provider detail
-    from this function. Prompt-build failures and unexpected non-provider
-    adapter exceptions are not caught here; they propagate to the route.
+
+    Returns {'action', 'value', 'reply', 'outcome', 'error_code', 'cached'} on
+    both success and every ordinary gateway failure -- callers never see a raw
+    exception or provider detail from this function. Prompt-build failures and
+    unexpected non-provider adapter exceptions are not caught here; they
+    propagate to the route.
+
+    `outcome` exists because a reply string alone cannot tell a caller whether
+    NOVA answered. The gateway already distinguishes these cases via
+    `success` / `error_code`; the previous version of this function collapsed
+    them into a bare reply, which is why the page rendered
+    "AI features are not configured right now." as a NOVA analysis. The four
+    values are disjoint and exhaustive for a non-raising call:
+
+        'ok'          a real answer -- and the only outcome that may act
+        'empty'       the provider succeeded but returned no reply text
+        'malformed'   the provider succeeded but the payload is not the
+                      {action,value,reply} contract
+        'unavailable' the gateway failed; `reply` is its user-safe message
+                      and `error_code` is the fixed-vocabulary reason
     """
     response = request_intelligence(
         'assistant',
@@ -177,10 +193,37 @@ def call_assistant_llm(message: str) -> dict:
         user_id='pedro',
         request_id=str(uuid.uuid4()),
     )
-    if response.success:
-        return response.structured_data
+
+    if not response.success:
+        return {
+            'action': 'none',
+            'value': '',
+            'reply': response.user_message,
+            'outcome': 'unavailable',
+            'error_code': response.error_code,
+            'cached': False,
+        }
+
+    data = response.structured_data
+    # A success envelope still has to carry the agreed payload. parse_response()
+    # can hand back None or a non-conforming object; that is a distinct failure
+    # from "the gateway was down", and must not be reported as an answer.
+    if not isinstance(data, dict) or 'reply' not in data:
+        return {
+            'action': 'none',
+            'value': '',
+            'reply': '',
+            'outcome': 'malformed',
+            'error_code': 'MALFORMED_OUTPUT',
+            'cached': bool(response.cached),
+        }
+
+    reply = str(data.get('reply') or '').strip()
     return {
-        'action': 'none',
-        'value': '',
-        'reply': response.user_message,
+        'action': str(data.get('action') or 'none'),
+        'value': data.get('value') or '',
+        'reply': reply,
+        'outcome': 'ok' if reply else 'empty',
+        'error_code': None,
+        'cached': bool(response.cached),
     }

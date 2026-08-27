@@ -231,6 +231,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'journal') { refreshJournal(); switchJTab('trades'); }
     if (btn.dataset.page === 'settings') { refreshSettings(); }
+    if (btn.dataset.page === 'assistant') { refreshNovaIntelligence(); }
   });
 });
 
@@ -1460,70 +1461,403 @@ async function refreshSettings() {
   } catch(e) { console.error('refreshSettings:', e); }
 }
 
-// ════════ ASSISTANT CHAT ════════
-const chatOutput = document.getElementById('assistantOutput');
-const chatInput = document.getElementById('assistantInput');
-const sendBtn = document.getElementById('assistantSend');
-const typingIndicator = document.getElementById('typingIndicator');
+// ════════ NOVA INTELLIGENCE ════════
+// Three defects in the previous version are corrected here, and each fix is
+// load-bearing rather than cosmetic:
+//
+//  1. A failure was rendered as an answer. `res.ok` and the response `status`
+//     were both unchecked, so "AI features are not configured right now."
+//     appeared as a NOVA message stamped ANALYSIS. Every non-answer now
+//     renders as a system note, never in NOVA's voice.
+//  2. The response tag was invented client-side. inferResponseTag() keyword-
+//     matched the reply to produce ANALYSIS / RISK / EXECUTION / CALENDAR --
+//     labels the backend never asserted, in a product that cannot execute.
+//     It is gone; the only badge is "NOVA inference", which is true of every
+//     reply the model returns.
+//  3. Message text went through innerHTML. All text is written with
+//     textContent now.
 
-function inferResponseTag(text) {
-  const t = (text || '').toLowerCase();
-  if (/risk|danger|warning|threat|caution|stop|avoid/.test(t)) return 'RISK';
-  if (/buy|sell|entry|exit|trade|execute|position|size|stop.loss|target/.test(t)) return 'EXECUTION';
-  if (/earnings|fomc|cpi|event|calendar|report|release|tomorrow|today at/.test(t)) return 'CALENDAR';
-  return 'ANALYSIS';
+const niLog      = document.getElementById('assistantOutput');
+const niInput    = document.getElementById('assistantInput');
+const niAskBtn   = document.getElementById('assistantSend');
+const niIdleNote = document.getElementById('niIdleNote');
+const niFresh    = document.getElementById('niContextFresh');
+const niSeeSub   = document.getElementById('niSeeSub');
+const niSourcesEl= document.getElementById('niSources');
+const niMemoryEl = document.getElementById('niMemory');
+
+let _niBusy = false;
+let _niSourceState = [];
+
+// Each entry is a context source the assistant prompt is built from, paired
+// with the route that actually serves it. Availability and age come from
+// these routes -- NOT from /assistant/chat, which reports neither.
+const NI_SOURCES = [
+  ['Session & risk posture', '/dashboard-data'],
+  ['Market reality',         '/market-reality'],
+  ['Market structure',       '/market-structure'],
+  ['Liquidity',              '/liquidity'],
+  ['Participation',          '/participation'],
+  ['Cross-market',           '/cross-market'],
+  ['Synthesis',              '/synthesis'],
+  ['Session memory',         '/session-memory']
+];
+
+function niEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
 }
 
-function appendMsg(role, text, tag) {
-  const clearfix = document.createElement('div');
-  clearfix.className = 'msg-clearfix';
-
-  const el = document.createElement('div');
-  el.className = 'msg ' + role;
-  if (role === 'assistant') {
-    const resolvedTag = tag || inferResponseTag(text);
-    el.innerHTML = `<span class="role">NOVA</span>${text}<div><span class="msg-tag ${resolvedTag}">${resolvedTag}</span></div>`;
-  } else {
-    el.innerHTML = `<span class="role">YOU</span>${text}`;
+function _niStamp(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const direct = obj.last_updated || obj.updated_at || obj.generated_at || obj.timestamp;
+  if (direct) return direct;
+  const nests = ['risk', 'data', 'state', 'reality', 'synthesis', 'memory'];
+  for (let i = 0; i < nests.length; i++) {
+    const v = obj[nests[i]];
+    if (v && typeof v === 'object' && v.last_updated) return v.last_updated;
   }
-  chatOutput.appendChild(el);
-  chatOutput.appendChild(clearfix);
-  chatOutput.scrollTop = chatOutput.scrollHeight;
+  return null;
 }
 
-function showTyping(show) {
-  if (typingIndicator) typingIndicator.classList.toggle('active', show);
-  if (show) chatOutput.scrollTop = chatOutput.scrollHeight;
+function _niAge(ts) {
+  if (!ts) return null;
+  const s = String(ts);
+  const tail = s.length > 11 ? s.slice(11) : '';
+  const hasTz = s.endsWith('Z') || tail.indexOf('+') >= 0 || tail.lastIndexOf('-') > 0;
+  const t = Date.parse(hasTz ? s : s + 'Z');
+  if (!isFinite(t)) return null;
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 0) return 'just now';
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm old';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h old';
+  return Math.floor(hrs / 24) + 'd old';
+}
+
+// A source is STALE past this age. 6h keeps an intraday read honest without
+// flagging an overnight file the moment the session rolls.
+const NI_STALE_MINUTES = 360;
+
+function _niClassify(ok, ts) {
+  if (!ok) return { cls: 'off', label: 'unavailable' };
+  const age = _niAge(ts);
+  if (!age) return { cls: 'on', label: 'available' };
+  const s = String(ts);
+  const tail = s.length > 11 ? s.slice(11) : '';
+  const hasTz = s.endsWith('Z') || tail.indexOf('+') >= 0 || tail.lastIndexOf('-') > 0;
+  const mins = Math.floor((Date.now() - Date.parse(hasTz ? s : s + 'Z')) / 60000);
+  return { cls: mins > NI_STALE_MINUTES ? 'stale' : 'on', label: age };
+}
+
+// ── context rail ──────────────────────────────────────────────────────────
+async function niRefreshSources() {
+  const results = await Promise.all(NI_SOURCES.map(async ([name, route]) => {
+    try {
+      const res = await fetch(route);
+      if (!res.ok) return { name, route, ok: false, ts: null };
+      const data = await res.json();
+      return { name, route, ok: true, ts: _niStamp(data) };
+    } catch (e) {
+      return { name, route, ok: false, ts: null };
+    }
+  }));
+
+  _niSourceState = results.map(r => {
+    const c = _niClassify(r.ok, r.ts);
+    return { name: r.name, route: r.route, ok: r.ok, cls: c.cls, label: c.label };
+  });
+
+  niSourcesEl.textContent = '';
+  _niSourceState.forEach(s => {
+    const row = niEl('div', 'ni-srow');
+    row.appendChild(niEl('span', 'ni-sk', s.name));
+    row.appendChild(niEl('span', 'ni-sv ' + s.cls, s.label));
+    niSourcesEl.appendChild(row);
+  });
+
+  const up    = _niSourceState.filter(s => s.ok).length;
+  const stale = _niSourceState.filter(s => s.cls === 'stale').length;
+  if (niSeeSub) niSeeSub.textContent = up + ' of ' + _niSourceState.length + ' available';
+
+  if (niFresh) {
+    niFresh.classList.remove('ok', 'stale', 'down', 'busy');
+    if (up === 0) {
+      niFresh.classList.add('down');
+      niFresh.textContent = 'No context available';
+    } else if (up < _niSourceState.length || stale > 0) {
+      niFresh.classList.add('stale');
+      niFresh.textContent = up + '/' + _niSourceState.length + ' available' + (stale ? ', ' + stale + ' stale' : '');
+    } else {
+      niFresh.classList.add('ok');
+      niFresh.textContent = 'All ' + _niSourceState.length + ' sources available';
+    }
+  }
+}
+
+// ── working memory (real GET /assistant-data) ─────────────────────────────
+function _niMemGroup(title, items, emptyText) {
+  const frag = document.createDocumentFragment();
+  frag.appendChild(niEl('div', 'ni-ground-k', title));
+  if (!items || !items.length) {
+    frag.appendChild(niEl('div', 'ni-rail-empty', emptyText));
+    return frag;
+  }
+  items.forEach(t => frag.appendChild(niEl('div', 'ni-task', String(t))));
+  return frag;
+}
+
+async function niRefreshMemory() {
+  try {
+    const res = await fetch('/assistant-data');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+
+    niMemoryEl.textContent = '';
+    niMemoryEl.appendChild(niEl('div', 'ni-ground-k', 'Daily focus'));
+    niMemoryEl.appendChild(
+      niEl('div', d.daily_focus ? 'ni-focus-line' : 'ni-rail-empty',
+           d.daily_focus || 'No focus set.')
+    );
+    const tasks = niEl('div');
+    tasks.style.marginTop = '12px';
+    tasks.appendChild(_niMemGroup('Tasks', d.tasks, 'No tasks.'));
+    niMemoryEl.appendChild(tasks);
+    const rem = niEl('div');
+    rem.style.marginTop = '12px';
+    rem.appendChild(_niMemGroup('Reminders', d.reminders, 'No reminders.'));
+    niMemoryEl.appendChild(rem);
+
+    const age = _niAge(d.last_updated);
+    if (age) {
+      const st = niEl('div', 'ni-ground-k', 'Saved ' + age);
+      st.style.marginTop = '12px';
+      niMemoryEl.appendChild(st);
+    }
+  } catch (e) {
+    niMemoryEl.textContent = '';
+    niMemoryEl.appendChild(niEl('div', 'ni-rail-empty', 'Working memory could not be read.'));
+  }
+}
+
+function refreshNovaIntelligence() {
+  niRefreshSources();
+  niRefreshMemory();
+}
+
+// ── conversation rendering ────────────────────────────────────────────────
+function niHideIdle() {
+  if (niIdleNote && niIdleNote.parentNode) niIdleNote.parentNode.removeChild(niIdleNote);
+}
+
+function niScroll() { niLog.scrollTop = niLog.scrollHeight; }
+
+function niAppendQuestion(text) {
+  niHideIdle();
+  const turn = niEl('div', 'ni-turn');
+  const q = niEl('div', 'ni-q');
+  q.appendChild(niEl('span', 'ni-who', 'You'));
+  q.appendChild(document.createTextNode(String(text)));
+  turn.appendChild(q);
+  niLog.appendChild(turn);
+  niScroll();
+  return turn;
+}
+
+// The pending card carries a skeleton in the shape of the answer, so the
+// arrival of a reply is a fill rather than a jump.
+function niAppendPending() {
+  const a = niEl('div', 'ni-a');
+  const head = niEl('div', 'ni-a-head');
+  head.appendChild(niEl('span', 'ni-a-who', 'NOVA'));
+  const think = niEl('span', 'ni-thinking');
+  think.appendChild(niEl('i'));
+  think.appendChild(niEl('i'));
+  think.appendChild(niEl('i'));
+  think.appendChild(niEl('span', null, 'reading context'));
+  head.appendChild(think);
+  a.appendChild(head);
+  const body = niEl('div', 'ni-a-body');
+  const sk = niEl('div', 'ni-skel');
+  sk.appendChild(niEl('i'));
+  sk.appendChild(niEl('i'));
+  sk.appendChild(niEl('i'));
+  body.appendChild(sk);
+  a.appendChild(body);
+  niLog.appendChild(a);
+  niScroll();
+  return a;
+}
+
+// The grounding strip states AVAILABILITY, never use. See ui/pages/nova_ai.py
+// for why the distinction is not cosmetic.
+function niGroundStrip() {
+  const g = niEl('div', 'ni-ground');
+  g.appendChild(niEl('div', 'ni-ground-k', 'Context available when asked'));
+  const chips = niEl('div', 'ni-chips');
+  (_niSourceState.length ? _niSourceState : []).forEach(s => {
+    const c = niEl('span', 'ni-chip ' + s.cls);
+    c.appendChild(document.createTextNode(s.name + (s.cls === 'off' ? '' : ' · ' + s.label)));
+    chips.appendChild(c);
+  });
+  if (!_niSourceState.length) chips.appendChild(niEl('span', 'ni-chip off', 'not read'));
+  g.appendChild(chips);
+
+  const down  = _niSourceState.filter(s => !s.ok).length;
+  const stale = _niSourceState.filter(s => s.cls === 'stale').length;
+
+  // The availability-is-not-use sentence is unconditional. It was previously
+  // on the healthy branch only, which meant the page dropped its most
+  // important caveat in exactly the degraded case where it matters most.
+  if (down || stale) {
+    const warn = niEl('div', 'ni-ground-note');
+    warn.appendChild(niEl('b', null,
+      (down ? down + ' source' + (down > 1 ? 's' : '') + ' did not answer' : '') +
+      (down && stale ? ', and ' : '') +
+      (stale ? stale + ' ' + (stale > 1 ? 'are' : 'is') + ' stale' : '') + '. '));
+    warn.appendChild(document.createTextNode(
+      'NOVA is not told which were missing or old, so treat any claim resting on them as unsupported.'));
+    g.appendChild(warn);
+  }
+
+  const note = niEl('div', 'ni-ground-note');
+  note.appendChild(document.createTextNode(
+    'Availability and age are read from each source\u2019s own route. '));
+  note.appendChild(niEl('b', null,
+    'Whether NOVA incorporated each one is not reported by the chat route \u2014 availability is proven, use is not.'));
+  g.appendChild(note);
+  return g;
+}
+
+function niFillAnswer(card, reply) {
+  card.textContent = '';
+  const head = niEl('div', 'ni-a-head');
+  head.appendChild(niEl('span', 'ni-a-who', 'NOVA'));
+  head.appendChild(niEl('span', 'ni-kind infer', 'NOVA inference'));
+  card.appendChild(head);
+
+  const body = niEl('div', 'ni-a-body');
+  body.appendChild(niEl('p', null, String(reply)));
+  card.appendChild(body);
+
+  card.appendChild(niGroundStrip());
+
+  const note = niEl('div', 'ni-a-note');
+  note.appendChild(niEl('span', 'ni-kind na', 'No citations'));
+  note.appendChild(niEl('span', null,
+    'The intelligence layer returns no source references. Nothing above links to a document.'));
+  card.appendChild(note);
+  niScroll();
+}
+
+// Every non-answer replaces the pending card with a SYSTEM note. It is never
+// given NOVA's speaker label, never given the inference badge, and never
+// given the grounding strip -- none of which would be true of it.
+function niFillNotice(card, kind, badge, title, detail, meta) {
+  card.className = 'ni-state-note ' + (kind === 'err' ? 'err' : 'warn');
+  card.textContent = '';
+  const b = niEl('b');
+  b.appendChild(niEl('span', 'ni-kind ' + (kind === 'err' ? 'bad' : 'warn'), badge));
+  b.appendChild(document.createTextNode(' ' + title));
+  card.appendChild(b);
+  card.appendChild(document.createTextNode(detail));
+  if (meta) {
+    const m = niEl('div');
+    m.style.marginTop = '7px';
+    m.appendChild(niEl('code', null, meta));
+    card.appendChild(m);
+  }
+  niScroll();
+}
+
+function niSetBusy(busy) {
+  _niBusy = busy;
+  niAskBtn.disabled = busy;
+  niAskBtn.textContent = busy ? 'Asking…' : 'Ask';
+  document.querySelectorAll('#page-assistant .ni-sg').forEach(b => { b.disabled = busy; });
 }
 
 async function sendChat(overrideMsg) {
-  const msg = overrideMsg || chatInput.value.trim();
+  if (_niBusy) return;
+  const msg = overrideMsg || niInput.value.trim();
   if (!msg) return;
-  chatInput.value = '';
-  sendBtn.disabled = true;
-  appendMsg('user', msg);
-  showTyping(true);
+  niInput.value = '';
+  niSetBusy(true);
+  niAppendQuestion(msg);
+  const card = niAppendPending();
+
+  // Availability is re-read per question, so the strip describes THIS ask.
+  await niRefreshSources();
+
   try {
     const res = await fetch('/assistant/chat', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({message: msg})
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
     });
-    const data = await res.json();
-    showTyping(false);
-    appendMsg('assistant', data.reply || 'No response.');
+
+    // Checked, unlike before: an HTTP failure is not an answer.
+    if (!res.ok) {
+      niFillNotice(card, 'err', 'Request failed',
+        'NOVA could not be reached.',
+        'The server returned an error, so there is no answer to show. Nothing was recorded.',
+        'HTTP ' + res.status);
+      return;
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      niFillNotice(card, 'err', 'Unreadable response',
+        'The reply could not be read.',
+        'The server responded, but the body was not valid JSON. No answer is being shown rather than a guess.');
+      return;
+    }
+
+    const outcome = String((data && data.outcome) || (data && data.status) || 'ok');
+    const reply   = data && typeof data.reply === 'string' ? data.reply.trim() : '';
+
+    if (outcome === 'ok' && reply) {
+      niFillAnswer(card, reply);
+      // Only a real answer may have changed working memory.
+      niRefreshMemory();
+    } else if (outcome === 'unavailable') {
+      niFillNotice(card, 'warn', 'AI unavailable',
+        'NOVA did not answer.',
+        reply || 'The intelligence layer is not available right now.',
+        data.error_code ? 'error_code: ' + data.error_code : null);
+    } else if (outcome === 'empty') {
+      niFillNotice(card, 'warn', 'Empty reply',
+        'NOVA returned no answer.',
+        'The request succeeded but came back with no text. Showing nothing is more honest than filling the gap.');
+    } else if (outcome === 'malformed') {
+      niFillNotice(card, 'err', 'Malformed reply',
+        'The response did not match the expected shape.',
+        'The reply arrived but did not carry the agreed fields, so it is not being displayed as analysis.',
+        data.error_code ? 'error_code: ' + data.error_code : null);
+    } else {
+      niFillNotice(card, 'err', 'Request failed',
+        'NOVA did not answer.',
+        reply || 'The request failed before an answer was produced.',
+        data.error_code ? 'error_code: ' + data.error_code : null);
+    }
   } catch (err) {
-    showTyping(false);
-    appendMsg('assistant', 'Connection error. Please try again.');
+    niFillNotice(card, 'err', 'No connection',
+      'NOVA could not be reached.',
+      'The request did not complete. This is a connection failure, not an answer.');
+  } finally {
+    niSetBusy(false);
+    niInput.focus();
   }
-  sendBtn.disabled = false;
-  chatInput.focus();
 }
 
-sendBtn.addEventListener('click', () => sendChat());
-chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
-
-document.querySelectorAll('.quick-cmd-btn').forEach(btn => {
+if (niAskBtn) niAskBtn.addEventListener('click', () => sendChat());
+if (niInput) niInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+document.querySelectorAll('#page-assistant .ni-sg').forEach(btn => {
   btn.addEventListener('click', () => sendChat(btn.dataset.cmd));
 });
 

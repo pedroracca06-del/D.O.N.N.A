@@ -753,8 +753,13 @@ _CRITICAL_DOM_IDS = (
     'novaMarketSummaryPanel', 'novaMarketSummaryBtn', 'novaMarketSummaryLoading',
     'novaMarketSummaryText', 'novaMarketSummaryError',
     'sidebarEconCalendar2', 'moversGainers', 'moversLosers',
-    # NOVA AI (Assistant)
-    'assistantOutput', 'typingIndicator', 'assistantInput', 'assistantSend',
+    # NOVA Intelligence. The approved composition replaced the single
+    # "Command Interface" panel with a conversation + context rail, so
+    # 'typingIndicator' is gone by design: in-flight state is now a skeleton
+    # inside the pending answer card, not a separate always-present element.
+    # The three ids the conversation depends on are unchanged.
+    'assistantOutput', 'assistantInput', 'assistantSend',
+    'niIdleNote', 'niContextFresh', 'niSeeSub', 'niSources', 'niMemory',
     # Modals (owned by ui/pages/journal.py)
     'jtdBackdrop', 'jtdBody', 'jModalBackdrop', 'jSubmitBtn', 'jFormMsg',
     # Settings (post-correction: no setTradingStatus)
@@ -815,6 +820,20 @@ _ACTIVE_FETCH_TARGETS = (
     # (both routes pre-existed this commit and were already used elsewhere
     # in the app; Overview did not consume them before).
     '/market-structure', '/liquidity',
+    # NOVA Intelligence implementation: the context rail reports per-source
+    # AVAILABILITY and AGE, which it can only do by reading each source's own
+    # route. All nine pre-exist this commit and none is new backend surface;
+    # '/assistant-data' is the existing working-memory read, and the other
+    # eight are the sources summarize_system_context() already builds the
+    # prompt from.
+    #
+    # NOTE: the rail issues these through a table (NI_SOURCES) and calls
+    # fetch(route) with a variable, so the literal-regex scan in
+    # test_shell_checkpoint_introduces_no_new_fetch_target does NOT see them.
+    # This allowlist entry is therefore the only place they are recorded --
+    # it is documentation, not a check that fired.
+    '/assistant-data', '/market-reality', '/cross-market',
+    '/participation', '/synthesis', '/session-memory',
 )
 
 

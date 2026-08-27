@@ -197,7 +197,42 @@ def test_call_assistant_llm_returns_structured_data_on_success(monkeypatch):
     monkeypatch.setattr(svc, 'request_intelligence', lambda *a, **kw: _success_envelope(expected))
     monkeypatch.setattr(svc, 'summarize_system_context', lambda: 'ctx')
 
-    assert svc.call_assistant_llm('anything') == expected
+    result = svc.call_assistant_llm('anything')
+    assert result['action'] == 'set_focus'
+    assert result['value'] == 'NVDA'
+    assert result['reply'] == 'Focusing on NVDA.'
+    # A real answer is the only outcome allowed to act on working memory.
+    assert result['outcome'] == 'ok'
+    assert result['error_code'] is None
+
+
+def test_call_assistant_llm_reports_empty_reply_as_empty_not_ok(monkeypatch):
+    """A success envelope carrying no reply text is not an answer."""
+    import services.assistant as svc
+
+    monkeypatch.setattr(svc, 'request_intelligence',
+                        lambda *a, **kw: _success_envelope({'action': 'none', 'value': '', 'reply': '   '}))
+    monkeypatch.setattr(svc, 'summarize_system_context', lambda: 'ctx')
+
+    result = svc.call_assistant_llm('anything')
+    assert result['outcome'] == 'empty'
+    assert result['reply'] == ''
+
+
+@pytest.mark.parametrize('payload', [None, 'a bare string', [], {'action': 'none', 'value': ''}])
+def test_call_assistant_llm_reports_non_conforming_payload_as_malformed(monkeypatch, payload):
+    """parse_response() can hand back something that is not the agreed
+    {action,value,reply} contract. That is a distinct failure from the gateway
+    being down, and must never be presented as an answer."""
+    import services.assistant as svc
+
+    monkeypatch.setattr(svc, 'request_intelligence', lambda *a, **kw: _success_envelope(payload))
+    monkeypatch.setattr(svc, 'summarize_system_context', lambda: 'ctx')
+
+    result = svc.call_assistant_llm('anything')
+    assert result['outcome'] == 'malformed'
+    assert result['error_code'] == 'MALFORMED_OUTPUT'
+    assert result['reply'] == ''
 
 
 @pytest.mark.parametrize('code,message', [
@@ -220,7 +255,15 @@ def test_call_assistant_llm_maps_every_gateway_error_code(monkeypatch, code, mes
     monkeypatch.setattr(svc, 'summarize_system_context', lambda: 'ctx')
 
     result = svc.call_assistant_llm('anything')
-    assert result == {'action': 'none', 'value': '', 'reply': message}
+    assert result['action'] == 'none'
+    assert result['value'] == ''
+    # The user-safe message still passes through untouched...
+    assert result['reply'] == message
+    # ...but it is now labelled as a failure, so no caller can mistake it for
+    # an answer. This is the defect that let the page render
+    # "AI features are not configured right now." as a NOVA analysis.
+    assert result['outcome'] == 'unavailable'
+    assert result['error_code'] == code.value
 
 
 def test_call_assistant_llm_does_not_import_client_or_assistant_model():
@@ -287,14 +330,52 @@ def test_assistant_chat_success_preserves_response_shape():
 
 
 def test_assistant_chat_gateway_failure_message_passes_through_unmodified():
+    """The user-safe message is preserved verbatim -- but the route must not
+    call it 'ok'. Reporting a failure as a success is exactly what made the
+    frontend render it in NOVA's voice."""
     import main
-    fake_result = {'action': 'none', 'value': '', 'reply': 'AI credits are unavailable right now — try again later.'}
+    fake_result = {'action': 'none', 'value': '', 'reply': 'AI credits are unavailable right now — try again later.',
+                   'outcome': 'unavailable', 'error_code': 'INSUFFICIENT_CREDITS', 'cached': False}
+    with patch.object(main, 'call_assistant_llm', return_value=fake_result), \
+         patch.object(main, 'apply_assistant_action') as mock_apply:
+        result = asyncio.run(main.assistant_chat(_FakeRequest({'message': 'hello'})))
+
+    assert result['reply'] == 'AI credits are unavailable right now — try again later.'
+    assert result['status'] == 'unavailable'
+    assert result['outcome'] == 'unavailable'
+    assert result['error_code'] == 'INSUFFICIENT_CREDITS'
+    # A failed call carries no trustworthy action, so working memory is read,
+    # never written.
+    mock_apply.assert_not_called()
+
+
+@pytest.mark.parametrize('outcome,status', [
+    ('ok', 'ok'), ('empty', 'empty'), ('malformed', 'malformed'), ('unavailable', 'unavailable'),
+])
+def test_assistant_chat_status_is_distinct_per_outcome(outcome, status):
+    """unavailable / empty / malformed / successful must be distinguishable by
+    the client without inspecting the reply text."""
+    import main
+    fake_result = {'action': 'none', 'value': '', 'reply': 'x' if outcome == 'ok' else '',
+                   'outcome': outcome, 'error_code': None, 'cached': False}
     with patch.object(main, 'call_assistant_llm', return_value=fake_result), \
          patch.object(main, 'apply_assistant_action', return_value={'daily_focus': None, 'tasks': [], 'reminders': []}):
         result = asyncio.run(main.assistant_chat(_FakeRequest({'message': 'hello'})))
 
+    assert result['status'] == status
+    assert result['outcome'] == outcome
+
+
+def test_assistant_chat_only_a_real_answer_may_write_working_memory():
+    import main
+    fake_result = {'action': 'set_focus', 'value': 'NVDA', 'reply': 'Focusing on NVDA.',
+                   'outcome': 'ok', 'error_code': None, 'cached': False}
+    with patch.object(main, 'call_assistant_llm', return_value=fake_result), \
+         patch.object(main, 'apply_assistant_action', return_value={'daily_focus': 'NVDA', 'tasks': [], 'reminders': []}) as mock_apply:
+        result = asyncio.run(main.assistant_chat(_FakeRequest({'message': 'focus on NVDA'})))
+
     assert result['status'] == 'ok'
-    assert result['reply'] == 'AI credits are unavailable right now — try again later.'
+    mock_apply.assert_called_once_with('set_focus', 'NVDA')
 
 
 def test_assistant_chat_unexpected_exception_returns_sanitized_shape():
