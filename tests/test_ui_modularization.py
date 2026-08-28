@@ -762,8 +762,14 @@ _CRITICAL_DOM_IDS = (
     'niIdleNote', 'niContextFresh', 'niSeeSub', 'niSources', 'niMemory',
     # Modals (owned by ui/pages/journal.py)
     'jtdBackdrop', 'jtdBody', 'jModalBackdrop', 'jSubmitBtn', 'jFormMsg',
-    # Settings (post-correction: no setTradingStatus)
-    'setIntegrations', 'setChatModel', 'setFastModel', 'setServerTime',
+    # Settings. The approved composition replaced three fixed value spans
+    # (setChatModel / setFastModel / setServerTime) with a System row list
+    # built by _stRenderSystem() into 'setSystemRows', so those three ids are
+    # gone by design. 'setTradingStatus' remains absent.
+    'setIntegrations', 'setSystemRows', 'setTiles', 'setWmRows', 'setBand',
+    'setSaveTiles', 'setDiscardTiles', 'setSaveMsg', 'setTileCount', 'setTileErr',
+    'setClearTasks', 'setClearReminders', 'setConfirm', 'setStatusPill',
+    'setCountEditable', 'setCountEnv', 'setCountReadonly',
     # Journal
     'jOpenModal', 'jOvTrades', 'jOvPnl', 'jOvEvals', 'jOvWinRate', 'jOvPF', 'jOvWeek',
     # The approved Journal composition (artifact b22fcc6b frame 2) replaced the
@@ -834,6 +840,12 @@ _ACTIVE_FETCH_TARGETS = (
     # it is documentation, not a check that fired.
     '/assistant-data', '/market-reality', '/cross-market',
     '/participation', '/synthesis', '/session-memory',
+    # Settings implementation: the two existing working-memory clear routes.
+    # Both pre-date this commit and are already exercised by NOVA Intelligence's
+    # action vocabulary; Settings calls them from a variable, so the literal
+    # regex scan does NOT see them and this entry is documentation, not a check
+    # that fired.
+    '/assistant/clear-tasks', '/assistant/clear-reminders',
 )
 
 
@@ -997,10 +1009,15 @@ def test_execution_bot_mandatory_correction_applied_in_settings_module():
     from ui.pages.settings import SETTINGS_HTML
     for marker in ('setTradingStatus', 'TRADING SUBSYSTEM', 'Execution Bot', 'H.A.R.V.E.Y', 'ORB/PROS/ICT'):
         assert marker not in SETTINGS_HTML, f'{marker!r} must not appear in ui/pages/settings.py'
-    # Settings must still report active, user-relevant info.
-    assert 'INTEGRATIONS' in SETTINGS_HTML
-    assert 'SYSTEM' in SETTINGS_HTML
+    # Settings must still report active, user-relevant info. The uppercase
+    # kicker divs are now real <h2> headings, so the sections are asserted by
+    # their heading text rather than by the old all-caps label.
+    assert '<h2 id="setIntTitle">Integrations</h2>' in SETTINGS_HTML
+    assert '<h2 id="setSysTitle">System</h2>' in SETTINGS_HTML
     assert 'setIntegrations' in SETTINGS_HTML
+    assert 'setSystemRows' in SETTINGS_HTML
+    # And it must never claim a connection it cannot prove.
+    assert 'CONNECTED' not in SETTINGS_HTML
 
 
 def test_execution_bot_mandatory_correction_applied_in_scripts_module():
@@ -1175,7 +1192,9 @@ _APPROVED_PAGE_HEADINGS = {
     'page-journal':   'Journal',
     'page-news':      'Markets',
     'page-assistant': 'NOVA Intelligence',
-    'page-settings':  'SETTINGS',
+    # Settings' heading is now a real <h1> in sentence case. The old page had
+    # no heading element at all -- 'SETTINGS' was a styled div.
+    'page-settings':  'Settings',
 }
 
 

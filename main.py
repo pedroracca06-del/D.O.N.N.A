@@ -911,14 +911,27 @@ async def risk_engine_reset_stop():
 
 @app.post('/risk-engine/settings')
 async def risk_engine_settings(request: Request):
-    body         = await request.json()
-    account_size = body.get('account_size')
-    risk_pct     = body.get('risk_pct')
-    try:
-        if account_size is not None: account_size = float(account_size)
-        if risk_pct     is not None: risk_pct     = float(risk_pct)
-    except Exception:
-        raise HTTPException(status_code=400, detail='account_size and risk_pct must be numbers')
+    """Update risk-engine sizing inputs.
+
+    Retired-trading gate first: refuses before reading or writing any state.
+    Previously ungated, and it accepted risk_pct=-50 with status 'ok' because
+    only non-numeric input was rejected -- there was no range check at all.
+    """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_payload('risk_engine_settings')
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='body must be an object')
+    _reject_unknown_fields(body, _RISK_SETTINGS_FIELDS, 'risk-engine settings')
+
+    account_size = None
+    if body.get('account_size') is not None:
+        account_size = _require_finite('account_size', body['account_size'], 1.0, 1e9)
+    risk_pct = None
+    if body.get('risk_pct') is not None:
+        risk_pct = _require_finite('risk_pct', body['risk_pct'], 0.0, 100.0)
+
     state = update_re_settings(account_size=account_size, risk_pct=risk_pct)
     return {'status': 'ok', 'settings': state}
 
@@ -2193,40 +2206,130 @@ async def execution_cancel_orders():
     return await asyncio.to_thread(cancel_all_orders)
 
 
+# Legacy trading-configuration write routes.
+#
+# Both of the routes below persist configuration belonging to the retired
+# trading subsystem. Neither carried a kill-switch check, so with
+# NOVA_TRADING_SUBSYSTEM_ENABLED false it was still possible to durably write
+# execution_mode='live_personal' and loosen every governance parameter --
+# a change that would take effect the moment the switch were flipped.
+#
+# They are now gated by the same flag as every broker-write entry point in
+# services/execution.py, and they refuse BEFORE reading or writing any state,
+# so a blocked request cannot mutate memory or any file. The kill switch is
+# checked independently of the validation below: validation never re-enables
+# anything, and the broker-write guards in services/execution.py are
+# untouched by either route.
+_EXECUTION_MODES = ('paper', 'paper_validation', 'autonomous_test', 'prop_firm', 'live_personal')
+_MIN_GRADES = ('A+', 'A', 'B', 'C')
+_EXECUTION_SETTINGS_FIELDS = frozenset(
+    {'execution_mode', 'min_grade', 'max_trades_per_day', 'cooldown_minutes'})
+_RISK_SETTINGS_FIELDS = frozenset({'account_size', 'risk_pct'})
+
+
+def _trading_disabled_payload(action: str) -> dict:
+    """The established refusal contract, mirroring services/execution.py."""
+    return {
+        'status': 'TRADING_SUBSYSTEM_DISABLED',
+        'action': action,
+        'reason': 'NOVA_TRADING_SUBSYSTEM_ENABLED is false — trading subsystem retired pending rebuild approval',
+    }
+
+
+def _require_finite(name: str, raw, lo: float, hi: float) -> float:
+    """Reject NaN/Infinity, non-numeric input, and out-of-range values.
+
+    bool is excluded explicitly: it is a subclass of int, so True would
+    otherwise pass as 1.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise HTTPException(status_code=400, detail=f'{name} must be a number')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f'{name} must be a number')
+    if value != value or value in (float('inf'), float('-inf')):
+        raise HTTPException(status_code=400, detail=f'{name} must be finite')
+    if not (lo <= value <= hi):
+        raise HTTPException(status_code=400, detail=f'{name} must be between {lo} and {hi}')
+    return value
+
+
+def _reject_unknown_fields(body: dict, allowed: frozenset, label: str) -> None:
+    unknown = sorted(k for k in body if k not in allowed)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'unknown {label} field(s): {", ".join(unknown)}')
+
+
 @app.post('/execution/settings')
 async def execution_settings_update(request: Request):
-    """Update execution mode and active profile parameters (min_grade, max_trades, cooldown)."""
-    body = await request.json()
-    settings = load_settings()
+    """Update execution mode and active profile parameters.
 
-    new_mode = str(body.get('execution_mode', '')).strip()
-    valid_modes = ('paper', 'paper_validation', 'autonomous_test', 'prop_firm', 'live_personal')
-    if new_mode and new_mode in valid_modes:
+    Refuses outright while the trading subsystem is disabled, and reads no
+    state before refusing, so a blocked call cannot mutate anything.
+    """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_payload('execution_settings_update')
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='body must be an object')
+    _reject_unknown_fields(body, _EXECUTION_SETTINGS_FIELDS, 'execution settings')
+
+    # Validate everything BEFORE touching stored state. An invalid value is
+    # rejected outright -- previously it was silently discarded and the route
+    # still answered status:"ok", so a caller could not tell the write had
+    # been dropped.
+    new_mode = None
+    if 'execution_mode' in body:
+        new_mode = str(body['execution_mode']).strip()
+        if new_mode not in _EXECUTION_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f'execution_mode must be one of: {", ".join(_EXECUTION_MODES)}')
+
+    new_grade = None
+    if 'min_grade' in body:
+        new_grade = str(body['min_grade']).strip().upper()
+        if new_grade not in _MIN_GRADES:
+            raise HTTPException(
+                status_code=400, detail=f'min_grade must be one of: {", ".join(_MIN_GRADES)}')
+
+    new_max = None
+    if 'max_trades_per_day' in body:
+        new_max = int(_require_finite('max_trades_per_day', body['max_trades_per_day'], 1, 50))
+
+    new_cooldown = None
+    if 'cooldown_minutes' in body:
+        new_cooldown = int(_require_finite('cooldown_minutes', body['cooldown_minutes'], 0, 1440))
+
+    settings = load_settings()
+    if new_mode is not None:
         settings['execution_mode'] = new_mode
 
     active_mode = settings.get('execution_mode', 'paper_validation')
     profiles = settings.get('execution_profiles', {})
     profile = dict(profiles.get(active_mode, {}))
-
-    if 'min_grade' in body:
-        g = str(body['min_grade']).strip().upper()
-        if g in ('A+', 'A', 'B', 'C'):
-            profile['min_grade'] = g
-    if 'max_trades_per_day' in body:
-        try:
-            profile['max_trades_per_day'] = max(1, int(body['max_trades_per_day']))
-        except (TypeError, ValueError):
-            pass
-    if 'cooldown_minutes' in body:
-        try:
-            profile['trade_cooldown_minutes'] = max(0, int(body['cooldown_minutes']))
-        except (TypeError, ValueError):
-            pass
+    if new_grade is not None:
+        profile['min_grade'] = new_grade
+    if new_max is not None:
+        profile['max_trades_per_day'] = new_max
+    if new_cooldown is not None:
+        profile['trade_cooldown_minutes'] = new_cooldown
 
     profiles[active_mode] = profile
     settings['execution_profiles'] = profiles
     write_json_file(SETTINGS_FILE, settings)
-    return {'status': 'ok', 'execution_mode': settings['execution_mode'], 'profile': profile}
+
+    # Success is reported only after the intended state is read back from disk
+    # and matches, so a failed write can never be announced as 'ok'.
+    stored = load_settings()
+    stored_profile = (stored.get('execution_profiles') or {}).get(
+        stored.get('execution_mode', ''), {})
+    if stored.get('execution_mode') != settings['execution_mode'] or stored_profile != profile:
+        raise HTTPException(status_code=500, detail='settings did not persist')
+
+    return {'status': 'ok', 'execution_mode': stored['execution_mode'], 'profile': stored_profile}
 
 
 @app.get('/close-all')

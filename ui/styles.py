@@ -2362,4 +2362,257 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
   #page-assistant .ni-crow{flex-direction:column;align-items:stretch;gap:9px}
   #page-assistant .ni-ask{width:100%;padding:12px 16px}
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SETTINGS  (#page-settings)
+   Every selector below is scoped to #page-settings, so nothing here can
+   reach Overview, Journal, Markets or NOVA Intelligence.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── identity ── */
+#page-settings .st-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:9px}
+#page-settings .st-kicker{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
+}
+#page-settings .st-id h1{
+  font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;letter-spacing:1.5px;margin:0;line-height:1;
+}
+#page-settings .st-id-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:3px}
+#page-settings .st-fresh{
+  display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:11px;
+  padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+}
+#page-settings .st-fresh::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted2)}
+#page-settings .st-fresh.ok{color:#7ee3b4;border-color:rgba(61,220,151,.32);background:rgba(61,220,151,.10)}
+#page-settings .st-fresh.ok::before{background:var(--green)}
+#page-settings .st-fresh.down{color:#ff9d9d;border-color:rgba(255,107,107,.34);background:rgba(255,107,107,.10)}
+#page-settings .st-fresh.down::before{background:var(--red)}
+#page-settings .st-fresh.busy::before{animation:stPulse 1.4s ease-in-out infinite}
+@keyframes stPulse{0%,100%{opacity:.35}50%{opacity:1}}
+
+/* ── configuration status band ── */
+#page-settings .st-band{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:var(--radius2);overflow:hidden;margin-bottom:9px;
+}
+#page-settings .st-bcell{background:var(--panel);padding:9px 14px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+#page-settings .st-bk{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted2);
+}
+#page-settings .st-bv{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;line-height:1.05;letter-spacing:.6px}
+#page-settings .st-bv.ok{color:#7ee3b4}
+#page-settings .st-bv.env{color:#f3cd7a}
+#page-settings .st-bv.ro{color:var(--muted)}
+#page-settings .st-bv.no{color:var(--muted2)}
+#page-settings .st-bs{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+
+/* ── independent column stacks ──────────────────────────────────────────────
+   `align-items:start`, not stretch: each column flows on its own, so the third
+   left-hand section starts straight after Working Memory rather than waiting
+   for the taller rail to end. */
+#page-settings .st-grid{
+  display:grid;grid-template-columns:minmax(0,1.42fr) minmax(310px,1fr);gap:12px;align-items:start;
+}
+#page-settings .st-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+#page-settings .st-panel{
+  padding:11px 15px 12px;border-radius:var(--radius2);min-width:0;display:flex;flex-direction:column;
+}
+#page-settings .st-ph{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:4px}
+#page-settings .st-ph h2{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.8px;text-transform:uppercase;
+  color:#c3b9ff;margin:0;font-weight:700;
+}
+#page-settings .st-pdesc{font-size:12.5px;color:var(--muted2);line-height:1.45;margin:0 0 9px}
+#page-settings .st-pdesc b{color:var(--muted);font-weight:400}
+
+/* scope badges: where a value actually lives */
+#page-settings .st-tag{
+  font-family:'Space Mono',monospace;font-size:11px;padding:2px 7px;border-radius:5px;letter-spacing:.5px;white-space:nowrap;
+}
+#page-settings .st-tag.env{color:#f3cd7a;background:rgba(251,191,36,.12);box-shadow:inset 0 0 0 1px rgba(251,191,36,.30)}
+#page-settings .st-tag.browser{color:#8fb8ff;background:rgba(79,141,255,.12);box-shadow:inset 0 0 0 1px rgba(79,141,255,.30)}
+#page-settings .st-tag.server{color:#7ee3b4;background:rgba(61,220,151,.12);box-shadow:inset 0 0 0 1px rgba(61,220,151,.28)}
+#page-settings .st-tag.na{color:var(--muted2);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--line)}
+
+/* ── rows ── */
+#page-settings .st-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:6px 0;border-bottom:1px solid var(--line2);
+}
+#page-settings .st-row:last-child{border-bottom:0}
+#page-settings .st-rk{font-size:13px;color:var(--muted);min-width:0}
+#page-settings .st-rsub{
+  display:block;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:2px;
+}
+#page-settings .st-rv{font-family:'Space Mono',monospace;font-size:12px;color:var(--text);text-align:right;white-space:nowrap}
+#page-settings .st-rv.on{color:#7ee3b4}
+#page-settings .st-rv.off{color:var(--muted2)}
+#page-settings .st-rv.warn{color:#f3cd7a}
+
+/* ── tile picker: the one genuinely savable preference ── */
+#page-settings .st-tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:1px 0 8px}
+#page-settings .st-tile{
+  font-family:'Space Mono',monospace;font-size:11px;padding:10px 8px;min-height:44px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+}
+#page-settings .st-tile:hover{border-color:var(--muted2);color:var(--text)}
+#page-settings .st-tile:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+#page-settings .st-tile[aria-pressed="true"]{
+  color:#c3b9ff;background:rgba(155,140,255,.14);border-color:rgba(155,140,255,.34);font-weight:700;
+}
+/* Literal glyphs, not CSS backslash escapes: this stylesheet lives inside a
+   Python string, where a CSS \2713 is read as the octal escape \271 plus '3'
+   and renders as garbage. Same for \26A0. */
+#page-settings .st-tile[aria-pressed="true"]::before{content:'✓';font-size:11px}
+#page-settings .st-count{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+#page-settings .st-count.bad{color:#ff9d9d}
+
+/* ── save bar ── */
+#page-settings .st-savebar{
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--line2);
+}
+#page-settings .st-btn{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.8px;padding:11px 16px;min-height:44px;
+  border-radius:8px;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-weight:700;
+}
+#page-settings .st-btn:hover{border-color:var(--muted2);color:var(--text)}
+#page-settings .st-btn:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+#page-settings .st-btn.primary{background:rgba(155,140,255,.16);color:#c3b9ff;border-color:rgba(155,140,255,.34)}
+#page-settings .st-btn.primary:hover{background:rgba(155,140,255,.24)}
+#page-settings .st-btn.danger{background:rgba(255,107,107,.10);color:#ff9d9d;border-color:rgba(255,107,107,.32)}
+#page-settings .st-btn.danger:hover{background:rgba(255,107,107,.18)}
+#page-settings .st-btn[disabled]{opacity:.5;cursor:default}
+#page-settings .st-btn[disabled]:hover{border-color:var(--line);color:var(--muted)}
+#page-settings .st-savemsg{font-family:'Space Mono',monospace;font-size:11px;display:inline-flex;align-items:center;gap:6px}
+#page-settings .st-savemsg.idle{color:var(--muted2)}
+#page-settings .st-savemsg.dirty{color:#f3cd7a}
+#page-settings .st-savemsg.saving{color:var(--muted)}
+#page-settings .st-savemsg.ok{color:#7ee3b4}
+#page-settings .st-savemsg.err{color:#ff9d9d}
+#page-settings .st-sp{
+  width:9px;height:9px;border-radius:50%;border:2px solid rgba(167,177,194,.3);border-top-color:var(--muted);
+  display:inline-block;animation:stSpin .7s linear infinite;
+}
+@keyframes stSpin{to{transform:rotate(360deg)}}
+#page-settings .st-fielderr{
+  font-size:12.5px;color:#ff9d9d;line-height:1.45;margin-top:9px;display:flex;gap:7px;align-items:flex-start;
+}
+#page-settings .st-fielderr[hidden]{display:none}
+#page-settings .st-fielderr::before{content:'⚠';flex-shrink:0}
+
+/* ── notes and callouts ── */
+#page-settings .st-note{
+  font-size:12.5px;color:var(--muted2);line-height:1.4;margin-top:8px;padding-top:8px;border-top:1px solid var(--line2);
+}
+#page-settings .st-note[hidden]{display:none}
+#page-settings .st-note b{color:var(--muted);font-weight:400}
+#page-settings .st-note code{font-family:'Space Mono',monospace;font-size:11px}
+#page-settings .st-callout{border-radius:8px;padding:9px 11px;font-size:12.5px;line-height:1.4;margin-top:9px}
+#page-settings .st-callout code{font-family:'Space Mono',monospace;font-size:11px}
+#page-settings .st-callout.warn{color:#f3cd7a;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.26)}
+#page-settings .st-callout.warn b{color:#ffd88a;font-weight:700}
+#page-settings .st-callout.err{
+  color:#ff9d9d;background:rgba(255,107,107,.07);border:1px solid rgba(255,107,107,.28);margin:0 0 12px;
+}
+#page-settings .st-callout.err b{color:#ffb3b3;font-weight:700}
+
+/* Confirmation stays the size of the action it governs — it never grows to
+   fill the page. */
+#page-settings .st-confirm{
+  margin-top:9px;border:1px solid rgba(255,107,107,.32);background:rgba(255,107,107,.06);
+  border-radius:8px;padding:12px 13px;max-width:560px;
+}
+#page-settings .st-confirm h3{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+  color:#ff9d9d;margin:0 0 6px;font-weight:700;
+}
+#page-settings .st-confirm p{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0 0 10px}
+#page-settings .st-confirm code{font-family:'Space Mono',monospace;font-size:11px}
+#page-settings .st-confirm .st-cbtns{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ── boundaries list ── */
+#page-settings .st-bgrid{display:flex;flex-direction:column;gap:0}
+#page-settings .st-bitem{padding:5px 0;border-bottom:1px solid var(--line2);min-width:0}
+#page-settings .st-bitem:last-child{border-bottom:0}
+#page-settings .st-bitem h3{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;
+  color:var(--muted);margin:0 0 3px;font-weight:700;
+}
+#page-settings .st-bitem p{font-size:12.5px;color:var(--muted2);line-height:1.4;margin:0}
+#page-settings .st-bitem p b{color:var(--muted);font-weight:400}
+#page-settings .st-bitem code{font-family:'Space Mono',monospace;font-size:11px}
+
+/* ── loading / unavailable, sized to the content they stand in for ── */
+#page-settings .st-skel{display:flex;flex-direction:column;gap:9px}
+#page-settings .st-skel i{
+  display:block;height:12px;border-radius:5px;
+  background:linear-gradient(90deg,var(--panel2) 25%,#182034 50%,var(--panel2) 75%);
+  background-size:200% 100%;animation:stSk 1.3s linear infinite;
+}
+#page-settings .st-skel.rows i{height:34px}
+#page-settings .st-skel.st-tiles-sk{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+#page-settings .st-skel.st-tiles-sk i{height:44px}
+#page-settings .st-skel i:nth-child(even){opacity:.75}
+@keyframes stSk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+#page-settings .st-unavail{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;
+  min-height:150px;border:1px dashed rgba(255,107,107,.30);border-radius:8px;
+  background:rgba(255,107,107,.04);padding:20px 18px;
+}
+#page-settings .st-unavail .u1{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+  color:#ff9d9d;font-weight:700;
+}
+#page-settings .st-unavail .u2{font-size:12.5px;color:var(--muted2);line-height:1.5;max-width:34ch}
+#page-settings .st-unavail code{font-family:'Space Mono',monospace;font-size:11px}
+#page-settings .st-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ── state driving ──────────────────────────────────────────────────────────
+   `display:revert` reverts to the USER-AGENT value (block for a div), not to
+   the value this stylesheet set, so revealing a grid or flex container that
+   way silently turns it into a block. Each element declares its intrinsic
+   display in --st-d and the reveal rule restores that. */
+#page-settings [data-when]{--st-d:block}
+#page-settings .st-band[data-when],#page-settings .st-tiles[data-when],
+#page-settings .st-skel.st-tiles-sk[data-when]{--st-d:grid}
+#page-settings .st-skel[data-when],#page-settings .st-unavail[data-when],
+#page-settings .st-savebar[data-when],#page-settings .st-fielderr[data-when]{--st-d:flex}
+/* The doubled [data-when] raises this to specificity (1,2,0) so it outranks
+   two-class component rules such as `.st-skel.st-tiles-sk{display:grid}`.
+   Without it the loading skeleton kept rendering underneath the loaded tiles
+   — 144px of duplicate content that the state attribute appeared to hide. */
+#page-settings [data-when][data-when]{display:none}
+#page-settings[data-st-state="loaded"]  [data-when~="loaded"][data-when],
+#page-settings[data-st-state="loading"] [data-when~="loading"][data-when],
+#page-settings[data-st-state="error"]   [data-when~="error"][data-when]{display:var(--st-d)}
+#page-settings[data-st-state="loaded"] .st-fielderr[hidden],
+#page-settings[data-st-state="loaded"] .st-note[hidden]{display:none}
+
+/* ── desktop: the legacy shell chrome is suppressed for this page too ── */
+.wrap:has(> #page-settings.active) > .content-header,
+.wrap:has(> #page-settings.active) > .live-strip-row,
+.wrap:has(> #page-settings.active) > .footer{display:none}
+/* Settings is composed to fit 1440x1000; the shared wrap padding is trimmed
+   for this page only so the clean state needs no desktop scrolling. */
+.wrap:has(> #page-settings.active){padding-top:12px;padding-bottom:8px}
+
+/* ── mobile ── */
+@media(max-width:767px){
+  #page-settings .st-id{display:block}
+  #page-settings .st-id h1{font-size:27px}
+  #page-settings .st-id-meta{margin-top:9px;padding-bottom:0}
+  #page-settings .st-band{grid-template-columns:repeat(2,1fr)}
+  #page-settings .st-grid{grid-template-columns:minmax(0,1fr)}
+  #page-settings .st-row{flex-direction:column;align-items:flex-start;gap:4px}
+  #page-settings .st-rv{text-align:left}
+  #page-settings .st-tiles,#page-settings .st-skel.st-tiles-sk{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+  /* 44px floor for every touch target on the page. */
+  #page-settings .st-btn{width:100%;justify-content:center;text-align:center}
+  #page-settings .st-savebar{flex-direction:column;align-items:stretch}
+  #page-settings .st-savemsg{justify-content:center;padding:4px 0}
+  #page-settings .st-confirm{max-width:none}
+  #page-settings .st-confirm .st-cbtns{flex-direction:column}
+}
 '''

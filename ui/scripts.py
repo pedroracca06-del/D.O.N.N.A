@@ -1435,31 +1435,408 @@ async function refresh() {
 }
 
 // ════════ SETTINGS ════════
+// The page this replaces had one button and no settings. Three defects are
+// corrected here, and each is load-bearing:
+//
+//  1. "CONNECTED" was bool() of an environment string -- no reachability,
+//     validity or credit check. Discord read CONNECTED with no credential at
+//     all, because that field is a module-import flag. Rows now say
+//     Configured / Not configured, which is the only thing /check-env proves.
+//  2. A failed read left the previous values on screen. refreshSettings()
+//     caught, logged to console, and touched nothing, so a reader could not
+//     tell the data was stale. Failure now withholds values and says so.
+//  3. Nothing was saveable. The one genuine preference (Overview tiles) is
+//     exposed here, and "Saved" is shown only after the stored value is read
+//     back and matches.
+
+const ST_SYMBOLS = SYMBOL_LIST;          // the existing 13-instrument contract
+const ST_REQUIRED_TILES = 5;             // Overview renders exactly five
+
+let _stEnv = null, _stHealth = null;
+let _stTiles = null;                     // working selection
+let _stSavedTiles = null;                // last value read back from storage
+let _stBusy = false;                     // guards double submission
+
+function _stEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+function _stSetState(state) {
+  const p = document.getElementById('page-settings');
+  if (p) p.dataset.stState = state;
+}
+function _stRow(label, value, valueCls, sub) {
+  const row = _stEl('div', 'st-row');
+  const k = _stEl('span', 'st-rk');
+  k.appendChild(document.createTextNode(label));
+  if (sub) k.appendChild(_stEl('span', 'st-rsub', sub));
+  row.appendChild(k);
+  row.appendChild(_stEl('span', 'st-rv' + (valueCls ? ' ' + valueCls : ''), value));
+  return row;
+}
+
+// ── Overview tiles: the one genuinely savable preference ─────────────────
+function _stRenderTiles() {
+  const host = document.getElementById('setTiles');
+  if (!host) return;
+  host.textContent = '';
+  ST_SYMBOLS.forEach(sym => {
+    const on = _stTiles.indexOf(sym) >= 0;
+    const b = _stEl('button', 'st-tile', sym);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(on));
+    b.addEventListener('click', () => {
+      const i = _stTiles.indexOf(sym);
+      if (i >= 0) _stTiles.splice(i, 1); else _stTiles.push(sym);
+      _stRenderTiles();
+      _stSyncSaveBar();
+    });
+    host.appendChild(b);
+  });
+}
+
+function _stTilesDiffer() {
+  if (!_stSavedTiles || !_stTiles) return false;
+  if (_stTiles.length !== _stSavedTiles.length) return true;
+  return _stTiles.some((s, i) => s !== _stSavedTiles[i]);
+}
+
+function _stSetMsg(cls, text, spinner) {
+  const m = document.getElementById('setSaveMsg');
+  if (!m) return;
+  m.className = 'st-savemsg ' + cls;
+  m.textContent = '';
+  if (spinner) m.appendChild(_stEl('span', 'st-sp'));
+  m.appendChild(document.createTextNode(text));
+}
+
+function _stSyncSaveBar() {
+  const count = document.getElementById('setTileCount');
+  const err = document.getElementById('setTileErr');
+  const save = document.getElementById('setSaveTiles');
+  const discard = document.getElementById('setDiscardTiles');
+  const note = document.getElementById('setSaveNote');
+  if (!count || !save) return;
+
+  const n = _stTiles.length;
+  const valid = n === ST_REQUIRED_TILES;
+  const dirty = _stTilesDiffer();
+
+  count.textContent = n + ' of ' + ST_REQUIRED_TILES + ' selected';
+  count.className = 'st-count' + (valid ? '' : ' bad');
+  err.hidden = valid;
+  if (!valid) {
+    err.textContent = n > ST_REQUIRED_TILES
+      ? 'Overview shows exactly five tiles. Deselect ' + (n - ST_REQUIRED_TILES) + ' before saving.'
+      : 'Overview shows exactly five tiles. Select ' + (ST_REQUIRED_TILES - n) + ' more before saving.';
+  }
+  if (discard) discard.hidden = !dirty;
+  save.disabled = _stBusy || !dirty || !valid;
+  if (_stBusy) { save.setAttribute('aria-describedby', ''); save.removeAttribute('aria-describedby'); }
+  if (!valid) save.setAttribute('aria-describedby', 'setTileErr');
+  else save.removeAttribute('aria-describedby');
+
+  if (_stBusy) return;                       // the saving message stands
+  if (note && dirty) note.hidden = true;
+  if (!valid) _stSetMsg('err', 'Cannot save — fix the error above');
+  else if (dirty) _stSetMsg('dirty', 'Unsaved changes');
+  else _stSetMsg('idle', 'No unsaved changes');
+}
+
+async function _stSaveTiles() {
+  if (_stBusy) return;
+  if (_stTiles.length !== ST_REQUIRED_TILES) { _stSyncSaveBar(); return; }
+  _stBusy = true;
+  document.getElementById('setSaveTiles').disabled = true;
+  document.getElementById('setSaveTiles').textContent = 'Saving…';
+  _stSetMsg('saving', 'Writing to this browser', true);
+
+  // Yield once so the saving state actually paints. Without it the write and
+  // read-back run synchronously after the message is set, so the browser goes
+  // straight from 'unsaved' to 'saved' and the in-flight state, though set, is
+  // never observable.
+  await new Promise(r => requestAnimationFrame(() => r()));
+
+  const intended = _stTiles.slice();
+  let ok = false, failure = '';
+  try {
+    saveIndexPrefs(intended);              // the existing storage contract
+    // Read back before claiming success: a write that silently failed (quota,
+    // private mode, a disabled store) must never be reported as saved.
+    const stored = loadIndexPrefs();
+    ok = Array.isArray(stored) && stored.length === intended.length &&
+         stored.every((s, i) => s === intended[i]);
+    if (!ok) failure = 'the browser did not store the value';
+  } catch (e) {
+    ok = false;
+    failure = 'this browser refused to store it';
+  }
+
+  _stBusy = false;
+  const save = document.getElementById('setSaveTiles');
+  save.textContent = 'Save preferences';
+  const note = document.getElementById('setSaveNote');
+  if (ok) {
+    _stSavedTiles = intended.slice();
+    if (note) note.hidden = false;
+    _stSyncSaveBar();
+    _stSetMsg('ok', 'Saved — read back and confirmed');
+    if (typeof renderIndexTiles === 'function' && _lastDashData) {
+      try { renderIndexTiles(_lastDashData); } catch (e) {}
+    }
+  } else {
+    if (note) note.hidden = true;
+    _stSyncSaveBar();
+    _stSetMsg('err', 'Not saved — ' + failure);
+  }
+}
+
+// ── working memory: real GET /assistant-data, real clear routes ──────────
+function _stRenderWorkingMemory(d) {
+  const host = document.getElementById('setWmRows');
+  if (!host) return;
+  host.textContent = '';
+  host.appendChild(_stRow('Daily focus', d.daily_focus ? 'set' : 'not set',
+                          d.daily_focus ? '' : 'off'));
+  host.appendChild(_stRow('Tasks', String((d.tasks || []).length)));
+  host.appendChild(_stRow('Reminders', String((d.reminders || []).length)));
+  host.appendChild(_stRow('Last written', _stAge(d.last_updated) || '—'));
+
+  const t = document.getElementById('setClearTasks');
+  const r = document.getElementById('setClearReminders');
+  if (t) t.disabled = !(d.tasks || []).length;
+  if (r) r.disabled = !(d.reminders || []).length;
+}
+
+function _stAge(ts) {
+  if (!ts) return null;
+  const s = String(ts);
+  const tail = s.length > 11 ? s.slice(11) : '';
+  const hasTz = s.endsWith('Z') || tail.indexOf('+') >= 0 || tail.lastIndexOf('-') > 0;
+  const t = Date.parse(hasTz ? s : s + 'Z');
+  if (!isFinite(t)) return null;
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}
+
+function _stCloseConfirm() {
+  const host = document.getElementById('setConfirm');
+  if (host) host.textContent = '';
+}
+
+// Explicit confirmation, stated in terms of what will actually happen.
+function _stConfirmClear(kind, count) {
+  const host = document.getElementById('setConfirm');
+  if (!host) return;
+  const route = kind === 'tasks' ? '/assistant/clear-tasks' : '/assistant/clear-reminders';
+  const other = kind === 'tasks' ? 'Reminders and the daily focus are not affected.'
+                                 : 'Tasks and the daily focus are not affected.';
+  host.textContent = '';
+  const box = _stEl('div', 'st-confirm');
+  box.setAttribute('role', 'alertdialog');
+  box.setAttribute('aria-labelledby', 'setConfirmTitle');
+  box.setAttribute('aria-describedby', 'setConfirmBody');
+  const h = _stEl('h3', null, 'Clear all ' + count + ' ' + kind + '?');
+  h.id = 'setConfirmTitle';
+  box.appendChild(h);
+  const p = _stEl('p');
+  p.id = 'setConfirmBody';
+  p.appendChild(document.createTextNode('This calls POST ' + route +
+    ' and deletes every ' + kind.replace(/s$/, '') + ' from the server immediately. '));
+  p.appendChild(_stEl('b', null, 'There is no undo and no backup.'));
+  p.appendChild(document.createTextNode(' ' + other));
+  box.appendChild(p);
+  const btns = _stEl('div', 'st-cbtns');
+  const yes = _stEl('button', 'st-btn danger', 'Yes, delete ' + count + ' ' + kind);
+  yes.type = 'button';
+  const no = _stEl('button', 'st-btn', 'Cancel');
+  no.type = 'button';
+  no.addEventListener('click', _stCloseConfirm);
+  yes.addEventListener('click', () => _stDoClear(kind, route, yes, no));
+  btns.appendChild(yes);
+  btns.appendChild(no);
+  box.appendChild(btns);
+  host.appendChild(box);
+  yes.focus();
+}
+
+async function _stDoClear(kind, route, yesBtn, noBtn) {
+  if (_stBusy) return;                       // no double submission
+  _stBusy = true;
+  yesBtn.disabled = true;
+  noBtn.disabled = true;
+  yesBtn.textContent = 'Deleting…';
+  try {
+    const res = await fetch(route, { method: 'POST' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    await res.json();
+    _stCloseConfirm();
+    _stBusy = false;
+    // State is refreshed only after a confirmed success.
+    await _stLoadWorkingMemory();
+  } catch (e) {
+    _stBusy = false;
+    yesBtn.disabled = false;
+    noBtn.disabled = false;
+    yesBtn.textContent = 'Retry delete';
+    const host = document.getElementById('setConfirm');
+    const box = host && host.firstChild;
+    if (box && !box.querySelector('.st-cerr')) {
+      const err = _stEl('p', 'st-cerr');
+      err.setAttribute('role', 'alert');
+      err.style.color = '#ff9d9d';
+      err.style.margin = '9px 0 0';
+      err.style.fontSize = '12.5px';
+      err.textContent = 'Nothing was deleted — the request failed (' + e.message + ').';
+      box.appendChild(err);
+    }
+  }
+}
+
+async function _stLoadWorkingMemory() {
+  try {
+    const res = await fetch('/assistant-data');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    _stRenderWorkingMemory(await res.json());
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ── integrations + system ────────────────────────────────────────────────
+// "Configured" is the strongest claim /check-env supports: it returns
+// bool(<env var>). Connected, reachable, valid, funded and healthy are NOT
+// proven by any current backend contract and are never asserted here.
+const ST_INTEGRATIONS = [
+  ['Anthropic (Claude)',    'ANTHROPIC_API_KEY',     'anthropic_key_found'],
+  ['Finnhub',               'FINNHUB_API_KEY',       'finnhub_found'],
+  ['FMP',                   'FMP_API_KEY',           'fmp_found'],
+  ['Telegram',              'TELEGRAM_BOT_TOKEN',    'telegram_found'],
+  ['Alpha Vantage',         'ALPHA_VANTAGE_API_KEY', 'alpha_vantage_found'],
+  ['Discord macro channel', 'DISCORD_CHANNEL_MACRO', 'discord_macro_channel_set']
+];
+
+function _stRenderIntegrations(env) {
+  const host = document.getElementById('setIntegrations');
+  if (!host) return;
+  host.textContent = '';
+  let configured = 0;
+  ST_INTEGRATIONS.forEach(([label, varName, key]) => {
+    const on = !!env[key];
+    if (on) configured++;
+    host.appendChild(_stRow(label, on ? 'Configured' : 'Not configured',
+                            on ? 'on' : 'off', varName));
+  });
+  setText('setCountEnv', String(ST_INTEGRATIONS.length));
+  setText('setCountEnvSub', configured + ' configured · ' + (ST_INTEGRATIONS.length - configured) + ' not set');
+}
+
+function _stRenderSystem(env, health) {
+  const host = document.getElementById('setSystemRows');
+  if (!host) return;
+  const files = ['risk_file_exists', 'alerts_file_exists', 'assistant_file_exists',
+                 'settings_file_exists', 'macro_events_file_exists'];
+  const present = files.filter(k => env[k]).length;
+  host.textContent = '';
+  host.appendChild(_stRow('Reasoning model', env.chat_model || '—', '', 'ANTHROPIC_ASSISTANT_MODEL'));
+  host.appendChild(_stRow('Fast model', env.fast_model || '—', '', 'ANTHROPIC_MODEL'));
+  host.appendChild(_stRow('Server time',
+    health.last_time_ny ? health.last_time_ny.substring(0, 19).replace('T', ' ') : '—',
+    '', 'America/New_York'));
+  host.appendChild(_stRow('Macro calendar source', health.forex_factory_macro_layer || '—'));
+  host.appendChild(_stRow('Cached feeds', (health.cache_keys || []).length + ' keys'));
+  host.appendChild(_stRow('State files present', present + ' of ' + files.length,
+    present === files.length ? 'on' : 'warn', 'risk, alerts, assistant, settings, macro'));
+  // The former standalone callout, folded into the list so the card ends on a
+  // row edge rather than an isolated box.
+  host.appendChild(_stRow('Configuration changes', 'Deployment restart required', 'warn',
+    'models and keys — a running session keeps its own'));
+  setText('setCountReadonly', '6');
+}
+
+// ── page load ────────────────────────────────────────────────────────────
 async function refreshSettings() {
+  _stSetState('loading');
+  const pill = document.getElementById('setStatusPill');
+  if (pill) { pill.className = 'st-fresh busy'; pill.textContent = 'Reading system state'; }
+
+  let env = null, health = null;
   try {
     const [envRes, healthRes] = await Promise.all([fetch('/check-env'), fetch('/system-health')]);
-    const env    = envRes.ok    ? await envRes.json()    : {};
-    const health = healthRes.ok ? await healthRes.json() : {};
+    if (!envRes.ok || !healthRes.ok) throw new Error('HTTP');
+    env = await envRes.json();
+    health = await healthRes.json();
+  } catch (e) {
+    // Withhold rather than leave stale values on screen.
+    _stSetState('error');
+    if (pill) { pill.className = 'st-fresh down'; pill.textContent = 'System unreachable'; }
+    return;
+  }
 
+  _stEnv = env; _stHealth = health;
+  _stSetState('loaded');
+  if (pill) { pill.className = 'st-fresh ok'; pill.textContent = 'System reachable'; }
 
-    const rows = [
-      ['Anthropic (Claude)', env.anthropic_key_found],
-      ['Telegram',           env.telegram_found],
-      ['Finnhub',            env.finnhub_found],
-      ['FMP',                env.fmp_found],
-      ['Discord (Macro)',    env.macro_discord_available],
-    ];
-    setHtml('setIntegrations', rows.map(([label, ok]) => `
-      <div class="exec-row">
-        <span class="exec-row-label">${label}</span>
-        <span class="exec-row-val" style="color:${ok ? 'var(--green)' : 'var(--muted2)'}">${ok ? 'CONNECTED' : '—'}</span>
-      </div>`).join(''));
+  _stSavedTiles = loadIndexPrefs();
+  _stTiles = _stSavedTiles.slice();
+  _stRenderTiles();
+  _stSyncSaveBar();
+  const note = document.getElementById('setSaveNote');
+  if (note) note.hidden = true;
 
-    setText('setChatModel',  env.chat_model || '—');
-    setText('setFastModel',  env.fast_model || '—');
-    setText('setServerTime', health.last_time_ny ? health.last_time_ny.substring(0,19).replace('T',' ') : '—');
-  } catch(e) { console.error('refreshSettings:', e); }
+  _stRenderIntegrations(env);
+  _stRenderSystem(env, health);
+  setText('setCountEditable', '2');
+
+  _stCloseConfirm();
+  const wmOk = await _stLoadWorkingMemory();
+  if (!wmOk) {
+    const host = document.getElementById('setWmRows');
+    if (host) {
+      host.textContent = '';
+      host.appendChild(_stRow('Working memory', 'not read', 'off', '/assistant-data did not respond'));
+    }
+    ['setClearTasks', 'setClearReminders'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = true;
+    });
+  }
 }
+
+(function stBindSettings() {
+  const save = document.getElementById('setSaveTiles');
+  if (save) save.addEventListener('click', _stSaveTiles);
+  const discard = document.getElementById('setDiscardTiles');
+  if (discard) discard.addEventListener('click', () => {
+    if (_stBusy || !_stSavedTiles) return;
+    _stTiles = _stSavedTiles.slice();
+    _stRenderTiles();
+    const note = document.getElementById('setSaveNote');
+    if (note) note.hidden = true;
+    _stSyncSaveBar();
+  });
+  const t = document.getElementById('setClearTasks');
+  if (t) t.addEventListener('click', async () => {
+    if (_stBusy) return;
+    const res = await fetch('/assistant-data').then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!res) return;
+    _stConfirmClear('tasks', (res.tasks || []).length);
+  });
+  const r = document.getElementById('setClearReminders');
+  if (r) r.addEventListener('click', async () => {
+    if (_stBusy) return;
+    const res = await fetch('/assistant-data').then(x => x.ok ? x.json() : null).catch(() => null);
+    if (!res) return;
+    _stConfirmClear('reminders', (res.reminders || []).length);
+  });
+})();
 
 // ════════ NOVA INTELLIGENCE ════════
 // Three defects in the previous version are corrected here, and each fix is
