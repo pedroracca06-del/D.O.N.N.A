@@ -1455,7 +1455,6 @@ def build_dashboard_payload():
     news          = get_live_news()
     live_movers   = get_live_movers()
     futures_macro_pulse = get_live_futures_macro_pulse()
-    scenarios     = build_scenario_engine()
     cross_asset   = build_cross_asset_intelligence()
     effective_alerts = alerts if alerts else observations
 
@@ -1521,7 +1520,6 @@ def build_dashboard_payload():
         'session_playbook':     session_playbook,
         'forex_factory_notes_url': FOREX_FACTORY_NOTES_URL,
         'regime':               regime,
-        'scenarios':            scenarios,
         'cross_asset_intelligence': cross_asset,
         'intelligence': {
             'synthesis':      intelligence_synthesis,

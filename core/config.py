@@ -135,6 +135,15 @@ NOVA_EXECUTION_SAFETY_MONITOR_ENABLED        = os.getenv('NOVA_EXECUTION_SAFETY_
 NOVA_EXECUTION_SAFETY_DISCORD_ENABLED        = os.getenv('NOVA_EXECUTION_SAFETY_DISCORD_ENABLED', 'false').strip().lower() == 'true'
 NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS = _env_int('NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS', 900)
 
+# ── Trading subsystem master switch (controlled retirement, 2026-07-16) ──────
+# NOVA_TRADING_SUBSYSTEM_ENABLED — authoritative, top-level, default false.
+# Every broker-write function (execute_signal, close_position, close_all_positions,
+# close_all_positions_eod, cancel_all_orders) checks this directly and independently
+# of NOVA_AUTO_EXECUTE, so NOVA_AUTO_EXECUTE=true alone can never place, modify,
+# cancel, or close a trade while this is false. See nova_knowledge_core/
+# TRADING_SUBSYSTEM_DISABLEMENT.md for the full list of guarded paths.
+NOVA_TRADING_SUBSYSTEM_ENABLED = os.getenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'false').strip().lower() == 'true'
+
 # ── Feed sync (local → Render replication) ────────────────────
 # NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)
 # NOVA_INGEST_SECRET: shared secret for POST /api/feed/ingest — set in both local .env and Render env vars

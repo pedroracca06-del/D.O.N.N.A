@@ -53,6 +53,15 @@ def _auto_execute_enabled() -> bool:
     """Read flag at call time so env changes take effect without restart."""
     return os.getenv('NOVA_AUTO_EXECUTE', 'false').strip().lower() == 'true'
 
+
+def _trading_subsystem_enabled() -> bool:
+    """Read the master retirement flag at call time (controlled retirement, 2026-07-16).
+
+    Independent of, and checked before, NOVA_AUTO_EXECUTE — NOVA_AUTO_EXECUTE=true
+    alone can never re-enable this bridge while the subsystem flag is false.
+    """
+    return os.getenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'false').strip().lower() == 'true'
+
 # Symbol routing table: NOVA symbol → instrument + ticker
 _SYMBOL_MAP: dict[str, dict] = {
     'MES':  {'instrument': 'MES', 'ticker': 'MES1!'},
@@ -446,6 +455,18 @@ def route_to_execution(alert: 'AlertData') -> dict:
     direction  = getattr(alert, 'direction',  '')
     setup_type = getattr(alert, 'setup_type', '')
     session    = getattr(alert, 'session',    '')
+
+    # ── Gate 0: Trading subsystem master switch (controlled retirement) ──────────
+    # Checked before Phase 1 validation and before the NOVA_AUTO_EXECUTE gate below
+    # so no execution request is even recorded while the subsystem is retired.
+    if not _trading_subsystem_enabled():
+        _log(f'TRADING_SUBSYSTEM_DISABLED  {symbol} {direction} {alert_type}  (legacy trading subsystem retired)')
+        return {
+            'status':            'TRADING_SUBSYSTEM_DISABLED',
+            'reason':            'NOVA_TRADING_SUBSYSTEM_ENABLED is false',
+            'chain_id':          '',
+            'execution_request': {},
+        }
 
     # ── Phase 1: Execution request validation (parallel layer) ───────────────────
     # Always runs. In DRY_RUN mode the result is final and we return here.

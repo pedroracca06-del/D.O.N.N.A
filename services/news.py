@@ -13,7 +13,6 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import json
 import os
-import re
 import requests
 
 # ── paths & config ──────────────────────────────────────────
@@ -25,7 +24,6 @@ NY_TZ           = ZoneInfo('America/New_York')
 FINNHUB_API_KEY   = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY       = os.getenv('FMP_API_KEY', '').strip()
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '').strip()
-GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
 
 # ── helpers ──────────────────────────────────────────────────
 def _now_ny():
@@ -249,62 +247,6 @@ def _get_next_event_from_file() -> tuple[str, int | None]:
     except Exception:
         return 'No scheduled event', None
 
-# ── LLM headline classifier via Grok ─────────────────────────
-_GROK_SYSTEM = (
-    "You are NOVA's market news classifier. You have real-time awareness of current "
-    "market events. Today CPI printed 3.8% annually - highest since May 2023. Markets "
-    "are selling off. Factor this into your risk classification. Return only valid JSON."
-)
-
-def _llm_classify(headlines: list[str]) -> dict | None:
-    """
-    Uses Grok-3-mini (OpenAI-compatible) to extract a smarter headline read.
-    Returns dict with keys: macro_headline, market_headline, macro_guidance,
-    market_guidance, macro_severity, headline_severity, market_severity.
-    Falls back to None on any error.
-    """
-    if not GROK_API_KEY:
-        return None
-    try:
-        from openai import OpenAI
-
-        client = OpenAI(base_url='https://api.x.ai/v1', api_key=GROK_API_KEY)
-
-        headlines_text = '\n'.join(f'- {h}' for h in headlines[:12])
-        user_prompt = f"""Given these market headlines, extract the risk classification:
-
-Headlines:
-{headlines_text}
-
-Return JSON only (no other text):
-{{
-  "macro_headline": "single most important macro headline or story (max 18 words)",
-  "market_headline": "single most important company/sector headline (max 18 words)",
-  "macro_guidance": "1-2 sentence trader-grade guidance on macro risk (max 30 words)",
-  "market_guidance": "1-2 sentence guidance on market/company catalyst risk (max 30 words)",
-  "macro_severity": "LOW | MEDIUM | HIGH",
-  "headline_severity": "LOW | MEDIUM | HIGH",
-  "market_severity": "LOW | MEDIUM | HIGH"
-}}"""
-
-        response = client.chat.completions.create(
-            model='grok-3-mini',
-            max_tokens=400,
-            messages=[
-                {'role': 'system', 'content': _GROK_SYSTEM},
-                {'role': 'user',   'content': user_prompt},
-            ],
-        )
-        raw = response.choices[0].message.content or ''
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            raw = match.group(0)
-        data = json.loads(raw)
-        return data
-    except Exception as e:
-        print(f'[donna_news] Grok classify error: {e}')
-        return None
-
 # ── main cycle ───────────────────────────────────────────────
 def process_news_guard_cycle():
     """
@@ -351,32 +293,15 @@ def process_news_guard_cycle():
     )]
     top_market = market_items[0]['headline'] if market_items else ranked[1]['headline'] if len(ranked) > 1 else top_macro
 
-    # 5. Try LLM upgrade
+    # 5. Deterministic headline/guidance selection -- News Guard is fully
+    # keyword/calendar-driven (spec §5: no AI provider consumes this path).
     state = _read_risk()
-    all_headlines = [i['headline'] for i in items[:12]]
-    llm_data = _llm_classify(all_headlines)
-
-    if llm_data:
-        last_headline     = llm_data.get('macro_headline', top_macro)
-        last_market_hl    = llm_data.get('market_headline', top_market)
-        headline_guidance = llm_data.get('macro_guidance', '')
-        market_guidance   = llm_data.get('market_guidance', '')
-        # Allow LLM to upgrade severity but not downgrade below keyword score
-        def _merge_severity(llm_val, keyword_val):
-            order = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3}
-            lv = order.get(str(llm_val).upper(), 1)
-            kv = order.get(str(keyword_val).upper(), 1)
-            return {1: 'low', 2: 'medium', 3: 'high'}[max(lv, kv)]
-        macro_risk    = _merge_severity(llm_data.get('macro_severity', 'LOW'), macro_risk)
-        headline_risk = _merge_severity(llm_data.get('headline_severity', 'LOW'), headline_risk)
-        market_risk   = _merge_severity(llm_data.get('market_severity', 'LOW'), market_risk)
-    else:
-        last_headline     = top_macro
-        last_market_hl    = top_market
-        headline_guidance = _build_guidance(macro_risk, headline_risk, market_risk, top_macro, next_event)
-        market_guidance   = (f'Company catalysts active: {top_market}'
-                             if market_risk == 'high'
-                             else 'No dominant company catalyst right now.')
+    last_headline     = top_macro
+    last_market_hl    = top_market
+    headline_guidance = _build_guidance(macro_risk, headline_risk, market_risk, top_macro, next_event)
+    market_guidance   = (f'Company catalysts active: {top_market}'
+                         if market_risk == 'high'
+                         else 'No dominant company catalyst right now.')
 
     # 5b. Calendar coupling — event phase drives macro_risk floor
     if event_phase in ('LIVE', 'IMMINENT'):

@@ -298,6 +298,18 @@ def _run_premarket_check() -> None:
 
 
 def main() -> None:
+    # ── Controlled retirement (2026-07-16) ────────────────────────────────────
+    # This monitor's only purpose is the legacy reasoning → alert → execution
+    # pipeline. NOVA_TRADING_SUBSYSTEM_ENABLED defaults false; when false, exit
+    # cleanly here rather than connecting to TradingView/CDP, initializing a
+    # broker client, or running any reasoning cycle. See nova_knowledge_core/
+    # TRADING_SUBSYSTEM_DISABLEMENT.md.
+    if os.getenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'false').strip().lower() != 'true':
+        log.info('TRADING_SUBSYSTEM_DISABLED — legacy trading subsystem is retired.')
+        log.info('monitor.py has no non-trading purpose and is exiting cleanly.')
+        log.info('See nova_knowledge_core/TRADING_SUBSYSTEM_DISABLEMENT.md for details.')
+        return
+
     from engines.reasoning import run_reasoning_cycle, _run_mcp
     from delivery.alert_engine import deliver_alert
     from services.execution_bridge import route_to_execution

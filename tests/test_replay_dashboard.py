@@ -23,6 +23,8 @@ from __future__ import annotations
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+
 os.environ.setdefault('ALPACA_API_KEY',    '')
 os.environ.setdefault('ALPACA_SECRET_KEY', '')
 
@@ -30,15 +32,28 @@ from ui.html import DASHBOARD_HTML
 
 HTML = DASHBOARD_HTML
 
-# Isolate the replay JS block (from the NOVA REPLAY comment to end of script)
+# NOVA Replay was retired from active navigation (controlled retirement,
+# 2026-07-16, see nova_knowledge_core/TRADING_SUBSYSTEM_UI_RETIREMENT.md).
+# This file is preserved, not deleted, as documentation of the removed
+# surface -- it skips itself entirely once the tab is gone rather than
+# asserting at import time (which would break collection for the whole
+# suite). See tests/test_ui_retirement.py for tests proving Replay is absent.
 _REPLAY_JS_START = HTML.find('// ════════ NOVA REPLAY ════════')
-assert _REPLAY_JS_START > 0, 'Replay JS block not found in HTML'
-_REPLAY_JS = HTML[_REPLAY_JS_START:]
+_REPLAY_PRESENT  = _REPLAY_JS_START > 0
 
-_REPLAY_PAGE_START = HTML.find('id="page-replay"')
-assert _REPLAY_PAGE_START > 0, 'page-replay div not found'
-_REPLAY_PAGE_END   = HTML.find('</div><!-- /page-replay -->')
-_REPLAY_PAGE_HTML  = HTML[_REPLAY_PAGE_START:_REPLAY_PAGE_END]
+pytestmark = pytest.mark.skipif(
+    not _REPLAY_PRESENT,
+    reason='NOVA Replay tab retired from active UI (2026-07-16) -- file preserved for history only',
+)
+
+if _REPLAY_PRESENT:
+    _REPLAY_JS = HTML[_REPLAY_JS_START:]
+    _REPLAY_PAGE_START = HTML.find('id="page-replay"')
+    _REPLAY_PAGE_END   = HTML.find('</div><!-- /page-replay -->')
+    _REPLAY_PAGE_HTML  = HTML[_REPLAY_PAGE_START:_REPLAY_PAGE_END]
+else:
+    _REPLAY_JS = ''
+    _REPLAY_PAGE_HTML = ''
 
 _FORBIDDEN = frozenset({'win_rate', 'avg_r', 'expected_value', 'hit_rate'})
 

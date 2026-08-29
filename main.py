@@ -16,9 +16,10 @@ from core.config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_MODE, FOREX_FACTORY_NOTES_URL,
     FINNHUB_API_KEY, FMP_API_KEY, ALPHA_VANTAGE_API_KEY,
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE, MACRO_EVENTS_FILE,
-    MORNING_BRIEF_FILE, NY_TZ, GROK_INTEL_FILE,
+    NY_TZ,
     CACHE, now_ny, utc_now_iso, session_label, safe_float,
     send_telegram_message,
+    NOVA_TRADING_SUBSYSTEM_ENABLED,
 )
 from core.state import (
     ensure_files,
@@ -32,11 +33,11 @@ from core.state import (
 )
 from engines.engines import (
     build_harvey_payload, build_dashboard_payload,
-    build_scenario_engine, build_performance_memory,
+    build_performance_memory,
     build_market_driver_engine, build_morning_edge, build_session_significance,
     get_live_major_indexes, get_live_market_data, get_live_movers,
     get_live_calendar, get_live_earnings, get_live_news, get_live_futures_macro_pulse,
-    send_morning_brief, get_quote_with_fallback,
+    get_quote_with_fallback,
 )
 from engines.signals import process_signal
 
@@ -105,17 +106,23 @@ except Exception as _exec_err:
 from engines.analytics import compute_analytics, validate_trade
 
 from services.assistant import (
-    ASSISTANT_SYSTEM_PROMPT, call_assistant_llm, apply_assistant_action,
+    call_assistant_llm, apply_assistant_action,
 )
+from intelligence.gateway import request_intelligence
+from intelligence.errors import IntelligenceErrorCode
 from ui.html import DASHBOARD_HTML
 
 try:
-    from services.news import process_news_guard_cycle, get_grok_intelligence
-except Exception:
+    from services.news import process_news_guard_cycle
+except Exception as _news_err:
+    # Observable failure, never a silent no-op: if the real News Guard
+    # import ever breaks again, this must be visible in logs, not hidden
+    # behind a fallback that looks healthy. The fallback itself starts no
+    # AI provider and makes no external request -- it only logs and skips.
+    print(f'[main] services.news unavailable -- News Guard will NOT run: {_news_err}')
     def process_news_guard_cycle():
+        print('[main] process_news_guard_cycle() fallback invoked -- real News Guard failed to import')
         return None
-    def get_grok_intelligence():
-        return {}
 
 try:
     from engines.risk_engine import (
@@ -174,70 +181,6 @@ except Exception as _se_err:
 
 app = FastAPI(title='NOVA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
-
-_GROK_API_KEY      = os.getenv('GROK_API_KEY', '').strip()
-_GROK_INTEL_FILE   = GROK_INTEL_FILE  # /data/ persistent disk via DONNA_DATA_DIR
-_GROK_INTEL_PROMPT = (
-    'You are a financial markets AI with live access to X/Twitter and current news. '
-    'Return ONLY valid JSON with these fields:\n'
-    '{\n'
-    '  "top_story": "<headline of the single most market-moving story right now>",\n'
-    '  "top_story_summary": "<2-3 sentence summary of that story and its market impact>",\n'
-    '  "market_sentiment": "<one of: BULLISH | BEARISH | NEUTRAL | MIXED>",\n'
-    '  "sentiment_reason": "<1-2 sentences explaining the sentiment>",\n'
-    '  "donna_trade_read": "<actionable trading implication for today — what to watch, avoid, or lean into>",\n'
-    '  "key_names_to_watch": ["TICKER1", "TICKER2", "TICKER3"],\n'
-    '  "x_market_chatter": "<dominant narrative traders and financial accounts are discussing on X/Twitter right now — 1 sentence>",\n'
-    '  "x_stress_signal": "<any unusual fear, panic, risk-off, or market stress signals trending on X/Twitter — or the string none>",\n'
-    '  "x_key_catalyst": "<main catalyst driving market discussion on X right now — Fed, macro, earnings, geopolitical — or none>"\n'
-    '}\n'
-    'No markdown fences, no extra keys, no commentary. Output raw JSON only.'
-)
-
-
-def _load_cached_grok() -> dict:
-    """Return the last saved Grok intelligence file, or an empty dict."""
-    if _GROK_INTEL_FILE.exists():
-        try:
-            return json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            pass
-    return {}
-
-
-def fetch_grok_intelligence() -> dict:
-    if not _GROK_API_KEY:
-        print('[grok_intelligence] GROK_API_KEY not set — skipping fetch')
-        return _load_cached_grok()
-    try:
-        resp = requests.post(
-            'https://api.x.ai/v1/chat/completions',
-            headers={
-                'Authorization': f'Bearer {_GROK_API_KEY}',
-                'Content-Type':  'application/json',
-            },
-            json={
-                'model': 'grok-3-mini',
-                'messages': [
-                    {'role': 'system', 'content': 'You are a concise financial markets intelligence assistant.'},
-                    {'role': 'user',   'content': _GROK_INTEL_PROMPT},
-                ],
-                'temperature':   0.3,
-                'response_format': {'type': 'json_object'},
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        content = resp.json()['choices'][0]['message']['content']
-        result  = json.loads(content)
-        result['fetched_at'] = utc_now_iso()
-        _GROK_INTEL_FILE.write_text(json.dumps(result, indent=2), encoding='utf-8')
-        print(f'[grok_intelligence] Updated — sentiment:{result.get("market_sentiment")}')
-        return result
-    except Exception as e:
-        print(f'[grok_intelligence] Fetch error: {e} — keeping previous cached data')
-        return _load_cached_grok()
-
 
 # ── Background loops ───────────────────────────────────────────
 
@@ -305,14 +248,10 @@ async def eod_close_loop():
 async def morning_brief_loop():
     while True:
         try:
-            ny        = now_ny()
-            today_str = ny.strftime('%Y-%m-%d')
-            if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 5:
-                state = read_json_file(MORNING_BRIEF_FILE, {})
-                if state.get('last_sent_date') != today_str:
-                    print(f'DONNA morning brief: sending for {today_str}')
-                    result = await asyncio.to_thread(send_morning_brief)
-                    print(f'DONNA morning brief: {result}')
+            ny = now_ny()
+            # AI-generated Morning Brief (generate_morning_brief/send_morning_brief)
+            # is deferred per NOVA Intelligence V1 spec §4 -- disconnected from this
+            # loop. Only the deterministic compact brief below remains scheduled.
             # Compact intelligence brief -- fires 9:00-9:25 AM, once per day
             if ny.weekday() < 5 and ny.hour == 9 and ny.minute < 25:
                 try:
@@ -361,19 +300,6 @@ async def finnhub_loop():
         except Exception as e:
             print('Finnhub loop error:', str(e))
         await asyncio.sleep(300)
-
-
-async def grok_loop():
-    while True:
-        try:
-            await asyncio.to_thread(fetch_grok_intelligence)
-        except Exception as e:
-            print('Grok intelligence loop error:', str(e))
-        # Adaptive sleep: 5 min during market hours (9:00–16:30 ET Mon–Fri), 30 min outside
-        ny = now_ny()
-        m  = ny.hour * 60 + ny.minute
-        in_market = ny.weekday() < 5 and 9 * 60 <= m <= 16 * 60 + 30
-        await asyncio.sleep(300 if in_market else 1800)
 
 
 async def macro_discord_loop():
@@ -498,7 +424,6 @@ async def startup():
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
-    asyncio.create_task(grok_loop())
     asyncio.create_task(morning_brief_loop())
     asyncio.create_task(macro_discord_loop())
     if _EXECUTION_AVAILABLE:
@@ -506,9 +431,15 @@ async def startup():
         await asyncio.to_thread(reconcile_positions_from_alpaca)
         asyncio.create_task(position_outcomes_loop())
         asyncio.create_task(eod_close_loop())
-    if _ALERT_ENGINE_AVAILABLE:
-        await asyncio.to_thread(start_setup_monitor, 60)
-        print('[startup] NOVA alert monitor started (60s polling interval)')
+    # The retired setup-monitor thread (delivery.alert_engine.start_setup_monitor)
+    # polled TradingView/MCP every 60s and, when a chart was reachable, ran the
+    # legacy Claude setup-grading pipeline (engines.reasoning.evaluate_with_claude)
+    # independently of NOVA_TRADING_SUBSYSTEM_ENABLED -- the trading kill switch
+    # only ever guarded broker writes, never this reasoning/alert loop. Disabled
+    # here per the NOVA Intelligence Rebuild Phase 0 safety audit: normal startup
+    # must never reactivate legacy Claude grading or Discord setup alerts, even
+    # with TradingView/CDP open locally. start_setup_monitor() and the reasoning
+    # pipeline it calls remain intact and importable -- archived, not deleted.
     if _EXECUTION_SAFETY_AVAILABLE:
         asyncio.create_task(execution_safety_loop())
         print('[startup] Execution safety monitor started (60s market / 120s off-hours)')
@@ -547,63 +478,10 @@ async def debug_paths():
 
 @app.get('/debug-grok')
 async def debug_grok():
-    """Trace every stage of the Grok intelligence pipeline."""
-    import requests as _req
-
-    # Stage 1: API key
-    key_set    = bool(_GROK_API_KEY)
-    key_prefix = (_GROK_API_KEY[:8] + '...') if key_set else 'NOT_SET'
-
-    # Stage 2: File
-    file_path    = str(_GROK_INTEL_FILE)
-    file_exists  = _GROK_INTEL_FILE.exists()
-    file_bytes   = _GROK_INTEL_FILE.stat().st_size if file_exists else -1
-    file_contents = None
-    if file_exists:
-        try:
-            file_contents = json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-        except Exception as _fe:
-            file_contents = f'PARSE_ERROR: {_fe}'
-
-    # Stage 3: Live API probe (only if key is set — single message, minimal cost)
-    api_status  = 'SKIPPED — key not set'
-    api_payload = None
-    if key_set:
-        try:
-            _r = _req.post(
-                'https://api.x.ai/v1/chat/completions',
-                headers={'Authorization': f'Bearer {_GROK_API_KEY}', 'Content-Type': 'application/json'},
-                json={
-                    'model': 'grok-3-mini',
-                    'messages': [
-                        {'role': 'system', 'content': 'You are a test assistant.'},
-                        {'role': 'user',   'content': 'Reply with exactly: {"status":"ok"}'},
-                    ],
-                    'temperature': 0,
-                    'response_format': {'type': 'json_object'},
-                },
-                timeout=15,
-            )
-            api_status  = f'HTTP {_r.status_code}'
-            api_payload = _r.json() if _r.ok else _r.text[:500]
-        except Exception as _ae:
-            api_status  = f'EXCEPTION: {_ae}'
-
-    # Stage 4: Endpoint read
-    endpoint_result = _load_cached_grok()
-
-    return {
-        'stage_1_api_key':      {'set': key_set, 'prefix': key_prefix},
-        'stage_2_file':         {'path': file_path, 'exists': file_exists, 'bytes': file_bytes, 'contents': file_contents},
-        'stage_3_api_probe':    {'status': api_status, 'payload': api_payload},
-        'stage_4_endpoint':     endpoint_result or 'EMPTY — file missing or parse failed',
-        'break_point':          (
-            'STAGE 1 — GROK_API_KEY not set' if not key_set
-            else 'STAGE 2 — file missing (loop not yet run or API failing)' if not file_exists
-            else 'STAGE 4 — endpoint returns empty (file unreadable)' if not endpoint_result
-            else 'NO BREAK DETECTED — pipeline appears healthy'
-        ),
-    }
+    """Grok is permanently retired from NOVA V1 (Intelligence V1 commit #8).
+    Disabled from active runtime -- never makes a provider request, never
+    reads GROK_API_KEY, never exposes a key prefix, never reads any file."""
+    return {'status': 'GROK_DISABLED'}
 
 
 @app.head('/')
@@ -630,6 +508,7 @@ async def check_env():
         'telegram_alert_mode':         TELEGRAM_ALERT_MODE,
         'chat_model':                  ANTHROPIC_ASSISTANT_MODEL,
         'fast_model':                  ANTHROPIC_MODEL,
+        'trading_subsystem_enabled':   NOVA_TRADING_SUBSYSTEM_ENABLED,
     }
 
 
@@ -950,12 +829,16 @@ async def earnings():
 
 @app.get('/scenario-data')
 async def scenario_data():
-    return build_scenario_engine()
+    """Scenario Engine is deferred per NOVA Intelligence V1 spec §4 -- disconnected
+    from active runtime. Never calls build_scenario_engine()."""
+    return {'status': 'SCENARIO_ENGINE_DISABLED'}
 
 
 @app.post('/scenario-data/refresh')
 async def scenario_data_refresh():
-    return build_scenario_engine(force=True)
+    """Scenario Engine is deferred per NOVA Intelligence V1 spec §4 -- disconnected
+    from active runtime. Never calls build_scenario_engine()."""
+    return {'status': 'SCENARIO_ENGINE_DISABLED'}
 
 
 # ── HARVEY ─────────────────────────────────────────────────────
@@ -1028,14 +911,27 @@ async def risk_engine_reset_stop():
 
 @app.post('/risk-engine/settings')
 async def risk_engine_settings(request: Request):
-    body         = await request.json()
-    account_size = body.get('account_size')
-    risk_pct     = body.get('risk_pct')
-    try:
-        if account_size is not None: account_size = float(account_size)
-        if risk_pct     is not None: risk_pct     = float(risk_pct)
-    except Exception:
-        raise HTTPException(status_code=400, detail='account_size and risk_pct must be numbers')
+    """Update risk-engine sizing inputs.
+
+    Retired-trading gate first: refuses before reading or writing any state.
+    Previously ungated, and it accepted risk_pct=-50 with status 'ok' because
+    only non-numeric input was rejected -- there was no range check at all.
+    """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_payload('risk_engine_settings')
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='body must be an object')
+    _reject_unknown_fields(body, _RISK_SETTINGS_FIELDS, 'risk-engine settings')
+
+    account_size = None
+    if body.get('account_size') is not None:
+        account_size = _require_finite('account_size', body['account_size'], 1.0, 1e9)
+    risk_pct = None
+    if body.get('risk_pct') is not None:
+        risk_pct = _require_finite('risk_pct', body['risk_pct'], 0.0, 100.0)
+
     state = update_re_settings(account_size=account_size, risk_pct=risk_pct)
     return {'status': 'ok', 'settings': state}
 
@@ -1049,22 +945,10 @@ async def alerts_data():
 
 @app.get('/grok-intelligence')
 async def grok_intelligence():
-    cached = _load_cached_grok()
-    if cached:
-        return cached
-    # No file yet — return a safe skeleton so the frontend never breaks
-    return {
-        'top_story':          '',
-        'top_story_summary':  '',
-        'market_sentiment':   'NEUTRAL',
-        'sentiment_reason':   'Intelligence is being fetched — check back shortly.',
-        'donna_trade_read':   '',
-        'key_names_to_watch': [],
-        'x_market_chatter':   '',
-        'x_stress_signal':    '',
-        'x_key_catalyst':     '',
-        'fetched_at':         None,
-    }
+    """Grok is permanently retired from NOVA V1 (Intelligence V1 commit #8).
+    Disabled from active runtime -- never reads or refreshes the historical
+    snapshot, and never presents it as current NOVA intelligence."""
+    return {'status': 'GROK_DISABLED'}
 
 
 @app.get('/api/governance')
@@ -1256,12 +1140,11 @@ async def market_reality_endpoint():
         from engines.market_reality_v2 import load_market_reality_v2
         mr2 = load_market_reality_v2()
         if mr2 and mr2.get('state'):
-            # Supplement with V1 fields any caller may still expect (weekly_structure, grok)
+            # Supplement with V1 fields any caller may still expect (weekly_structure)
             try:
                 from engines.market_reality import load_market_reality
                 mr1 = load_market_reality()
                 mr2.setdefault('weekly_structure', mr1.get('weekly_structure', ''))
-                mr2.setdefault('grok_sentiment',   mr1.get('grok_sentiment', ''))
                 mr2.setdefault('direction',         mr1.get('direction', ''))
                 mr2.setdefault('severity',          mr1.get('severity', ''))
             except Exception:
@@ -1335,6 +1218,60 @@ async def session_memory_endpoint():
         return load_session_memory()
     except Exception as exc:
         return {'error': str(exc), 'rolling_narrative': 'Session memory unavailable.', 'session_count': 0}
+
+
+@app.post('/market-summary')
+async def market_summary_endpoint():
+    """Manual, user-triggered NOVA AI summary of existing stored market/news risk
+    state (spec §14 commit #7). No request body -- input is built exclusively
+    from approved stored data (load_risk_state()), never a live fetch, never a
+    trading signal. Every call must originate from the visible button in the
+    News tab; there is no automatic caller anywhere in the app."""
+    import uuid as _uuid
+
+    risk = load_risk_state()
+
+    snapshot = (risk.get('market_snapshot') or {}).get('NQ')
+    nq_snapshot = None
+    if isinstance(snapshot, dict) and snapshot:
+        nq_snapshot = {
+            'last': snapshot.get('last'),
+            'chg':  snapshot.get('chg'),
+            'pct':  snapshot.get('pct'),
+        }
+
+    # Curated risk-state fields only -- never Journal, broker, Assistant, or
+    # retired-strategy data. See intelligence/prompts/market_summary.py.
+    input_data = {
+        'macro_risk':            risk.get('macro_risk'),
+        'headline_risk':         risk.get('headline_risk'),
+        'market_news_risk':      risk.get('market_news_risk'),
+        'active_warnings':       risk.get('active_warnings') or [],
+        'next_event':            risk.get('next_event'),
+        'event_phase':           risk.get('event_phase'),
+        'last_headline':         risk.get('last_headline'),
+        'headline_guidance':     risk.get('headline_guidance'),
+        'headline_severity':     risk.get('headline_severity'),
+        'last_market_headline':  risk.get('last_market_headline'),
+        'last_market_guidance':  risk.get('last_market_guidance'),
+        'last_market_severity':  risk.get('last_market_severity'),
+        'nq_snapshot':           nq_snapshot,
+    }
+
+    try:
+        response = request_intelligence('market_summary', input_data, user_id='pedro', request_id=str(_uuid.uuid4()))
+    except Exception:
+        # Prompt-build failure or an unexpected non-ProviderError adapter
+        # failure -- never surface exception detail here.
+        raise HTTPException(status_code=500, detail='Market summary failed.')
+
+    if not response.success:
+        if response.error_code == IntelligenceErrorCode.PROVIDER_NOT_CONFIGURED.value:
+            return {'status': 'error', 'detail': response.user_message}
+        raise HTTPException(status_code=500, detail=response.user_message)
+
+    summary = (response.content or '').strip()
+    return {'status': 'ok', 'summary': summary}
 
 
 # ── MCP Snapshot query helpers ────────────────────────────────────────────────
@@ -2269,40 +2206,130 @@ async def execution_cancel_orders():
     return await asyncio.to_thread(cancel_all_orders)
 
 
+# Legacy trading-configuration write routes.
+#
+# Both of the routes below persist configuration belonging to the retired
+# trading subsystem. Neither carried a kill-switch check, so with
+# NOVA_TRADING_SUBSYSTEM_ENABLED false it was still possible to durably write
+# execution_mode='live_personal' and loosen every governance parameter --
+# a change that would take effect the moment the switch were flipped.
+#
+# They are now gated by the same flag as every broker-write entry point in
+# services/execution.py, and they refuse BEFORE reading or writing any state,
+# so a blocked request cannot mutate memory or any file. The kill switch is
+# checked independently of the validation below: validation never re-enables
+# anything, and the broker-write guards in services/execution.py are
+# untouched by either route.
+_EXECUTION_MODES = ('paper', 'paper_validation', 'autonomous_test', 'prop_firm', 'live_personal')
+_MIN_GRADES = ('A+', 'A', 'B', 'C')
+_EXECUTION_SETTINGS_FIELDS = frozenset(
+    {'execution_mode', 'min_grade', 'max_trades_per_day', 'cooldown_minutes'})
+_RISK_SETTINGS_FIELDS = frozenset({'account_size', 'risk_pct'})
+
+
+def _trading_disabled_payload(action: str) -> dict:
+    """The established refusal contract, mirroring services/execution.py."""
+    return {
+        'status': 'TRADING_SUBSYSTEM_DISABLED',
+        'action': action,
+        'reason': 'NOVA_TRADING_SUBSYSTEM_ENABLED is false — trading subsystem retired pending rebuild approval',
+    }
+
+
+def _require_finite(name: str, raw, lo: float, hi: float) -> float:
+    """Reject NaN/Infinity, non-numeric input, and out-of-range values.
+
+    bool is excluded explicitly: it is a subclass of int, so True would
+    otherwise pass as 1.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise HTTPException(status_code=400, detail=f'{name} must be a number')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f'{name} must be a number')
+    if value != value or value in (float('inf'), float('-inf')):
+        raise HTTPException(status_code=400, detail=f'{name} must be finite')
+    if not (lo <= value <= hi):
+        raise HTTPException(status_code=400, detail=f'{name} must be between {lo} and {hi}')
+    return value
+
+
+def _reject_unknown_fields(body: dict, allowed: frozenset, label: str) -> None:
+    unknown = sorted(k for k in body if k not in allowed)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'unknown {label} field(s): {", ".join(unknown)}')
+
+
 @app.post('/execution/settings')
 async def execution_settings_update(request: Request):
-    """Update execution mode and active profile parameters (min_grade, max_trades, cooldown)."""
-    body = await request.json()
-    settings = load_settings()
+    """Update execution mode and active profile parameters.
 
-    new_mode = str(body.get('execution_mode', '')).strip()
-    valid_modes = ('paper', 'paper_validation', 'autonomous_test', 'prop_firm', 'live_personal')
-    if new_mode and new_mode in valid_modes:
+    Refuses outright while the trading subsystem is disabled, and reads no
+    state before refusing, so a blocked call cannot mutate anything.
+    """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_payload('execution_settings_update')
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='body must be an object')
+    _reject_unknown_fields(body, _EXECUTION_SETTINGS_FIELDS, 'execution settings')
+
+    # Validate everything BEFORE touching stored state. An invalid value is
+    # rejected outright -- previously it was silently discarded and the route
+    # still answered status:"ok", so a caller could not tell the write had
+    # been dropped.
+    new_mode = None
+    if 'execution_mode' in body:
+        new_mode = str(body['execution_mode']).strip()
+        if new_mode not in _EXECUTION_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f'execution_mode must be one of: {", ".join(_EXECUTION_MODES)}')
+
+    new_grade = None
+    if 'min_grade' in body:
+        new_grade = str(body['min_grade']).strip().upper()
+        if new_grade not in _MIN_GRADES:
+            raise HTTPException(
+                status_code=400, detail=f'min_grade must be one of: {", ".join(_MIN_GRADES)}')
+
+    new_max = None
+    if 'max_trades_per_day' in body:
+        new_max = int(_require_finite('max_trades_per_day', body['max_trades_per_day'], 1, 50))
+
+    new_cooldown = None
+    if 'cooldown_minutes' in body:
+        new_cooldown = int(_require_finite('cooldown_minutes', body['cooldown_minutes'], 0, 1440))
+
+    settings = load_settings()
+    if new_mode is not None:
         settings['execution_mode'] = new_mode
 
     active_mode = settings.get('execution_mode', 'paper_validation')
     profiles = settings.get('execution_profiles', {})
     profile = dict(profiles.get(active_mode, {}))
-
-    if 'min_grade' in body:
-        g = str(body['min_grade']).strip().upper()
-        if g in ('A+', 'A', 'B', 'C'):
-            profile['min_grade'] = g
-    if 'max_trades_per_day' in body:
-        try:
-            profile['max_trades_per_day'] = max(1, int(body['max_trades_per_day']))
-        except (TypeError, ValueError):
-            pass
-    if 'cooldown_minutes' in body:
-        try:
-            profile['trade_cooldown_minutes'] = max(0, int(body['cooldown_minutes']))
-        except (TypeError, ValueError):
-            pass
+    if new_grade is not None:
+        profile['min_grade'] = new_grade
+    if new_max is not None:
+        profile['max_trades_per_day'] = new_max
+    if new_cooldown is not None:
+        profile['trade_cooldown_minutes'] = new_cooldown
 
     profiles[active_mode] = profile
     settings['execution_profiles'] = profiles
     write_json_file(SETTINGS_FILE, settings)
-    return {'status': 'ok', 'execution_mode': settings['execution_mode'], 'profile': profile}
+
+    # Success is reported only after the intended state is read back from disk
+    # and matches, so a failed write can never be announced as 'ok'.
+    stored = load_settings()
+    stored_profile = (stored.get('execution_profiles') or {}).get(
+        stored.get('execution_mode', ''), {})
+    if stored.get('execution_mode') != settings['execution_mode'] or stored_profile != profile:
+        raise HTTPException(status_code=500, detail='settings did not persist')
+
+    return {'status': 'ok', 'execution_mode': stored['execution_mode'], 'profile': stored_profile}
 
 
 @app.get('/close-all')
@@ -2310,6 +2337,8 @@ async def close_all_eod_manual():
     """Manually trigger EOD close of all open positions immediately."""
     if not _EXECUTION_AVAILABLE:
         return {'status': 'unavailable', 'error': 'execution not loaded'}
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return {'status': 'TRADING_SUBSYSTEM_DISABLED', 'positions_closed': 0}
     n = await asyncio.to_thread(close_all_positions_eod)
     return {'status': 'ok', 'positions_closed': n}
 
@@ -2345,16 +2374,6 @@ async def system_check():
         except Exception:
             pass
 
-    # Grok: last fetch time from cached file
-    grok_connected = bool(os.getenv('GROK_API_KEY', '').strip())
-    last_grok_fetch: str | None = None
-    try:
-        if _GROK_INTEL_FILE.exists():
-            cached = json.loads(_GROK_INTEL_FILE.read_text(encoding='utf-8'))
-            last_grok_fetch = cached.get('fetched_at')
-    except Exception:
-        pass
-
     # Calendar: last fetch time from macro events file
     last_calendar_fetch: str | None = None
     try:
@@ -2370,7 +2389,6 @@ async def system_check():
     from services.execution import BROKER_MODE as _BROKER_MODE
     return {
         'alpaca_connected':      alpaca_connected,
-        'grok_connected':        grok_connected,
         'finnhub_connected':     bool(FINNHUB_API_KEY),
         'telegram_connected':    bool(TELEGRAM_BOT_TOKEN),
         'daily_trades_taken':    exec_state.get('daily_trades_taken', 0),
@@ -2379,7 +2397,6 @@ async def system_check():
         'open_positions':        open_pos,
         'eod_close_scheduled':   _EXECUTION_AVAILABLE,
         'eod_close_window_now':  eod_close_window,
-        'last_grok_fetch':       last_grok_fetch,
         'last_calendar_fetch':   last_calendar_fetch,
         'broker_mode':           _BROKER_MODE if _EXECUTION_AVAILABLE else 'unavailable',
     }
@@ -2389,7 +2406,9 @@ async def system_check():
 
 @app.get('/send-morning-brief')
 async def manual_morning_brief():
-    return await asyncio.to_thread(send_morning_brief)
+    """AI-generated Morning Brief is deferred per NOVA Intelligence V1 spec §4 --
+    disconnected from active runtime. Never calls send_morning_brief()."""
+    return {'status': 'MORNING_BRIEF_DISABLED'}
 
 
 # ── Alert engine ────────────────────────────────────────────────
@@ -2715,6 +2734,18 @@ async def assistant_clear_reminders():
     return {'status': 'ok', 'assistant': state}
 
 
+# `status` must never say "ok" about something that is not an answer. Each
+# outcome from call_assistant_llm() gets its own status so the frontend can
+# render unavailable / empty / malformed distinctly instead of printing a
+# failure string in NOVA's voice. 'error' is reserved for the except branch.
+_ASSISTANT_CHAT_STATUS = {
+    'ok':          'ok',
+    'empty':       'empty',
+    'malformed':   'malformed',
+    'unavailable': 'unavailable',
+}
+
+
 @app.post('/assistant/chat')
 async def assistant_chat(request: Request):
     body    = await request.json()
@@ -2722,31 +2753,34 @@ async def assistant_chat(request: Request):
     if not message:
         raise HTTPException(status_code=400, detail='message is required')
 
-    from core.config import client
-    if not client:
-        risk    = load_risk_state()
-        driver  = build_market_driver_engine(risk)
-        morning = build_morning_edge(risk)
-        sig     = build_session_significance(risk)
-        msg_lower = message.lower()
-        if 'what matters' in msg_lower or 'summary' in msg_lower:
-            reply = f"{driver['dominant_driver']} is in control. {sig['summary']}"
-        elif 'danger' in msg_lower or 'safe' in msg_lower:
-            reply = f"Main threat: {morning['main_threat']}. Open quality: {morning['open_quality']}."
-        elif 'mover' in msg_lower or 'company' in msg_lower:
-            reply = 'Watch NVDA, MSFT, AMZN, AMD, and TSLA first. They have the most index influence right now.'
-        elif 'significant' in msg_lower or 'real' in msg_lower:
-            reply = sig['summary']
-        else:
-            reply = f"NOVA fallback: Bias is {morning['today_bias']}. Focus is {morning['focus']}."
-        return {'status': 'ok', 'action': 'none', 'value': '', 'reply': reply, 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
-
     try:
-        result        = call_assistant_llm(message)
-        updated_state = apply_assistant_action(result['action'], result['value'])
-        return {'status': 'ok', **result, 'assistant': updated_state, 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
-    except Exception as e:
-        return {'status': 'error', 'action': 'none', 'value': '', 'reply': f'Assistant error: {str(e)}', 'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10]}
+        result  = call_assistant_llm(message)
+        outcome = str(result.get('outcome') or 'ok')
+
+        # Only a real answer is allowed to mutate working memory. A failure,
+        # an empty reply, or a malformed payload carries no trustworthy
+        # action, so state is read rather than written.
+        if outcome == 'ok':
+            updated_state = apply_assistant_action(result['action'], result['value'])
+        else:
+            updated_state = load_assistant_state()
+
+        return {
+            'status': _ASSISTANT_CHAT_STATUS.get(outcome, 'error'),
+            **result,
+            'outcome': outcome,
+            'assistant': updated_state, 'risk': load_risk_state(), 'alerts': load_alert_history()[:10],
+        }
+    except Exception:
+        # Never surface exception detail here -- call_assistant_llm() already
+        # converts every ordinary gateway failure into a safe {action,value,
+        # reply,outcome} dict; only a genuinely unexpected failure (e.g. a
+        # prompt-build bug) reaches this except clause, per spec.
+        return {
+            'status': 'error', 'outcome': 'error', 'error_code': None, 'cached': False,
+            'action': 'none', 'value': '', 'reply': 'AI request failed.',
+            'assistant': load_assistant_state(), 'risk': load_risk_state(), 'alerts': load_alert_history()[:10],
+        }
 
 
 # ── Journal ────────────────────────────────────────────────────
@@ -3019,8 +3053,7 @@ async def journal_trade_detail(request: Request):
 async def journal_analyze(request: Request):
     """Generate a NOVA AI review for a journal trade entry. Stores result back to the trade."""
     import json as _json
-    from pathlib import Path
-    from core.config import client as _claude, ANTHROPIC_ASSISTANT_MODEL
+    import uuid as _uuid
 
     body      = await request.json()
     trade_idx = int(body.get('index', -1))
@@ -3054,55 +3087,45 @@ async def journal_analyze(request: Request):
         )
     sig_context = '\n'.join(sig_lines) if sig_lines else '  No signal log entries found for this instrument.'
 
-    prompt = f"""TRADE RECORD:
-Instrument: {trade.get('ticker')} {trade.get('direction')}
-Setup: {trade.get('setup_type') or 'unspecified'}
-Entry: {trade.get('entry_price') or '—'} | Exit: {trade.get('exit_price') or '—'} | Stop: {trade.get('stop') or '—'} | TP1: {trade.get('tp1') or '—'}
-Size: {trade.get('size',1)} | R:R: {trade.get('rr') or '—'}
-P&L: {trade.get('realized_pnl')} | Outcome: {trade.get('outcome')}
-Session: {trade.get('session') or '—'} | Macro risk: {trade.get('macro_risk') or '—'}
-Trader notes: {trade.get('notes') or 'none'}
-Emotional state: {trade.get('emotional_state') or 'not reported'}
-Behavioral flags: {', '.join(trade.get('behavioral_flags') or []) or 'none'}
-Reflection: {trade.get('reflection') or 'none'}
-
-NOVA EVALUATION LOG (closest entries for {ticker}):
-{sig_context}
-
-Provide a structured post-trade analysis with these exact sections. Keep each section to 2-4 sentences max. Tactical, operational language only.
-
-QUALIFICATION
-Why this setup did or did not meet execution standards. Reference PROS phase, OTE, IB draw, session quality, confidence score.
-
-EXECUTION
-Entry timing, stop placement, exit management. Execution score: X/100.
-
-OUTCOME ASSESSMENT
-Was the outcome correct given the setup quality? Explain the result.
-
-WHAT SHOULD HAVE HAPPENED
-Validate correct trades. Identify the error on incorrect ones. State the right path.
-
-BEHAVIORAL NOTE
-One sentence on any behavioral pattern if trader notes or flags suggest it. If none, state "No behavioral flags."
-"""
-
-    system = "You are NOVA, an AI trading intelligence system for MES and MNQ micro futures. You give precise, institutional-grade trade reviews. No hedging, no generic advice. Speak directly about this specific trade."
-
-    if not _claude:
-        return {'status': 'error', 'detail': 'Claude API not configured'}
+    # Curated trade fields only -- never nova_review/nova_review_ts (those are
+    # this endpoint's own output, and including them would churn the cache
+    # key on every regeneration) and never the full trade/journal dump.
+    input_data = {
+        'trade': {
+            'ticker': trade.get('ticker'),
+            'direction': trade.get('direction'),
+            'setup_type': trade.get('setup_type'),
+            'entry_price': trade.get('entry_price'),
+            'exit_price': trade.get('exit_price'),
+            'stop': trade.get('stop'),
+            'tp1': trade.get('tp1'),
+            'size': trade.get('size', 1),
+            'rr': trade.get('rr'),
+            'realized_pnl': trade.get('realized_pnl'),
+            'outcome': trade.get('outcome'),
+            'session': trade.get('session'),
+            'macro_risk': trade.get('macro_risk'),
+            'notes': trade.get('notes'),
+            'emotional_state': trade.get('emotional_state'),
+            'behavioral_flags': trade.get('behavioral_flags'),
+            'reflection': trade.get('reflection'),
+        },
+        'nearby_signals': sig_context,
+    }
 
     try:
-        resp = _claude.messages.create(
-            model=ANTHROPIC_ASSISTANT_MODEL,
-            system=system,
-            messages=[{'role': 'user', 'content': prompt}],
-            max_tokens=800,
-        )
-        analysis = resp.content[0].text.strip() if resp.content else ''
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Claude API error: {str(e)[:100]}')
+        response = request_intelligence('journal_review', input_data, user_id='pedro', request_id=str(_uuid.uuid4()))
+    except Exception:
+        # Prompt-build failure or an unexpected non-ProviderError adapter
+        # failure -- never surface exception detail here.
+        raise HTTPException(status_code=500, detail='Journal review failed.')
 
+    if not response.success:
+        if response.error_code == IntelligenceErrorCode.PROVIDER_NOT_CONFIGURED.value:
+            return {'status': 'error', 'detail': response.user_message}
+        raise HTTPException(status_code=500, detail=response.user_message)
+
+    analysis = (response.content or '').strip()
     trades[trade_idx]['nova_review']    = analysis
     trades[trade_idx]['nova_review_ts'] = utc_now_iso()
     save_journal(trades)

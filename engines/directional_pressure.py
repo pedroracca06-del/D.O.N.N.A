@@ -70,7 +70,6 @@ def _score_reality(mr: dict, mr2: dict | None = None) -> tuple[int, int, str]:
     severity  = (mr.get('severity')     or 'LOW').upper()
     drive     = (mr.get('session_drive')or '').upper()
     structure = (mr.get('structure')    or 'RANGE').upper()
-    grok      = (mr.get('grok_sentiment') or 'UNKNOWN').upper()
 
     sev_pts = {'LOW': 5, 'MEDIUM': 10, 'HIGH': 15, 'EXTREME': 20}.get(severity, 5)
 
@@ -90,8 +89,6 @@ def _score_reality(mr: dict, mr2: dict | None = None) -> tuple[int, int, str]:
     elif 'BEAR' in drive: bear += 4
     if structure == 'WEEKLY_HIGH_BREAK': bull += 3
     elif structure == 'WEEKLY_LOW_BREAK': bear += 3
-    if grok == 'BULLISH': bull += 2
-    elif grok == 'BEARISH': bear += 2
 
     return min(bull, _W_REALITY), min(bear, _W_REALITY), ' | '.join(notes)
 

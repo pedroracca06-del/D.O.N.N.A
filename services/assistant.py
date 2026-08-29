@@ -1,13 +1,12 @@
 """donna_assistant.py — DONNA assistant LLM, context summary, action dispatch."""
 from __future__ import annotations
 
-import json
-import re
+import uuid
 
-from core.config import client, ANTHROPIC_ASSISTANT_MODEL
 from core.state import (
     load_risk_state, load_assistant_state, save_assistant_state, load_alert_history,
 )
+from intelligence.gateway import request_intelligence
 from engines.engines import (
     build_market_driver_engine, build_morning_edge,
     build_session_significance, build_market_movers_engine,
@@ -53,29 +52,6 @@ try:
 except Exception:
     _load_mem = None
     _mem_fmt  = None
-
-ASSISTANT_SYSTEM_PROMPT = (
-    'You are NOVA, an elite market intelligence assistant. '
-    'MR2 (Market Reality 2.0) is objective ground truth — it overrides any cached session narrative. '
-    'When MR2 state is BEARISH_DOMINANT or PANIC_SELLING: acknowledge bearish conditions first. '
-    'When MR2 state is BULLISH_DOMINANT: acknowledge bullish conditions. '
-    'When LONGS_BLOCKED or SHORTS_BLOCKED: respect the execution rule explicitly. '
-    'Return JSON only — no text outside the JSON object: '
-    '{"action":"none|set_focus|add_task|add_reminder|clear_tasks|clear_reminders","value":"","reply":"1-3 sentences"}'
-)
-
-
-def parse_json_loose(text, fallback):
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    try:
-        m = re.search(r'\{.*\}', text, re.S)
-        return json.loads(m.group(0)) if m else fallback
-    except Exception:
-        return fallback
-
 
 def summarize_system_context() -> str:
     risk      = load_risk_state()
@@ -186,27 +162,68 @@ def apply_assistant_action(action, value):
 
 
 def call_assistant_llm(message: str) -> dict:
-    """Call Claude for assistant chat. Returns {'action', 'value', 'reply'}."""
-    fallback = {'action': 'none', 'value': '', 'reply': ''}
-    if not client:
-        return fallback
+    """Call NOVA Intelligence for assistant chat, via the gateway (spec §14 commit #5).
 
-    response = client.messages.create(
-        model=ANTHROPIC_ASSISTANT_MODEL,
-        system=ASSISTANT_SYSTEM_PROMPT,
-        messages=[{'role': 'user', 'content': f'User message:\n{message}\n\nSystem context:\n{summarize_system_context()}'}],
-        max_tokens=400,
+    Returns {'action', 'value', 'reply', 'outcome', 'error_code', 'cached'} on
+    both success and every ordinary gateway failure -- callers never see a raw
+    exception or provider detail from this function. Prompt-build failures and
+    unexpected non-provider adapter exceptions are not caught here; they
+    propagate to the route.
+
+    `outcome` exists because a reply string alone cannot tell a caller whether
+    NOVA answered. The gateway already distinguishes these cases via
+    `success` / `error_code`; the previous version of this function collapsed
+    them into a bare reply, which is why the page rendered
+    "AI features are not configured right now." as a NOVA analysis. The four
+    values are disjoint and exhaustive for a non-raising call:
+
+        'ok'          a real answer -- and the only outcome that may act
+        'empty'       the provider succeeded but returned no reply text
+        'malformed'   the provider succeeded but the payload is not the
+                      {action,value,reply} contract
+        'unavailable' the gateway failed; `reply` is its user-safe message
+                      and `error_code` is the fixed-vocabulary reason
+    """
+    response = request_intelligence(
+        'assistant',
+        {
+            'message': message,
+            'system_context': summarize_system_context(),
+        },
+        user_id='pedro',
+        request_id=str(uuid.uuid4()),
     )
-    raw = response.content[0].text
-    parsed = parse_json_loose(raw, fallback)
 
-    # Log parse failures so we can see what Claude actually returned
-    reply = str(parsed.get('reply', '')).strip()
-    if not reply:
-        print(f'[assistant] parse miss — raw response: {raw[:300]!r}')
+    if not response.success:
+        return {
+            'action': 'none',
+            'value': '',
+            'reply': response.user_message,
+            'outcome': 'unavailable',
+            'error_code': response.error_code,
+            'cached': False,
+        }
 
+    data = response.structured_data
+    # A success envelope still has to carry the agreed payload. parse_response()
+    # can hand back None or a non-conforming object; that is a distinct failure
+    # from "the gateway was down", and must not be reported as an answer.
+    if not isinstance(data, dict) or 'reply' not in data:
+        return {
+            'action': 'none',
+            'value': '',
+            'reply': '',
+            'outcome': 'malformed',
+            'error_code': 'MALFORMED_OUTPUT',
+            'cached': bool(response.cached),
+        }
+
+    reply = str(data.get('reply') or '').strip()
     return {
-        'action': str(parsed.get('action', 'none')).strip().lower(),
-        'value':  str(parsed.get('value', '')).strip(),
-        'reply':  reply or 'No reply generated.',
+        'action': str(data.get('action') or 'none'),
+        'value': data.get('value') or '',
+        'reply': reply,
+        'outcome': 'ok' if reply else 'empty',
+        'error_code': None,
+        'cached': bool(response.cached),
     }

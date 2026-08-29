@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from core.config import (
     now_ny, utc_now_iso, safe_float, send_telegram_message, session_label,
+    NOVA_TRADING_SUBSYSTEM_ENABLED,
 )
 from core.state import (
     load_risk_state, save_risk_state,
@@ -133,6 +134,22 @@ _LOSS_LIMIT_USD     = -1000.0   # Rule 3: unified P&L floor (all sessions)
 
 
 # ── Alpaca client ──────────────────────────────────────────────
+
+def _trading_disabled_result(action: str) -> dict:
+    """Uniform blocked-result for every broker-write entry point.
+
+    Controlled retirement (2026-07-16): NOVA_TRADING_SUBSYSTEM_ENABLED defaults
+    false and is checked here independently of NOVA_AUTO_EXECUTE, so the legacy
+    trading subsystem cannot place, modify, cancel, or close a trade no matter
+    which caller reaches this module.
+    """
+    print(f'[execution] TRADING_SUBSYSTEM_DISABLED — blocked {action}')
+    return {
+        'status': 'TRADING_SUBSYSTEM_DISABLED',
+        'action': action,
+        'reason': 'NOVA_TRADING_SUBSYSTEM_ENABLED is false — trading subsystem retired pending rebuild approval',
+    }
+
 
 def _client() -> 'TradingClient | None':
     if not _ALPACA_LIB or not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
@@ -1026,6 +1043,8 @@ def _close_symbol_and_sync(api, symbol: str, snapshot: dict, close_reason: str, 
 
 
 def close_position(symbol: str) -> dict:
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_result('close_position')
     api = _client()
     if not api:
         return {'status': 'error', 'error': 'Alpaca not configured'}
@@ -1043,6 +1062,8 @@ def close_position(symbol: str) -> dict:
 
 
 def close_all_positions() -> dict:
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_result('close_all_positions')
     api = _client()
     if not api:
         return {'status': 'error', 'error': 'Alpaca not configured'}
@@ -1071,6 +1092,10 @@ def cancel_all_orders() -> dict:
     live position with no stop-loss or take-profit attached -- this never
     happens silently. Protected legs are skipped and reported, not cancelled.
     """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        r = _trading_disabled_result('cancel_all_orders')
+        r.update({'cancelled': 0, 'protected_skipped': []})
+        return r
     api = _client()
     if not api:
         return {'status': 'error', 'error': 'Alpaca not configured', 'cancelled': 0, 'protected_skipped': []}
@@ -1128,6 +1153,10 @@ def close_all_positions_eod() -> int:
     a new entry for manually placed positions.  Sends a Telegram message per close.
     Returns number of positions closed.
     """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        _trading_disabled_result('close_all_positions_eod')
+        return 0
+
     positions = get_positions()
     if not positions:
         return 0
@@ -2020,6 +2049,8 @@ def _execute_alpaca_etf(data: dict, parsed: dict, session: str, is_long: bool, r
 
 def close_qqq_positions() -> dict:
     """Close all open QQQ positions on Alpaca immediately."""
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_result('close_qqq_positions')
     api = _client()
     if not api:
         return {'status': 'error', 'reason': 'Alpaca not configured'}
@@ -2056,6 +2087,9 @@ def execute_signal(signal_result: dict) -> dict:
     Rule 4 — ASIA SESSION       confidence ≥ 90%, max 1 trade per Asia session.
     Rule 5 — POSITION SIZING    broker-specific (ALPACA_ETF: floor($500/stop)).
     """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _trading_disabled_result('execute_signal')
+
     # Pre-extract signal payload so all rejection gates have full context
     data   = signal_result.get('data',   {})
     parsed = signal_result.get('parsed', {})

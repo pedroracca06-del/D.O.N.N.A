@@ -18,6 +18,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 # Alpaca must stay unconfigured for plain imports of services.execution:
 # it runs a one-time live "QQQ cleanup on load" call at module scope.
 os.environ['ALPACA_API_KEY']    = ''
@@ -26,6 +28,13 @@ os.environ['ALPACA_SECRET_KEY'] = ''
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import services.execution as ex
+
+# Legacy execution test (controlled retirement, 2026-07-16): the trading
+# subsystem is disabled by default everywhere, including in tests. This file
+# tests cancel_all_orders()'s bracket-protection business logic directly, so
+# it explicitly opts into the trading-enabled fixture rather than inheriting
+# it -- see tests/conftest.py's legacy_trading_enabled fixture.
+pytestmark = pytest.mark.usefixtures('legacy_trading_enabled')
 
 
 class _FakeOrder:
@@ -125,6 +134,12 @@ if __name__ == '__main__':
             for obj, name, value in reversed(self._undo):
                 setattr(obj, name, value)
 
+    # Legacy execution test running outside pytest -- the pytestmark fixture
+    # above has no effect here, so enable the trading subsystem manually for
+    # this run and restore it afterward (mirrors legacy_trading_enabled).
+    _legacy_mp = _MiniMonkeypatch()
+    _legacy_mp.setattr(ex, 'NOVA_TRADING_SUBSYSTEM_ENABLED', True)
+
     tests = [v for k, v in list(globals().items()) if k.startswith('test_')]
     failed = 0
     for t in tests:
@@ -138,5 +153,7 @@ if __name__ == '__main__':
         finally:
             if mp:
                 mp.undo()
+
+    _legacy_mp.undo()
     print(f'\n{len(tests) - failed}/{len(tests)} passed')
     sys.exit(1 if failed else 0)

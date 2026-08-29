@@ -1,7 +1,7 @@
 """market_reality.py — Market Reality Engine.
 
-Aggregates live price data (yfinance), weekly structure, Grok/X sentiment, and
-internal risk state into a single authoritative market_reality_state object.
+Aggregates live price data (yfinance), weekly structure, and internal risk
+state into a single authoritative market_reality_state object.
 
 Refresh schedule: called at the end of every process_finnhub_cycle() (~5 min).
 Read path: load_market_reality() → reads donna_market_reality.json, no network call.
@@ -23,7 +23,6 @@ from engines.market_reality_shared import fetch_weekly_structure
 from core.config import (
     MARKET_REALITY_FILE  as _REALITY_FILE,
     RISK_STATE_FILE      as _RISK_FILE,
-    GROK_INTEL_FILE      as _GROK_FILE,
 )
 
 _NY_TZ = ZoneInfo('America/New_York')
@@ -112,35 +111,6 @@ def _compute_assistant_tone(direction: str, severity: str, prior_valid: bool) ->
     return 'NORMAL'
 
 
-# ── Prior context validity check ───────────────────────────────────────────────
-
-def _check_prior_context(direction: str, severity: str, grok: dict) -> tuple[bool, str]:
-    """
-    Returns (is_valid, reason_if_invalid).
-    Invalidated when live price reality strongly contradicts cached sentiment,
-    or when the Grok read is too old to trust.
-    """
-    grok_sentiment = (grok.get('market_sentiment') or '').upper()
-    fetched_at_str = grok.get('fetched_at', '')
-
-    if fetched_at_str:
-        try:
-            fetched_at   = datetime.fromisoformat(fetched_at_str.replace('Z', '+00:00'))
-            age_min      = (datetime.now(timezone.utc) - fetched_at).total_seconds() / 60
-            if age_min > 45:
-                return False, f'Grok intelligence is {age_min:.0f}min old — context stale'
-        except Exception:
-            pass
-
-    if severity in ('HIGH', 'EXTREME'):
-        if direction == 'BEARISH' and grok_sentiment == 'BULLISH':
-            return False, f'Grok shows {grok_sentiment} but live price is {direction} at {severity} severity'
-        if direction == 'BULLISH' and grok_sentiment == 'BEARISH':
-            return False, f'Grok shows {grok_sentiment} but live price is {direction} at {severity} severity'
-
-    return True, ''
-
-
 # ── Main compute ───────────────────────────────────────────────────────────────
 
 def compute_market_reality() -> dict:
@@ -150,7 +120,6 @@ def compute_market_reality() -> dict:
     Saves result to donna_market_reality.json and returns the dict.
     """
     risk     = _read_json(_RISK_FILE)
-    grok     = _read_json(_GROK_FILE)
     snapshot = risk.get('market_snapshot', {})
 
     nq_pct   = _safe_float((snapshot.get('NQ') or {}).get('pct'))
@@ -165,7 +134,7 @@ def compute_market_reality() -> dict:
     severity     = _compute_severity(nq_pct, es_pct)
     displacement = _compute_displacement(direction, severity)
 
-    prior_valid, prior_reason = _check_prior_context(direction, severity, grok)
+    prior_valid, prior_reason = True, ''
     assistant_tone = _compute_assistant_tone(direction, severity, prior_valid)
     session_drive  = _compute_session_drive(direction, severity, regime, session)
 
@@ -197,12 +166,6 @@ def compute_market_reality() -> dict:
         'displacement':              displacement,
         'prior_context_valid':       prior_valid,
         'prior_context_reason':      prior_reason,
-        'grok_sentiment':            grok.get('market_sentiment', 'UNKNOWN'),
-        'grok_trade_read':           grok.get('donna_trade_read', ''),
-        'x_market_chatter':          grok.get('x_market_chatter', ''),
-        'x_stress_signal':           grok.get('x_stress_signal', ''),
-        'x_key_catalyst':            grok.get('x_key_catalyst', ''),
-        'top_story':                 grok.get('top_story', ''),
         'market_regime':             regime,
         'session':                   session,
         'assistant_tone':            assistant_tone,
@@ -249,12 +212,6 @@ def load_market_reality() -> dict:
         'bearish_execution_preferred': False,
         'short_execution_allowed': True,
         'long_execution_preferred': False,
-        'grok_sentiment': 'UNKNOWN',
-        'grok_trade_read': '',
-        'x_market_chatter': '',
-        'x_stress_signal': '',
-        'x_key_catalyst': '',
-        'top_story': '',
         'last_updated': '',
     }
 
@@ -307,25 +264,7 @@ def format_reality_for_prompt(mr: dict) -> str:
         f'NQ: {nq_pct:+.2f}%   ES: {es_pct:+.2f}%   VIX: {vix:.1f}',
         f'Structure: {structure}  |  Displacement: {disp}',
         f'Session drive: {mr.get("session_drive", "UNKNOWN")}',
-        f'Grok/X Sentiment: {mr.get("grok_sentiment", "UNKNOWN")}',
     ]
-
-    x_chatter   = mr.get('x_market_chatter', '')
-    x_stress    = mr.get('x_stress_signal', '')
-    x_catalyst  = mr.get('x_key_catalyst', '')
-    top_story   = mr.get('top_story', '')
-    trade_read  = mr.get('grok_trade_read', '')
-
-    if x_chatter:
-        lines.append(f'X/Twitter chatter: {x_chatter}')
-    if x_catalyst:
-        lines.append(f'X catalyst: {x_catalyst}')
-    if x_stress and x_stress.lower() not in ('none', ''):
-        lines.append(f'X stress signal: {x_stress}')
-    if top_story:
-        lines.append(f'Top story: {top_story}')
-    if trade_read:
-        lines.append(f'Grok trade read: {trade_read}')
 
     lines.append(f'Prior context valid: {prior}')
     if not prior and mr.get('prior_context_reason'):
