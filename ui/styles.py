@@ -1849,7 +1849,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .mk-left,.mk-side{display:contents}
 .mk-pulse{grid-area:pulse;align-self:start;display:flex;flex-direction:column}
 .mk-struct{grid-area:structure}
-.mk-vol{grid-area:volatility}
+.mk-vol{grid-area:volatility;align-self:stretch}
 .mk-news{grid-area:news;align-self:start}
 .mk-prov{grid-area:prov}
 
