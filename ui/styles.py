@@ -1839,16 +1839,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   grid-template-columns:minmax(0,2fr) minmax(300px,1fr);
   grid-template-areas:
     "rail       rail"
-    "pulse      side"
-    "structure  side"
+    "left       side"
     "prov       prov";
   gap:12px;align-items:start;
 }
 .mk-rail{grid-area:rail}
-.mk-pulse{grid-area:pulse;align-self:start;display:flex;flex-direction:column}
+.mk-left{grid-area:left;display:grid;gap:12px;align-content:start;min-width:0}
 .mk-side{grid-area:side;display:grid;gap:12px;align-content:start;min-width:0}
+.mk-pulse{align-self:start;display:flex;flex-direction:column}
 .mk-news{align-self:start}
-.mk-struct{grid-area:structure}
 .mk-prov{grid-area:prov}
 
 .mk-panel{
@@ -2078,14 +2077,14 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
      through document order alone. */
   .mk-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:none}
   .mk-grid > *{grid-area:auto;grid-column:1}
-  .mk-side{display:contents}
+  .mk-left,.mk-side{display:contents}
   .mk-pulse{align-self:auto;display:block;padding:14px 0 0}
   .mk-news{align-self:auto}
   .mk-news #mkNewsBody{display:block}
   .mk-news #mkNewsBody .mk-news-section+.mk-news-section{margin-top:14px;padding-top:13px;padding-left:0;border-left:0;border-top:1px solid var(--line)}
   .mk-foot{margin-top:0}
-  .mk-rail{order:1} .mk-pulse{order:2} .mk-vol{order:3}
-  .mk-struct{order:4} .mk-news{order:5} .mk-prov{order:6}
+  .mk-rail{order:1} .mk-pulse{order:2} .mk-struct{order:3}
+  .mk-vol{order:4} .mk-news{order:5} .mk-prov{order:6}
   .mk-rail{grid-template-columns:1fr 1fr}
   .mk-cell{border-right:1px solid var(--line2);border-bottom:1px solid var(--line2)}
   .mk-cell:nth-child(2n){border-right:0}

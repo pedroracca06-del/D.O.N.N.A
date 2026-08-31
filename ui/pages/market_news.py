@@ -88,17 +88,30 @@ MARKET_NEWS_HTML = '''  <!-- ═════════════════
           </div>
         </div>
 
-        <!-- 3. CROSS-ASSET PULSE -->
-        <section class="mk-panel mk-pulse" aria-labelledby="mkPulseTitle">
-          <div class="mk-ph">
-            <h2 id="mkPulseTitle">Cross-asset pulse</h2>
-            <span class="mk-sub" id="mkPulseMeta">&mdash;</span>
-          </div>
-          <div class="mk-pulse-body" id="mkPulseBody">
-            <div class="mk-skel-rows"><i></i><i></i><i></i><i></i></div>
-          </div>
-          <div class="mk-foot" id="mkPulseFoot"></div>
-        </section>
+        <!-- 3 + 6. LEFT STACK: independent from the taller news rail. -->
+        <div class="mk-left">
+          <section class="mk-panel mk-pulse" aria-labelledby="mkPulseTitle">
+            <div class="mk-ph">
+              <h2 id="mkPulseTitle">Cross-asset pulse</h2>
+              <span class="mk-sub" id="mkPulseMeta">&mdash;</span>
+            </div>
+            <div class="mk-pulse-body" id="mkPulseBody">
+              <div class="mk-skel-rows"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="mk-foot" id="mkPulseFoot"></div>
+          </section>
+
+          <section class="mk-panel mk-struct" aria-labelledby="mkStructTitle">
+            <div class="mk-ph">
+              <h2 id="mkStructTitle"><span id="mkStructSym">NQ</span> &middot; market structure</h2>
+              <span class="mk-switch" role="group" aria-label="Instrument">
+                <button type="button" data-mk-sym="NQ" aria-pressed="true">NQ</button>
+                <button type="button" data-mk-sym="ES" aria-pressed="false">ES</button>
+              </span>
+            </div>
+            <div id="mkStructBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
+          </section>
+        </div>
 
         <!-- 4–5. RIGHT RAIL: keep news directly below the shorter volatility
              card instead of leaving a table-height void between them. -->
@@ -120,18 +133,6 @@ MARKET_NEWS_HTML = '''  <!-- ═════════════════
             <div id="mkNewsBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
           </section>
         </div>
-
-        <!-- 6. MARKET STRUCTURE — full width -->
-        <section class="mk-panel mk-struct" aria-labelledby="mkStructTitle">
-          <div class="mk-ph">
-            <h2 id="mkStructTitle"><span id="mkStructSym">NQ</span> &middot; market structure</h2>
-            <span class="mk-switch" role="group" aria-label="Instrument">
-              <button type="button" data-mk-sym="NQ" aria-pressed="true">NQ</button>
-              <button type="button" data-mk-sym="ES" aria-pressed="false">ES</button>
-            </span>
-          </div>
-          <div id="mkStructBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
-        </section>
 
         <!-- 7. SOURCES / PROVENANCE -->
         <div class="mk-prov" id="mkProv" aria-label="Data sources"></div>

@@ -1254,21 +1254,20 @@ def test_overview_reading_order_matches_approved_hierarchy():
 def test_markets_reading_order_matches_approved_hierarchy():
     """Markets' DOM order must follow the approved composition (artifact
     55c387a4): identity/freshness -> session and risk rail -> Cross-Asset
-    Pulse -> Volatility & Direction -> News & Catalysts -> Market Structure
+    Pulse -> Market Structure -> Volatility & Direction -> News & Catalysts
     -> sources. Proven the same way as Overview's order -- strictly
     increasing string offsets.
 
-    Desktop places Market Structure across both columns beneath Pulse; mobile
-    stacks in this same DOM order with Structure pinned ahead of News by CSS
-    `order`, which one column cannot express through document order alone."""
+    Desktop uses two independent vertical stacks so neither column inherits
+    dead space from the other's height. Mobile follows this same DOM order."""
     from ui.pages.market_news import MARKET_NEWS_HTML
     anchors_in_required_order = (
         'id="mkFresh"',        # 1. identity + freshness
         'id="mkRail"',         # 2. session and risk rail
         'id="mkPulseBody"',    # 3. Cross-Asset Pulse
-        'id="mkVolBody"',      # 4. Volatility & Direction
-        'id="mkNewsBody"',     # 5. News & Catalysts
-        'id="mkStructBody"',   # 6. Market Structure
+        'id="mkStructBody"',   # 4. Market Structure
+        'id="mkVolBody"',      # 5. Volatility & Direction
+        'id="mkNewsBody"',     # 6. News & Catalysts
         'id="mkProv"',         # 7. sources / provenance
     )
     positions = [MARKET_NEWS_HTML.index(a) for a in anchors_in_required_order]
