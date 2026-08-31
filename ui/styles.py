@@ -1839,19 +1839,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   grid-template-columns:minmax(0,2fr) minmax(300px,1fr);
   grid-template-areas:
     "rail       rail"
-    "pulse      volatility"
-    "news       news"
+    "pulse      side"
     "structure  structure"
     "prov       prov";
   gap:12px;align-items:start;
 }
 .mk-rail{grid-area:rail}
 .mk-pulse{grid-area:pulse;align-self:start;display:flex;flex-direction:column}
-.mk-vol{grid-area:volatility}
-/* Both stretch: whichever is shorter grows its surface while its content stays
-   anchored at the top, so an empty state is never inflated and no bare page is
-   ever exposed above Market Structure. */
-.mk-news{grid-area:news;align-self:stretch}
+.mk-side{grid-area:side;display:grid;gap:12px;align-content:start;min-width:0}
+.mk-news{align-self:start}
 .mk-struct{grid-area:structure}
 .mk-prov{grid-area:prov}
 
@@ -1956,6 +1952,8 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 .mk-news #mkNewsBody{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr);gap:0 28px}
 .mk-news-section+.mk-news-section{margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
 .mk-news #mkNewsBody .mk-news-section+.mk-news-section{margin-top:0;padding-top:0;border-top:0;border-left:1px solid var(--line);padding-left:28px}
+.mk-side .mk-news #mkNewsBody{display:block}
+.mk-side .mk-news #mkNewsBody .mk-news-section+.mk-news-section{margin-top:14px;padding-top:13px;padding-left:0;border-left:0;border-top:1px solid var(--line)}
 .mk-news-label{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
 .mk-cat{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--line2);align-items:flex-start}
 .mk-cat:last-child{border-bottom:0}
@@ -2080,6 +2078,7 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
      through document order alone. */
   .mk-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:none}
   .mk-grid > *{grid-area:auto;grid-column:1}
+  .mk-side{display:contents}
   .mk-pulse{align-self:auto;display:block;padding:14px 0 0}
   .mk-news{align-self:auto}
   .mk-news #mkNewsBody{display:block}

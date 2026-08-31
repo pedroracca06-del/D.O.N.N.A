@@ -100,23 +100,26 @@ MARKET_NEWS_HTML = '''  <!-- ═════════════════
           <div class="mk-foot" id="mkPulseFoot"></div>
         </section>
 
-        <!-- 4. VOLATILITY & DIRECTION -->
-        <section class="mk-panel mk-vol" aria-labelledby="mkVolTitle">
-          <div class="mk-ph">
-            <h2 id="mkVolTitle">Volatility &amp; direction</h2>
-            <span class="mk-sub" id="mkVolMeta">&mdash;</span>
-          </div>
-          <div id="mkVolBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
-        </section>
+        <!-- 4–5. RIGHT RAIL: keep news directly below the shorter volatility
+             card instead of leaving a table-height void between them. -->
+        <div class="mk-side">
+          <section class="mk-panel mk-vol" aria-labelledby="mkVolTitle">
+            <div class="mk-ph">
+              <h2 id="mkVolTitle">Volatility &amp; direction</h2>
+              <span class="mk-sub" id="mkVolMeta">&mdash;</span>
+            </div>
+            <div id="mkVolBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
+          </section>
 
-        <!-- 5. MARKET-MOVING NEWS: scheduled macro + ranked live headlines -->
-        <section class="mk-panel mk-news" aria-labelledby="mkNewsTitle">
-          <div class="mk-ph">
-            <h2 id="mkNewsTitle">Market-moving news</h2>
-            <span class="mk-sub" id="mkNewsMeta">&mdash;</span>
-          </div>
-          <div id="mkNewsBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
-        </section>
+          <!-- MARKET-MOVING NEWS: scheduled macro + ranked live headlines -->
+          <section class="mk-panel mk-news" aria-labelledby="mkNewsTitle">
+            <div class="mk-ph">
+              <h2 id="mkNewsTitle">Market-moving news</h2>
+              <span class="mk-sub" id="mkNewsMeta">&mdash;</span>
+            </div>
+            <div id="mkNewsBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
+          </section>
+        </div>
 
         <!-- 6. MARKET STRUCTURE — full width -->
         <section class="mk-panel mk-struct" aria-labelledby="mkStructTitle">
