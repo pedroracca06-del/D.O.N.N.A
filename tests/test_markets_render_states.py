@@ -191,6 +191,7 @@ DASH = {'risk': {'macro_risk': 'low', 'headline_risk': 'high',
                  'next_event': 'No scheduled event', 'donna_session': 'LONDON'},
         'news': [], 'calendar': {'source': 'ForexFactory', 'events': [
             {'title': 'President Trump Speaks', 'time_et': '15:00',
+             'date': '2026-09-01',
              'importance': 'medium', 'category': 'macro', 'currency': 'USD',
              'source': 'ForexFactory'}]}}
 STRUCTURE = {'nq': {'onh': 29282.25, 'onl': 28831.75, 'daily_open': 29234.25,
@@ -353,6 +354,19 @@ def test_news_empty_feed_is_stated_not_padded():
     assert 'No headlines in the feed' in out['mkNewsBody']['text']
     assert 'as if it had just broken' in out['mkNewsBody']['text']
     assert 'President Trump Speaks' in out['mkNewsBody']['text']
+    assert '09-01 · 15:00' in out['mkNewsBody']['text']
+
+
+def test_news_headline_links_to_its_real_source_article():
+    dash = dict(DASH, news=[{
+        'headline': 'Powell signals rates may stay higher',
+        'source': 'Reuters', 'severity': 'high', 'category': 'Fed & rates',
+        'url': 'https://example.test/powell-rates',
+    }])
+    html = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY}, 'dash': dash})['mkNewsBody']['html']
+    assert 'href="https://example.test/powell-rates"' in html
+    assert 'target="_blank"' in html
+    assert 'rel="noopener noreferrer"' in html
 
 
 def test_news_quiet_tape_is_distinct_from_failure():

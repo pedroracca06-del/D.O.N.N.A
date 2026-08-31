@@ -9,8 +9,8 @@ workspace:
   1. Markets identity, freshness and clock
   2. Session and risk rail
   3. Cross-Asset Pulse          | 4. Volatility & Direction
-     (spans both right rows)    | 5. News & Catalysts
-  6. Market Structure — full width beneath both columns
+  5. Market-moving News — full width, macro calendar + linked headlines
+  6. Market Structure — full width beneath the news workspace
   7. Sources / provenance
 
 Both marquees are gone. The futures ticker and the five editable index tiles
@@ -109,10 +109,10 @@ MARKET_NEWS_HTML = '''  <!-- ═════════════════
           <div id="mkVolBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
         </section>
 
-        <!-- 5. NEWS & CATALYSTS -->
+        <!-- 5. MARKET-MOVING NEWS: scheduled macro + ranked live headlines -->
         <section class="mk-panel mk-news" aria-labelledby="mkNewsTitle">
           <div class="mk-ph">
-            <h2 id="mkNewsTitle">News &amp; catalysts</h2>
+            <h2 id="mkNewsTitle">Market-moving news</h2>
             <span class="mk-sub" id="mkNewsMeta">&mdash;</span>
           </div>
           <div id="mkNewsBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>

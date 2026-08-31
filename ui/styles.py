@@ -1467,23 +1467,23 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
    dates along the bottom. The aggregation behind it is unchanged -- the chart
    draws the sessions that exist and leaves the rest of the timeline alone. */
 .jn-daily-chart{
-  display:grid;grid-template-columns:auto minmax(0,1fr);
-  grid-template-rows:auto auto;column-gap:10px;
+  display:grid;grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto auto;
 }
 .jn-daily-chart.is-empty{display:block}
 
 /* Y axis */
-.jn-dp-yax{grid-column:1;grid-row:1;padding:20px 0;display:flex;align-items:stretch}
+.jn-dp-yax{grid-column:1;grid-row:1;padding:20px 0;display:flex;align-items:stretch;z-index:3;pointer-events:none}
 .jn-dp-yin{position:relative;width:100%;height:var(--plot-h,168px)}
 .jn-dp-yin span{
-  position:absolute;right:0;transform:translateY(-50%);
+  position:absolute;left:10px;transform:translateY(-50%);
   font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);
   white-space:nowrap;letter-spacing:.2px;
 }
 
 /* The surface itself: seated slightly below the card, not floating on it. */
 .jn-dp-surface{
-  grid-column:2;grid-row:1;position:relative;padding:20px 12px;
+  grid-column:1;grid-row:1;position:relative;padding:20px 12px 20px 58px;
   border:1px solid var(--line2);border-radius:10px;
   background:
     linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,0) 42%),
@@ -1541,8 +1541,8 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
 /* X axis */
 .jn-dp-xax{
-  grid-column:2;grid-row:2;display:grid;
-  grid-template-columns:repeat(var(--n,1),minmax(0,1fr));padding:8px 12px 0;
+  grid-column:1;grid-row:2;display:grid;
+  grid-template-columns:repeat(var(--n,1),minmax(0,1fr));padding:8px 12px 0 58px;
 }
 .jn-dp-xax span{
   grid-column:var(--i);text-align:center;
@@ -1840,13 +1840,13 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   grid-template-areas:
     "rail       rail"
     "pulse      volatility"
-    "pulse      news"
+    "news       news"
     "structure  structure"
     "prov       prov";
   gap:12px;align-items:start;
 }
 .mk-rail{grid-area:rail}
-.mk-pulse{grid-area:pulse;align-self:stretch;display:flex;flex-direction:column}
+.mk-pulse{grid-area:pulse;align-self:start;display:flex;flex-direction:column}
 .mk-vol{grid-area:volatility}
 /* Both stretch: whichever is shorter grows its surface while its content stays
    anchored at the top, so an empty state is never inflated and no bare page is
@@ -1953,11 +1953,18 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 .mk-vnote{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:7px;line-height:1.5}
 
 /* ── news & catalysts ── */
+.mk-news #mkNewsBody{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr);gap:0 28px}
+.mk-news-section+.mk-news-section{margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
+.mk-news #mkNewsBody .mk-news-section+.mk-news-section{margin-top:0;padding-top:0;border-top:0;border-left:1px solid var(--line);padding-left:28px}
+.mk-news-label{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
 .mk-cat{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--line2);align-items:flex-start}
 .mk-cat:last-child{border-bottom:0}
-.mk-cat-t{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);min-width:44px;padding-top:1px;font-variant-numeric:tabular-nums}
+.mk-cat-t{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);width:82px;flex:0 0 82px;padding-top:1px;font-variant-numeric:tabular-nums}
 .mk-cat-b{min-width:0}
 .mk-cat-h{font-size:13px;line-height:1.45;color:var(--text);display:block}
+.mk-cat-link{color:inherit;text-decoration:none}
+.mk-cat-link:hover{text-decoration:underline;text-underline-offset:2px}
+.mk-cat-link:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:2px}
 .mk-cat-m{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:3px;display:block}
 .mk-imp{display:inline-block;width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0;background:var(--muted2)}
 .mk-imp.high{background:var(--red)} .mk-imp.medium{background:var(--yellow)}
@@ -2075,6 +2082,8 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
   .mk-grid > *{grid-area:auto;grid-column:1}
   .mk-pulse{align-self:auto;display:block;padding:14px 0 0}
   .mk-news{align-self:auto}
+  .mk-news #mkNewsBody{display:block}
+  .mk-news #mkNewsBody .mk-news-section+.mk-news-section{margin-top:14px;padding-top:13px;padding-left:0;border-left:0;border-top:1px solid var(--line)}
   .mk-foot{margin-top:0}
   .mk-rail{order:1} .mk-pulse{order:2} .mk-vol{order:3}
   .mk-struct{order:4} .mk-news{order:5} .mk-prov{order:6}

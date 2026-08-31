@@ -430,7 +430,47 @@ def get_live_news():
     if c:
         return c
     data   = fetch_finnhub_market_news()
-    result = [{'headline': x.get('headline', '-'), 'source': x.get('source', '-'), 'summary': x.get('summary', ''), 'url': x.get('url', '')} for x in data[:8]]
+    def classify(item):
+        text = f"{item.get('headline', '')} {item.get('summary', '')}".lower()
+        high = (
+            'powell', 'fomc', 'federal reserve', 'rate decision', 'cpi', 'pce',
+            'nonfarm', 'payroll', 'jobs report', 'trump', 'tariff', 'sanction',
+            'war', 'attack', 'missile', 'invasion', 'emergency', 'default',
+            'banking crisis', 'oil jumps', 'oil surges', 'oil tumbles',
+        )
+        medium = (
+            'treasury', 'yield', 'inflation', 'jobless', 'gdp', 'retail sales',
+            'consumer sentiment', 'opec', 'iran', 'russia', 'china', 'earnings',
+        )
+        if any(k in text for k in high):
+            severity = 'high'
+        elif any(k in text for k in medium):
+            severity = 'medium'
+        else:
+            severity = 'low'
+        if any(k in text for k in ('war', 'attack', 'missile', 'invasion', 'iran', 'russia', 'sanction')):
+            category = 'Geopolitics'
+        elif any(k in text for k in ('powell', 'fed ', 'fomc', 'rate decision', 'treasury', 'yield')):
+            category = 'Fed & rates'
+        elif any(k in text for k in ('cpi', 'pce', 'inflation', 'payroll', 'jobs report', 'gdp', 'retail sales')):
+            category = 'Macro data'
+        elif any(k in text for k in ('trump', 'tariff', 'white house', 'congress')):
+            category = 'Policy'
+        elif any(k in text for k in ('oil', 'gold', 'commodity', 'opec')):
+            category = 'Commodities'
+        else:
+            category = 'Markets'
+        return severity, category
+
+    result = []
+    for x in data[:12]:
+        severity, category = classify(x)
+        result.append({
+            'headline': x.get('headline', '-'), 'source': x.get('source', '-'),
+            'summary': x.get('summary', ''), 'url': x.get('url', ''),
+            'published_at': x.get('datetime'), 'severity': severity,
+            'category': category,
+        })
     cache_set('news', result, 120)
     return result
 

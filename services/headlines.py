@@ -81,7 +81,11 @@ def _safe_get(url: str, params=None, timeout: int = 18):
 
 def _week_bounds() -> tuple[str, str]:
     now    = _now_ny()
-    monday = now - timedelta(days=now.weekday())
+    # ForexFactory rolls its `thisweek` feed forward over the weekend.  Match
+    # that behaviour: on Saturday/Sunday fetch the coming trading week instead
+    # of filtering every returned event against the week that just ended.
+    days_to_monday = (7 - now.weekday()) if now.weekday() >= 5 else -now.weekday()
+    monday = now + timedelta(days=days_to_monday)
     friday = monday + timedelta(days=4)
     return monday.strftime('%Y-%m-%d'), friday.strftime('%Y-%m-%d')
 

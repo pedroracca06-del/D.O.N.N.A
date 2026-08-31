@@ -95,7 +95,7 @@ _PARTS = [
 ]
 
 _IDS = [
-    'jnNetPnl', 'jnNetPnlSub', 'jnWeekPnl', 'jnWeekPnlSub',
+    'jnNetPnlLabel', 'jnNetPnl', 'jnNetPnlSub', 'jnWeekPnl', 'jnWeekPnlSub',
     'jnProfitFactor', 'jnProfitFactorSub', 'jnAvgWL', 'jnAvgWLSub',
     'jnWinRate', 'jnWinRateSub', 'jnRailNote',
     'jnLedgerBody', 'jnLedgerFoot', 'jFilterBar',
@@ -437,6 +437,41 @@ def test_period_filter_narrows_by_date():
     trades = [_trade(trade_date=today), _trade(trade_date=old)]
     out = _run({'payload': _payload(trades), 'period': 'week'})
     assert out['rowCount'] == 1
+
+
+def test_period_filter_recomputes_every_performance_region():
+    """The period control is analytical scope, not a ledger-only hide/show."""
+    import datetime
+    today = datetime.date.today().isoformat()
+    old = (datetime.date.today() - datetime.timedelta(days=200)).isoformat()
+    trades = [
+        _trade(trade_date=today, realized_pnl=100.0, outcome='WIN', active_regime='CURRENT'),
+        _trade(trade_date=old, realized_pnl=-900.0, outcome='LOSS', active_regime='OLD'),
+    ]
+    out = _run({'payload': _payload(trades), 'period': 'week'})
+    assert out['jnNetPnl']['text'] == '+$100.00'
+    assert out['jnNetPnlLabel']['text'] == 'Net P&L · This week'
+    assert '1 closed trade' in out['jnNetPnlSub']['text']
+    assert out['jnWinRate']['text'] == '100%'
+    assert 'CURRENT' in out['jnByRegime']['text']
+    assert 'OLD' not in out['jnByRegime']['text']
+    assert today[5:].replace('-', '/') in out['jnDaily']['text']
+    assert old[5:].replace('-', '/') not in out['jnDaily']['text']
+
+
+def test_this_month_uses_calendar_month_not_rolling_thirty_days():
+    import datetime
+    today = datetime.date.today()
+    current = today.replace(day=1).isoformat()
+    prior = (today.replace(day=1) - datetime.timedelta(days=1)).isoformat()
+    trades = [
+        _trade(trade_date=current, realized_pnl=75.0, outcome='WIN'),
+        _trade(trade_date=prior, realized_pnl=-500.0, outcome='LOSS'),
+    ]
+    out = _run({'payload': _payload(trades), 'period': 'month'})
+    assert out['rowCount'] == 1
+    assert out['jnNetPnl']['text'] == '+$75.00'
+    assert out['jnNetPnlLabel']['text'] == 'Net P&L · This month'
 
 
 def test_selection_follows_the_filtered_ledger():

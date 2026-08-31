@@ -2427,6 +2427,10 @@ function _jnRenderRail(stats, closed) {
   const wins = closed.filter(t => _jnOutcome(t) === 'WIN').length;
   const losses = closed.filter(t => _jnOutcome(t) === 'LOSS').length;
   const net = closed.reduce((s, t) => s + _jnPnl(t), 0);
+  const winPnls = closed.filter(t => _jnOutcome(t) === 'WIN').map(_jnPnl);
+  const lossPnls = closed.filter(t => _jnOutcome(t) === 'LOSS').map(_jnPnl);
+  const grossWins = winPnls.reduce((s, p) => s + Math.max(0, p), 0);
+  const grossLosses = lossPnls.reduce((s, p) => s + Math.abs(Math.min(0, p)), 0);
 
   const setCell = (id, val, sub, cls) => {
     const v = document.getElementById(id), s = document.getElementById(id + 'Sub');
@@ -2434,23 +2438,36 @@ function _jnRenderRail(stats, closed) {
     if (s) s.textContent = sub;
   };
 
+  const netLabel = document.getElementById('jnNetPnlLabel');
+  if (netLabel) netLabel.textContent = 'Net P&L · ' + _JN_PERIODS[_jnPeriod];
+
   setCell('jnNetPnl', total ? _jnMoney(net) : '—',
     total ? `${total} closed trade${total === 1 ? '' : 's'}` : 'No closed trades yet',
     total ? _jnPnlClass(net) : '');
 
-  const week = _jnNum((stats.daily_pnl || {}).this_week);
+  // This-week P&L is also computed from the selected population. Instrument,
+  // outcome, regime and period filters therefore cannot leave an all-time
+  // number behind in an otherwise filtered rail.
+  const todayNY = new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York'}).format(new Date());
+  const td = todayNY.split('-').map(Number);
+  const monday = new Date(Date.UTC(td[0], td[1] - 1, td[2]));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const weekStart = monday.toISOString().slice(0, 10);
+  const week = closed.filter(t => _jnValidDate(t.trade_date) && t.trade_date >= weekStart)
+    .reduce((s, t) => s + _jnPnl(t), 0);
   setCell('jnWeekPnl', week === null ? '—' : _jnMoney(week),
     week === null ? 'Not available' : 'Week to date', week === null ? '' : _jnPnlClass(week));
 
   // compute_journal_stats() returns profit_factor 0.0 when there are no
   // losing trades. Rendering "0.00" would read as catastrophic rather than
   // "not yet meaningful", so that case is stated in words instead.
-  const pf = _jnNum(stats.profit_factor);
+  const pf = grossLosses > 0 ? grossWins / grossLosses : null;
   if (!total) setCell('jnProfitFactor', '—', 'No closed trades yet');
   else if (losses === 0) setCell('jnProfitFactor', '—', `No losing trades yet (${wins} win${wins === 1 ? '' : 's'})`);
   else setCell('jnProfitFactor', pf === null ? '—' : pf.toFixed(2), `gross wins ÷ gross losses · ${total} trades`);
 
-  const aw = _jnNum(stats.avg_win), al = _jnNum(stats.avg_loss);
+  const aw = winPnls.length ? grossWins / winPnls.length : null;
+  const al = lossPnls.length ? grossLosses / lossPnls.length : null;
   if (!total) setCell('jnAvgWL', '—', 'No closed trades yet');
   else setCell('jnAvgWL',
     (aw ? _jnMoney(aw) : '—') + ' / ' + (al ? '-$' + Math.abs(al).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'),
@@ -2565,6 +2582,31 @@ function _jnRenderReview(row) {
 }
 
 function _jnRenderBreakdown(stats, closed) {
+  // Rebuild every bucket from the selected records. Backend all-time buckets
+  // are deliberately not reused here because they would contradict the
+  // active week/month/instrument/regime/outcome filters.
+  const bucket = (pick, missing) => {
+    const out = {};
+    closed.forEach(t => {
+      const key = String(pick(t) || missing);
+      const row = out[key] || (out[key] = {wins:0, losses:0, breakevens:0, pnl:0, win_rate:0});
+      const oc = _jnOutcome(t);
+      if (oc === 'WIN') row.wins++;
+      else if (oc === 'LOSS') row.losses++;
+      else row.breakevens++;
+      row.pnl += _jnPnl(t);
+    });
+    Object.keys(out).forEach(k => {
+      const r = out[k], n = r.wins + r.losses + r.breakevens;
+      r.win_rate = n ? r.wins / n * 100 : 0;
+    });
+    return out;
+  };
+  stats = {
+    by_regime: bucket(t => t.active_regime, 'UNKNOWN'),
+    by_session: bucket(t => t.session, 'UNKNOWN'),
+    by_setup_type: bucket(t => t.setup_type, 'Untagged'),
+  };
   const bars = (host, items, fmt, emptyMsg) => {
     const el = document.getElementById(host);
     if (!el) return;
@@ -2626,7 +2668,7 @@ function _jnRenderBreakdown(stats, closed) {
 
   const meta = document.getElementById('jnBreakdownMeta');
   if (meta) meta.textContent = closed.length
-    ? `${closed.length} closed trade${closed.length === 1 ? '' : 's'} · all-time`
+    ? `${closed.length} closed trade${closed.length === 1 ? '' : 's'} · ${_JN_PERIODS[_jnPeriod].toLowerCase()}`
     : 'No closed trades yet';
 }
 
@@ -2847,15 +2889,30 @@ function _jnFilterGroup(label, name, options, active, disabledReason) {
 
 function renderJournal(data) {
   _journalData = data;
-  const stats = data.stats || {};
-  const trades = data.trades || [];
+  // Personal records are the default performance population. Entries emitted
+  // by the retired execution subsystem remain available as a labelled archive
+  // but can no longer silently alter the user's performance figures.
+  const scope = data._activeScope || 'personal';
+  const hasProvenance = Array.isArray(data.personal_trades) && Array.isArray(data.legacy_system_trades);
+  const trades = hasProvenance
+    ? (scope === 'legacy_system' ? data.legacy_system_trades : data.personal_trades)
+    : (data.trades || []);
+  const stats = hasProvenance
+    ? (scope === 'legacy_system' ? data.legacy_system_stats : data.personal_stats) || {}
+    : (data.stats || {});
   const closed = _jnClosed(trades);
 
+  // One selected population drives the ledger and every analytical region.
+  // “This week” means Monday-to-today in New York; “This month” means the
+  // current NY calendar month. Rolling 7/30-day windows would make those
+  // labels inaccurate around week and month boundaries.
+  const todayNY = new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York'}).format(new Date());
+  const td = todayNY.split('-').map(Number);
+  const monday = new Date(Date.UTC(td[0], td[1] - 1, td[2]));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const weekStart = monday.toISOString().slice(0, 10);
+  const monthStart = todayNY.slice(0, 7) + '-01';
   setText('jTabCount-trades', trades.length);
-
-  _jnRenderRail(stats, closed);
-  _jnRenderBreakdown(stats, closed);
-  _jnRenderDaily(closed);
 
   // Instrument and regime options come from the real records, never a literal.
   const instruments = _jnDistinct(closed, t => String(t.ticker || '').trim().toUpperCase());
@@ -2866,13 +2923,32 @@ function renderJournal(data) {
   if (_jnInstrument !== 'all' && instruments.indexOf(_jnInstrument) === -1) _jnInstrument = 'all';
   if (_jnRegime !== 'all' && regimes.indexOf(_jnRegime) === -1) _jnRegime = 'all';
 
+  const filteredClosed = closed.filter(t => {
+    const outcome = _jnOutcome(t);
+    if (journalFilter === 'wins' && outcome !== 'WIN') return false;
+    if (journalFilter === 'losses' && outcome !== 'LOSS') return false;
+    if (_jnInstrument !== 'all' && String(t.ticker || '').trim().toUpperCase() !== _jnInstrument) return false;
+    if (_jnPeriod === 'week' && !(_jnValidDate(t.trade_date) && t.trade_date >= weekStart)) return false;
+    if (_jnPeriod === 'month' && !(_jnValidDate(t.trade_date) && t.trade_date >= monthStart)) return false;
+    if (_jnRegime !== 'all' && String(t.active_regime || '').trim() !== _jnRegime) return false;
+    return true;
+  });
+
+  _jnRenderRail(stats, filteredClosed);
+  _jnRenderBreakdown(stats, filteredClosed);
+  _jnRenderDaily(filteredClosed);
+
   const bar = document.getElementById('jFilterBar');
   if (bar) {
     const instOpts = {all: 'All'};
     instruments.forEach(i => { instOpts[i] = i; });
     const regOpts = {all: 'All regimes'};
     regimes.forEach(r => { regOpts[r] = _jnBucketLabel(r, 'regime'); });
-    bar.innerHTML =
+    const scopeHtml = hasProvenance ? _jnFilterGroup('Records', 'records', {
+      personal: 'Personal journal (' + data.personal_trades.length + ')',
+      legacy_system: 'Legacy system archive (' + data.legacy_system_trades.length + ')',
+    }, scope, '') : '';
+    bar.innerHTML = scopeHtml +
       _jnFilterGroup('Outcome', 'outcome', _JN_OUTCOMES, journalFilter, '') +
       _jnFilterGroup('Instrument', 'instrument', instOpts, _jnInstrument,
         instruments.length ? '' : 'No instrument recorded') +
@@ -2885,7 +2961,10 @@ function renderJournal(data) {
         const b = e.target.closest ? e.target.closest('[data-fdim]') : null;
         if (!b) return;
         const dim = b.dataset.fdim, val = b.dataset.fval;
-        if (dim === 'outcome') journalFilter = val;
+        if (dim === 'records') {
+          _journalData._activeScope = val;
+          _jnSelectedKey = null;
+        } else if (dim === 'outcome') journalFilter = val;
         else if (dim === 'instrument') _jnInstrument = val;
         else if (dim === 'period') _jnPeriod = val;
         else if (dim === 'regime') _jnRegime = val;
@@ -2894,22 +2973,8 @@ function renderJournal(data) {
     }
   }
 
-  // Build ledger rows newest-first, applying the active filter.
-  const since = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const weekAgo = since(7), monthAgo = since(30);
-  _jnRows = closed.map((t, i) => ({key: _jnKey(t, i), trade: t, pnl: _jnPnl(t), outcome: _jnOutcome(t)}))
-    .filter(r => {
-      if (journalFilter === 'wins' && r.outcome !== 'WIN') return false;
-      if (journalFilter === 'losses' && r.outcome !== 'LOSS') return false;
-      if (_jnInstrument !== 'all' &&
-          String(r.trade.ticker || '').trim().toUpperCase() !== _jnInstrument) return false;
-      if (_jnPeriod === 'week' &&
-          !(_jnValidDate(r.trade.trade_date) && r.trade.trade_date >= weekAgo)) return false;
-      if (_jnPeriod === 'month' &&
-          !(_jnValidDate(r.trade.trade_date) && r.trade.trade_date >= monthAgo)) return false;
-      if (_jnRegime !== 'all' && String(r.trade.active_regime || '').trim() !== _jnRegime) return false;
-      return true;
-    })
+  // Build the ledger from that exact same selected population.
+  _jnRows = filteredClosed.map((t, i) => ({key: _jnKey(t, i), trade: t, pnl: _jnPnl(t), outcome: _jnOutcome(t)}))
     .sort((a, b) => String(b.trade.trade_date || '').localeCompare(String(a.trade.trade_date || '')));
 
   // Selection survives a refresh when the trade still exists; otherwise it
@@ -3276,8 +3341,8 @@ function nyTodayDateStr() {
 }
 
 function renderOverviewAccountSummary(data) {
-  const stats  = data.stats  || {};
-  const trades = data.trades || [];
+  const stats  = data.personal_stats  || data.stats  || {};
+  const trades = data.personal_trades || data.trades || [];
   const todayStr = nyTodayDateStr();
 
   const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'REJECTED');
@@ -3313,7 +3378,7 @@ function renderOverviewAccountSummary(data) {
 }
 
 function renderOverviewRecentActivity(data) {
-  const trades = data.trades || [];
+  const trades = data.personal_trades || data.trades || [];
   if (!trades.length) {
     setHtml('ovRecentTrades', 'No trades logged yet.');
     return;
@@ -3729,35 +3794,39 @@ function _mkRenderNews(dash) {
   }
   const news = dash.news || [];
   const events = ((dash.calendar || {}).events) || [];
-  if (meta) {
-    meta.textContent = events.length
-      ? events.length + ' event' + (events.length === 1 ? '' : 's')
-      : (news.length ? news.length + ' headline' + (news.length === 1 ? '' : 's') : 'nothing scheduled');
-  }
-  let html = '';
-  events.slice(0, 4).forEach(e => {
+  if (meta) meta.textContent = events.length + ' events · ' + news.length + ' headlines';
+  let html = '<div class="mk-news-section"><div class="mk-news-label">Upcoming macro</div>';
+  events.slice(0, 6).forEach(e => {
     const imp = String(e.importance || 'low').toLowerCase();
-    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(e.time_et || '—') + '</span>' +
+    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc((e.date ? e.date.slice(5) + ' · ' : '') + (e.time_et || '—')) + '</span>' +
       '<span class="mk-imp ' + _mkEsc(imp) + '" aria-hidden="true"></span>' +
       '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(e.title || 'Untitled event') + '</span>' +
-      '<span class="mk-cat-m">' + _mkEsc([e.category, e.currency, imp, e.source].filter(Boolean).join(' · ')) +
+      '<span class="mk-cat-m">' + _mkEsc([imp.toUpperCase() + ' IMPACT', e.currency, e.note, e.source].filter(Boolean).join(' · ')) +
       '</span></span></div>';
   });
-  news.slice(0, 4).forEach(n => {
-    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(n.time || '') + '</span>' +
-      '<span class="mk-imp ' + _mkEsc(String(n.severity || 'low').toLowerCase()) + '" aria-hidden="true"></span>' +
-      '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(n.headline || '') + '</span>' +
-      '<span class="mk-cat-m">' + _mkEsc(n.source || '') + '</span></span></div>';
+  if (!events.length) html += '<div class="mk-note"><b>No scheduled events loaded</b>The calendar source returned no events. NOVA will not invent an economic release.</div>';
+  html += '</div><div class="mk-news-section"><div class="mk-news-label">Market-moving headlines</div>';
+  const ranked = news.slice().sort((a, b) => ({high:3,medium:2,low:1}[b.severity] || 0) - ({high:3,medium:2,low:1}[a.severity] || 0));
+  ranked.slice(0, 8).forEach(n => {
+    const sev = String(n.severity || 'low').toLowerCase();
+    const safeUrl = /^https?:[/][/]/i.test(String(n.url || '')) ? String(n.url) : '';
+    const title = safeUrl
+      ? '<a class="mk-cat-link" href="' + _mkEsc(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + _mkEsc(n.headline || '') + '</a>'
+      : _mkEsc(n.headline || '');
+    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(n.category || 'Markets') + '</span>' +
+      '<span class="mk-imp ' + _mkEsc(sev) + '" aria-hidden="true"></span>' +
+      '<span class="mk-cat-b"><span class="mk-cat-h">' + title + '</span>' +
+      '<span class="mk-cat-m">' + _mkEsc(sev.toUpperCase() + ' IMPACT · ' + (n.source || 'Source unavailable')) + '</span></span></div>';
   });
   if (!news.length) {
-    html += '<div class="mk-note"' + (events.length ? ' style="margin-top:11px"' : '') + '>' +
+    html += '<div class="mk-note">' +
       '<b>No headlines in the feed</b>The news service returned zero articles. Nothing is shown ' +
       'rather than repeating an older headline as if it had just broken.</div>';
   }
   if (!events.length && !news.length) {
-    html = '<div class="mk-note"><b>Nothing scheduled and no headlines</b>' +
-      'Both sources answered and both were empty. This is a quiet tape, not a failure.</div>';
+    html += '<div class="mk-note"><b>Nothing live right now</b>Both collections are empty — quiet tape, not a failure.</div>';
   }
+  html += '</div>';
   body.innerHTML = html;
 }
 

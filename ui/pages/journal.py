@@ -68,7 +68,7 @@ JOURNAL_HTML = '''  <!-- ══════════════════�
            from, so no figure is readable without its sample size. -->
       <div class="jn-rail" id="jnRail" aria-label="Performance summary">
         <div class="ri">
-          <div class="l">Net P&amp;L &middot; All-time</div>
+          <div class="l" id="jnNetPnlLabel">Net P&amp;L &middot; All time</div>
           <div class="v" id="jnNetPnl">&mdash;</div>
           <div class="s" id="jnNetPnlSub">&mdash;</div>
         </div>

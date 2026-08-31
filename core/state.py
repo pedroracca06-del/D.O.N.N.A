@@ -145,6 +145,27 @@ def load_journal() -> list:
     return data if isinstance(data, list) else []
 
 
+_LEGACY_EXECUTION_NOTE_MARKERS = (
+    'donna autonomous trade',
+    'nova autonomous trade',
+    'eod forced close',
+    'closed via nova_execution_tab',
+    'reconstructed by audit.py from execution_trace',
+)
+
+
+def journal_record_origin(trade: dict) -> str:
+    """Classify provenance without mutating historical journal evidence.
+
+    The retired execution subsystem wrote distinctive audit text into every
+    record it created.  Strong markers are intentionally required: an older
+    record with incomplete metadata remains personal rather than being hidden
+    on a guess.
+    """
+    notes = str((trade or {}).get('notes', '')).lower()
+    return 'legacy_system' if any(marker in notes for marker in _LEGACY_EXECUTION_NOTE_MARKERS) else 'personal'
+
+
 def save_journal(trades: list):
     write_json_file(JOURNAL_FILE, trades)
 

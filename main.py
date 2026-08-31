@@ -2789,6 +2789,11 @@ async def assistant_chat(request: Request):
 async def journal_data():
     trades    = load_journal()
     stats     = compute_journal_stats(trades)
+    from core.state import journal_record_origin
+    personal_trades = [t for t in trades if journal_record_origin(t) == 'personal']
+    legacy_system_trades = [t for t in trades if journal_record_origin(t) == 'legacy_system']
+    personal_stats = compute_journal_stats(personal_trades)
+    legacy_system_stats = compute_journal_stats(legacy_system_trades)
     today_str = now_ny().strftime('%Y-%m-%d')
 
     _closed_outcomes = ('WIN', 'LOSS', 'EOD_CLOSE', 'BREAKEVEN')
@@ -2807,7 +2812,34 @@ async def journal_data():
 
     stats['today_pnl'] = round(today_pnl, 2)
 
-    return {'status': 'ok', 'trades': trades, 'stats': stats}
+    personal_stats['today_pnl'] = round(sum(
+        float(t.get('realized_pnl', 0) or 0)
+        for t in personal_trades
+        if t.get('trade_date') == today_str
+        and t.get('outcome') in _closed_outcomes
+        and t.get('realized_pnl') is not None
+        and t.get('outcome') != 'REJECTED'
+    ), 2)
+    legacy_system_stats['today_pnl'] = round(sum(
+        float(t.get('realized_pnl', 0) or 0)
+        for t in legacy_system_trades
+        if t.get('trade_date') == today_str
+        and t.get('outcome') in _closed_outcomes
+        and t.get('realized_pnl') is not None
+        and t.get('outcome') != 'REJECTED'
+    ), 2)
+
+    return {
+        'status': 'ok', 'trades': trades, 'stats': stats,
+        'personal_trades': personal_trades, 'personal_stats': personal_stats,
+        'legacy_system_trades': legacy_system_trades,
+        'legacy_system_stats': legacy_system_stats,
+        'record_scope': {
+            'default': 'personal',
+            'personal': len(personal_trades),
+            'legacy_system': len(legacy_system_trades),
+        },
+    }
 
 
 @app.get('/journal/signals')
