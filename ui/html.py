@@ -28,6 +28,7 @@ DASHBOARD_HTML = (
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>NOVA v5.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23080d1a'/%3E%3Cpath d='M16 46V18h7l18 20V18h7v28h-7L23 26v20z' fill='%234f8dff'/%3E%3C/svg%3E" />
 <style>
 '''
     + DASHBOARD_CSS +

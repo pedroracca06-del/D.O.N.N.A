@@ -94,7 +94,10 @@ def get_futures_quote(symbol_alias):
         'NQ': ['NQ=F', '^NDX', '^IXIC', 'QQQ'],
         'ES': ['ES=F', '^GSPC', 'SPY'],
         'OIL': ['CL=F', 'USO'],
-        'GOLD': ['GC=F', 'GLD'],
+        # GOLD means COMEX gold futures everywhere else in NOVA. Do not
+        # silently substitute the GLD ETF: its price and daily move describe
+        # a different instrument and made two honest GOLD panels disagree.
+        'GOLD': ['GC=F'],
         'SILVER': ['SI=F', 'SLV'],
     }
     candidates = futures_map.get(str(symbol_alias).upper(), [])

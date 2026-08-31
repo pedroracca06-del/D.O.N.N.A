@@ -145,7 +145,7 @@ NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS = _env_int('NOVA_EXECUTION_SAFETY_A
 NOVA_TRADING_SUBSYSTEM_ENABLED = os.getenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'false').strip().lower() == 'true'
 
 # ── Feed sync (local → Render replication) ────────────────────
-# NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)
+# NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://d-o-n-n-a.onrender.com)
 # NOVA_INGEST_SECRET: shared secret for POST /api/feed/ingest — set in both local .env and Render env vars
 NOVA_RENDER_URL    = os.getenv('NOVA_RENDER_URL', '').strip().rstrip('/')
 NOVA_INGEST_SECRET = os.getenv('NOVA_INGEST_SECRET', '').strip()

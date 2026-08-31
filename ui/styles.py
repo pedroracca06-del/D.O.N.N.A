@@ -1781,7 +1781,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 /* ── identity ── */
 .mk-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}
 .mk-kicker{
-  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
   color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
 }
 .mk-title{
@@ -2128,7 +2128,7 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 /* ── page identity ── */
 #page-assistant .ni-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}
 #page-assistant .ni-kicker{
-  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
   color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
 }
 #page-assistant .ni-id h1{
@@ -2372,7 +2372,7 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 /* ── identity ── */
 #page-settings .st-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:9px}
 #page-settings .st-kicker{
-  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
   color:var(--muted2);text-transform:uppercase;margin-bottom:5px;
 }
 #page-settings .st-id h1{
