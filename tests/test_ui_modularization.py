@@ -1258,8 +1258,9 @@ def test_markets_reading_order_matches_approved_hierarchy():
     -> sources. Proven the same way as Overview's order -- strictly
     increasing string offsets.
 
-    Desktop uses two independent vertical stacks so neither column inherits
-    dead space from the other's height. Mobile follows this same DOM order."""
+    Desktop makes Cross-Asset Pulse and Market-Moving News full-width, pairing
+    the similarly sized Structure and Volatility cards between them. Mobile
+    follows this same DOM order."""
     from ui.pages.market_news import MARKET_NEWS_HTML
     anchors_in_required_order = (
         'id="mkFresh"',        # 1. identity + freshness
