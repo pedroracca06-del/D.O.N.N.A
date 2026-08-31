@@ -1840,7 +1840,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   grid-template-areas:
     "rail       rail"
     "pulse      side"
-    "structure  structure"
+    "structure  side"
     "prov       prov";
   gap:12px;align-items:start;
 }
