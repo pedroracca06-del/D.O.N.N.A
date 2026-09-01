@@ -1,14 +1,21 @@
 #!/usr/bin/env python
 """
-test_nova_guard_hook.py -- synthetic harness for the DISABLED candidate hook.
+test_nova_guard_hook.py -- PHASE 2J candidate harness.
 
-Every case is a JSON payload fed to the candidate on stdin as a subprocess.
+Every case is a JSON payload fed to the candidate hook on stdin as a subprocess.
 No proposed command is ever executed.
 
 The harness builds a SYNTHETIC repository in the OS temp directory
-(nova_guard_sandbox/D.O.N.N.A + a marker directory) and points every case at it. The
-real NOVA repository and the real protected files are never referenced, read,
-written, or stat-ed by these tests.
+(nova_guard_sandbox/D.O.N.N.A + a marker directory) and points every case at it.
+The real NOVA repository and the real protected files are never referenced.
+
+Groups:
+  safe/edit/shell/ps/flag/scope/root/prefix/case/malformed/exit2/noleak
+      -- the 104 checks inherited from commit ee91955, unchanged
+  h1/h2/h3/m1/m2/m3/m4
+      -- Phase 2I findings, each with negative controls
+  config
+      -- settings.json wiring assertions (Phase 2I L-3)
 
 Run:  python test_nova_guard_hook.py
 """
@@ -24,23 +31,25 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "nova_guard_hook.py")
+# The harness lives in <project>/.claude/hooks/ once installed, so the settings
+# file it must assert against is one directory up. Resolved from the harness
+# location only -- never from the working directory, an absolute repo path, or
+# an environment variable.
+CLAUDE_DIR = os.path.normpath(os.path.join(HERE, os.pardir))
+SETTINGS = os.path.join(CLAUDE_DIR, "settings.json")
 
-# ---------------------------------------------------------------- synthetic repo
-SANDBOX = os.path.join(tempfile.gettempdir(), "nova_guard_sandbox")
+SANDBOX = os.path.join(tempfile.gettempdir(), "nova_guard_sandbox_2j")
 ROOT_NATIVE = os.path.join(SANDBOX, "D.O.N.N.A")
-COPY_NATIVE = os.path.join(SANDBOX, "D.O.N.N.A-copy")   # prefix-confusion sibling
+COPY_NATIVE = os.path.join(SANDBOX, "D.O.N.N.A-copy")
 PLAIN_NATIVE = os.path.join(SANDBOX, "unrelated-project")
 
 
 def build_sandbox():
     if os.path.isdir(SANDBOX):
         shutil.rmtree(SANDBOX)
-    # marker present -> counts as a NOVA checkout
     os.makedirs(os.path.join(ROOT_NATIVE, "nova_knowledge_core"))
-    os.makedirs(os.path.join(ROOT_NATIVE, "services"))
-    os.makedirs(os.path.join(ROOT_NATIVE, "core"))
-    os.makedirs(os.path.join(ROOT_NATIVE, "tests"))
-    # no marker -> must never be treated as the project root
+    for d in ("services", "core", "tests", "engines"):
+        os.makedirs(os.path.join(ROOT_NATIVE, d))
     os.makedirs(os.path.join(COPY_NATIVE, "services"))
     os.makedirs(os.path.join(PLAIN_NATIVE, "services"))
 
@@ -61,9 +70,13 @@ PLAIN = posix(PLAIN_NATIVE)
 
 ALLOW, DENY = "allow", "deny"
 
+# Real kill-switch text, copied read-only from main.py:2268 and monitor.py:307.
+MAIN_GUARD_OLD = "    if not NOVA_TRADING_SUBSYSTEM_ENABLED:\n        return {'status': 'TRADING_SUBSYSTEM_DISABLED', 'positions_closed': 0}"
+MAIN_GUARD_NEW = "    n = await asyncio.to_thread(close_all_positions_eod)"
+MON_GUARD_OLD = "    if os.getenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'false').strip().lower() != 'true':"
+
 
 def run(payload, raw=None, env_root="__default__"):
-    """Return (decision, exit_code, stdout, stderr). 'allow' == hook stayed silent."""
     data = raw if raw is not None else json.dumps(payload)
     env = dict(os.environ)
     if env_root == "__default__":
@@ -88,7 +101,7 @@ def edit(tool, path, cwd=None, **extra):
     if tool == "NotebookEdit":
         ti["notebook_path"] = path
     elif tool == "MultiEdit":
-        ti["edits"] = [{"file_path": path, "old_string": "a", "new_string": "b"}]
+        ti.setdefault("edits", [{"file_path": path, "old_string": "a", "new_string": "b"}])
     else:
         ti["file_path"] = path
     return {"hook_event_name": "PreToolUse", "tool_name": tool,
@@ -101,12 +114,11 @@ def sh(command, tool="Bash", cwd=None):
 
 
 def cases():
-    """(group, name, payload, expected, env_root)"""
     D = "__default__"
     C = []
     a = lambda g, n, p, e, env=D: C.append((g, n, p, e, env))
 
-    # ---- safe / allowed --------------------------------------------------
+    # ================= inherited 104 =================
     a("safe", "read protected file",           edit("Read", r"services\execution.py"), ALLOW)
     a("safe", "edit unrelated source",         edit("Edit", r"engines\reasoning.py"), ALLOW)
     a("safe", "edit similarly named file",     edit("Edit", r"services\execution_notes.py"), ALLOW)
@@ -126,7 +138,6 @@ def cases():
     a("safe", "ps flag read only",             sh("$env:NOVA_AUTO_EXECUTE", tool="PowerShell"), ALLOW)
     a("safe", "grep output to /dev/null",      sh("grep -c x services/execution.py > /dev/null"), ALLOW)
 
-    # ---- blocked file-edit tools -----------------------------------------
     a("edit", "Edit windows relative",         edit("Edit", r"services\execution.py"), DENY)
     a("edit", "Edit posix relative",           edit("Edit", "services/execution.py"), DENY)
     a("edit", "Edit dot-slash",                edit("Edit", "./services/execution_bridge.py"), DENY)
@@ -141,7 +152,6 @@ def cases():
     a("edit", "MultiEdit protected file",      edit("MultiEdit", "core/config.py"), DENY)
     a("edit", "NotebookEdit protected path",   edit("NotebookEdit", "tests/conftest.py"), DENY)
 
-    # ---- blocked shell mutations -----------------------------------------
     a("shell", "redirect overwrite",           sh("echo '' > services/execution.py"), DENY)
     a("shell", "redirect append",              sh("echo x >> core/config.py"), DENY)
     a("shell", "sed in-place",                 sh("sed -i 's/False/True/' services/execution.py"), DENY)
@@ -158,14 +168,12 @@ def cases():
     a("shell", "node fs.writeFileSync",        sh("node -e \"require('fs').writeFileSync('services/execution.py','')\""), DENY)
     a("shell", "quoted windows path write",    sh('sed -i s/a/b/ "%s"' % (ROOT_NATIVE + r"\services\execution.py")), DENY)
 
-    # ---- blocked PowerShell mutations ------------------------------------
     a("ps", "Set-Content",                     sh("Set-Content -Path services/execution.py -Value ''", tool="PowerShell"), DENY)
     a("ps", "Out-File",                        sh("'x' | Out-File core/config.py", tool="PowerShell"), DENY)
     a("ps", "Remove-Item",                     sh("Remove-Item tests/conftest.py", tool="PowerShell"), DENY)
     a("ps", "Copy-Item over target",           sh("Copy-Item patched.py services/execution.py", tool="PowerShell"), DENY)
     a("ps", "Move-Item over target",           sh("Move-Item a.py services/execution_bridge.py", tool="PowerShell"), DENY)
 
-    # ---- guarded trading flags -------------------------------------------
     a("flag", "bash export true",              sh("export NOVA_TRADING_SUBSYSTEM_ENABLED=true"), DENY)
     a("flag", "bash inline True",              sh("NOVA_TRADING_SUBSYSTEM_ENABLED=True python main.py"), DENY)
     a("flag", "bash auto-execute true",        sh("NOVA_AUTO_EXECUTE=true python -m uvicorn main:app"), DENY)
@@ -175,7 +183,6 @@ def cases():
     a("flag", "powershell auto-execute on",    sh("$env:NOVA_AUTO_EXECUTE = 'on'", tool="PowerShell"), DENY)
     a("flag", "setx persistence",              sh("setx NOVA_AUTO_EXECUTE true", tool="PowerShell"), DENY)
 
-    # ---- scope -----------------------------------------------------------
     a("scope", "unrelated repo edit",          edit("Edit", "services/execution.py", cwd=PLAIN), ALLOW, PLAIN_NATIVE)
     a("scope", "unrelated repo sed in-place",  sh("sed -i s/a/b/ services/execution.py", cwd=PLAIN), ALLOW, PLAIN_NATIVE)
     a("scope", "unrelated repo flag true",     sh("export NOVA_AUTO_EXECUTE=true", cwd=PLAIN), ALLOW, PLAIN_NATIVE)
@@ -183,7 +190,6 @@ def cases():
     a("scope", "missing cwd field",            {"hook_event_name": "PreToolUse", "tool_name": "Edit",
                                                 "tool_input": {"file_path": "services/execution.py"}}, ALLOW)
 
-    # ---- NEW: project-root resolution ------------------------------------
     a("root", "missing env, cwd in repo",      edit("Edit", "services/execution.py"), DENY, None)
     a("root", "missing env, cwd in subdir",    edit("Edit", "execution.py", cwd=ROOT_SUB), DENY, None)
     a("root", "missing env, cwd outside repo", edit("Edit", "services/execution.py", cwd=PLAIN), ALLOW, None)
@@ -195,18 +201,109 @@ def cases():
     a("root", "env without NOVA marker",       edit("Edit", "services/execution.py", cwd=PLAIN), ALLOW, PLAIN_NATIVE)
     a("root", "env quoted path",               edit("Edit", "services/execution.py"), DENY, '"%s"' % ROOT_NATIVE)
 
-    # ---- NEW: prefix confusion -------------------------------------------
     a("prefix", "sibling -copy cwd, edit",     edit("Edit", "services/execution.py", cwd=COPY), ALLOW)
     a("prefix", "sibling -copy cwd, sed",      sh("sed -i s/a/b/ services/execution.py", cwd=COPY), ALLOW)
     a("prefix", "sibling -copy cwd, flag",     sh("export NOVA_AUTO_EXECUTE=true", cwd=COPY), ALLOW)
     a("prefix", "sibling -copy absolute path", edit("Edit", COPY + "/services/execution.py"), ALLOW)
     a("prefix", "sibling as env root",         edit("Edit", "services/execution.py", cwd=COPY), ALLOW, COPY_NATIVE)
 
-    # ---- NEW: mixed-case Windows paths -----------------------------------
     a("case", "upper cwd, relative path",      edit("Edit", "services/execution.py", cwd=ROOT.upper()), DENY)
     a("case", "upper env root",                edit("Edit", "services/execution.py"), DENY, ROOT_NATIVE.upper())
     a("case", "upper absolute file path",      edit("Edit", (ROOT + "/SERVICES/EXECUTION.PY")), DENY)
     a("case", "upper shell path in command",   sh("sed -i s/a/b/ %s" % (ROOT + "/SERVICES/EXECUTION.PY").upper()), DENY)
+
+    # ================= H-1 : directory-changing commands =================
+    a("h1", "cd core && sed -i config.py",     sh("cd core && sed -i 's/False/True/' config.py"), DENY)
+    a("h1", "cd services; sed -i execution",   sh("cd services; sed -i s/a/b/ execution.py"), DENY)
+    a("h1", "pushd services && sed -i",        sh("pushd services && sed -i s/a/b/ execution.py"), DENY)
+    a("h1", "cd tests && rm conftest.py",      sh("cd tests && rm conftest.py"), DENY)
+    a("h1", "cd core && redirect into config", sh("cd core && echo x > config.py"), DENY)
+    a("h1", "quoted cd target",                sh('cd "services" && sed -i s/a/b/ execution.py'), DENY)
+    a("h1", "two hops cd .. then into core",   sh("cd services && cd ../core && sed -i s/a/b/ config.py"), DENY)
+    a("h1", "PS Set-Location core; Set-Content", sh("Set-Location core; Set-Content -Path config.py -Value ''", tool="PowerShell"), DENY)
+    a("h1", "PS cd services; Remove-Item",     sh("cd services; Remove-Item execution.py", tool="PowerShell"), DENY)
+    a("h1", "PS sl services; Set-Content",     sh("sl services; Set-Content -Path execution.py -Value ''", tool="PowerShell"), DENY)
+    # negative controls
+    a("h1", "NEG cd elsewhere, mutate other",  sh("cd engines && sed -i s/a/b/ reasoning.py"), ALLOW)
+    a("h1", "NEG cd core, read config",        sh("cd core && grep -n FLAG config.py"), ALLOW)
+    a("h1", "NEG cd core then back out",       sh("cd core && cd .. && sed -i s/a/b/ engines/reasoning.py"), ALLOW)
+    a("h1", "NEG cd services, sed -n read",    sh("cd services && sed -n '1,5p' execution.py"), ALLOW)
+
+    # ================= H-2 : main.py / monitor.py two-tier =================
+    a("h2", "unrelated Edit in main.py",       edit("Edit", "main.py", old_string="def health():", new_string="def health_v2():"), ALLOW)
+    a("h2", "unrelated Edit in monitor.py",    edit("Edit", "monitor.py", old_string="poll_interval = 60", new_string="poll_interval = 30"), ALLOW)
+    a("h2", "Edit removing main kill switch",  edit("Edit", "main.py", old_string=MAIN_GUARD_OLD, new_string=MAIN_GUARD_NEW), DENY)
+    a("h2", "Edit inserting flag into main",   edit("Edit", "main.py", old_string="x = 1", new_string="NOVA_AUTO_EXECUTE = True"), DENY)
+    a("h2", "Edit removing monitor guard",     edit("Edit", "monitor.py", old_string=MON_GUARD_OLD, new_string="    if True:"), DENY)
+    a("h2", "MultiEdit touching guard",        edit("MultiEdit", "main.py", edits=[
+        {"file_path": "main.py", "old_string": "a", "new_string": "b"},
+        {"file_path": "main.py", "old_string": MAIN_GUARD_OLD, "new_string": "pass"}]), DENY)
+    a("h2", "MultiEdit unrelated only",        edit("MultiEdit", "main.py", edits=[
+        {"file_path": "main.py", "old_string": "a", "new_string": "b"}]), ALLOW)
+    a("h2", "full Write of main.py",           edit("Write", "main.py", content="print('x')"), DENY)
+    a("h2", "full Write of monitor.py",        edit("Write", "monitor.py", content="print('x')"), DENY)
+    a("h2", "NotebookEdit of main.py",         edit("NotebookEdit", "main.py"), DENY)
+    a("h2", "shell sed -i on main.py",         sh("sed -i 's/False/True/' main.py"), DENY)
+    a("h2", "shell redirect into main.py",     sh("echo x > main.py"), DENY)
+    a("h2", "shell rm monitor.py",             sh("rm monitor.py"), DENY)
+    a("h2", "PS Set-Content main.py",          sh("Set-Content -Path main.py -Value ''", tool="PowerShell"), DENY)
+    a("h2", "cd-then-mutate main.py",          sh("cd . && sed -i s/a/b/ main.py"), DENY)
+    # negative controls
+    a("h2", "read main.py",                    sh("cat main.py"), ALLOW)
+    a("h2", "grep main.py",                    sh("grep -n NOVA_TRADING_SUBSYSTEM_ENABLED main.py"), ALLOW)
+    a("h2", "git diff main.py",                sh("git diff main.py"), ALLOW)
+    a("h2", "pytest referencing main",         sh("python -m pytest tests -q -k main"), ALLOW)
+    a("h2", "copy main.py OUT as backup",      sh("cp main.py /tmp/main_backup.py"), ALLOW)
+
+    # ================= H-3 : redirect destination =================
+    a("h3", "grep protected -> notes.txt",     sh("grep -n NOVA services/execution.py > notes.txt"), ALLOW)
+    a("h3", "pytest conftest -> results.txt",  sh("python -m pytest tests/conftest.py -q > results.txt"), ALLOW)
+    a("h3", "diff two protected -> d.txt",     sh("diff services/execution.py services/execution_bridge.py > d.txt"), ALLOW)
+    a("h3", "append read output elsewhere",    sh("sed -n '1,5p' core/config.py >> log.txt"), ALLOW)
+    a("h3", "stderr redirect only",            sh("grep x services/execution.py 2> err.txt"), ALLOW)
+    a("h3", "redirect INTO protected",         sh("grep x foo.txt > services/execution.py"), DENY)
+    a("h3", "append INTO protected",           sh("cat notes.txt >> core/config.py"), DENY)
+    a("h3", "quoted redirect INTO protected",  sh('echo x > "services/execution.py"'), DENY)
+
+    # ================= M-1 : flag assignment context =================
+    a("m1", "quoted doc mention in echo",      sh('echo "the retired default is NOVA_AUTO_EXECUTE=true" >> notes.md'), ALLOW)
+    a("m1", "quoted doc mention, single q",    sh("echo 'set NOVA_TRADING_SUBSYSTEM_ENABLED=true to re-enable' > doc.md"), ALLOW)
+    a("m1", "PS Write-Output quoted mention",  sh('Write-Output "NOVA_AUTO_EXECUTE=true is the retired default"', tool="PowerShell"), ALLOW)
+    a("m1", "grep for the flag literal",       sh("grep -rn 'NOVA_AUTO_EXECUTE=true' docs/"), ALLOW)
+    a("m1", "real export still denied",        sh("export NOVA_AUTO_EXECUTE=true"), DENY)
+    a("m1", "real inline assignment denied",   sh("NOVA_AUTO_EXECUTE=true python x.py"), DENY)
+    a("m1", "python os.environ assignment",    sh("python -c \"import os; os.environ['NOVA_AUTO_EXECUTE']='true'\""), DENY)
+    a("m1", "node process.env assignment",     sh("node -e \"process.env.NOVA_AUTO_EXECUTE='true'\""), DENY)
+    a("m1", "env VAR=true prefix",             sh("env NOVA_TRADING_SUBSYSTEM_ENABLED=true python x.py"), DENY)
+
+    # ================= M-2 : Windows persistence =================
+    a("m2", "Environment::SetEnvironmentVariable", sh('[Environment]::SetEnvironmentVariable("NOVA_AUTO_EXECUTE","true","User")', tool="PowerShell"), DENY)
+    a("m2", "System.Environment:: form",       sh('[System.Environment]::SetEnvironmentVariable("NOVA_TRADING_SUBSYSTEM_ENABLED","1","Machine")', tool="PowerShell"), DENY)
+    a("m2", "Set-Item Env: form",              sh('Set-Item -Path Env:NOVA_AUTO_EXECUTE -Value "true"', tool="PowerShell"), DENY)
+    a("m2", "NEG SetEnvironmentVariable false", sh('[Environment]::SetEnvironmentVariable("NOVA_AUTO_EXECUTE","false","User")', tool="PowerShell"), ALLOW)
+    a("m2", "NEG SetEnvironmentVariable 0",    sh('[System.Environment]::SetEnvironmentVariable("NOVA_TRADING_SUBSYSTEM_ENABLED","0","Machine")', tool="PowerShell"), ALLOW)
+    a("m2", "NEG Set-Item Env: off",           sh('Set-Item -Path Env:NOVA_AUTO_EXECUTE -Value "off"', tool="PowerShell"), ALLOW)
+    a("m2", "NEG $env: disabled",              sh("$env:NOVA_AUTO_EXECUTE = 'disabled'", tool="PowerShell"), ALLOW)
+
+    # ================= M-3 : copy direction =================
+    a("m3", "cp protected -> backup",          sh("cp services/execution.py /tmp/backup.py"), ALLOW)
+    a("m3", "Copy-Item protected -> temp",     sh(r"Copy-Item services/execution.py C:\Temp\backup.py", tool="PowerShell"), ALLOW)
+    a("m3", "cp INTO protected",               sh("cp patched.py services/execution.py"), DENY)
+    a("m3", "Copy-Item INTO protected",        sh(r"Copy-Item C:\Temp\patched.py services/execution.py", tool="PowerShell"), DENY)
+    a("m3", "Copy-Item -Destination protected", sh("Copy-Item -Path a.py -Destination core/config.py", tool="PowerShell"), DENY)
+    a("m3", "mv protected away is denied",     sh("mv services/execution.py /tmp/gone.py"), DENY)
+
+    # ================= M-4 : narrow writer matching =================
+    a("m4", "stdout.write of protected read",  sh("python -c \"import sys; sys.stdout.write(open('services/execution.py').read())\""), ALLOW)
+    a("m4", "mkdir while naming protected",    sh("mkdir -p out && echo services/execution.py"), ALLOW)
+    a("m4", "node console.log of read",        sh("node -e \"console.log(require('fs').readFileSync('services/execution.py','utf8'))\""), ALLOW)
+    a("m4", "python del statement",            sh("python -c \"x=1; del x; print(open('core/config.py').read())\""), ALLOW)
+    a("m4", "os.mkdir unrelated",              sh("python -c \"import os; os.mkdir('out'); print('core/config.py')\""), ALLOW)
+    a("m4", "shutil.copy INTO protected",      sh("python -c \"import shutil; shutil.copy('a.py','services/execution.py')\""), DENY)
+    a("m4", "shutil.copy FROM protected",      sh("python -c \"import shutil; shutil.copy('services/execution.py','/tmp/b.py')\""), ALLOW)
+    a("m4", "os.replace onto protected",       sh("python -c \"import os; os.replace('a.py','core/config.py')\""), DENY)
+    a("m4", "fs.appendFile onto protected",    sh("node -e \"require('fs').appendFileSync('core/config.py','x')\""), DENY)
+    a("m4", "quoted data mention, no mutation", sh("python -c \"PROT=['services/execution.py']; RISKY={'git restore': 1}; print(len(PROT), len(RISKY))\""), ALLOW)
 
     return C
 
@@ -221,8 +318,44 @@ MALFORMED = [
     ("malformed", "cwd not a string", '{"tool_name":"Edit","cwd":123,"tool_input":{"file_path":"a.py"}}'),
 ]
 
-# Secret-shaped strings that must never be echoed back by the hook.
 SECRET = "sk-live-SHOULD-NEVER-APPEAR-9999"
+EXPECTED_TOOLS = ["Edit", "Write", "NotebookEdit", "MultiEdit", "Bash", "PowerShell"]
+
+
+def config_checks(rows):
+    """Phase 2I L-3: assert the candidate settings.json wires the hook correctly."""
+    fails = 0
+
+    def chk(label, cond):
+        nonlocal fails
+        rows.append(("config", label, "pass", "pass" if cond else "fail", 0, cond))
+        fails += (not cond)
+
+    try:
+        cfg = json.load(open(SETTINGS, encoding="utf-8"))
+        ok = True
+    except Exception:
+        cfg, ok = {}, False
+    chk("settings.json parses", ok)
+    hooks = cfg.get("hooks", {})
+    pre = hooks.get("PreToolUse")
+    chk("PreToolUse exists", isinstance(pre, list) and len(pre) == 1)
+    entry = pre[0] if isinstance(pre, list) and pre else {}
+    matcher = entry.get("matcher", "")
+    chk("matcher contains exactly the six expected tools",
+        sorted(matcher.split("|")) == sorted(EXPECTED_TOOLS))
+    handlers = entry.get("hooks", [])
+    h = handlers[0] if handlers else {}
+    chk("exactly one handler", len(handlers) == 1)
+    chk("handler type is command", h.get("type") == "command")
+    chk("command is python", h.get("command") == "python")
+    chk("args point at the hook under CLAUDE_PROJECT_DIR",
+        h.get("args") == ["${CLAUDE_PROJECT_DIR}/.claude/hooks/nova_guard_hook.py"])
+    chk("timeout is 10", h.get("timeout") == 10)
+    chk("mcpServers still present", "mcpServers" in cfg)
+    chk("mcpServers tradingview intact",
+        cfg.get("mcpServers", {}).get("tradingview", {}).get("args") == ["src/server.js"])
+    return fails
 
 
 def main():
@@ -233,7 +366,7 @@ def main():
         got, code, out, err = run(payload, env_root=env_root)
         ok = got == expected
         if expected == DENY:
-            ok = ok and code == 2          # exit-2 blocking contract
+            ok = ok and code == 2
         rows.append((group, name, expected, got, code, ok))
         failures += (not ok)
 
@@ -243,7 +376,6 @@ def main():
         rows.append((group, name, "no-decision", got, code, ok))
         failures += (not ok)
 
-    # ---- exit-2 stderr contract ------------------------------------------
     got, code, out, err = run(edit("Edit", "services/execution.py"))
     reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
     for label, cond in (
@@ -257,23 +389,20 @@ def main():
         rows.append(("exit2", label, "pass", "pass" if cond else "fail", code, cond))
         failures += (not cond)
 
-    # ---- no command / secret text leaks ----------------------------------
     leaky_cmd = ("sed -i 's/x/y/' services/execution.py "
                  "&& export ALPACA_SECRET_KEY=%s" % SECRET)
     got, code, out, err = run(sh(leaky_cmd))
     blob = out + err
-    leak_checks = (
+    for label, cond in (
         ("blocks the leaky command", got == DENY and code == 2),
         ("secret value absent from output", SECRET not in blob),
         ("full command absent from output", leaky_cmd not in blob),
         ("no 'sed -i' fragment echoed", "sed -i" not in blob),
         ("no env var name+value echoed", "ALPACA_SECRET_KEY=" not in blob),
-    )
-    for label, cond in leak_checks:
+    ):
         rows.append(("noleak", label, "pass", "pass" if cond else "fail", code, cond))
         failures += (not cond)
 
-    # flag-block path must not echo the value either
     got, code, out, err = run(sh("export NOVA_AUTO_EXECUTE=true && echo %s" % SECRET))
     blob = out + err
     for label, cond in (
@@ -283,6 +412,8 @@ def main():
     ):
         rows.append(("noleak", label, "pass", "pass" if cond else "fail", code, cond))
         failures += (not cond)
+
+    failures += config_checks(rows)
 
     width = max(len(r[1]) for r in rows) + 2
     cur = None
