@@ -1530,14 +1530,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
    bar with invented height. */
 .jn-dbar.flat{height:3px;background:var(--muted2);border-radius:2px;opacity:.9}
 
-/* Per-bar value, parked just outside the plot in the surface padding so a
-   full-height bar never collides with it. */
+/* Per-bar value follows the endpoint of its own bar, rather than sitting at
+   the maximum scale position shared by the tallest session. */
 .jn-dp-v{
-  position:absolute;left:-6px;right:-6px;bottom:100%;margin-bottom:5px;
+  position:absolute;left:-6px;right:-6px;bottom:var(--mag,0%);margin-bottom:5px;
   font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
   text-align:center;white-space:nowrap;
 }
-.jn-col-neg .jn-dp-v{bottom:auto;top:100%;margin:5px 0 0}
+.jn-col-neg .jn-dp-v{bottom:auto;top:var(--mag,0%);margin:5px 0 0}
 .jn-dp-v.up{color:var(--green)}
 .jn-dp-v.down{color:var(--red)}
 .jn-dp-v.flat{color:var(--muted2)}

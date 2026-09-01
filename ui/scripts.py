@@ -2751,15 +2751,16 @@ function _jnRenderDaily(closed) {
     // A breakeven session is neither a gain nor a loss, so it carries no sign.
     const money = flat(v) ? '$0.00' : _jnMoney(v);
     const a11y = d + ', net ' + money + ', ' + n + ' closed trade' + (n === 1 ? '' : 's');
-    const mag = flat(v) ? '' : ' style="--mag:' +
-      (v > 0 ? (v / maxPos * 100) : (-v / maxNeg * 100)).toFixed(2) + '%"';
+    const magPct = flat(v) ? '0%' :
+      (v > 0 ? (v / maxPos * 100) : (-v / maxNeg * 100)).toFixed(2) + '%';
+    const mag = ' style="--mag:' + magPct + '"';
     const fill = '<i class="jn-dbar ' + cls + '"' + mag + '></i>';
+    const value = '<span class="jn-dp-v ' + cls + '">' + _jnEsc(money) + '</span>';
     const posCell = '<span class="jn-col-pos">' +
-      ((v > 0 || (flat(v) && flatSide === 'pos')) ? fill : '') +
-      '<span class="jn-dp-v ' + cls + '">' + _jnEsc(money) + '</span></span>';
+      ((v > 0 || (flat(v) && flatSide === 'pos')) ? fill + value : '') + '</span>';
     const negCell = '<span class="jn-col-neg">' +
-      ((v < 0 || (flat(v) && flatSide === 'neg')) ? fill : '') + '</span>';
-    return '<button type="button" class="jn-dp-bar" style="--i:' + (i + 1) + '"' +
+      ((v < 0 || (flat(v) && flatSide === 'neg')) ? fill + value : '') + '</span>';
+    return '<button type="button" class="jn-dp-bar" style="--i:' + (i + 1) + ';--mag:' + magPct + '"' +
       ' aria-label="' + _jnEsc(a11y) + '">' +
       '<span class="jn-dp-d" aria-hidden="true">' + _jnEsc(label) + '</span>' +
       '<span class="jn-col-plot">' + posCell + negCell + '</span>' +

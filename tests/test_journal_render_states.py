@@ -597,6 +597,16 @@ def test_daily_bar_heights_are_proportional_to_the_largest_absolute_result():
     assert '--mag:25.00%' in html, '100 of 400 must render at a quarter height'
 
 
+def test_daily_value_labels_live_in_the_same_scale_cell_as_their_bars():
+    trades = [_trade(order_id='w', trade_date='2026-06-22', realized_pnl=300.0, outcome='WIN'),
+              _trade(order_id='l', trade_date='2026-06-23', realized_pnl=-150.0, outcome='LOSS')]
+    html = _run({'payload': _payload(trades)})['jnDaily']['html']
+    assert 'jn-col-pos"><i class="jn-dbar up"' in html
+    assert '+$300.00</span></span><span class="jn-col-neg"></span>' in html
+    assert 'jn-col-pos"></span><span class="jn-col-neg"><i class="jn-dbar down"' in html
+    assert '-$150.00</span></span>' in html
+
+
 def test_daily_baseline_splits_by_the_positive_share_of_the_scale():
     trades = [_trade(order_id='a', trade_date='2026-06-22', realized_pnl=300.0),
               _trade(order_id='b', trade_date='2026-06-23', realized_pnl=-100.0, outcome='LOSS')]
