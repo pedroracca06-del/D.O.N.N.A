@@ -41,7 +41,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | ID | Item | Owner | Class | Mutation scope | Prerequisites | Evidence required | Approval gate | Status |
 |---|---|---|---|---|---|---|---|---|
 | B1.1 | **Evidence Formatter** — no claim without command + counts | Claude | FA | none (stdout only) | — | 53 formatter tests; guard 188/188; full suite 2 failed / 964 passed / 13 skipped | Per-commit | **DONE** — local only |
-| B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none | — | Demonstrated catch of a real ref move | none | TODO |
+| B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none (stdout only) | B1.1 | 61 guard tests incl. a local-bare-remote advance detected with no fetch; guard 188/188; full suite 2 failed / 1025 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.3 | **A7 battery** — secrets, machine paths, protected files, runtime data, committed paths, staleness, test parity, permission drift, worktree collision | Claude | AR | none | B1.1 | Each gate demonstrated **failing** on planted input | none | TODO |
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside repo | B1.2 | Collision + stale detection demonstrated | Named approval to first write | TODO |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | Guard blobs, permission hash/counts, submodule state | none | TODO |
@@ -92,6 +92,59 @@ recognizable credential formats are replaced without echoing the match; home
 directories are rewritten to `${HOME}` by pattern, so no username reaches the
 output. Ordinary prose such as "tokenizer" or "secret scan" is not redacted.
 Errors are sanitized and never contain the rejected payload.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **Not pushed,
+not merged.**
+
+### B1.2 Staleness Guard — implemented
+
+`tools/cowork/staleness_guard.py`, tested by `tests/test_cowork_staleness_guard.py`.
+
+**Purpose.** Re-measure live repository state and compare it with an explicit
+baseline, so a report can never assert a HEAD, ref, blob, permission count, or
+worktree that was not observed at the moment of reporting.
+
+**Baseline contract.** One UTF-8 JSON document (`schema_version: 1`) requiring
+`expected_branch` and `expected_head`, with optional `expected_local_refs`,
+`expected_remote_refs`, `require_clean_index`, `require_clean_worktree`,
+`expected_tracked_blobs`, `expected_permission_state`,
+`expected_submodule_gitlinks`, `expected_worktree_identity`, and `notes`.
+Unknown fields are **rejected**, not ignored — a baseline can never smuggle in a
+command, script, hook, environment value, or Git argument. Paths must be
+repository-relative with no traversal; object IDs must be full and well-formed;
+keys that collide after case normalization are rejected.
+
+**Local-only by default.** No network unless `--check-remote <name>` is given
+explicitly.
+
+**Read-only Git allowlist.** Only `rev-parse`, `status`, `ls-files`, `ls-tree`,
+`show-ref`, `remote`, `diff`, and `ls-remote` may ever run. Every invocation
+uses an argument array; `shell=True` is never used; `--no-optional-locks`
+prevents index refresh. No fetch, pull, push, merge, rebase, checkout, switch,
+reset, restore, clean, add, commit, tag/branch mutation, submodule update,
+config write, maintenance, or gc appears anywhere in command construction.
+
+**Remote-truth mode.** `--check-remote <name>` adds exactly one command,
+`git ls-remote --heads <validated-remote>`. The value must be a configured
+remote **name** — a URL is rejected. Heads only; tags are not inspected. It
+reads refs and updates nothing: FETCH_HEAD, refs, index, config, and the working
+tree are proven unchanged by test. An unreachable remote is reported as
+**stopped**, never as passed.
+
+**Exit codes.** `0` fresh · `1` staleness detected · `2` invalid usage or
+baseline validation failure · `3` safety-limit rejection · `4` observation
+stopped or unavailable. Output is still rendered for `1` and `4`.
+
+**Evidence Formatter integration.** The overall result is derived by
+`evidence_formatter.derive_overall` through `normalize`, so the guard cannot
+report "fresh" when a check failed. Rendering reuses the formatter's Markdown
+and JSON writers rather than duplicating them.
+
+**Privacy.** The repository root is normalized to `${REPO}`, home paths to
+`${HOME}`; remote URLs and usernames are never printed. The permission file is
+inspected only for its SHA-256 and parsed array lengths, never its entries.
+Tracked files are compared by **Git blob ID**, not on-disk hash, so
+`core.autocrlf` cannot cause a false alarm. Ignored files never count as drift.
 
 **Status.** Implemented locally on `integration/nova-foundation`. **Not pushed,
 not merged.**
