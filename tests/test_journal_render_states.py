@@ -150,7 +150,8 @@ const _dstyle = elements['jnDaily'].style._p || {};
 const out = {selectedKey: _jnSelectedKey, rowCount: _jnRows.length,
              jnDailyDense: elements['jnDaily'].getAttribute('data-dense'),
              jnDailyStyle: {pos: _dstyle['--pos'] || '', neg: _dstyle['--neg'] || '',
-                            slots: _dstyle['--slots'] || '', n: _dstyle['--n'] || ''}};
+                            slots: _dstyle['--slots'] || '', n: _dstyle['--n'] || '',
+                            track: _dstyle['--track-w'] || ''}};
 for (const id of %(ids)s) {
   out[id] = {display: elements[id].style.display,
              text: elements[id].textContent,
@@ -551,6 +552,13 @@ def test_daily_column_count_follows_the_real_sessions():
     out = _run({'payload': _payload([_trade(trade_date='2026-06-24')])})
     assert out['jnDailyStyle']['n'] == '1', 'one genuine session, one column'
     assert out['jnDaily']['html'].count('class="jn-col-plot"') == 1
+
+
+def test_daily_sparse_sessions_use_a_compact_track():
+    trades = [_trade(order_id='a', trade_date='2026-08-31'),
+              _trade(order_id='b', trade_date='2026-09-01')]
+    out = _run({'payload': _payload(trades)})
+    assert out['jnDailyStyle']['track'] == '280px'
 
 
 def test_daily_sparse_history_says_so_without_an_empty_panel():

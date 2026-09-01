@@ -1495,10 +1495,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 /* The baseline is the one line that carries meaning, so it outweighs the grid. */
 .jn-zero{position:absolute;left:0;right:0;top:var(--pos,100%);height:1px;background:var(--muted2);z-index:2}
 
-/* Bars. One column per genuine session -- one session centres in the full
-   width, ten spread across it -- with the width capped so a sparse chart
-   still reads as deliberate. */
-.jn-dp-bars{position:absolute;inset:0;display:grid;grid-template-columns:repeat(var(--n,1),minmax(0,1fr));z-index:1}
+/* Bars. Sparse histories use a compact centred track instead of stretching
+   two consecutive dates across the whole card. The track grows by session
+   and naturally reaches the full plot width as history fills in. */
+.jn-dp-bars{
+  position:absolute;top:0;bottom:0;left:50%;width:min(100%,var(--track-w,140px));
+  transform:translateX(-50%);display:grid;
+  grid-template-columns:repeat(var(--n,1),minmax(0,1fr));z-index:1;
+}
 .jn-dp-bar{
   grid-column:var(--i);position:relative;display:block;
   background:none;border:0;padding:0;margin:0 auto;width:100%;max-width:78px;
@@ -1541,8 +1545,9 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 
 /* X axis */
 .jn-dp-xax{
-  grid-column:1;grid-row:2;display:grid;
-  grid-template-columns:repeat(var(--n,1),minmax(0,1fr));padding:8px 12px 0 58px;
+  grid-column:1;grid-row:2;display:grid;width:min(calc(100% - 70px),var(--track-w,140px));
+  grid-template-columns:repeat(var(--n,1),minmax(0,1fr));justify-self:center;
+  transform:translateX(23px);padding-top:8px;
 }
 .jn-dp-xax span{
   grid-column:var(--i);text-align:center;
