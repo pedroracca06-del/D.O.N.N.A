@@ -47,13 +47,13 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 
 ## Immediate next automation sequence
 
-1. **Evidence Formatter** — no test claim without command and counts
+1. ~~**Evidence Formatter**~~ — **implemented locally** as `tools/cowork/evidence_formatter.py` (53 tests). Deterministic, executes nothing, writes no file, derives overall status from the checks rather than trusting a caller. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b11-evidence-formatter--implemented).
 2. **Staleness Guard** — re-read HEAD and target hashes before reporting
 3. **A7 battery** — the reusable pre-mutation gate set
 4. **Session Registry** — make concurrent sessions visible
 5. **Worktree bootstrap validator** — verify a new worktree is correctly secured
 
-All five are read-only. Nothing beyond them is scheduled.
+All five are read-only. Item 1 is done locally; items 2-5 are not started. Nothing beyond them is scheduled, and nothing here is pushed or merged.
 
 ## What this documentation does not do
 

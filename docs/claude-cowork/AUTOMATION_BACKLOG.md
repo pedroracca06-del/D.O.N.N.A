@@ -40,7 +40,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 
 | ID | Item | Owner | Class | Mutation scope | Prerequisites | Evidence required | Approval gate | Status |
 |---|---|---|---|---|---|---|---|---|
-| B1.1 | **Evidence Formatter** — no claim without command + counts | Claude | FA | none | — | Its own output on a real run | none | TODO |
+| B1.1 | **Evidence Formatter** — no claim without command + counts | Claude | FA | none (stdout only) | — | 53 formatter tests; guard 188/188; full suite 2 failed / 964 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none | — | Demonstrated catch of a real ref move | none | TODO |
 | B1.3 | **A7 battery** — secrets, machine paths, protected files, runtime data, committed paths, staleness, test parity, permission drift, worktree collision | Claude | AR | none | B1.1 | Each gate demonstrated **failing** on planted input | none | TODO |
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside repo | B1.2 | Collision + stale detection demonstrated | Named approval to first write | TODO |
@@ -49,6 +49,52 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.7 | **Test Selector** — changed paths → test list | Claude | AR | none | P0.9 | Selection matches Pedro's choice on repeated trials | none | TODO |
 
 ---
+
+### B1.1 Evidence Formatter — implemented
+
+`tools/cowork/evidence_formatter.py`, tested by `tests/test_cowork_evidence_formatter.py`.
+
+**Purpose.** Render a JSON evidence document as Markdown or normalized JSON so
+that no claim about repository or test state can be made without the command,
+the counts, and the failures behind it.
+
+**Contract.** Input is one UTF-8 JSON document (`schema_version: 1`) with
+`phase`, `scope`, `checks`, and optional `tests`, `changes`, `repository_state`,
+`permission_state`, `notes`. Output is deterministic: stable key and ID
+ordering, explicit UTF-8 bytes, exactly one trailing newline.
+
+**Derived status.** Overall status is computed from the check statuses, never
+from a caller-supplied claim: any `fail` -> `failed`; else any `stopped` ->
+`stopped`; else any `warning` -> `passed_with_warnings`; else `passed`. **Zero
+checks can never yield `passed`.**
+
+**Read-only boundary.** Executes nothing — command strings are data and are
+never passed to a shell, a subprocess, `eval`, or `exec`. Writes no file. No
+network. Reads no environment variable and no clock; a timestamp appears only if
+supplied in the input. Standard library only.
+
+**CLI.**
+
+```bash
+python -B tools/cowork/evidence_formatter.py --format markdown
+python -B tools/cowork/evidence_formatter.py --format json
+python -B tools/cowork/evidence_formatter.py --format markdown --input evidence.json
+```
+
+Output is stdout only; there is deliberately no output-file option.
+
+**Exit codes.** `0` valid input formatted (whatever the checks reported) ·
+`2` invalid usage or validation failure · `3` safety-limit rejection
+(1 MiB size, depth 32, 1000-item collections).
+
+**Privacy.** Values under credential-shaped keys are replaced wholesale;
+recognizable credential formats are replaced without echoing the match; home
+directories are rewritten to `${HOME}` by pattern, so no username reaches the
+output. Ordinary prose such as "tokenizer" or "secret scan" is not redacted.
+Errors are sanitized and never contain the rejected payload.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **Not pushed,
+not merged.**
 
 ## Tier 2 — Proposal layer
 
