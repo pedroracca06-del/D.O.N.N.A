@@ -558,7 +558,7 @@ def test_daily_sparse_sessions_use_a_compact_track():
     trades = [_trade(order_id='a', trade_date='2026-08-31'),
               _trade(order_id='b', trade_date='2026-09-01')]
     out = _run({'payload': _payload(trades)})
-    assert out['jnDailyStyle']['track'] == '280px'
+    assert out['jnDailyStyle']['track'] == '192px'
 
 
 def test_daily_sparse_history_says_so_without_an_empty_panel():

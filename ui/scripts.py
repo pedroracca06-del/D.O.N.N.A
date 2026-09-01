@@ -2727,7 +2727,7 @@ function _jnRenderDaily(closed) {
   // width is capped so a sparse chart reads as deliberate, not stretched.
   host.style.setProperty('--n', String(days.length));
   host.style.setProperty('--rows', String(days.length));
-  host.style.setProperty('--track-w', (days.length * 140) + 'px');
+  host.style.setProperty('--track-w', (days.length * 96) + 'px');
 
   // ── Y axis: only the values the scale actually reaches ───────────────────
   const yTicks = [];
