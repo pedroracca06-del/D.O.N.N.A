@@ -59,3 +59,30 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---------------------------------------------------------------------------
+# Local runtime and research artifacts
+#
+# The block above enumerates runtime JSON file-by-file, so every file created
+# after that list was written stays visible to git. Today that is 26 untracked
+# runtime JSON files; a bare `git add .` would sweep them into a commit.
+# The pattern below closes that gap by default-denying runtime JSON in data/
+# and re-including the one structural file that is genuinely versioned.
+# ---------------------------------------------------------------------------
+
+# All runtime JSON in data/ is auto-generated. Default-deny, then re-include
+# the single structural file. Order matters: the negation must follow the
+# pattern, and data/ itself is never excluded, so the negation can take effect.
+data/*.json
+!data/donna_settings.json
+
+# Dashboard/debug scratch artifacts written into data/ by ad-hoc checks.
+# Deliberately narrow: only leading-underscore files, only these two
+# extensions, only directly inside data/ -- never ordinary source.
+data/_*.js
+data/_*.html
+
+# Raw third-party transcripts: full verbatim source material held locally
+# pending Pedro's copyright policy decision. Derived summaries and analysis
+# under nova_knowledge_core/ remain tracked -- only the raw capture is hidden.
+nova_knowledge_core/TRANSCRIPTS_RAW/
