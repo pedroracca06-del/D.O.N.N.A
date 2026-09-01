@@ -16,7 +16,11 @@ import os
 import requests
 
 from core.state_engine import state as _state
-from core.config import RISK_STATE_FILE as _CONFIG_RISK_STATE_FILE, MACRO_EVENTS_FILE as _CONFIG_MACRO_EVENTS_FILE
+from core.config import (
+    RISK_STATE_FILE as _CONFIG_RISK_STATE_FILE,
+    MACRO_EVENTS_FILE as _CONFIG_MACRO_EVENTS_FILE,
+    cache_delete,
+)
 
 BASE_DIR          = Path(__file__).parent.parent
 MACRO_EVENTS_FILE = _CONFIG_MACRO_EVENTS_FILE   # respects DONNA_DATA_DIR on Render
@@ -501,17 +505,42 @@ def process_headlines_cycle():
     source = 'FMP+ForexFactory' if (fmp_events and ff_events) \
         else ('FMP' if fmp_events else ('ForexFactory' if ff_events else 'none'))
 
+    # Both providers occasionally return a transient empty response. Never let
+    # that erase a valid calendar for the same trading week: the browser polls
+    # /dashboard-data every 30 seconds, so replacing the file with [] made the
+    # Macro panel visibly disappear and reappear between provider cycles.
+    # A prior-week payload is not retained because that would present stale
+    # events as current; only a non-empty, exact-week payload is protected.
+    previous = _read_json(MACRO_EVENTS_FILE, {})
+    previous_events = previous.get('events') if isinstance(previous.get('events'), list) else []
+    retained_last_good = (
+        not week_events
+        and source == 'none'
+        and previous.get('week_start') == mon_str
+        and previous.get('week_end') == fri_str
+        and bool(previous_events)
+    )
+    if retained_last_good:
+        week_events = previous_events
+        source = str(previous.get('source') or 'retained')
+        print('[donna_headlines] Both calendar providers returned empty; '
+              'retaining the last good payload for the current week')
+
     print(f'[donna_headlines] {len(week_events)} USD HIGH/MEDIUM events '
           f'({mon_str}→{fri_str}) — source: {source}')
 
-    # 2. Persist full week
-    _write_json(MACRO_EVENTS_FILE, {
-        'source':     source,
-        'fetched_at': _utc_iso(),
-        'week_start': mon_str,
-        'week_end':   fri_str,
-        'events':     week_events,
-    })
+    # 2. Persist full week. When retaining, leave fetched_at and the file bytes
+    # untouched so freshness remains honest. A successful replacement clears
+    # the five-minute API cache immediately.
+    if not retained_last_good:
+        _write_json(MACRO_EVENTS_FILE, {
+            'source':     source,
+            'fetched_at': _utc_iso(),
+            'week_start': mon_str,
+            'week_end':   fri_str,
+            'events':     week_events,
+        })
+        cache_delete('calendar')
 
     # 3. Red-folder detection
     is_red = is_red_folder_week()

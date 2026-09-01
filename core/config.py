@@ -267,6 +267,11 @@ def cache_set(key, value, ttl):
     CACHE[key] = {'value': value, 'expires_at': datetime.now(timezone.utc).timestamp() + ttl}
 
 
+def cache_delete(key):
+    """Remove one cached payload after its persisted source is replaced."""
+    CACHE.pop(key, None)
+
+
 # ── Telegram ──────────────────────────────────────────────────
 def send_telegram_message(text: str) -> dict:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
