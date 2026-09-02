@@ -53,7 +53,42 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 4. ~~**Session Registry**~~ — **implemented locally** as `tools/cowork/session_registry.py` (104 tests). Detects worktree, branch, and scope collisions between concurrent sessions; live collisions block, stale or ambiguous ones escalate to you. It never deletes a record — `close` marks history. `advance` moves an active session's pinned commit forward after a reviewed local commit: the destination is always the verified HEAD, it must be a descendant of the recorded commit, and there is no force or rewind. Advancing records where a session sits — it approves nothing and never pushes, merges, or deploys. The real registry has been initialized under separate approval; each write remains your decision. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b14-session-registry--implemented-tool-only-registry-not-initialized).
 5. ~~**Worktree bootstrap validator**~~ — **implemented locally** as `tools/cowork/worktree_bootstrap_validator.py` (86 tests). Answers one question before an automated session begins: is this worktree safely configured for its declared role? It checks identity, cleanliness, tracked content, local and permission state, path casing, submodules, forbidden inherited artifacts, and registry compatibility against an explicit manifest. Tracked files are compared **by Git blob id**, so `core.autocrlf` cannot cause a false failure. It observes only — it never creates, removes, repairs, populates, or registers anything, and every Git call reuses the A7 battery's existing read-only allowlist rather than adding a new capability. Nine planted cases were demonstrated, and against the real foundation worktree it returns exit 0 with 30 checks passing. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b15-worktree-bootstrap-validator--implemented-tool-local-only).
 
-All five are read-only in effect. Items 1-3 and 5 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. Nothing beyond them is scheduled, and nothing here is pushed or merged.
+6. ~~**Change Classifier**~~ — **implemented locally** as `tools/cowork/change_classifier.py` with the pure-data `change_policy.json` (216 tests). Answers what *minimum* approval class a change requires, and **never approves anything**. See below.
+
+All six are read-only in effect. Items 1-3, 5, and 6 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. Nothing beyond them is scheduled, and nothing here is pushed or merged.
+
+## The Change Classifier: minimum approval, never approval
+
+`tools/cowork/change_classifier.py` reports the **minimum approval class** an observed
+or proposed change requires. It is the answer to "how carefully must this be handled?",
+never to "may this proceed?".
+
+| Class | Meaning | Exit |
+|---|---|---|
+| `FA_AR` | fully automated / automated read-only; no approval | 0 |
+| `AAM` | automated, with an approval naming exact targets | 5 |
+| `AM` | always manual; you perform it or explicitly command it | 6 |
+| `PROHIBITED` | must not proceed under any approval | 7 |
+
+- **It never outputs "approved".** No class, status, exit code, or policy field can
+  produce that. It reports scope, minimum class, reasons, ambiguity, and the
+  escalation required — and authorizes nothing.
+- **Every repository write is at least AAM.** A write is never FA/AR just because its
+  content is documentation. FA/AR needs a read-only operation that changes no path.
+- **The overall result is the most restrictive class present.** Aggregation only ever
+  moves upward.
+- **Unknown escalates.** An unrecognized path or change kind, unscannable content, or
+  any ambiguity becomes AM. A deletion is never below a modification, both sides of a
+  rename are classified, binaries escalate, gitlinks are AM, and raw transcripts and
+  runtime artefacts are prohibited as tracked content.
+- **Six read-only modes**: `classify-worktree`, `classify-staged`, `classify-commit`,
+  `classify-range`, `classify-manifest`, `validate-policy`.
+- **A clean tree is `stopped`, not passed** — there is nothing to classify, and
+  nothing is approved.
+- **Semantic scanning is defence in depth.** It can raise a class; it *cannot prove
+  the absence* of dangerous behaviour, and matched text is never printed.
+
+See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b16-change-classifier--implemented-tool-local-only).
 
 ## Obsidian: the planning half only
 

@@ -45,7 +45,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.3 | **A7 battery** — seven gates: scope, secrets, machine paths, protected boundary, runtime/generated/copyright, baseline staleness, test-evidence parity | Claude | AR | none (stdout only) | B1.1, B1.2 | 84 battery tests; all seven gates demonstrated **failing** on planted input; guard 188/188 | Per-commit | **DONE** — local only |
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 104 registry tests (incl. 23 for `advance`); 10 planted demonstrations; collision, stale approval, lock contention, moved HEAD | **Named approval required for each real write** | **DONE** — local only; real registry initialized under separate approval; `advance` lifecycle correction added |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | 86 validator tests; 9 planted demonstrations; tracked blobs, permission hash/counts, casing, submodule state, forbidden artifacts, registry compatibility | none | **DONE (tool)** — local only |
-| B1.6 | **Change Classifier** — cluster changed paths, mark do-not-commit | Claude | AR | none | B1.3 | Classification of a real dirty tree | none | TODO |
+| B1.6 | **Change Classifier** — determine the minimum approval class a change requires | Claude | AR | none | B1.3 | 216 classifier tests; 10 planted demonstrations; every class, every mode, most-restrictive aggregation, semantic escalation | none | **DONE (tool) — local only** |
 | B1.7 | **Test Selector** — changed paths → test list | Claude | AR | none | P0.9 | Selection matches Pedro's choice on repeated trials | none | TODO |
 
 ---
@@ -395,6 +395,107 @@ live `claude-foundation-improvements` registry session.
 — local only. Not pushed, not merged.** It grants no permission; a failing or
 approval-required verdict is information for Pedro, not a gate automation may
 clear on its own.
+
+### B1.6 Change Classifier — implemented (tool; local only)
+
+`tools/cowork/change_classifier.py` with the pure-data `change_policy.json`
+(sha256 `febb9138a313f61ca09f8aac7d286ec0cb8637fd40d47d9c334769fe38635b99`), and
+`tests/test_cowork_change_classifier.py` (216 tests).
+
+**The one question it answers.** What is the *minimum* approval class an observed
+or proposed change requires?
+
+**It never approves.** There is no output value meaning "approved", no class named
+for it, no exit code carrying it, and no flag, policy field, or input that can
+produce one. It reports observed scope, minimum required class, reasons and the
+policy rules behind them, unresolved ambiguity, and what escalation is required.
+Classification authorizes nothing: it does not stage, commit, push, merge, deploy,
+mutate a registry, or execute a proposed command.
+
+**Classes and ordering.**
+
+| Class | Meaning | Exit |
+|---|---|---|
+| `FA_AR` | fully automated / automated read-only; no approval | 0 |
+| `AAM` | automated with an approval naming exact targets | 5 |
+| `AM` | always manual; Pedro performs or explicitly commands it | 6 |
+| `PROHIBITED` | must not proceed under any approval | 7 |
+
+Each path is classified independently and the overall result is the **most
+restrictive class present**. Aggregation can only ever move upward.
+
+**The repository-write floor.** Any change to a repository path is at least AAM.
+A repository write is never FA/AR merely because its content is documentation;
+FA/AR is reachable only by a declared read-only operation that changes no path.
+Policy validation refuses a policy that tries to lower this floor.
+
+**Fail-safe.** An unrecognized path, an unrecognized change kind, unscannable
+content, or any ambiguity escalates to AM. Nothing resolves downward by default.
+A deletion is never classified below a modification of the same path. Both sides
+of a rename are classified, so a destination can never soften its source. Binaries
+escalate to at least AAM, and to AM inside a sensitive area, because they cannot be
+read for intent. Submodule gitlinks are AM. Raw transcripts and runtime or
+generated artefacts are PROHIBITED as tracked content. Ignored files never enter a
+Git-mode classification; they are classified only when a manifest names them
+explicitly. That a path is already tracked authorizes nothing about changing it now.
+
+**Modes.** Six, all read-only: `classify-worktree`, `classify-staged`,
+`classify-commit`, `classify-range`, `classify-manifest`, `validate-policy`.
+Git object ids are validated before use, and `--expected-head` / `--expected-branch`
+stop the run when the baseline has moved. HEAD is re-read after observation, so a
+commit landing mid-run stops rather than producing a stale answer.
+
+**Semantic escalation — and its limits.** Eleven indicators: retirement-flag
+activation, guard bypass, LLM-to-order-path wiring, autonomous order submission,
+credential material, and automatic research promotion (all PROHIBITED); risk-limit
+change, kill-switch change, broker order API, research-authority promotion, and
+deployment or history-rewrite intent (all AM). A finding may **raise** a path's
+class and can never lower one. Matched text is never captured or printed — only the
+indicator identifier, its class, and its declared reason.
+
+> Semantic scanning is defence in depth. **It cannot prove the absence of dangerous
+> behaviour.** A file that trips no indicator has not been shown to be safe; it has
+> only failed to match a known pattern. Path rules and the declared operation remain
+> the primary controls.
+
+**Pure-data policy.** The policy carries identifiers, classes, and human-readable
+reasons only — no regular expression, no command, no machine path, no credential,
+and no disable switch. Detection patterns live in the classifier source, which is
+fixed and reviewable. Validation refuses a policy whose declared indicator set
+disagrees with the implemented one, so neither half can drift unnoticed.
+
+**Manifest mode.** Proposed paths, change kinds, optional old/new content hashes,
+optional sanitized semantic finding identifiers, and a declared operation. Executable
+commands, scripts, environment values, credentials, URLs carrying secrets, traversal,
+absolute paths, and unknown fields are all rejected at exit 2.
+
+**Exit codes.** 0 FA/AR only, 5 AAM, 6 AM, 7 PROHIBITED, 2 invalid input/usage/
+policy, 3 safety limit, 4 stopped. **A clean or zero-change input is `stopped`, not
+passed and not approved.**
+
+**Demonstrated.** Ten planted cases, each producing the intended verdict: a
+read-only evidence operation (FA/AR), a Cowork documentation edit (AAM), an ordinary
+UI edit (AAM), a strategy/risk change (AM), a submodule pointer (AM), retirement-flag
+activation (PROHIBITED), LLM order-path wiring (PROHIBITED), mixed AAM + AM (AM),
+mixed AM + prohibited (PROHIBITED), and zero changes (stopped).
+
+**Static safety.** Standard library only; no `eval`, `exec`, or bare `compile`; no
+subprocess or shell of its own; no network library; no environment reads; no
+write-mode `open`; no deletion, move, or rename; no mutating Git verb; no Session
+Registry mutation. Its only writes are to stdout and stderr. Every Git call routes
+through the A7 battery's read-only allowlist and asks only for `rev-parse`, `diff`,
+`diff-tree`, `ls-files`, and `cat-file`. All output goes through the Evidence
+Formatter.
+
+**Known limitations.** Semantic scanning is pattern-based and defeatable by
+obfuscation; it is a second line, never the first. Classification is per-path and
+does not reason about interactions between files. Binary intent is not analysed at
+all, only escalated. The policy's path rules encode this repository's layout, so a
+significant reorganisation needs a policy review. And the tool reports a *minimum* —
+a change may still warrant more caution than any rule captures.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **DONE (tool) —
+local only. Not pushed, not merged.**
 
 ## Tier 2 — Proposal layer
 
