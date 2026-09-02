@@ -42,7 +42,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 |---|---|---|---|---|---|---|---|---|
 | B1.1 | **Evidence Formatter** — no claim without command + counts | Claude | FA | none (stdout only) | — | 53 formatter tests; guard 188/188; full suite 2 failed / 964 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none (stdout only) | B1.1 | 61 guard tests incl. a local-bare-remote advance detected with no fetch; guard 188/188; full suite 2 failed / 1025 passed / 13 skipped | Per-commit | **DONE** — local only |
-| B1.3 | **A7 battery** — secrets, machine paths, protected files, runtime data, committed paths, staleness, test parity, permission drift, worktree collision | Claude | AR | none | B1.1 | Each gate demonstrated **failing** on planted input | none | TODO |
+| B1.3 | **A7 battery** — seven gates: scope, secrets, machine paths, protected boundary, runtime/generated/copyright, baseline staleness, test-evidence parity | Claude | AR | none (stdout only) | B1.1, B1.2 | 84 battery tests; all seven gates demonstrated **failing** on planted input; guard 188/188 | Per-commit | **DONE** — local only |
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside repo | B1.2 | Collision + stale detection demonstrated | Named approval to first write | TODO |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | Guard blobs, permission hash/counts, submodule state | none | TODO |
 | B1.6 | **Change Classifier** — cluster changed paths, mark do-not-commit | Claude | AR | none | B1.3 | Classification of a real dirty tree | none | TODO |
@@ -145,6 +145,65 @@ and JSON writers rather than duplicating them.
 inspected only for its SHA-256 and parsed array lengths, never its entries.
 Tracked files are compared by **Git blob ID**, not on-disk hash, so
 `core.autocrlf` cannot cause a false alarm. Ignored files never count as drift.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **Not pushed,
+not merged.**
+
+### B1.3 A7 battery — implemented
+
+`tools/cowork/a7_battery.py` with `tools/cowork/a7_policy.json`, tested by
+`tests/test_cowork_a7_battery.py`.
+
+**Purpose.** One reusable pre-mutation gate set. A candidate change set is
+described by a manifest; the battery observes the repository and reports whether
+the candidate is safe to offer.
+
+**The seven gates.**
+
+| Gate | Checks |
+|---|---|
+| **A1** Scope integrity | Observed changed paths equal the manifest's expectation. Detects missing, extra, duplicate, case-conflicting, and traversal entries; distinguishes staged, unstaged, untracked, committed, and submodule paths. Zero declared paths cannot pass when changes exist. |
+| **A2** Secret / credential scan | Credential-shaped keys and recognized secret formats in candidate text. Binary files are classified, never decoded. Reports sanitized path, line, category, and a finding hash — **never a matched value**. |
+| **A3** Machine-specific paths | Windows user profiles, Git-Bash user paths, home directories, temp/scratch, absolute drive paths. Portable placeholders (`${HOME}`, `${REPO}`, `${CLAUDE_PROJECT_DIR}`) are allowed. Usernames are never emitted. |
+| **A4** Protected boundary | Retirement Tier 1, kill-switch files, hooks, settings, permissions, risk limits, strategy specs, broker/execution paths, and activation flags. Classification does not authorize: an **undeclared** protected change fails; a **declared** one produces a warning carrying its AAM/AM classification and never passes silently. |
+| **A5** Runtime / generated / copyright | Runtime JSON, logs, caches, bytecode, temp output, credential files, and raw third-party transcripts are prohibited. `data/donna_settings.json` is the explicit tracked exception; original summaries and mockups are not prohibited; submodule gitlinks are classified separately. |
+| **A6** Baseline staleness | Reuses the Staleness Guard's observations for branch, HEAD, refs, index/worktree, tracked blobs, permission hash and counts, gitlinks, and worktree identity. A stale required baseline fails; a stopped observation stops the battery. **Never fetches.** |
+| **A7** Evidence / test parity | Validates **supplied** test evidence: commands recorded as data, expected vs observed passed/failed/skipped/errors/collected, new failures, missing suites, weakened expectations, and unsupported "all passed" prose. Absent evidence stops; it never passes. **No test is executed.** |
+
+Worktree-session collision detection is deliberately **not** here; it belongs to
+the Session Registry phase.
+
+**Manifest contract.** UTF-8 JSON, `schema_version: 1`, requiring `phase`,
+`change_scope`, `expected_paths`, `baseline`, and `required_test_suites`;
+optionally `declared_protected_changes`, `stricter_protected_paths`,
+`expected_submodule_gitlinks`, `notes`. Unknown fields, commands, scripts,
+absolute or traversal paths, duplicates, unsupported scopes, abbreviated commit
+IDs, and negation-style ("weakening") entries are all rejected.
+
+**Scopes.** `staged` inspects only the index candidate; `worktree` distinguishes
+tracked, staged, unstaged, and visible untracked changes; `commit` requires an
+explicit **full** commit ID.
+
+**Fixed minimum policy.** `a7_policy.json` is versioned data — no executable
+content, no machine path, no secret, no permission entry. A manifest may add
+`stricter_protected_paths`; it can never remove or weaken a minimum, and there
+is no "disable this gate" option.
+
+**Read-only boundary.** A fixed allowlist (`rev-parse`, `status`, `diff`,
+`diff-tree`, `show`, `ls-files`, `ls-tree`, `cat-file`, `check-ignore`,
+`show-ref`, `remote`) run as argument arrays with `--no-optional-locks`.
+`shell=True` is never used, no mutating Git command can be constructed, and
+`ls-remote` is reachable only through the Staleness Guard's explicit mode.
+Machine-readable NUL-delimited Git output is used throughout; human-formatted
+`git status` is never parsed.
+
+**Exit codes.** `0` all gates pass · `1` one or more gates fail · `2` invalid
+CLI/manifest/policy · `3` safety-limit rejection · `4` required observation
+stopped/unavailable · **`5` gates pass but approval-required warnings exist**.
+
+**Integration.** The overall result is derived through the Evidence Formatter,
+so the battery cannot report a pass when a gate failed; rendering reuses the
+formatter's writers, and A6 reuses the Staleness Guard's observer.
 
 **Status.** Implemented locally on `integration/nova-foundation`. **Not pushed,
 not merged.**

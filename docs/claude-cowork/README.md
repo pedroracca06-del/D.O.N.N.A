@@ -49,11 +49,11 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 
 1. ~~**Evidence Formatter**~~ — **implemented locally** as `tools/cowork/evidence_formatter.py` (53 tests). Deterministic, executes nothing, writes no file, derives overall status from the checks rather than trusting a caller. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b11-evidence-formatter--implemented).
 2. ~~**Staleness Guard**~~ — **implemented locally** as `tools/cowork/staleness_guard.py` (61 tests). Re-measures branch, HEAD, refs, index, worktree, tracked blobs, permission hash and counts, gitlinks, and worktree identity against an explicit baseline. Local-only by default; `--check-remote` reads refs via `git ls-remote` without fetching, proven not to touch FETCH_HEAD, refs, index, or config. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b12-staleness-guard--implemented).
-3. **A7 battery** — the reusable pre-mutation gate set
+3. ~~**A7 battery**~~ — **implemented locally** as `tools/cowork/a7_battery.py` with the versioned `a7_policy.json` (84 tests). Seven gates: scope integrity, secrets, machine paths, protected boundary, runtime/generated/copyright, baseline staleness, and test-evidence parity. Every gate was demonstrated **failing** on planted input. A declared protected change yields exit 5 (approval required) rather than a silent pass. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b13-a7-battery--implemented).
 4. **Session Registry** — make concurrent sessions visible
 5. **Worktree bootstrap validator** — verify a new worktree is correctly secured
 
-All five are read-only. Items 1-2 are done locally; items 3-5 are not started. Nothing beyond them is scheduled, and nothing here is pushed or merged.
+All five are read-only. Items 1-3 are done locally; items 4-5 are not started. Nothing beyond them is scheduled, and nothing here is pushed or merged.
 
 ## What this documentation does not do
 

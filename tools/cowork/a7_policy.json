@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "policy_name": "nova-a7-minimum",
+  "description": "Fixed minimum safety policy for the A7 battery. Data only: no executable content, no machine path, no secret value, no permission entry, no credential. A manifest may add stricter protections but can never weaken these minimums.",
+  "approval_vocabulary": {
+    "FA": "fully automatic; no approval",
+    "AR": "automatic, read-only; no approval",
+    "AAM": "automatic with approval before mutation; names exact targets",
+    "AM": "always manual; Pedro performs or explicitly commands each time"
+  },
+  "protected_path_categories": {
+    "retirement_tier1": {
+      "classification": "AM",
+      "paths": [
+        "services/execution.py",
+        "services/execution_bridge.py",
+        "services/execution_request.py",
+        "services/execution_reconcile.py",
+        "core/config.py",
+        "tests/conftest.py"
+      ]
+    },
+    "kill_switch_files": {
+      "classification": "AM",
+      "paths": [
+        "main.py",
+        "monitor.py"
+      ]
+    },
+    "hooks": {
+      "classification": "AAM",
+      "patterns": [
+        ".claude/hooks/**"
+      ]
+    },
+    "settings": {
+      "classification": "AAM",
+      "patterns": [
+        ".claude/settings.json",
+        ".claude/settings.local.json"
+      ]
+    },
+    "permissions": {
+      "classification": "AAM",
+      "patterns": [
+        ".claude/settings.local.json"
+      ]
+    },
+    "risk_limits": {
+      "classification": "AM",
+      "patterns": [
+        "engines/risk_engine.py",
+        "core/state_engine.py",
+        "data/nova_prop_risk_config.json"
+      ]
+    },
+    "strategy_specifications": {
+      "classification": "AM",
+      "patterns": [
+        "nova_knowledge_core/RULES/**",
+        "nova_knowledge_core/EXECUTION_RULES/**",
+        "nova_knowledge_core/INVALIDATION_RULES/**",
+        "nova_knowledge_core/NO_TRADE_CONDITIONS/**",
+        "nova_knowledge_core/ORB_RP/**",
+        "nova_knowledge_core/PROS_EVAN_INVESTING/**"
+      ]
+    },
+    "broker_execution": {
+      "classification": "AM",
+      "patterns": [
+        "services/execution*.py",
+        "services/prop_*.py",
+        "engines/signals.py"
+      ]
+    }
+  },
+  "protected_flags": [
+    "NOVA_TRADING_SUBSYSTEM_ENABLED",
+    "NOVA_AUTO_EXECUTE"
+  ],
+  "runtime_generated_patterns": [
+    "data/*.json",
+    "data/_*.js",
+    "data/_*.html",
+    "**/__pycache__/**",
+    "*.pyc",
+    "*.pyo",
+    "*.log",
+    ".pytest_cache/**",
+    "*.tmp",
+    "*.bak",
+    "*.swp",
+    "**/node_modules/**",
+    "mcp/tradingview/screenshots/**"
+  ],
+  "credential_file_patterns": [
+    ".env",
+    "**/.env",
+    ".env.*",
+    "**/.env.*",
+    "**/.credentials.json",
+    "**/id_rsa",
+    "**/id_ed25519",
+    "**/*.pem",
+    "**/*.pfx",
+    "**/*.p12"
+  ],
+  "raw_transcript_prohibition": {
+    "classification": "AM",
+    "reason": "Full verbatim third-party material; copyright policy undecided.",
+    "patterns": [
+      "nova_knowledge_core/TRANSCRIPTS_RAW/**"
+    ]
+  },
+  "tracked_data_exceptions": [
+    "data/donna_settings.json"
+  ],
+  "allowed_research_patterns": [
+    "nova_knowledge_core/**/*.md",
+    "nova_knowledge_core/mockups/**",
+    "docs/**/*.md"
+  ],
+  "portable_placeholders": [
+    "${HOME}",
+    "${REPO}",
+    "${CLAUDE_PROJECT_DIR}",
+    "${TMPDIR}"
+  ],
+  "known_configuration_security_paths": [
+    ".gitignore",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks/nova_guard_hook.py",
+    ".claude/hooks/test_nova_guard_hook.py",
+    "pytest.ini"
+  ]
+}
