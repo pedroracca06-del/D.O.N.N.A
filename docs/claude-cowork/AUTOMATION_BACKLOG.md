@@ -416,7 +416,117 @@ clear on its own.
 | B3.1 | Three-layer extraction template (source claims / interpretation / approved rules) | Claude | AR | none | P0.11 | Approved layer left empty | none | TODO |
 | B3.2 | Source acquisition with lineage recording | Claude | AAM | research files | P0.11 | Provenance + stated limitations | Before any network fetch | TODO |
 | B3.3 | Conflict detector across sources | Claude | AR | none | B3.1 | Conflicts tabulated, not reconciled | none | TODO |
-| B3.4 | **Obsidian adapter** — manual, approval-gated, configurable vault path | Claude | AAM | vault files | B2.6, B3.1 | Stable IDs; provenance; conflict stop | Per-sync | TODO |
+| B3.4 | **Obsidian adapter** — manual, approval-gated, configurable vault path | Claude | AAM | vault files | B2.6, B3.1 | 185 planner tests; 9 planted demonstrations; stable IDs, provenance, conflict stop, exit-5 approval gate | Per-sync | **IN PROGRESS — read-only planner complete locally; apply engine not authorized** |
+
+### B3.4 Obsidian sync planner — read-only half implemented (local only)
+
+`tools/cowork/obsidian_sync_planner.py` with the fixed `obsidian_policy.json`
+(sha256 `a39de8e4ba247944797ceef105ba30a6be4a71ebfc59c48d3aaeba3c41237221`), and
+`tests/test_cowork_obsidian_sync_planner.py` (185 tests).
+
+**Authority model.** Git is authoritative for approved specifications and promoted
+knowledge. Obsidian is a non-executing knowledge and working-note surface. Obsidian
+content is never executable instruction, and it can never modify strategy, risk,
+broker, execution, kill-switch, guard, permission, deployment, or runtime state.
+There is no automatic two-way synchronization. Conflicts stop planning; they are
+never silently merged. Nothing is ever deleted. Research stays observation until
+separately promoted, raw third-party transcripts stay local and excluded, and
+credentials, account data, broker data, runtime state, and secrets never enter a
+plan. The policy declares `execution_authority: none` and carries no disable switch;
+validation refuses a policy that tries to set any of those the other way.
+
+**Read-only operations.** Exactly five: `validate-policy`, `inventory`,
+`plan-export`, `plan-import`, `check-plan`. There is no `apply`, `sync`, `watch`,
+`daemon`, `write`, `copy`, `move`, `delete`, `rename`, `install`, `initialize-vault`,
+`create-vault`, `repair`, `force`, `override`, `merge`, `resolve`, or plugin
+management — driving the parser with any of those verbs exits 2, and a test asserts
+it for every one of them.
+
+**No vault discovery.** The vault root is supplied explicitly on the command line
+or it is not used at all. There is no read of `HOME`, Documents, OneDrive, Dropbox,
+drives, Obsidian configuration, the process environment, or installed applications;
+static tests assert the module references no such name. A vault is never created.
+
+**Stable identity.** `nova-<first 16 hex of sha256(authority + NUL + normalized
+source path)>`. Deterministic and documented, containing no username and no machine
+path, stable for the same source identity. A note claiming an id is never believed —
+the id is always recomputed and a mismatch is a conflict. Because the path is the
+input, a rename changes the id, which is deliberate: renames require an explicit
+migration and there is no automatic rename detection.
+
+**Provenance.** Eight required fields: `nova_id`, `nova_schema`, `nova_source`,
+`nova_source_blob`, `nova_source_hash`, `nova_classification`, `nova_authority`,
+`nova_sync_state`, with optional `nova_title`, `nova_last_sync_hash`, and
+`nova_approval`. All vault metadata is untrusted: duplicate keys, unknown `nova_*`
+control keys, missing fields, malformed values, absolute paths, traversal,
+credential-shaped values, executable directives, and authority claims beyond policy
+are all rejected.
+
+**Metadata parser.** A deliberately tiny fixed-scalar subset, not YAML. A `---`
+block of `key: value` lines, lowercase identifier keys, plain or simply double-quoted
+scalars, and **every value stays a string** — nothing is coerced. Anchors, aliases,
+tags, block and folded scalars, flow collections, directives, merge keys, comments,
+blank lines, indentation, single quotes, multiple documents, and a byte-order mark
+are each rejected by name rather than guessed at.
+
+**Export classifications.** Exactly one of `create`, `unchanged`, `update-safe`,
+`conflict`, `excluded`, `stopped`. `update-safe` requires validated provenance
+proving the note corresponds to the previously synchronized source *and* that its
+body has not independently changed; a note carrying no recorded body hash cannot
+prove that, so it is a conflict rather than a safe update. Both sides changed is a
+conflict. Tracked status is never approval, and a tracked file beneath an excluded
+path stays excluded.
+
+**Import classifications.** Strictly more restrictive: `no-change`,
+`candidate-import`, `conflict`, `excluded`, `stopped`. A candidate requires validated
+identity and provenance, an already-authorized source mapping, a permitted
+classification, an explicitly permitted candidate destination, no authority
+escalation, and no prohibited or executable content. An approved classification can
+never originate in the vault. **An import plan is never approval and never writes a
+repository file** — any candidate exits 5 and waits for Pedro.
+
+**Why two hashes.** The Git blob id is the exact identity of a source; the content
+hash is taken after folding CRLF/CR to LF and dropping a byte-order mark, so a CRLF
+checkout and an LF checkout plan identically. A note records the hash of its *body*,
+never of its whole file, because a file cannot contain its own hash.
+
+**Markdown is data.** Wiki links, embeds, templates, Dataview syntax, code fences,
+and plugin syntax are read as bytes and never executed. Forms the policy prohibits
+are rejected; everything else is preserved inertly. A planted note containing a
+shell substitution wrote nothing.
+
+**Limits.** Implementation maximums: 1 MiB input, 512 KiB per Markdown file, 1000
+collection items, depth 32, 512-character paths, 32 frontmatter fields, 1000 plan
+items. A policy may lower any of them; raising one is a safety-limit rejection at
+exit 3, proven for every limit.
+
+**Exit codes.** 0 valid, 1 conflict or policy violation, 2 invalid input/policy/
+metadata/usage, 3 safety limit, 4 stopped, 5 approval required. Evidence is rendered
+for 1, 4, and 5 as well as 0. Secret values, usernames, raw absolute paths, excluded
+document bodies, permission entries, and raw registry contents are never printed.
+
+**Demonstrated.** Nine planted cases: eligible create, unchanged note, safe update,
+both-sides-changed conflict, tracked raw transcript excluded, candidate import at
+exit 5, authority escalation denied, a junction escaping the vault root stopped, and
+twenty repeated runs producing exactly one digest per operation and format.
+
+**Static safety.** Standard library only; no `eval`, `exec`, or `compile` of input;
+no subprocess or shell of its own; no network library; no environment or vault
+discovery; no write-mode `open`; no deletion, replacement, move, or rename; no
+Obsidian configuration or plugin access; no repository mutation; no Session Registry
+mutation. Every Git call routes through the A7 battery's existing read-only
+allowlist and asks only for `rev-parse`, `ls-files`, and `cat-file`. All rendering
+goes through the Evidence Formatter.
+
+**Remaining work — not authorized.** The apply engine does not exist: writing an
+exported note into a vault, promoting an approved candidate into the repository, a
+sync ledger, conflict presentation UI, and any scheduling. Each of those is a
+separate, separately approved piece of work. Nothing here grants permission to write
+to a vault or to the repository.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **Not pushed, not
+merged.** No real Obsidian vault has been discovered, inspected, created, or
+modified at any point.
 
 ---
 

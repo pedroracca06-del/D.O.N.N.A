@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "policy_name": "nova-obsidian-minimum",
+  "description": "Fixed, reviewable data policy for controlled Obsidian synchronization planning. Git is the authority for approved specifications and promoted knowledge. Obsidian is a non-executing knowledge and working-note surface and can never modify strategy, risk, broker, execution, kill-switch, guard, permission, deployment, or runtime state. This file is data only: no executable construct, no disable switch, no vault path, no username, no secret, no URL, and no machine-specific path.",
+  "authority_model": {
+    "git": "authoritative for approved specifications and promoted knowledge",
+    "obsidian": "non-executing knowledge and working-note surface",
+    "execution_authority": "none",
+    "two_way_automatic_sync": false,
+    "auto_merge": false,
+    "deletion": false,
+    "every_write_requires_named_approval": true
+  },
+  "allowed_file_types": [".md"],
+  "export_classes": {
+    "approved_doc": {
+      "status": "approved-doc",
+      "authority": "git",
+      "requires_explicit_selection": false,
+      "source_roots": [
+        "docs/claude-cowork/**"
+      ],
+      "vault_namespace": "NOVA/Docs"
+    },
+    "approved_spec": {
+      "status": "approved-spec",
+      "authority": "git",
+      "requires_explicit_selection": false,
+      "source_roots": [
+        "nova_knowledge_core/RULES/**"
+      ],
+      "vault_namespace": "NOVA/Specs"
+    },
+    "observation": {
+      "status": "observation",
+      "authority": "git",
+      "requires_explicit_selection": true,
+      "source_roots": [
+        "nova_knowledge_core/OTE_INTELLIGENCE/**",
+        "nova_knowledge_core/PROS_EVAN_INVESTING/**"
+      ],
+      "vault_namespace": "NOVA/Observations"
+    }
+  },
+  "import_classes": {
+    "working_note": {
+      "status": "working-note",
+      "authority": "obsidian",
+      "vault_namespaces": [
+        "NOVA/Working"
+      ],
+      "candidate_destination_root": "nova_knowledge_core/CANDIDATES"
+    }
+  },
+  "candidate_destination_roots": [
+    "nova_knowledge_core/CANDIDATES"
+  ],
+  "prohibited_import_destination_roots": [
+    "nova_knowledge_core/RULES",
+    "docs/claude-cowork",
+    "services",
+    "engines",
+    "delivery",
+    "core",
+    "indicators",
+    "mcp",
+    "scripts",
+    "tests",
+    "tools",
+    "ui",
+    "health",
+    "intelligence",
+    "data",
+    ".claude",
+    ".github"
+  ],
+  "prohibited_paths": {
+    "claude_control": [
+      ".claude/**",
+      ".github/**"
+    ],
+    "runtime_state": [
+      "data/**",
+      "*.log",
+      "*.sqlite",
+      "*.db"
+    ],
+    "raw_transcripts": [
+      "nova_knowledge_core/TRANSCRIPTS_RAW/**",
+      "**/TRANSCRIPTS_RAW/**"
+    ],
+    "backups_and_quarantine": [
+      "**/backups/**",
+      "**/backup/**",
+      "**/quarantine/**",
+      "**/_quarantine/**",
+      "*.bak",
+      "*.orig",
+      "*.rej"
+    ],
+    "environment_and_credentials": [
+      ".env",
+      ".env.*",
+      "*.env",
+      "*.pem",
+      "*.key",
+      "*.p12",
+      "*.pfx",
+      "*.keystore",
+      "credentials*",
+      "secrets*",
+      "*.netrc",
+      ".npmrc",
+      ".pypirc"
+    ],
+    "broker_account_and_runtime": [
+      "services/execution.py",
+      "services/execution_bridge.py",
+      "services/execution_request.py",
+      "services/execution_reconcile.py",
+      "services/execution_trace.py",
+      "services/broker*",
+      "services/alpaca*",
+      "core/state_engine.py"
+    ],
+    "execution_risk_strategy_and_kill_switch": [
+      "main.py",
+      "monitor.py",
+      "core/config.py",
+      "engines/risk_engine.py",
+      "engines/reasoning.py",
+      "engines/signals.py",
+      "delivery/alert_engine.py",
+      "indicators/**"
+    ],
+    "generated_and_temporary": [
+      "**/__pycache__/**",
+      "*.pyc",
+      "*.pyo",
+      "*.tmp",
+      "*.temp",
+      "*.lock",
+      "*.swp",
+      ".pytest_cache/**",
+      ".ruff_cache/**",
+      "node_modules/**",
+      ".obsidian/**",
+      ".trash/**"
+    ],
+    "binaries_and_attachments": [
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.gif",
+      "*.bmp",
+      "*.webp",
+      "*.svg",
+      "*.ico",
+      "*.pdf",
+      "*.zip",
+      "*.gz",
+      "*.tar",
+      "*.7z",
+      "*.exe",
+      "*.dll",
+      "*.so",
+      "*.dylib",
+      "*.bin",
+      "*.mp3",
+      "*.mp4",
+      "*.mov",
+      "*.webm",
+      "*.woff",
+      "*.woff2",
+      "*.ttf",
+      "*.otf",
+      "*.xlsx",
+      "*.docx",
+      "*.pptx"
+    ],
+    "scripts_notebooks_and_executables": [
+      "*.py",
+      "*.ipynb",
+      "*.ps1",
+      "*.sh",
+      "*.bash",
+      "*.zsh",
+      "*.bat",
+      "*.cmd",
+      "*.js",
+      "*.mjs",
+      "*.cjs",
+      "*.ts",
+      "*.pine",
+      "*.vbs",
+      "*.jar",
+      "*.msi",
+      "*.reg"
+    ]
+  },
+  "prohibited_entry_kinds": [
+    "symlink",
+    "junction",
+    "submodule",
+    "gitlink",
+    "directory",
+    "device",
+    "socket"
+  ],
+  "prohibited_content_classes": {
+    "credential_shaped": "an assignment naming an api key, secret, token, password, passphrase, cookie, authorization header, bearer value, private key, or access key",
+    "machine_specific_path": "a drive-letter path, a UNC path, a home directory, or a user profile directory",
+    "broker_or_account_identifier": "an account number, broker account id, or order id presented as live account data",
+    "runtime_state_dump": "serialized live risk, position, order, or session state",
+    "executable_directive": "a plugin, template, script, or query directive that asks a reader or tool to execute something",
+    "authority_escalation": "metadata or body text claiming an authority, status, or destination beyond what this policy grants"
+  },
+  "required_provenance_fields": [
+    "nova_id",
+    "nova_schema",
+    "nova_source",
+    "nova_source_blob",
+    "nova_source_hash",
+    "nova_classification",
+    "nova_authority",
+    "nova_sync_state"
+  ],
+  "optional_provenance_fields": [
+    "nova_title",
+    "nova_last_sync_hash",
+    "nova_approval"
+  ],
+  "stable_id": {
+    "algorithm": "sha256-prefix",
+    "input": "authority + NUL + normalized source-relative path",
+    "hex_length": 16,
+    "prefix": "nova-",
+    "rename_policy": "explicit-migration-only",
+    "automatic_rename_detection": false
+  },
+  "valid_classifications": [
+    "approved-spec",
+    "approved-doc",
+    "observation",
+    "working-note"
+  ],
+  "valid_authorities": [
+    "git",
+    "obsidian"
+  ],
+  "limits": {
+    "max_input_bytes": 1048576,
+    "max_markdown_bytes": 524288,
+    "max_collection": 1000,
+    "max_depth": 32,
+    "max_path_chars": 512,
+    "max_frontmatter_fields": 32,
+    "max_plan_items": 1000
+  }
+}

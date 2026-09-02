@@ -55,6 +55,35 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 
 All five are read-only in effect. Items 1-3 and 5 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. Nothing beyond them is scheduled, and nothing here is pushed or merged.
 
+## Obsidian: the planning half only
+
+`tools/cowork/obsidian_sync_planner.py`, with the fixed `obsidian_policy.json`, plans
+and validates a controlled synchronization between Git and an Obsidian vault (185
+tests). **Only the read-only half exists.** It answers what a synchronization would
+propose and whether every proposed item is provably safe; it writes nothing, in the
+repository or in a vault.
+
+- **Git is the authority** for approved specifications and promoted knowledge.
+  Obsidian is a non-executing knowledge and working-note surface, and its content is
+  never executable instruction. It cannot modify strategy, risk, broker, execution,
+  kill-switch, guard, permission, deployment, or runtime state.
+- **Five read-only operations**: `validate-policy`, `inventory`, `plan-export`,
+  `plan-import`, `check-plan`. There is no apply, sync, watch, write, copy, move,
+  delete, rename, install, repair, force, override, or plugin management.
+- **A vault is never discovered.** Its root is supplied explicitly or nothing is
+  read. No environment, no Documents folder, no cloud-drive folder, no Obsidian
+  configuration, no installed-application lookup, and no vault is ever created.
+- **No auto-merge, no deletion, no two-way sync.** Conflicts stop planning. When
+  Git and a note both changed, that is a conflict a person resolves.
+- **An import plan is never approval.** Any candidate import exits 5 and waits for
+  Pedro's separate, named approval.
+
+**The apply engine is not built and not authorized** — writing a note into a vault,
+promoting a candidate into the repository, a sync ledger, and any scheduling are all
+separate future work. See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b34-obsidian-sync-planner--read-only-half-implemented-local-only).
+
+No real Obsidian vault has been discovered, inspected, created, or modified.
+
 ## What this documentation does not do
 
 Nothing here authorizes trading, deployment, merging, pushing, or autonomous
