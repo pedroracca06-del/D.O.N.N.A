@@ -29,6 +29,7 @@ from core.state import (
     load_settings,
     load_macro_events,
     load_journal, save_journal, compute_journal_stats,
+    journal_trading_date, with_journal_trading_dates,
     read_json_file, write_json_file,
 )
 from engines.engines import (
@@ -2787,7 +2788,7 @@ async def assistant_chat(request: Request):
 
 @app.get('/journal/data')
 async def journal_data():
-    trades    = load_journal()
+    trades    = with_journal_trading_dates(load_journal())
     stats     = compute_journal_stats(trades)
     from core.state import journal_record_origin
     personal_trades = [t for t in trades if journal_record_origin(t) == 'personal']
@@ -2800,7 +2801,7 @@ async def journal_data():
     today_pnl = sum(
         float(t.get('realized_pnl', 0) or 0)
         for t in trades
-        if t.get('trade_date') == today_str
+        if journal_trading_date(t) == today_str
         and t.get('outcome') in _closed_outcomes
         and t.get('realized_pnl') is not None
         and t.get('outcome') != 'REJECTED'
@@ -2815,7 +2816,7 @@ async def journal_data():
     personal_stats['today_pnl'] = round(sum(
         float(t.get('realized_pnl', 0) or 0)
         for t in personal_trades
-        if t.get('trade_date') == today_str
+        if journal_trading_date(t) == today_str
         and t.get('outcome') in _closed_outcomes
         and t.get('realized_pnl') is not None
         and t.get('outcome') != 'REJECTED'
@@ -2823,7 +2824,7 @@ async def journal_data():
     legacy_system_stats['today_pnl'] = round(sum(
         float(t.get('realized_pnl', 0) or 0)
         for t in legacy_system_trades
-        if t.get('trade_date') == today_str
+        if journal_trading_date(t) == today_str
         and t.get('outcome') in _closed_outcomes
         and t.get('realized_pnl') is not None
         and t.get('outcome') != 'REJECTED'
@@ -3021,6 +3022,7 @@ async def journal_add(request: Request):
         'behavioral_flags': behavioral_flags,
         'reflection':       reflection,
     }
+    trade['trade_date'] = journal_trading_date(trade)
 
     trades = load_journal()
     trades.append(trade)

@@ -45,6 +45,7 @@ os.environ.setdefault('ALPACA_SECRET_KEY', '')
 import pytest
 
 from core.state import compute_journal_stats
+from core.state import journal_trading_date, with_journal_trading_dates
 
 _NY_TZ = ZoneInfo('America/New_York')
 
@@ -158,6 +159,32 @@ def test_daily_pnl_this_week_is_the_established_weekly_figure():
     assert isinstance(stats['daily_pnl']['this_week'], float)
 
 
+def test_evening_asia_trade_rolls_into_next_trading_day():
+    trade = _trade(
+        'LOSS', -142.20, trade_date='2026-09-01', session='ASIA',
+        timestamp='2026-09-02T02:22:57.368019+00:00',
+    )
+    assert journal_trading_date(trade) == '2026-09-02'
+    assert with_journal_trading_dates([trade])[0]['trade_date'] == '2026-09-02'
+    assert trade['trade_date'] == '2026-09-01', 'historical source evidence is not mutated'
+
+
+def test_after_midnight_asia_trade_is_not_advanced_twice():
+    trade = _trade(
+        'LOSS', -50.0, trade_date='2026-09-02', session='ASIA',
+        timestamp='2026-09-02T05:30:00+00:00',  # 01:30 ET
+    )
+    assert journal_trading_date(trade) == '2026-09-02'
+
+
+def test_non_asia_trade_keeps_its_explicit_date():
+    trade = _trade(
+        'WIN', 100.0, trade_date='2026-09-01', session='NY_AM',
+        timestamp='2026-09-02T02:22:57.368019+00:00',
+    )
+    assert journal_trading_date(trade) == '2026-09-01'
+
+
 # ── win_rate is all-time (no separate weekly win-rate field exists) ──────
 
 def test_win_rate_is_all_time_not_date_scoped():
@@ -201,6 +228,25 @@ def test_journal_data_today_pnl_uses_new_york_date_not_utc():
         f"reports 2026-06-24 20:30 ET, got {data['stats']['today_pnl']!r} -- "
         f"a UTC-based 'today' would have wrongly excluded it (UTC date is already 2026-06-25)"
     )
+
+
+def test_journal_data_moves_evening_asia_loss_to_next_trading_day():
+    import main as _main
+    from unittest.mock import patch
+
+    fixed_ny_instant = datetime(2026, 9, 2, 9, 0, tzinfo=_NY_TZ)
+    asia_loss = _trade(
+        'LOSS', -142.20, trade_date='2026-09-01', session='ASIA',
+        timestamp='2026-09-02T02:22:57.368019+00:00',
+    )
+
+    with patch('main.load_journal', return_value=[asia_loss]), \
+         patch('main.now_ny', return_value=fixed_ny_instant):
+        from fastapi.testclient import TestClient
+        data = TestClient(_main.app).get('/journal/data').json()
+
+    assert data['trades'][0]['trade_date'] == '2026-09-02'
+    assert data['stats']['today_pnl'] == -142.20
 
 
 if __name__ == '__main__':

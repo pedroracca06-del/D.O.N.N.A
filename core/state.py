@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta
 
 from core.config import (
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE,
     MACRO_EVENTS_FILE, JOURNAL_FILE, REJECTIONS_FILE,
-    DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS,
+    DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS, NY_TZ,
     now_ny, now_utc, utc_now_iso, day_name, session_label,
 )
 
@@ -145,6 +146,43 @@ def load_journal() -> list:
     return data if isinstance(data, list) else []
 
 
+def journal_trading_date(trade: dict) -> str:
+    """Return the NY trading date, rolling evening Asia into the next day.
+
+    The Asia session opens at 19:00 ET. A record created from 19:00 onward
+    therefore belongs to the following trading day; an after-midnight Asia
+    record already carries that following calendar date and is not advanced
+    again. Records without a trustworthy timestamp retain their explicit
+    date so manual historical backfills are never guessed at.
+    """
+    stored = str((trade or {}).get('trade_date', '') or '')
+    if str((trade or {}).get('session', '') or '').upper() != 'ASIA':
+        return stored
+
+    raw_ts = str((trade or {}).get('timestamp', '') or '')
+    if not raw_ts:
+        return stored
+    try:
+        instant = datetime.fromisoformat(raw_ts.replace('Z', '+00:00'))
+        if instant.tzinfo is None:
+            return stored
+        ny = instant.astimezone(NY_TZ)
+    except (TypeError, ValueError):
+        return stored
+
+    calendar_date = ny.date().isoformat()
+    if ny.hour >= 19 and stored == calendar_date:
+        return (ny.date() + timedelta(days=1)).isoformat()
+    if ny.hour < 3 and stored != calendar_date:
+        return calendar_date
+    return stored
+
+
+def with_journal_trading_dates(trades: list) -> list:
+    """Copy journal records with their effective trading dates for display."""
+    return [{**t, 'trade_date': journal_trading_date(t)} for t in trades]
+
+
 _LEGACY_EXECUTION_NOTE_MARKERS = (
     'donna autonomous trade',
     'nova autonomous trade',
@@ -265,7 +303,7 @@ def compute_journal_stats(trades: list) -> dict:
         else:
             breakevens += 1
 
-        trade_date = str(t.get('trade_date', ''))
+        trade_date = journal_trading_date(t)
         if trade_date == today_str:
             daily_today += pnl
         elif trade_date == yesterday_str:
