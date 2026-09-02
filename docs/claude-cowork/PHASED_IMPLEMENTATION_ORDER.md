@@ -71,9 +71,37 @@ expected hash and counts, submodule state verified.
 **Exit:** run against a freshly created throwaway worktree and correctly reports a
 deliberately omitted permission file.
 
+## Phase 6a — Change Classifier (B1.6) · **COMPLETE**
+
+**Entry:** Phase 4 exit met (A7 running).
+**Deliverable:** a read-only tool reporting the **minimum approval class** a change
+requires — FA/AR, AAM, AM, or PROHIBITED — and never granting approval.
+**Exit met.** Every class and every mode demonstrated; each path classified
+independently and aggregated to the most restrictive; unknown paths, unknown change
+kinds, and unscannable content escalate to AM; retirement-flag activation, guard
+bypass, and LLM-to-order wiring are PROHIBITED. 216 tests, 10 planted
+demonstrations.
+**Abort if:** any output could be read as an approval.
+
+## Phase 6b — Test Selector (B1.7) · **COMPLETE**
+
+**Entry:** Phase 6a exit met.
+**Deliverable:** a read-only tool proposing a focused test list from changed paths,
+built by static AST analysis of tracked blobs — importing nothing and invoking
+pytest never, not even `--collect-only`.
+**Exit met.** Self, direct, transitive, relative, conftest-subtree, and explicit
+policy mappings demonstrated; deletion, rename, and case-only rename handled;
+unmapped, dynamic-import, unresolvable-star-import, unresolved-internal-import,
+syntax-error, and binary changes all escalate to full suite; a recomputed closure
+proof shows no statically discovered dependent test is omitted. 167 tests, 10
+planted demonstrations.
+**Abort if:** a focused selection is ever presented as sufficient evidence for a
+commit. It is not, and cannot be — see the A7.7 note in
+[AUTOMATION_ARCHITECTURE.md](AUTOMATION_ARCHITECTURE.md#a77-and-focused-test-selection).
+
 ## Phase 7 — Integration with current remote `main` · **AM**
 
-**Entry:** Phases 2–6 exit met.
+**Entry:** Phases 2–6, 6a, and 6b exit met.
 **Deliverable:** `integration/nova-foundation` reconciled with `origin/main`.
 **Preconditions:** remote `main` has been observed moving repeatedly, so the
 divergence **must be re-measured immediately before planning**, never taken from

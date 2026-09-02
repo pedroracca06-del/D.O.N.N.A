@@ -189,6 +189,28 @@ Gates must be **demonstrated to fail** on planted bad input before being trusted
 A gate that has never failed has not been tested. Audit logs live outside the
 repository and never contain secret values.
 
+### A7.7 and focused test selection
+
+The Test Selector (B1.7) proposes a **focused** subset of tests from changed paths.
+That subset is **optional preliminary evidence** and nothing more.
+
+- **A focused selection never satisfies A7.7.** A7.7 compares collection node IDs
+  and counts; a deliberately partial run cannot establish that.
+- **Collection parity remains mandatory** before a commit, re-measured against the
+  current pinned HEAD and compared as **exact node-ID sets**. Historical counts —
+  926 at P0.9, 1722 at Phase 3U — are snapshots, never expected values.
+- **The complete regression suite remains mandatory** before a commit. A focused run
+  is for fast feedback while working, not for clearing a gate.
+- **A focused selection makes no claim about the tests it did not select.** They
+  were not chosen; they were not shown to pass.
+- **An unmappable or ambiguous path escalates to a full-suite-required result.** The
+  selector never narrows silently, and "no focused test" never means "no testing
+  required".
+
+The selector imports nothing and invokes pytest never — not even `--collect-only`,
+which would import every test module and conftest and execute their module-level
+code. It emits a structured argument array as evidence, and does not run it.
+
 ---
 
 ## F. Obsidian boundary

@@ -46,7 +46,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 104 registry tests (incl. 23 for `advance`); 10 planted demonstrations; collision, stale approval, lock contention, moved HEAD | **Named approval required for each real write** | **DONE** — local only; real registry initialized under separate approval; `advance` lifecycle correction added |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | 86 validator tests; 9 planted demonstrations; tracked blobs, permission hash/counts, casing, submodule state, forbidden artifacts, registry compatibility | none | **DONE (tool)** — local only |
 | B1.6 | **Change Classifier** — determine the minimum approval class a change requires | Claude | AR | none | B1.3 | 216 classifier tests; 10 planted demonstrations; every class, every mode, most-restrictive aggregation, semantic escalation | none | **DONE (tool) — local only** |
-| B1.7 | **Test Selector** — changed paths → test list | Claude | AR | none | P0.9 | Selection matches Pedro's choice on repeated trials | none | TODO |
+| B1.7 | **Test Selector** — changed paths → focused test list, advisory only | Claude | AR | none | P0.9, B1.1, B1.2, B1.3, B1.4 (optional collision check), B1.6 | 167 selector tests; 10 planted demonstrations; self / direct / transitive / relative / conftest-subtree / policy mapping, deletion, rename, case-only rename, escalation on unmapped-dynamic-wildcard-unresolved-syntax-binary, and a recomputed proof that no statically discovered test importing a changed module is omitted | none | **DONE (tool) — local only** |
 
 ---
 
@@ -493,6 +493,111 @@ does not reason about interactions between files. Binary intent is not analysed 
 all, only escalated. The policy's path rules encode this repository's layout, so a
 significant reorganisation needs a policy review. And the tool reports a *minimum* —
 a change may still warrant more caution than any rule captures.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **DONE (tool) —
+local only. Not pushed, not merged.**
+
+### B1.7 Test Selector — implemented (tool; local only)
+
+`tools/cowork/test_selector.py` with the pure-data `test_selection_policy.json`
+(sha256 `b884fd2d6ceaaad8d6f92ea1fd94cc770cc26ef79aa4116f205abf968f014531`), and
+`tests/test_cowork_test_selector.py` (167 tests).
+
+**The governing rule, stated in every report.** A focused selection is a **fast
+local feedback aid only**. It can never satisfy A7.7 by itself, replace collection
+parity, replace the full regression suite required before a commit, claim that the
+unselected tests would pass, or authorize staging, committing, pushing, merging, or
+deployment. Every report carries `full_regression_required: true` and
+`collection_parity_required: true` unconditionally, and policy validation refuses a
+policy that tries to set either false or to claim any of those capabilities.
+
+**Acceptance criteria — replacing the earlier unmeasurable wording.** The row
+previously required "selection matches Pedro's choice on repeated trials", which
+specified no trial count, no agreement threshold, and no tie-break, and could not be
+satisfied in a test suite. It is replaced by mechanically verifiable evidence:
+
+| Evidence | Result |
+|---|---|
+| Countable focused test suite | 167 tests |
+| Planted mapping demonstrations | 10, all as intended |
+| Direct-import coverage | a changed module selects its direct importers |
+| Transitive-import coverage | `core/base` → `core/middle` → `engines/top` → its test |
+| Relative-import coverage | `from .sibling import …` resolved |
+| Changed-test self-selection | a changed test selects itself |
+| Conftest subtree selection | root and nested scopes, each limited to its own subtree |
+| Policy/data mapping | a non-Python file maps through explicit policy |
+| Deletion handling | the pre-change path's prior dependents are selected |
+| Unmappable-path escalation | exit 5, full suite required |
+| **Closure proof** | for every changed module, every statically discovered test that imports it directly or transitively is in the selection — recomputed independently from the reverse index, so a bug in the selection loop cannot hide behind itself |
+
+**Corrected prerequisites.** P0.9, plus **B1.1** (all output through the Evidence
+Formatter), **B1.2** (pinned baseline and staleness), **B1.3** (every Git call
+through the A7 read-only allowlist), **B1.4** (optional read-only registry collision
+check), and **B1.6** (changed-path observation, reused rather than duplicated). The
+old row declared only P0.9 and so predated all of them.
+
+**It imports and runs nothing.** It does not import an application or test module,
+and it does not invoke pytest — **not even `--collect-only`**, which imports every
+test module and conftest and would execute their module-level code. Mapping is built
+by parsing tracked blobs with `ast` alone. A planted module whose top level writes a
+marker file was mapped correctly and the marker was never created; no
+`.pytest_cache` appeared. The selector owns no subprocess.
+
+**Modes.** Six, all read-only: `select-worktree`, `select-staged`, `select-commit`,
+`select-range`, `select-manifest`, `validate-policy`.
+
+**Mapping sources.** `self`, `direct import`, `transitive import`, `conftest scope`,
+`explicit policy`, `global fallback`. A direct edge is never downgraded to transitive.
+
+**Escalation to full suite (exit 5).** An unmapped path, a global-impact path, a
+Python file that will not parse, a dynamic import (`importlib`, `__import__`,
+`exec`/`compile`) anywhere in a test file, a star import from an unresolvable module,
+an import that looks internal but resolves to no tracked file, an ambiguous bare
+module name matching several tracked files, a binary change, a deleted test file, or
+an explicit mapping that declares no target. **It never silently produces an empty or
+narrow selection.**
+
+**Bare-module resolution.** The Cowork tools are imported by bare module name after a
+`sys.path` insertion, which package paths cannot express, so a single-segment name
+also resolves against tracked file basenames. A name matching more than one tracked
+file is ambiguous and escalates rather than being guessed. A false positive here can
+only make a selection **broader**, never narrower, so it cannot cause an omission.
+
+**Proposed invocation.** A structured argument array — `["python", "-B", "-m",
+"pytest", <validated targets>, "-q"]` — emitted as evidence and **never executed**.
+The policy's argument template may contain only the fixed tokens `python`, `-B`,
+`-m`, `pytest`, `-q`; arbitrary pytest flags, plugin arguments, environment
+assignments, and shell fragments are refused.
+
+**Documentation-only changes** report **no focused pytest target** and exit 0 while
+stating explicitly that this does **not** mean no testing is required. Zero changed
+paths is `stopped` (exit 4), with no testing conclusion implied.
+
+**Collection counts are snapshots, never expectations.** 926 was the P0.9 snapshot
+and 1722 the Phase 3U observation. Collection must be re-measured against the current
+pinned HEAD and compared as exact node-ID sets; the selector never invokes collection
+itself, and its source contains no expected collection constant.
+
+**Static safety.** Standard library only; no `eval`, `exec`, bare `compile`,
+`__import__`, `importlib`, or `runpy`; no subprocess, shell, or network; no
+environment reads; no write-mode `open`; no deletion, move, or rename; no Session
+Registry mutation. Its only writes are to stdout and stderr. Every Git call routes
+through the A7 read-only allowlist and asks only for `rev-parse`, `ls-files`, and
+`cat-file`. All output goes through the Evidence Formatter.
+
+**Known limitation, measured on this repository.** `tests/test_ui_modularization.py`
+uses `exec(compile(...))` and `importlib.import_module`, so its import set cannot be
+known by reading. Under the rule above, that makes **every** selection on the current
+NOVA repository escalate to full suite. The tool is correct and honest here; it is
+simply not yet useful on this tree. A narrower alternative — always *including*
+dynamic-import test files rather than escalating the whole run — would be equally
+safe and far more useful, but it changes a declared safety rule and is therefore not
+implemented without explicit approval.
+
+**Other limitations.** Mapping is static, so runtime-only coupling (fixtures
+resolved by name, plugin hooks, data loaded by path at runtime) is invisible unless
+declared in the policy. The explicit mappings encode this repository's layout and
+need review after a reorganisation. And the tool proposes; it never runs.
 
 **Status.** Implemented locally on `integration/nova-foundation`. **DONE (tool) —
 local only. Not pushed, not merged.**

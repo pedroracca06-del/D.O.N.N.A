@@ -94,9 +94,25 @@ version of the same operation.
 - Any action would reach the network, a broker, a chat service, or a deploy
 - Two sessions or worktrees appear to target the same branch
 
+### The test-selector rule, in full
+
+When the Test Selector **cannot map a changed path** — it is unmapped, a
+global-impact path, unparseable, binary, or reached only through a dynamic or
+unresolvable import — it does not narrow the selection. It **requires full
+regression** and reports that requirement (exit 5).
+
+**If that full regression is declined, the workflow stops.** There is no partial
+substitute: the focused subset is not evidence for a commit, and a declined
+regression is not a smaller regression.
+
+A focused selection is a fast local feedback aid. Before any commit, the complete
+regression suite and collection-parity evidence remain mandatory regardless of what
+the selector proposed, and regardless of whether the selection was empty.
+
 ## 7. Reporting discipline
 
 - **Never claim a test result that was not measured.** Command, counts, failures.
 - **Never weaken a test to make a change pass.**
+- **Never present a focused selection as full-suite evidence.** Say which it was.
 - **Never print a credential value**, in output, logs, or a report.
 - Report a guard block as a finding. Do not route around it.

@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "policy_name": "nova-test-selection",
+  "description": "Fixed, reviewable data policy for the Cowork Test Selector. A focused selection is a fast local feedback aid ONLY. It can never satisfy A7.7, replace collection parity, replace the full regression suite required before a commit, claim that unselected tests would pass, or authorize staging, committing, pushing, merging, or deployment. Pure data: no executable construct, no regular expression, no command, no pytest flag beyond the fixed template, no environment assignment, no machine path, and no credential.",
+  "contract": {
+    "focused_selection_is_advisory_only": true,
+    "full_regression_required": true,
+    "collection_parity_required": true,
+    "can_satisfy_a7_7": false,
+    "can_replace_collection_parity": false,
+    "can_replace_full_regression": false,
+    "claims_unselected_tests_pass": false,
+    "authorizes_staging_or_commit": false,
+    "unmappable_path_escalates_to_full_suite": true,
+    "selector_invokes_collection": false,
+    "selector_imports_modules": false
+  },
+  "collection_count_history": {
+    "note": "These are historical snapshots, never expected values. Collection must be re-measured against the current pinned HEAD every time, and parity compares exact node-ID sets. The Test Selector never invokes collection itself.",
+    "snapshots": [
+      {"label": "P0.9 pytest discovery defaults", "count": 926},
+      {"label": "Phase 3U observation", "count": 1722}
+    ]
+  },
+  "test_roots": ["tests"],
+  "source_roots": [
+    "core",
+    "engines",
+    "services",
+    "delivery",
+    "ui",
+    "health",
+    "intelligence",
+    "tools",
+    "scripts",
+    "main.py",
+    "monitor.py"
+  ],
+  "test_file_patterns": ["test_*.py", "*_test.py"],
+  "conftest_filename": "conftest.py",
+  "python_suffixes": [".py"],
+  "explicit_mappings": [
+    {
+      "id": "a7_policy",
+      "paths": ["tools/cowork/a7_policy.json"],
+      "tests": ["tests/test_cowork_a7_battery.py"],
+      "reason": "the A7 battery reads this policy as data"
+    },
+    {
+      "id": "obsidian_policy",
+      "paths": ["tools/cowork/obsidian_policy.json"],
+      "tests": ["tests/test_cowork_obsidian_sync_planner.py"],
+      "reason": "the Obsidian planner reads this policy as data"
+    },
+    {
+      "id": "change_policy",
+      "paths": ["tools/cowork/change_policy.json"],
+      "tests": ["tests/test_cowork_change_classifier.py"],
+      "reason": "the change classifier reads this policy as data"
+    },
+    {
+      "id": "test_selection_policy",
+      "paths": ["tools/cowork/test_selection_policy.json"],
+      "tests": ["tests/test_cowork_test_selector.py"],
+      "reason": "the test selector reads this policy as data"
+    },
+    {
+      "id": "retirement_guard",
+      "paths": [".claude/hooks/nova_guard_hook.py"],
+      "tests": [],
+      "reason": "the guard has its own standalone harness outside pytest; changing it always requires the full suite as well"
+    }
+  ],
+  "global_impact_paths": [
+    "pytest.ini",
+    "pyproject.toml",
+    "setup.cfg",
+    "tox.ini",
+    "requirements.txt",
+    "requirements-dev.txt",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks/nova_guard_hook.py",
+    ".gitignore",
+    ".gitmodules"
+  ],
+  "documentation_only_paths": [
+    "docs/**",
+    "nova_knowledge_core/**",
+    "NOVA_UI_VISION/**",
+    "*.md",
+    "LICENSE",
+    "CLAUDE.md"
+  ],
+  "exclusions": [
+    "data/**",
+    "**/__pycache__/**",
+    "*.pyc",
+    "*.pyo",
+    ".pytest_cache/**",
+    ".ruff_cache/**",
+    "node_modules/**",
+    "mcp/**",
+    "**/TRANSCRIPTS_RAW/**"
+  ],
+  "full_suite_arguments": ["python", "-B", "-m", "pytest", "-q"],
+  "focused_arguments_prefix": ["python", "-B", "-m", "pytest"],
+  "focused_arguments_suffix": ["-q"],
+  "limits": {
+    "max_input_bytes": 1048576,
+    "max_changes": 1000,
+    "max_files_scanned": 5000,
+    "max_file_bytes": 524288,
+    "max_depth": 32,
+    "max_path_chars": 512,
+    "max_selected": 2000
+  }
+}

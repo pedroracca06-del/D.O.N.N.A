@@ -55,7 +55,46 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 
 6. ~~**Change Classifier**~~ — **implemented locally** as `tools/cowork/change_classifier.py` with the pure-data `change_policy.json` (216 tests). Answers what *minimum* approval class a change requires, and **never approves anything**. See below.
 
-All six are read-only in effect. Items 1-3, 5, and 6 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. Nothing beyond them is scheduled, and nothing here is pushed or merged.
+7. ~~**Test Selector**~~ — **implemented locally** as `tools/cowork/test_selector.py` with the pure-data `test_selection_policy.json` (167 tests). Proposes a focused test list from changed paths and **never replaces the full regression suite**. See below.
+
+All seven are read-only in effect. Items 1-3 and 5-7 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. **Tier 1 — the read-only trust layer — is now complete.** Nothing beyond it is scheduled, and nothing here is pushed or merged.
+
+## The Test Selector: fast feedback, never evidence
+
+`tools/cowork/test_selector.py` maps changed paths to the tests worth running first.
+It is an aid while working, not a gate.
+
+- **It never replaces anything.** Every report carries `full_regression_required: true`
+  and `collection_parity_required: true`, unconditionally. A focused selection cannot
+  satisfy A7.7, cannot replace collection parity, cannot replace the complete
+  regression suite required before a commit, makes no claim about the tests it did
+  not select, and authorizes nothing.
+- **It imports nothing and runs nothing** — not even `pytest --collect-only`, which
+  would import every test module and conftest and execute their module-level code.
+  Mapping is built by parsing tracked blobs with `ast`. A planted module whose top
+  level writes a file was mapped correctly and never executed.
+- **It proposes, it does not invoke.** The output is a structured argument array,
+  `["python", "-B", "-m", "pytest", <targets>, "-q"]`, emitted as evidence. The
+  policy may contain only those fixed tokens — no arbitrary flags, plugins,
+  environment assignments, or shell fragments.
+- **Six read-only modes**: `select-worktree`, `select-staged`, `select-commit`,
+  `select-range`, `select-manifest`, `validate-policy`.
+- **Mapping sources**: self, direct import, transitive import, conftest scope,
+  explicit policy, global fallback.
+- **Ambiguity escalates, never narrows.** An unmapped path, a global-impact path, an
+  unparseable file, a dynamic or unresolvable import, an ambiguous module name, or a
+  binary change all produce "full suite required" (exit 5). **"No focused test" never
+  means "no testing required"** — a documentation-only change says so explicitly.
+- **Collection counts are snapshots.** 926 (P0.9) and 1722 (Phase 3U) are history,
+  not expectations; collection is re-measured against the current pinned HEAD and
+  compared as exact node-ID sets.
+
+**Measured limitation:** `tests/test_ui_modularization.py` uses `exec(compile(...))`
+and `importlib.import_module`, so its imports cannot be read statically. Under the
+escalation rule that makes **every** selection on this repository fall back to the
+full suite today. The tool is correct; it is not yet useful here.
+
+See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b17-test-selector--implemented-tool-local-only).
 
 ## The Change Classifier: minimum approval, never approval
 
