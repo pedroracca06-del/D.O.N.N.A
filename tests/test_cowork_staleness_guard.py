@@ -647,6 +647,110 @@ def test_git_allowlist_is_read_only():
                 "switch", "reset", "restore", "clean", "add", "commit",
                 "tag", "branch", "submodule", "config", "maintenance", "gc"}
     assert not (sg._GIT_READ_ONLY & mutating)
+    # `merge-base` is read-only despite the name; `merge` itself is not present.
+    assert "merge-base" in sg._GIT_READ_ONLY
+    assert "merge" not in sg._GIT_READ_ONLY
+
+
+# ------------------------------------------- narrowly admitted merge-base
+
+def _sg():
+    sys.path.insert(0, str(GUARD.parent))
+    try:
+        import staleness_guard as sg
+        return sg
+    finally:
+        sys.path.pop(0)
+
+
+def test_is_ancestor_true_for_a_real_ancestor(tmp_path):
+    repo = make_repo(tmp_path)
+    first = git(repo, "rev-parse", "HEAD")
+    (repo / "kept.txt").write_text("2\n", encoding="utf-8")
+    git(repo, "add", "--", "kept.txt")
+    git(repo, "commit", "-q", "-m", "second")
+    second = git(repo, "rev-parse", "HEAD")
+    assert _sg().is_ancestor(str(repo), first, second) is True
+
+
+def test_is_ancestor_false_for_unrelated_history(tmp_path):
+    repo = make_repo(tmp_path)
+    first = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "--orphan", "fresh")
+    (repo / "b.txt").write_text("x\n", encoding="utf-8")
+    git(repo, "add", "--", "b.txt")
+    git(repo, "commit", "-q", "-m", "orphan")
+    other = git(repo, "rev-parse", "HEAD")
+    assert _sg().is_ancestor(str(repo), first, other) is False
+
+
+def test_is_ancestor_false_in_the_reverse_direction(tmp_path):
+    repo = make_repo(tmp_path)
+    first = git(repo, "rev-parse", "HEAD")
+    (repo / "kept.txt").write_text("2\n", encoding="utf-8")
+    git(repo, "add", "--", "kept.txt")
+    git(repo, "commit", "-q", "-m", "second")
+    second = git(repo, "rev-parse", "HEAD")
+    assert _sg().is_ancestor(str(repo), second, first) is False
+
+
+def test_is_ancestor_rejects_abbreviated_or_ref_arguments(tmp_path):
+    repo = make_repo(tmp_path)
+    head = git(repo, "rev-parse", "HEAD")
+    sg = _sg()
+    for bad in (head[:8], "HEAD", "main", "", "not-an-oid"):
+        with pytest.raises(sg.StoppedError):
+            sg.is_ancestor(str(repo), bad, head)
+        with pytest.raises(sg.StoppedError):
+            sg.is_ancestor(str(repo), head, bad)
+
+
+def test_only_the_is_ancestor_form_of_merge_base_is_permitted(tmp_path):
+    """Every other merge-base shape is refused inside _git, not at the caller."""
+    repo = make_repo(tmp_path)
+    head = git(repo, "rev-parse", "HEAD")
+    sg = _sg()
+    for args in (
+            ["merge-base", head, head],                       # plain merge-base
+            ["merge-base", "--all", head, head],
+            ["merge-base", "--fork-point", "main"],
+            ["merge-base", "--octopus", head, head],
+            ["merge-base", "--is-ancestor", head],            # too few
+            ["merge-base", "--is-ancestor", head, head, head],  # too many
+            ["merge-base", "--is-ancestor", "HEAD", head],    # ref, not an oid
+            ["merge-base", "--is-ancestor", head[:8], head],  # abbreviation
+    ):
+        with pytest.raises(sg.StoppedError):
+            sg._git(str(repo), args)
+
+
+def test_merge_base_addition_does_not_mutate_the_repository(tmp_path):
+    repo = make_repo(tmp_path)
+    first = git(repo, "rev-parse", "HEAD")
+    (repo / "kept.txt").write_text("2\n", encoding="utf-8")
+    git(repo, "add", "--", "kept.txt")
+    git(repo, "commit", "-q", "-m", "second")
+    second = git(repo, "rev-parse", "HEAD")
+    fetch_head = repo / ".git" / "FETCH_HEAD"
+    before = (fetch_head.exists(), git(repo, "show-ref"),
+              (repo / ".git" / "index").read_bytes(),
+              (repo / ".git" / "config").read_bytes(),
+              git(repo, "status", "--porcelain", "-uall"))
+    _sg().is_ancestor(str(repo), first, second)
+    after = (fetch_head.exists(), git(repo, "show-ref"),
+             (repo / ".git" / "index").read_bytes(),
+             (repo / ".git" / "config").read_bytes(),
+             git(repo, "status", "--porcelain", "-uall"))
+    assert before == after
+
+
+def test_existing_observer_behaviour_is_unchanged_by_the_addition(tmp_path):
+    """The pre-existing commands still work exactly as before."""
+    repo = make_repo(tmp_path)
+    b = baseline_for(repo, require_clean_index=True, require_clean_worktree=True)
+    rc, out, err = run(repo, b)
+    assert rc == 0, err + out
+    assert json.loads(out)["overall_status"] == "passed"
 
 
 def test_git_helper_refuses_a_subcommand_outside_the_allowlist(tmp_path):

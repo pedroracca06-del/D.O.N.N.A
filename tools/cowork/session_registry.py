@@ -17,6 +17,12 @@ BOUNDARY:
   * Never blocks a human: it reports, and a person decides.
   * NEVER deletes a record. `close` marks history; there is deliberately no
     prune, delete, clear, force, override, repair, or patch operation.
+  * `advance` moves an active session's `expected_commit` forward after an
+    intentional local commit. The destination is ALWAYS the verified repository
+    HEAD -- it can never be supplied -- and the recorded commit must be an
+    ancestor of it, so a rewind, amend, or rebase is refused rather than
+    absorbed. Advancing records where a session now sits; it approves nothing
+    and never pushes, merges, or deploys.
   * Optional worktree verification reuses the Staleness Guard's read-only
     observations. It never fetches.
   * Standard library only.
@@ -585,7 +591,7 @@ def main(argv=None) -> int:
         description="Machine-local session collision registry. Never deletes a record.")
     parser.add_argument("operation",
                         choices=("list", "check", "register", "heartbeat",
-                                 "pause", "resume", "close"))
+                                 "pause", "resume", "close", "advance"))
     parser.add_argument("--registry", required=True,
                         help="path to the machine-local registry JSON file")
     parser.add_argument("--format", choices=("markdown", "json"), required=True)
@@ -598,6 +604,10 @@ def main(argv=None) -> int:
     parser.add_argument("--observed-at", default=None,
                         help="RFC3339 UTC observation time (defaults to now)")
     parser.add_argument("--stale-seconds", type=int, default=DEFAULT_STALE_SECONDS)
+    parser.add_argument("--previous-commit", default=None,
+                        help="for advance: the commit currently recorded on the "
+                             "session; the destination is always the verified "
+                             "repository HEAD and can never be supplied")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -665,6 +675,15 @@ def main(argv=None) -> int:
             if target is None:
                 sg._bad("no session with that id is registered")
             proposal = target
+        if op == "advance":
+            if not args.repo:
+                sg._bad("advance requires --repo so the destination HEAD can be verified")
+            if not args.previous_commit:
+                sg._bad("advance requires --previous-commit")
+            if not _OID_RE.match(str(args.previous_commit)):
+                sg._bad("--previous-commit must be a full git object id")
+        elif args.previous_commit:
+            sg._bad("--previous-commit is only valid for advance")
     except ef.SafetyLimitError as exc:
         _err("session_registry: safety limit: %s\n" % ef.sanitize_text(str(exc)))
         return 3
@@ -783,6 +802,50 @@ def main(argv=None) -> int:
                     return 5
                 rec["status"] = "active"
                 rec["heartbeat_at"] = now_stamp
+
+            elif op == "advance":
+                rec = _find(current, args.session_id)
+                if rec["status"] != "active":
+                    raise TransitionError(
+                        "only an active session may advance its expected commit")
+                if rec["expected_commit"] != args.previous_commit:
+                    raise TransitionError(
+                        "the supplied previous commit does not match the "
+                        "commit recorded on this session")
+                repo, identity = sg.resolve_repo(args.repo)
+                if identity != rec["worktree_identity"]:
+                    raise TransitionError(
+                        "the supplied repository is a different worktree "
+                        "than the one recorded on this session")
+                branch = sg._git_ok(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+                if branch == "HEAD":
+                    raise TransitionError(
+                        "the repository is in a detached HEAD state")
+                if branch != rec["branch"]:
+                    raise TransitionError(
+                        "the repository is on a different branch than the one "
+                        "recorded on this session")
+                head = sg._git_ok(repo, ["rev-parse", "HEAD"])
+                if not _OID_RE.match(head):
+                    raise TransitionError("the repository HEAD is not a full object id")
+                if head == args.previous_commit:
+                    raise TransitionError(
+                        "HEAD has not moved; there is nothing to advance to")
+                # Forward-only: the recorded commit must be an ancestor of HEAD,
+                # so a rewind, an amend, or a rebase cannot be absorbed silently.
+                if not sg.is_ancestor(repo, args.previous_commit, head):
+                    raise TransitionError(
+                        "the recorded commit is not an ancestor of HEAD; "
+                        "advancement is forward-only")
+                before_fields = {k: v for k, v in rec.items()
+                                 if k not in ("expected_commit", "heartbeat_at")}
+                rec["expected_commit"] = head          # destination is HEAD, never supplied
+                rec["heartbeat_at"] = now_stamp
+                after_fields = {k: v for k, v in rec.items()
+                                if k not in ("expected_commit", "heartbeat_at")}
+                if before_fields != after_fields:
+                    raise TransitionError(
+                        "advance must change only expected_commit and heartbeat_at")
 
             elif op == "close":
                 rec = _find(current, args.session_id)

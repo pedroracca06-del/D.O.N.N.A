@@ -67,8 +67,15 @@ OPTIONAL_FIELDS = (
 # listed here cannot be constructed, and every entry is read-only.
 _GIT_READ_ONLY = frozenset({
     "rev-parse", "status", "ls-files", "ls-tree", "show-ref",
-    "remote", "ls-remote", "diff",
+    "remote", "ls-remote", "diff", "merge-base",
 })
+
+# `merge-base` is admitted for exactly one purpose: proving that one commit is
+# an ancestor of another. Only the `--is-ancestor <full-oid> <full-oid>` form is
+# permitted; every other form (plain merge-base, --fork-point, --octopus, --all,
+# ref names, abbreviations) is refused, so the verb cannot become a general
+# revision-walking capability.
+_MERGE_BASE_ARGC = 4
 
 
 class StoppedError(Exception):
@@ -83,6 +90,14 @@ def _git(repo: str, args: list, timeout: int = GIT_TIMEOUT_SECONDS):
     """Run one allowlisted read-only Git command. Never uses a shell."""
     if not args or args[0] not in _GIT_READ_ONLY:
         raise StoppedError("refused a git subcommand outside the read-only allowlist")
+    if args[0] == "merge-base":
+        # Enforced here, not at the call site, so no caller can construct
+        # another form of the verb.
+        if (len(args) != _MERGE_BASE_ARGC or args[1] != "--is-ancestor"
+                or not _OID_RE.match(args[2]) or not _OID_RE.match(args[3])):
+            raise StoppedError(
+                "refused a merge-base form other than "
+                "--is-ancestor with two full object ids")
     cmd = ["git", "--no-optional-locks", "-C", repo] + args
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
@@ -214,6 +229,18 @@ def validate_baseline(doc) -> dict:
 # --------------------------------------------------------------------------
 # Repository resolution
 # --------------------------------------------------------------------------
+
+def is_ancestor(repo: str, old: str, new: str) -> bool:
+    """True when `old` is an ancestor of `new`. Read-only; never fetches.
+
+    Both arguments must be full object ids -- `_git` re-checks that, so an
+    abbreviation or a ref name cannot reach git through this path.
+    """
+    if not _OID_RE.match(str(old)) or not _OID_RE.match(str(new)):
+        raise StoppedError("ancestry requires two full object ids")
+    rc, _, _ = _git(repo, ["merge-base", "--is-ancestor", old, new])
+    return rc == 0
+
 
 def resolve_repo(path: str):
     """Return (canonical_top_level, worktree_identity). Never searches beyond

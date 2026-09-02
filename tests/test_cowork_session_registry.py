@@ -134,11 +134,22 @@ def _real_registry_untouched():
     assert before == after, "the real session registry was touched"
 
 
-def test_real_registry_is_absent_and_stays_absent(tmp_path):
-    assert not REAL_REGISTRY.exists()
+def test_real_registry_is_never_touched_by_the_suite(tmp_path):
+    """The suite must never create or modify the real registry.
+
+    This originally asserted the real registry did not exist. Phase 3P
+    initialized it under explicit approval, so the durable invariant is the one
+    asserted here -- and by the autouse fixture around every test: whatever the
+    real file's state, this suite leaves it byte-identical.
+    """
+    before = (REAL_REGISTRY.exists(),
+              REAL_REGISTRY.read_bytes() if REAL_REGISTRY.exists() else None)
     reg = init_registry(tmp_path)
     run("register", reg, payload=session())
-    assert not REAL_REGISTRY.exists()
+    run("list", reg)
+    after = (REAL_REGISTRY.exists(),
+             REAL_REGISTRY.read_bytes() if REAL_REGISTRY.exists() else None)
+    assert before == after
 
 
 # ------------------------------------------------------------------- schema
@@ -595,8 +606,8 @@ def test_no_prune_or_delete_operation_exists():
     groups = {g for g in _re.findall(r"\{([^}]*)\}", help_text) if "list" in g}
     assert len(groups) == 1, groups
     offered = sorted(o.strip() for o in groups.pop().split(","))
-    assert offered == ["check", "close", "heartbeat", "list", "pause",
-                       "register", "resume"]
+    assert offered == ["advance", "check", "close", "heartbeat", "list",
+                       "pause", "register", "resume"]
 
 
 # ---------------------------------------------------------------- atomicity
@@ -910,3 +921,269 @@ def test_no_environment_value_exposure():
     body = _executable_source(REGISTRY_TOOL)
     for banned in ("os.environ", "getenv"):
         assert banned not in body, banned
+
+
+# ------------------------------------------------------------------ advance
+
+def _repo_with_session(tmp_path, revision=0, status="active",
+                       beat="2026-09-02T09:00:00Z"):
+    """A synthetic repo plus a registry holding one session pinned to its HEAD."""
+    repo = make_repo(tmp_path)
+    head = git(repo, "rev-parse", "HEAD")
+    rec = session(sid="sess-advance", wt=repo.name, branch="main",
+                  commit=head, status=status, beat=beat,
+                  path=str(repo), write=["a.txt"])
+    reg = init_registry(tmp_path, [rec], revision=revision)
+    return repo, reg, head
+
+
+def _commit(repo, text="next\n"):
+    (repo / "a.txt").write_text(text, encoding="utf-8")
+    git(repo, "add", "--", "a.txt")
+    git(repo, "commit", "-q", "-m", "next")
+    return git(repo, "rev-parse", "HEAD")
+
+
+def advance(reg, repo, sid="sess-advance", prev=None, at=T0):
+    cmd = [sys.executable, "-B", str(REGISTRY_TOOL), "advance",
+           "--registry", str(reg), "--format", "json", "--observed-at", at,
+           "--session-id", sid, "--repo", str(repo)]
+    if prev is not None:
+        cmd += ["--previous-commit", prev]
+    p = subprocess.run(cmd, capture_output=True)
+    return (p.returncode, p.stdout.decode("utf-8", "replace"),
+            p.stderr.decode("utf-8", "replace"))
+
+
+def test_advance_one_commit_succeeds(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path, revision=5)
+    new = _commit(repo)
+    rc, out, err = advance(reg, repo, prev=old)
+    assert rc == 0, err + out
+    doc = load(reg)
+    assert doc["revision"] == 6
+    assert doc["sessions"][0]["expected_commit"] == new
+
+
+def test_advance_multi_commit_descendant_succeeds(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo, "2\n")
+    _commit(repo, "3\n")
+    newest = _commit(repo, "4\n")
+    rc, out, err = advance(reg, repo, prev=old)
+    assert rc == 0, err + out
+    assert load(reg)["sessions"][0]["expected_commit"] == newest
+
+
+def test_advance_increments_revision_exactly_once(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path, revision=11)
+    _commit(repo)
+    advance(reg, repo, prev=old)
+    assert load(reg)["revision"] == 12
+
+
+def test_advance_changes_only_commit_and_heartbeat(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    before = load(reg)["sessions"][0]
+    _commit(repo)
+    rc, _, err = advance(reg, repo, prev=old)
+    assert rc == 0, err
+    after = load(reg)["sessions"][0]
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed == {"expected_commit", "heartbeat_at"}
+    assert after["heartbeat_at"] == T0
+
+
+def test_advance_wrong_session_id_rejected_without_mutation(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    before = Path(reg).read_bytes()
+    rc, _, err = advance(reg, repo, sid="no-such-session", prev=old)
+    assert rc == 2 and "no session with that id" in err
+    assert Path(reg).read_bytes() == before
+
+
+@pytest.mark.parametrize("status", ["paused", "closing", "closed"])
+def test_advance_rejects_non_active_status(tmp_path, status):
+    repo, reg, old = _repo_with_session(tmp_path, status=status)
+    _commit(repo)
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev=old)
+    assert rc == 1
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_wrong_previous_commit_rejected(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev="0" * 40)
+    assert rc == 1
+    assert "does not match" in out
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_rejects_when_head_has_not_moved(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev=old)
+    assert rc == 1
+    assert "has not moved" in out
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_rejects_non_ancestor_rewrite(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    git(repo, "checkout", "-q", "--orphan", "fresh")
+    (repo / "b.txt").write_text("x\n", encoding="utf-8")
+    git(repo, "add", "--", "b.txt")
+    git(repo, "commit", "-q", "-m", "unrelated history")
+    git(repo, "branch", "-M", "main")
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev=old)
+    assert rc == 1
+    assert "forward-only" in out
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_cannot_rewind(tmp_path):
+    """Advancing from a descendant back to its own ancestor is refused."""
+    repo, reg, first = _repo_with_session(tmp_path)
+    second = _commit(repo)
+    assert advance(reg, repo, prev=first)[0] == 0        # now pinned to second
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev=second)
+    assert rc == 1 and "has not moved" in out
+    assert Path(reg).read_bytes() == before
+    assert load(reg)["sessions"][0]["expected_commit"] == second
+
+
+def test_advance_rejects_branch_mismatch(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    git(repo, "checkout", "-q", "-b", "other")
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev=old)
+    assert rc == 1 and "different branch" in out
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_rejects_detached_head(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    git(repo, "checkout", "-q", "--detach")
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, repo, prev=old)
+    assert rc == 1 and "detached HEAD" in out
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_rejects_worktree_mismatch(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    other = make_repo(tmp_path, name="beta")
+    before = Path(reg).read_bytes()
+    rc, out, _ = advance(reg, other, prev=old)
+    assert rc == 1 and "different worktree" in out
+    assert Path(reg).read_bytes() == before
+
+
+def test_advance_foreign_lock_is_stopped_and_lock_retained(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    lock = Path(str(reg) + ".lock")
+    lock.write_text("99999", encoding="utf-8")
+    before = Path(reg).read_bytes()
+    rc, out, err = advance(reg, repo, prev=old)
+    assert rc == 4
+    assert lock.read_text(encoding="utf-8") == "99999"
+    assert Path(reg).read_bytes() == before
+    lock.unlink()
+
+
+def test_advance_leaves_registry_identical_when_replace_fails(tmp_path, monkeypatch):
+    sys.path.insert(0, str(REGISTRY_TOOL.parent))
+    try:
+        import session_registry as sr
+    finally:
+        sys.path.pop(0)
+    repo, reg, old = _repo_with_session(tmp_path, revision=3)
+    before = Path(reg).read_bytes()
+
+    def boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(sr.os, "replace", boom)
+    doc = sr.read_registry(str(reg))
+    doc["revision"] += 1
+    doc["sessions"][0]["expected_commit"] = "b" * 40
+    with pytest.raises(OSError):
+        sr.write_registry_atomic(str(reg), doc)
+    assert Path(reg).read_bytes() == before
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".nova-registry-")]
+
+
+def test_advance_rejects_stale_registry_revision(tmp_path):
+    """A registry that moved between read and write must not be overwritten."""
+    sys.path.insert(0, str(REGISTRY_TOOL.parent))
+    try:
+        import session_registry as sr
+    finally:
+        sys.path.pop(0)
+    repo, reg, old = _repo_with_session(tmp_path, revision=4)
+    stale = sr.read_registry(str(reg))
+    assert stale["revision"] == 4
+    _commit(repo)
+    advance(reg, repo, prev=old)                     # someone else advances
+    assert load(reg)["revision"] == 5
+    assert sr.read_registry(str(reg))["revision"] != stale["revision"]
+
+
+def test_advance_requires_repo_and_previous_commit(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    base = [sys.executable, "-B", str(REGISTRY_TOOL), "advance",
+            "--registry", str(reg), "--format", "json",
+            "--session-id", "sess-advance"]
+    p = subprocess.run(base + ["--previous-commit", old], capture_output=True)
+    assert p.returncode == 2 and b"requires --repo" in p.stderr
+    p = subprocess.run(base + ["--repo", str(repo)], capture_output=True)
+    assert p.returncode == 2 and b"requires --previous-commit" in p.stderr
+
+
+def test_advance_rejects_abbreviated_previous_commit(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    _commit(repo)
+    rc, _, err = advance(reg, repo, prev=old[:8])
+    assert rc == 2 and "full git object id" in err
+
+
+def test_no_arbitrary_destination_commit_can_be_supplied():
+    """The destination is always the verified HEAD; there is no target flag."""
+    p = subprocess.run([sys.executable, "-B", str(REGISTRY_TOOL), "--help"],
+                       capture_output=True, text=True)
+    for banned in ("--target", "--to-commit", "--new-commit", "--commit ",
+                   "--force", "--rewind", "--override"):
+        assert banned not in p.stdout, banned
+
+
+def test_previous_commit_flag_rejected_on_other_operations(tmp_path):
+    repo, reg, old = _repo_with_session(tmp_path)
+    p = subprocess.run([sys.executable, "-B", str(REGISTRY_TOOL), "heartbeat",
+                        "--registry", str(reg), "--format", "json",
+                        "--session-id", "sess-advance",
+                        "--previous-commit", old], capture_output=True)
+    assert p.returncode == 2
+    assert b"only valid for advance" in p.stderr
+
+
+def test_advance_never_creates_a_registry_or_parent(tmp_path):
+    repo = make_repo(tmp_path)
+    missing = tmp_path / "absent" / "registry.json"
+    p = subprocess.run([sys.executable, "-B", str(REGISTRY_TOOL), "advance",
+                        "--registry", str(missing), "--format", "json",
+                        "--session-id", "sess-advance", "--repo", str(repo),
+                        "--previous-commit", "a" * 40], capture_output=True)
+    assert p.returncode == 4
+    assert not (tmp_path / "absent").exists()

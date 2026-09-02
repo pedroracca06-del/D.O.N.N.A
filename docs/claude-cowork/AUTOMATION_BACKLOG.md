@@ -43,7 +43,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.1 | **Evidence Formatter** — no claim without command + counts | Claude | FA | none (stdout only) | — | 53 formatter tests; guard 188/188; full suite 2 failed / 964 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none (stdout only) | B1.1 | 61 guard tests incl. a local-bare-remote advance detected with no fetch; guard 188/188; full suite 2 failed / 1025 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.3 | **A7 battery** — seven gates: scope, secrets, machine paths, protected boundary, runtime/generated/copyright, baseline staleness, test-evidence parity | Claude | AR | none (stdout only) | B1.1, B1.2 | 84 battery tests; all seven gates demonstrated **failing** on planted input; guard 188/188 | Per-commit | **DONE** — local only |
-| B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 81 registry tests; 10 planted demonstrations incl. collision, stale approval, lock contention, moved HEAD | **Named approval still required for the first real write** | **DONE (tool)** — local only; real registry **not initialized** |
+| B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 104 registry tests (incl. 23 for `advance`); 10 planted demonstrations; collision, stale approval, lock contention, moved HEAD | **Named approval required for each real write** | **DONE** — local only; real registry initialized under separate approval; `advance` lifecycle correction added |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | Guard blobs, permission hash/counts, submodule state | none | TODO |
 | B1.6 | **Change Classifier** — cluster changed paths, mark do-not-commit | Claude | AR | none | B1.3 | Classification of a real dirty tree | none | TODO |
 | B1.7 | **Test Selector** — changed paths → test list | Claude | AR | none | P0.9 | Selection matches Pedro's choice on repeated trials | none | TODO |
@@ -275,8 +275,68 @@ environment value, or credential appears in output, and registry contents are
 never dumped wholesale — only sanitized identifiers, statuses, and collision
 categories.
 
-**Status.** Tool implemented locally on `integration/nova-foundation`.
-**Not pushed, not merged, and the real registry has not been initialized.**
+#### Lifecycle correction: `advance`
+
+**Why it is necessary.** A registered session pins `expected_commit`. The moment
+that session makes an approved local commit, its own registry record is stale
+against the worktree it is working in — every later `check`, `resume`, or
+worktree verification reports a mismatch, and the registry starts arguing with
+reality. Without a safe way to move the pin forward, the only alternatives were
+editing the JSON by hand or closing and re-registering the session, both of which
+defeat the point of the record.
+
+**What it does.** `advance` moves one **active** session's `expected_commit` from
+the commit it currently records to the repository's **current HEAD**, and updates
+`heartbeat_at`. Nothing else changes.
+
+```bash
+python -B tools/cowork/session_registry.py advance \
+  --registry <path> --format json \
+  --session-id <id> --previous-commit <full-oid> --repo <worktree>
+```
+
+**Gates — all must hold, or the registry is left byte-identical.**
+
+| Gate | Rule |
+|---|---|
+| Status | the session must be `active`; `paused`, `closing`, and `closed` are refused |
+| Previous commit | must be supplied as a **full** object id and match the stored value exactly |
+| Repository | `--repo` is mandatory; its worktree identity must match the record |
+| Branch | HEAD's branch must match the record; **detached HEAD is refused** |
+| Movement | HEAD must differ from the previous commit — nothing to advance to otherwise |
+| **Ancestry** | the previous commit must be an **ancestor** of HEAD |
+| Revision | compare-and-swap under the lock; a registry that moved is refused |
+| Lock | a foreign lock stops the operation (exit 4) and is never broken |
+| Fields | only `expected_commit` and `heartbeat_at` may differ afterwards |
+
+**The destination can never be supplied.** It is derived exclusively from the
+verified repository HEAD. There is no `--target`, `--new-commit`, `--force`,
+`--rewind`, or `--override`, and `--previous-commit` is rejected on every other
+operation.
+
+**Forward-only.** Because the recorded commit must be an ancestor of HEAD, a
+rewind, an amend, or a rebase that rewrites the recorded commit is refused rather
+than absorbed. Re-running an advance after it succeeded is refused too, since
+HEAD has not moved again.
+
+**No automatic advancement.** Nothing advances on its own. It runs only after a
+reviewed local commit, as an explicit step.
+
+**Advancing approves nothing.** It records where a session now sits. It does not
+push, merge, deploy, or endorse the commit, and it grants no permission.
+
+**Ancestry implementation.** `merge-base` was added to the Staleness Guard's
+read-only allowlist for this single purpose. Only the exact
+`merge-base --is-ancestor <full-oid> <full-oid>` form is accepted — enforced
+inside `_git`, not at the call site, so no caller can construct another shape.
+Plain `merge-base`, `--all`, `--fork-point`, `--octopus`, ref names, and
+abbreviations are all refused. Argument arrays only, no shell, no fetch, and no
+ref or index mutation.
+
+**Status.** Tool implemented locally on `integration/nova-foundation`, with the
+lifecycle correction above. **B1.4 remains DONE locally. Not pushed, not merged.**
+The real registry was initialized under separate approval; the first real write
+remains a decision Pedro makes, not one automation takes.
 
 ## Tier 2 — Proposal layer
 
