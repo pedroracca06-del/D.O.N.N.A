@@ -44,7 +44,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none (stdout only) | B1.1 | 61 guard tests incl. a local-bare-remote advance detected with no fetch; guard 188/188; full suite 2 failed / 1025 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.3 | **A7 battery** — seven gates: scope, secrets, machine paths, protected boundary, runtime/generated/copyright, baseline staleness, test-evidence parity | Claude | AR | none (stdout only) | B1.1, B1.2 | 84 battery tests; all seven gates demonstrated **failing** on planted input; guard 188/188 | Per-commit | **DONE** — local only |
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 104 registry tests (incl. 23 for `advance`); 10 planted demonstrations; collision, stale approval, lock contention, moved HEAD | **Named approval required for each real write** | **DONE** — local only; real registry initialized under separate approval; `advance` lifecycle correction added |
-| B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | Guard blobs, permission hash/counts, submodule state | none | TODO |
+| B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | 86 validator tests; 9 planted demonstrations; tracked blobs, permission hash/counts, casing, submodule state, forbidden artifacts, registry compatibility | none | **DONE (tool)** — local only |
 | B1.6 | **Change Classifier** — cluster changed paths, mark do-not-commit | Claude | AR | none | B1.3 | Classification of a real dirty tree | none | TODO |
 | B1.7 | **Test Selector** — changed paths → test list | Claude | AR | none | P0.9 | Selection matches Pedro's choice on repeated trials | none | TODO |
 
@@ -337,6 +337,64 @@ ref or index mutation.
 lifecycle correction above. **B1.4 remains DONE locally. Not pushed, not merged.**
 The real registry was initialized under separate approval; the first real write
 remains a decision Pedro makes, not one automation takes.
+
+### B1.5 Worktree bootstrap validator — implemented (tool; local only)
+
+`tools/cowork/worktree_bootstrap_validator.py`, with
+`tests/test_cowork_worktree_bootstrap_validator.py` (86 tests).
+
+**The one question it answers.** Is this Git worktree safely configured for its
+declared role *before* an automated session begins? It compares an explicit
+manifest against what the worktree actually is, and reports.
+
+**What it will not do.** It never creates or removes a worktree, creates or
+switches a branch, copies or edits a file, initializes or updates a submodule,
+installs settings or hooks, stages, commits, fetches, contacts a remote, runs a
+test command, mutates the Session Registry, or repairs any mismatch it finds.
+It writes only to stdout and stderr. A static test proves the source contains no
+mutating Git verb, no write-mode `open`, no deletion helper, and no environment
+read.
+
+**No new capability.** Every Git call is routed through the A7 battery's existing
+fixed read-only allowlist, so the validator can ask Git nothing that A7 could not
+already ask. Rendering goes through the Evidence Formatter, so the verdict is
+derived from the checks and cannot be asserted by a caller.
+
+**Gates.**
+
+| Gate | Question |
+|---|---|
+| A | Identity — resolves as a worktree, expected name, branch, HEAD, common Git directory, and the supplied path *is* the top level |
+| B | Cleanliness — index, worktree, and no interrupted Git operation |
+| C | Tracked content — declared files compared **by Git blob id** |
+| D/E | Local state — declared ignored files present, hashed, JSON, ignored, untracked; permission file counts and uniqueness |
+| F | Casing — required and forbidden tracked prefixes, case-normalized collisions |
+| G | Submodules — gitlink identity and declared population state |
+| H | Forbidden artifacts — inherited runtime state, transcripts, Cowork lock/temp residue |
+| I | Registry compatibility — the declared session is present, active, fresh, pinned to this worktree/branch/commit, and collision-free |
+
+**Why blob ids.** Under `core.autocrlf` a fresh checkout stores CRLF while an
+older one holds LF, so identical content has different file hashes. Blob identity
+is the only comparison stable across worktrees. A planted CRLF worktree passes
+while its on-disk sha256 differs from the blob id.
+
+**Demonstrated.** Nine planted cases, each producing the intended outcome: a
+valid worktree (exit 0), stale HEAD, a wrong permission-file hash, an uppercase
+`NOVA_KNOWLEDGE_CORE/` tracked path, a wrong gitlink, an accepted *unpopulated*
+submodule (exit 0 — matching the real `mcp/tradingview`), a live registry
+collision, a forbidden raw transcript, and the CRLF case above. The registry was
+byte-identical before and after every run.
+
+**Measured against the real worktree.** Run against `nova-foundation` itself the
+validator returns exit 0 with 30 checks passing, including 338/31/8 permission
+counts, the `.claude/settings.local.json` hash, 69 lowercase knowledge-core
+paths with zero uppercase, the unpopulated `mcp/tradingview` gitlink, and the
+live `claude-foundation-improvements` registry session.
+
+**Status.** Implemented locally on `integration/nova-foundation`. **DONE (tool)
+— local only. Not pushed, not merged.** It grants no permission; a failing or
+approval-required verdict is information for Pedro, not a gate automation may
+clear on its own.
 
 ## Tier 2 — Proposal layer
 
