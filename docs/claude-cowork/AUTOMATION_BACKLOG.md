@@ -43,7 +43,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.1 | **Evidence Formatter** — no claim without command + counts | Claude | FA | none (stdout only) | — | 53 formatter tests; guard 188/188; full suite 2 failed / 964 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.2 | **Staleness Guard** — re-read HEAD/hashes before reporting | Claude | FA | none (stdout only) | B1.1 | 61 guard tests incl. a local-bare-remote advance detected with no fetch; guard 188/188; full suite 2 failed / 1025 passed / 13 skipped | Per-commit | **DONE** — local only |
 | B1.3 | **A7 battery** — seven gates: scope, secrets, machine paths, protected boundary, runtime/generated/copyright, baseline staleness, test-evidence parity | Claude | AR | none (stdout only) | B1.1, B1.2 | 84 battery tests; all seven gates demonstrated **failing** on planted input; guard 188/188 | Per-commit | **DONE** — local only |
-| B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside repo | B1.2 | Collision + stale detection demonstrated | Named approval to first write | TODO |
+| B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 81 registry tests; 10 planted demonstrations incl. collision, stale approval, lock contention, moved HEAD | **Named approval still required for the first real write** | **DONE (tool)** — local only; real registry **not initialized** |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | Guard blobs, permission hash/counts, submodule state | none | TODO |
 | B1.6 | **Change Classifier** — cluster changed paths, mark do-not-commit | Claude | AR | none | B1.3 | Classification of a real dirty tree | none | TODO |
 | B1.7 | **Test Selector** — changed paths → test list | Claude | AR | none | P0.9 | Selection matches Pedro's choice on repeated trials | none | TODO |
@@ -207,6 +207,76 @@ formatter's writers, and A6 reuses the Staleness Guard's observer.
 
 **Status.** Implemented locally on `integration/nova-foundation`. **Not pushed,
 not merged.**
+
+### B1.4 Session Registry — implemented (tool only; registry not initialized)
+
+`tools/cowork/session_registry.py`, tested by `tests/test_cowork_session_registry.py`.
+
+**Purpose.** Let one session discover that another already holds the same
+worktree, branch, or file scope before it starts an audit or a staging plan.
+
+> **The real registry does not exist.** Its designed location is
+> `${HOME}/.claude/nova-session-registry.json`. The tool never creates it or its
+> parent directory: `list` and `check` report "uninitialized" safely, and every
+> mutating operation stops with exit 4. **The first real write requires Pedro's
+> explicit approval as a separate step.**
+
+**Schema.** Registry: `schema_version`, monotonic `revision`, `sessions`. Each
+session carries exactly `session_id`, `worktree_identity`,
+`canonical_worktree_path`, `branch`, `task`, `read_scope`, `write_scope`,
+`protected_scope`, `started_at`, `heartbeat_at`, `status`, `owner`,
+`expected_commit`. Status is `active` · `paused` · `closing` · `closed`.
+Timestamps are RFC3339 UTC; scopes are repository-relative with no traversal, no
+duplicates, and no case conflicts; commits are full object IDs; unknown fields,
+NaN/infinity, and credential-shaped content are rejected.
+
+**Operations.** `list` and `check` are read-only. `register`, `heartbeat`,
+`pause`, `resume`, and `close` mutate and increment the revision. There is
+deliberately **no prune, delete, clear, force, override, repair, or patch** —
+`close` marks history and **no record is ever deleted**.
+
+**Collision rules.** Same worktree where either session writes; same branch in a
+different worktree where either writes; write/write, write/read, and
+write/protected scope overlap; parent/child path overlap; Windows
+case-equivalent scopes; expected-commit mismatch on the same worktree; duplicate
+session id. Two genuinely read-only sessions, disjoint scopes, and closed records
+do **not** collide.
+
+*Documented limitation:* arbitrary glob intersection is not decidable. Only a
+single trailing `/**` or `/*` is treated exactly; anything more complex is
+**conservatively escalated to approval** rather than assumed disjoint.
+
+**Stale model.** Default threshold 30 minutes, configurable. `active` within
+threshold is live; `active`/`paused` beyond it is stale; `closing` stays visible;
+`closed` is historical and non-colliding. A **live** collision blocks (exit 1); a
+**stale or ambiguous** one requires Pedro's decision (exit 5) and never silently
+permits. A heartbeat later than the observation time is reported as a backward
+clock. Stale records are never removed automatically.
+
+**Atomic write.** An `O_CREAT|O_EXCL` sibling lock — atomic on Windows as well as
+POSIX, no advisory locking — with a finite timeout. A lock this process did not
+create is **never broken**. After acquiring it the registry is re-read and its
+revision compared to prevent lost updates; a complete temporary sibling is
+written, flushed, fsynced, and atomically replaced with restrictive permissions.
+If anything fails the original is preserved byte-for-byte and no temporary file
+or foreign lock is left behind.
+
+**Worktree verification.** `--repo` on `check`/`register`/`resume` reuses the
+Staleness Guard's read-only observer to confirm worktree identity, branch, and
+HEAD against `expected_commit`. It never fetches; a mismatch blocks.
+
+**Exit codes.** `0` read or safe mutation · `1` live collision or rejected
+transition · `2` invalid CLI/schema/record · `3` safety-limit rejection ·
+`4` registry unavailable, corrupt, or locked, or worktree observation failed ·
+`5` stale/ambiguous collision requiring Pedro's decision.
+
+**Privacy.** Rendered through the Evidence Formatter. No machine path, username,
+environment value, or credential appears in output, and registry contents are
+never dumped wholesale — only sanitized identifiers, statuses, and collision
+categories.
+
+**Status.** Tool implemented locally on `integration/nova-foundation`.
+**Not pushed, not merged, and the real registry has not been initialized.**
 
 ## Tier 2 — Proposal layer
 
