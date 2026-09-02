@@ -185,6 +185,22 @@ def test_non_asia_trade_keeps_its_explicit_date():
     assert journal_trading_date(trade) == '2026-09-01'
 
 
+def test_one_day_stale_ny_form_date_uses_submission_day():
+    trade = _trade(
+        'LOSS', -376.0, trade_date='2026-09-01', session='NY_AM',
+        timestamp='2026-09-02T15:29:53.937421+00:00',  # 11:29 ET
+    )
+    assert journal_trading_date(trade) == '2026-09-02'
+
+
+def test_intentional_older_ny_backfill_keeps_explicit_date():
+    trade = _trade(
+        'LOSS', -200.0, trade_date='2026-09-07', session='NY_AM',
+        timestamp='2026-09-09T13:42:22.153565+00:00',
+    )
+    assert journal_trading_date(trade) == '2026-09-07'
+
+
 # ── win_rate is all-time (no separate weekly win-rate field exists) ──────
 
 def test_win_rate_is_all_time_not_date_scoped():

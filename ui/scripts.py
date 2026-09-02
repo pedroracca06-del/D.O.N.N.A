@@ -3437,6 +3437,15 @@ async function refreshJournal() {
   try { renderJournal(data); } catch(e) { console.error('renderJournal failed:', e); }
   try { renderOverviewAccountSummary(data); } catch(e) { console.error('renderOverviewAccountSummary failed:', e); }
   try { renderOverviewRecentActivity(data); } catch(e) { console.error('renderOverviewRecentActivity failed:', e); }
+
+  // Keep an untouched form date current across midnight, while preserving a
+  // date the user deliberately changed for a historical backfill.
+  const dateEl = document.getElementById('jDate');
+  if (dateEl) {
+    const today = todayDateStr();
+    if (!dateEl.value || dateEl.value === dateEl.dataset.autoDate) dateEl.value = today;
+    dateEl.dataset.autoDate = today;
+  }
 }
 
 async function refreshSignals() {
@@ -3508,6 +3517,7 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
     if (data.status === 'ok') {
       ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes','jReflection'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
       document.getElementById('jDate').value = todayDateStr();
+      document.getElementById('jDate').dataset.autoDate = todayDateStr();
       document.getElementById('jSession').value = '';
       document.getElementById('jEmotionalState').value = '';
       ['jFlagEarlyExit','jFlagLateEntry','jFlagHesitation','jFlagOversized','jFlagFomo','jFlagRevenge'].forEach(id => { const el = document.getElementById(id); if(el) el.checked = false; });
@@ -4042,10 +4052,10 @@ if (_jSignalsTab) _jSignalsTab.addEventListener('click', () => refreshSignals())
 
 // ════════ BOOT ════════
 function todayDateStr() {
-  const t = new Date();
-  return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  return nyTodayDateStr();
 }
 document.getElementById('jDate').value = todayDateStr();
+document.getElementById('jDate').dataset.autoDate = todayDateStr();
 
 // First-load fade-in — applies once, removed after animation completes
 document.body.classList.add('donna-first-load');

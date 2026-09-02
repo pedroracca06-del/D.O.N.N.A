@@ -156,8 +156,7 @@ def journal_trading_date(trade: dict) -> str:
     date so manual historical backfills are never guessed at.
     """
     stored = str((trade or {}).get('trade_date', '') or '')
-    if str((trade or {}).get('session', '') or '').upper() != 'ASIA':
-        return stored
+    session = str((trade or {}).get('session', '') or '').upper()
 
     raw_ts = str((trade or {}).get('timestamp', '') or '')
     if not raw_ts:
@@ -171,9 +170,20 @@ def journal_trading_date(trade: dict) -> str:
         return stored
 
     calendar_date = ny.date().isoformat()
-    if ny.hour >= 19 and stored == calendar_date:
+    previous_date = (ny.date() - timedelta(days=1)).isoformat()
+    if session == 'ASIA' and ny.hour >= 19 and stored == calendar_date:
         return (ny.date() + timedelta(days=1)).isoformat()
-    if ny.hour < 3 and stored != calendar_date:
+    if session == 'ASIA' and ny.hour < 3 and stored != calendar_date:
+        return calendar_date
+
+    # The manual form can remain open across midnight. If its untouched date
+    # is exactly one day stale and the submission timestamp falls inside the
+    # selected NY session, use the submission's NY calendar date. A record
+    # backfilled by two or more days remains explicit and is never rewritten.
+    minute = ny.hour * 60 + ny.minute
+    ny_sessions = {'NY_AM', 'NY_OPEN', 'NEW_YORK_CASH', 'NEW_YORK_CLOSE'}
+    if (session in ny_sessions and 9 * 60 + 30 <= minute < 16 * 60
+            and stored == previous_date):
         return calendar_date
     return stored
 
