@@ -732,5 +732,13 @@ def test_daily_every_session_label_and_value_is_rendered():
         assert token in html, token
 
 
+@pytest.mark.parametrize('period', ['quarter', 'all'])
+def test_quarter_and_all_time_calendars_complete_the_final_week(period):
+    trades = [_trade(order_id='a', trade_date='2026-09-01', realized_pnl=100.0),
+              _trade(order_id='b', trade_date='2026-09-02', realized_pnl=-50.0, outcome='LOSS')]
+    html = _run({'payload': _payload(trades), 'period': period})['jnCalendar']['html']
+    assert html.count('class="jn-cal-day') == 35
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))

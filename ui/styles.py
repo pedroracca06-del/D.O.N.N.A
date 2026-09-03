@@ -1718,7 +1718,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .jn-dash-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .jn-dash-label{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-right:2px}
 .jn-dash-sep{width:1px;height:24px;background:var(--line);margin:0 5px}
-.jn-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(360px,.95fr);gap:14px;margin-top:14px;align-items:stretch}
+.jn-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(360px,.95fr);gap:14px;margin-top:14px;align-items:start}
 .jn-dash-panel{background:var(--panel);border:1px solid var(--line);padding:14px 16px 16px;min-width:0}
 .jn-equity-panel,.jn-calendar-panel{min-width:0}
 .jn-dashboard-side{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -1922,7 +1922,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
    so both fall back — deliberately not changed here, because adding a font
    CDN would alter Overview and Journal too. */
 
-#page-news .mk-wrap{max-width:1400px}
+#page-news .mk-wrap{max-width:none;width:100%}
 
 /* ── identity ── */
 .mk-id{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}
@@ -2146,7 +2146,7 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 .mk-news-row a{font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.38;color:var(--text);text-decoration:none}
 .mk-news-row a:hover{text-decoration:underline;text-underline-offset:2px}
 .mk-news-row small{display:block;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:3px}
-.mk-news-lower{display:grid;grid-template-columns:minmax(300px,.78fr) minmax(350px,.9fr) minmax(0,1.55fr);gap:0;border-top:1px solid var(--line)}
+.mk-news-lower{display:grid;grid-template-columns:minmax(330px,.88fr) minmax(350px,.9fr) minmax(0,1.5fr);gap:0;border-top:1px solid var(--line)}
 .mk-news-section{padding:22px 24px 4px 0;min-width:0}
 .mk-news-section+.mk-news-section{border-left:1px solid var(--line);padding-left:24px}
 .mk-driver-box{background:rgba(143,33,59,.08);border:1px solid rgba(143,33,59,.28);border-radius:2px;padding:15px 16px;margin-top:10px}
