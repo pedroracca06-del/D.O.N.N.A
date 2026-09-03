@@ -3140,7 +3140,9 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
   const first = new Date(Date.UTC(ay, am - 1, 1));
   const count = new Date(Date.UTC(ay, am, 0)).getUTCDate();
   const calDays = [];
-  for (let i=0;i<first.getUTCDay();i++) calDays.push('<div class="jn-cal-day"></div>');
+  const leading = first.getUTCDay();
+  const prevCount = new Date(Date.UTC(ay, am - 1, 0)).getUTCDate();
+  for (let i=0;i<leading;i++) calDays.push('<div class="jn-cal-day outside">' + (prevCount - leading + i + 1) + '</div>');
   let green=0, red=0, flat=0;
   for (let day=1;day<=count;day++) {
     const date = ay + '-' + String(am).padStart(2,'0') + '-' + String(day).padStart(2,'0');
@@ -3148,9 +3150,10 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
     if (has) { if (p>0) green++; else if (p<0) red++; else flat++; }
     calDays.push('<div class="jn-cal-day' + (has ? ' ' + _jnPnlClass(p) : '') + '">' + day + (has ? '<b class="' + _jnPnlClass(p) + '">' + _jnEsc(_jnMoney(p)) + '</b>' : '') + '</div>');
   }
-  // Complete the final calendar week. Without trailing cells, months ending
-  // before Saturday leave a raw panel-coloured hole on the right edge.
-  while (calDays.length % 7) calDays.push('<div class="jn-cal-day"></div>');
+  // Always render six complete weeks. Adjacent-month dates fill the calendar
+  // naturally instead of leaving blank cells or an empty lower panel.
+  let nextDay = 1;
+  while (calDays.length < 42) calDays.push('<div class="jn-cal-day outside">' + nextDay++ + '</div>');
   setText('jnCalendarMeta', new Date(Date.UTC(ay, am - 1, 1)).toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'}));
   setHtml('jnCalendarSummary','<div class="jn-cal-stat"><b class="up">' + green + '</b><span>Profit days</span></div><div class="jn-cal-stat"><b class="down">' + red + '</b><span>Loss days</span></div><div class="jn-cal-stat"><b class="flat">' + flat + '</b><span>Break even</span></div><div class="jn-cal-stat"><b>' + rows.length + '</b><span>Trades</span></div>');
   setHtml('jnCalendar','<span class="jn-cal-dow">Sun</span><span class="jn-cal-dow">Mon</span><span class="jn-cal-dow">Tue</span><span class="jn-cal-dow">Wed</span><span class="jn-cal-dow">Thu</span><span class="jn-cal-dow">Fri</span><span class="jn-cal-dow">Sat</span>' + calDays.join(''));

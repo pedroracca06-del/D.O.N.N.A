@@ -747,7 +747,8 @@ def test_quarter_and_all_time_calendars_complete_the_final_week(period):
     trades = [_trade(order_id='a', trade_date='2026-09-01', realized_pnl=100.0),
               _trade(order_id='b', trade_date='2026-09-02', realized_pnl=-50.0, outcome='LOSS')]
     html = _run({'payload': _payload(trades), 'period': period})['jnCalendar']['html']
-    assert html.count('class="jn-cal-day') == 35
+    assert html.count('class="jn-cal-day') == 42
+    assert html.count('class="jn-cal-day outside"') == 12
 
 
 if __name__ == '__main__':
