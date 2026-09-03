@@ -296,6 +296,9 @@ async def headline_loop():
 
 
 async def finnhub_loop():
+    # The startup warmup performs the first cycle. Avoid immediately making
+    # the same provider calls twice, which wastes quota during deploys.
+    await asyncio.sleep(300)
     while True:
         try:
             await asyncio.to_thread(process_finnhub_cycle)
@@ -375,6 +378,18 @@ async def execution_safety_loop():
 
 # ── Startup ────────────────────────────────────────────────────
 
+async def _initial_data_warmup() -> None:
+    """Refresh external data after the web server has become available."""
+    try:
+        await asyncio.to_thread(check_todays_breaking_events)
+    except Exception as e:
+        print(f'[startup] Initial breaking-events check failed: {e}')
+    try:
+        await asyncio.to_thread(process_finnhub_cycle)
+        print('[startup] Initial finnhub cycle complete')
+    except Exception as e:
+        print(f'[startup] Initial finnhub cycle failed: {e}')
+
 def _init_settings_from_bundle() -> None:
     """
     On Render, DONNA_DATA_DIR=/data so SETTINGS_FILE lives on the persistent disk.
@@ -417,12 +432,10 @@ async def startup():
         await asyncio.to_thread(reconcile_execution_audit)
     except Exception as e:
         print(f'[startup] audit reconciliation error: {e}')
-    await asyncio.to_thread(check_todays_breaking_events)
-    try:
-        await asyncio.to_thread(process_finnhub_cycle)
-        print('[startup] Initial finnhub cycle complete')
-    except Exception as e:
-        print(f'[startup] Initial finnhub cycle failed: {e}')
+    # Provider availability must never determine application availability.
+    # Warm external data in the background so Render can mark the service
+    # healthy even when a market-data provider is slow or rate-limiting us.
+    asyncio.create_task(_initial_data_warmup())
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
