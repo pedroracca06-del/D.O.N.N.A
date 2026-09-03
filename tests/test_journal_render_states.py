@@ -83,12 +83,15 @@ _PARTS = [
     'let _jnSelectedKey = null;', 'let _jnRows = [];',
     'let _journalData = null;', 'let journalFilter = "all";',
     'let _jnInstrument = "all";', 'let _jnPeriod = "all";', 'let _jnRegime = "all";',
-    _fn('setText'),
-    _fn('_jnNum'), _fn('_jnKey'), _fn('_jnPnl'), _fn('_jnOutcome'),
+    'let _jnMode = "LIVE";', 'let _jnAccount = "all";',
+    'let _journalWorkspace = null;',
+    _fn('setText'), _fn('setHtml'),
+    _fn('_jnNum'), _fn('_jnKey'), _fn('_jnPnl'), _fn('_jnOutcome'), _fn('_jnTradeMode'),
     _fn('_jnClosed'), _fn('_jnDir'), _fn('_jnEsc'), _fn('_jnMoney'),
     _fn('_jnPnlClass'), _fn('_jnPnlMark'), _fn('_jnValidDate'),
     _fn('_jnBucketLabel'), _fn('_jnIsAbsentBucket'), _fn('_jnMoneyAxis'),
-    _fn('_jnDistinct'), _fn('_jnFilterGroup'),
+    _fn('_jnDistinct'), _fn('_jnFilterGroup'), _fn('_jnDailyTotals'),
+    _fn('_jnRenderDashboard'),
     _fn('_jnRenderRail'), _fn('_jnRenderLedger'), _fn('_jnRenderReview'),
     _fn('_jnRenderBreakdown'), _fn('_jnRenderDaily'),
     _fn('_jnSelect'), _fn('_jnBindLedger'), _fn('renderJournal'),
@@ -102,6 +105,9 @@ _IDS = [
     'jnByRegime', 'jnBySession', 'jnByDirection', 'jnByDirectionNote',
     'jnBySetup', 'jnBreakdownMeta', 'jnDaily', 'jnDailyMeta', 'jnDailyNote', 'jnDailyCtx',
     'jnReviewInner', 'jTabCount-trades',
+    'jDashboardControls', 'jnEquityMeta', 'jnEquity',
+    'jnDashDailyMeta', 'jnDashDaily', 'jnCalendarMeta', 'jnCalendarSummary',
+    'jnCalendar', 'jnWeeklyMeta', 'jnWeekly', 'jnModels',
 ]
 
 _HARNESS = r'''
@@ -142,6 +148,7 @@ journalFilter = scenario.filter || 'all';
 if (scenario.instrument) _jnInstrument = scenario.instrument;
 if (scenario.period) _jnPeriod = scenario.period;
 if (scenario.regime) _jnRegime = scenario.regime;
+if (scenario.mode) _jnMode = scenario.mode;
 if (scenario.preselect) _jnSelectedKey = scenario.preselect;
 renderJournal(scenario.payload);
 if (scenario.thenPayload) renderJournal(scenario.thenPayload);
@@ -196,6 +203,30 @@ def _payload(trades, **stats):
          'by_setup_type': {}, 'daily_pnl': {'today': 0, 'yesterday': 0, 'this_week': 0}}
     s.update(stats)
     return {'trades': trades, 'stats': s}
+
+
+def test_live_and_paper_books_are_strictly_isolated():
+    trades = [
+        _trade(order_id='live', trade_mode='LIVE', realized_pnl=100.0),
+        _trade(order_id='paper', trade_mode='PAPER', realized_pnl=-50.0, outcome='LOSS'),
+    ]
+
+    live = _run({'payload': _payload(trades)})
+    paper = _run({'payload': _payload(trades), 'mode': 'PAPER'})
+
+    assert live['rowCount'] == 1
+    assert live['jnNetPnl']['text'] == '+$100.00'
+    assert paper['rowCount'] == 1
+    assert paper['jnNetPnl']['text'] == '-$50.00'
+    for out in (live, paper):
+        assert 'Live trades (1)' in out['jFilterBar']['text']
+        assert 'Paper studies (1)' in out['jFilterBar']['text']
+
+
+def test_historical_trades_without_a_mode_remain_in_live_book():
+    out = _run({'payload': _payload([_trade(order_id='legacy')])})
+    assert out['rowCount'] == 1
+    assert out['jnNetPnl']['text'] == '+$10.00'
 
 
 # ── Performance rail ─────────────────────────────────────────────────────

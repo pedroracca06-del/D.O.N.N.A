@@ -209,7 +209,10 @@ def fetch_finnhub_market_news():
         return []
     try:
         d = _requests_get_json('https://finnhub.io/api/v1/news', {'category': 'general', 'token': FINNHUB_API_KEY})
-        return d[:8] if isinstance(d, list) else []
+        # Finnhub's general stream contains both market intelligence and broad
+        # publisher traffic. Pull enough rows to rank the useful stories
+        # instead of letting the first eight lifestyle headlines define NOVA.
+        return d[:50] if isinstance(d, list) else []
     except Exception:
         return []
 
@@ -442,6 +445,16 @@ def get_live_news():
             'treasury', 'yield', 'inflation', 'jobless', 'gdp', 'retail sales',
             'consumer sentiment', 'opec', 'iran', 'russia', 'china', 'earnings',
         )
+        market_terms = (
+            'nasdaq', 'nq ', 's&p', 'dow ', 'stock', 'equity', 'futures',
+            'market', 'rally', 'selloff', 'sell-off', 'pump', 'plunge',
+            'treasury', 'yield', 'bond', 'dollar', 'dxy', 'vix', 'volatility',
+            'oil', 'crude', 'gold', 'commodity', 'opec', 'fed ', 'fomc', 'powell',
+            'inflation', 'cpi', 'pce', 'payroll', 'jobless', 'gdp',
+            'tariff', 'sanction', 'war', 'attack', 'missile', 'iran',
+            'russia', 'china', 'white house', 'congress', 'earnings',
+            'nvidia', 'nvda', 'apple', 'microsoft', 'amazon', 'meta', 'tesla',
+        )
         if any(k in text for k in high):
             severity = 'high'
         elif any(k in text for k in medium):
@@ -458,20 +471,38 @@ def get_live_news():
             category = 'Policy'
         elif any(k in text for k in ('oil', 'gold', 'commodity', 'opec')):
             category = 'Commodities'
+        elif any(k in text for k in ('earnings', 'nvidia', 'nvda', 'apple', 'microsoft', 'amazon', 'meta', 'tesla')):
+            category = 'Finance & earnings'
         else:
             category = 'Markets'
-        return severity, category
+        score = (6 if severity == 'high' else 3 if severity == 'medium' else 0)
+        padded = f' {text} '
+        market_hits = [k for k in market_terms if k != 'war' and k in text]
+        if ' war ' in padded:
+            market_hits.append('war')
+        score += len(market_hits)
+        # A generic publisher story with no finance, policy, macro, conflict or
+        # asset language does not belong in a market-moving intelligence feed.
+        relevant = bool(market_hits)
+        return severity, category, score, relevant
 
     result = []
-    for x in data[:12]:
-        severity, category = classify(x)
+    for x in data:
+        severity, category, score, relevant = classify(x)
+        if not relevant:
+            continue
         result.append({
             'headline': x.get('headline', '-'), 'source': x.get('source', '-'),
             'summary': x.get('summary', ''), 'url': x.get('url', ''),
             'published_at': x.get('datetime'), 'severity': severity,
-            'category': category,
+            'category': category, 'market_score': score,
         })
-    cache_set('news', result, 120)
+    result.sort(key=lambda row: (
+        int(row.get('market_score') or 0),
+        int(row.get('published_at') or 0),
+    ), reverse=True)
+    result = result[:24]
+    cache_set('news', result, 60)
     return result
 
 

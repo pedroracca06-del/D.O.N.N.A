@@ -83,7 +83,7 @@ _PARTS = [
 _IDS = [
     'mkFresh', 'mkClock', 'mkSession', 'mkMacroRisk', 'mkHeadlineRisk',
     'mkMarketRisk', 'mkEventPhase', 'mkPulseBody', 'mkPulseMeta', 'mkPulseFoot',
-    'mkVolBody', 'mkVolMeta', 'mkNewsBody', 'mkNewsMeta', 'mkStructBody',
+    'mkVolBody', 'mkVolMeta', 'mkBreakingWire', 'mkNewsBody', 'mkNewsMeta', 'mkStructBody',
     'mkStructSym', 'mkProv',
 ]
 
@@ -363,10 +363,33 @@ def test_news_headline_links_to_its_real_source_article():
         'source': 'Reuters', 'severity': 'high', 'category': 'Fed & rates',
         'url': 'https://example.test/powell-rates',
     }])
-    html = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY}, 'dash': dash})['mkNewsBody']['html']
+    out = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY}, 'dash': dash})
+    html = out['mkNewsBody']['html']
     assert 'href="https://example.test/powell-rates"' in html
     assert 'target="_blank"' in html
     assert 'rel="noopener noreferrer"' in html
+    assert 'Powell signals rates may stay higher' in out['mkBreakingWire']['text']
+    assert 'href="https://example.test/powell-rates"' in out['mkBreakingWire']['html']
+
+
+def test_news_is_a_live_desk_with_timestamp_and_nq_driver_context():
+    dash = dict(DASH, news=[{
+        'headline': 'Iran escalation sends oil and index futures sharply higher',
+        'summary': 'Energy prices and equity futures moved after the latest conflict update.',
+        'source': 'Reuters', 'severity': 'high', 'category': 'Geopolitics',
+        'market_score': 12, 'published_at': 1788271200,
+        'url': 'https://example.test/iran-market-update',
+    }])
+    out = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY}, 'dash': dash})
+    text = out['mkNewsBody']['text']
+    html = out['mkNewsBody']['html']
+    assert 'Top market driver' in text or 'Breaking' in text
+    assert 'ET' in text
+    assert 'Why NQ is moving' in text
+    assert '+498.00 pts (+1.72%)' in text
+    assert 'not verified causation' in text
+    assert 'Open full article' in text
+    assert 'href="https://example.test/iran-market-update"' in html
 
 
 def test_news_quiet_tape_is_distinct_from_failure():

@@ -28,7 +28,7 @@ DASHBOARD_HTML = (
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>NOVA v5.0</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23080d1a'/%3E%3Cpath d='M16 46V18h7l18 20V18h7v28h-7L23 26v20z' fill='%234f8dff'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23050505'/%3E%3Cpath d='M16 46V18h7l18 20V18h7v28h-7L23 26v20z' fill='%23c59b51'/%3E%3C/svg%3E" />
 <style>
 '''
     + DASHBOARD_CSS +
@@ -49,7 +49,7 @@ DASHBOARD_HTML = (
     <div class="nav">
       <button class="tab-btn active" data-page="dashboard" aria-current="page">Overview</button>
       <button class="tab-btn" data-page="journal">Journal</button>
-      <button class="tab-btn" data-page="news">Markets</button>
+      <button class="tab-btn" data-page="news">News</button>
       <button class="tab-btn" data-page="assistant">NOVA Intelligence</button>
       <button class="tab-btn" data-page="settings">Settings</button>
     </div>
@@ -57,6 +57,7 @@ DASHBOARD_HTML = (
          /dashboard-data cycle. Deliberately NOT a hard-coded "All systems
          normal": the frontend cannot substantiate a whole-system health
          claim, so it reports only what it can prove. -->
+    <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch color mode">◐ &nbsp;Light mode</button>
     <div class="sidebar-status connecting" id="sidebarStatus"><span class="d"></span>Connecting…</div>
   </nav>
 

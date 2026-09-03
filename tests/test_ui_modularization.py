@@ -817,6 +817,9 @@ _ACTIVE_FETCH_TARGETS = (
     '/trending-movers', '/calendar', '/dashboard-data', '/check-env', '/system-health',
     '/assistant/chat', '/journal/trade-detail', '/journal/analyze', '/market-summary',
     '/journal/data', '/journal/signals', '/journal/delete', '/journal/add',
+    '/journal/screenshot/upload',
+    '/journal/workspace', '/journal/workspace/',
+    '/journal/workspace/screenshot/upload',
     # commit #11: the one explicitly-approved new frontend read, against the
     # existing, unchanged GET /morning-brief backend contract.
     '/morning-brief',
@@ -1069,7 +1072,7 @@ def test_frontend_needs_no_new_backend_route():
 # (I) Commit #11: information-architecture restructuring safety
 # ═══════════════════════════════════════════════════════════════════════
 
-_APPROVED_NAV_LABELS_IN_ORDER = ('Overview', 'Journal', 'Markets', 'NOVA Intelligence', 'Settings')
+_APPROVED_NAV_LABELS_IN_ORDER = ('Overview', 'Journal', 'News', 'NOVA Intelligence', 'Settings')
 
 
 def test_nav_visible_labels_match_approved_ia_order():
@@ -1190,7 +1193,7 @@ _APPROVED_PAGE_HEADINGS = {
     # untouched by that pass and keep their pre-existing all-caps headings.
     'page-dashboard': 'Overview',
     'page-journal':   'Journal',
-    'page-news':      'Markets',
+    'page-news':      'Market News',
     'page-assistant': 'NOVA Intelligence',
     # Settings' heading is now a real <h1> in sentence case. The old page had
     # no heading element at all -- 'SETTINGS' was a styled div.
@@ -1223,6 +1226,31 @@ def test_every_page_renders_its_approved_heading():
         )
 
 
+def test_news_is_the_primary_editorial_surface_before_market_context():
+    from ui.pages.market_news import MARKET_NEWS_HTML
+    anchors = (
+        'id="mkRail"',
+        'id="mkBreakingWire"',
+        'id="mkNewsTitle"',
+        'id="mkPulseTitle"',
+        'id="mkStructTitle"',
+    )
+    positions = [MARKET_NEWS_HTML.index(anchor) for anchor in anchors]
+    assert positions == sorted(positions)
+    assert 'What is moving markets now' in MARKET_NEWS_HTML
+    assert 'Full live coverage' in __import__('ui.scripts', fromlist=['DASHBOARD_SCRIPT']).DASHBOARD_SCRIPT
+
+
+def test_platform_has_persistent_black_white_mode_and_no_blue_literals():
+    from ui.html import DASHBOARD_HTML
+    from ui.styles import DASHBOARD_CSS
+    assert 'id="themeToggle"' in DASHBOARD_HTML
+    assert "nova_color_mode" in DASHBOARD_HTML
+    assert 'html[data-theme="light"]' in DASHBOARD_CSS
+    for rejected in ('#4f8dff', '#8fb8ff', 'rgba(79,141,255', 'rgba(37,99,235'):
+        assert rejected not in DASHBOARD_HTML
+
+
 def test_overview_reading_order_matches_approved_hierarchy():
     """Overview's DOM order (which, in a single vstack, is also its visual
     reading order) must be: page identity/status -> hero (Morning Brief +
@@ -1251,24 +1279,19 @@ def test_overview_reading_order_matches_approved_hierarchy():
     )
 
 
-def test_markets_reading_order_matches_approved_hierarchy():
-    """Markets' DOM order must follow the approved composition (artifact
-    55c387a4): identity/freshness -> session and risk rail -> Cross-Asset
-    Pulse -> Market Structure -> Volatility & Direction -> News & Catalysts
-    -> sources. Proven the same way as Overview's order -- strictly
-    increasing string offsets.
+def test_markets_reading_order_restores_news_as_the_primary_pillar():
+    """The live intelligence desk must precede analytical market context.
 
-    Desktop makes Cross-Asset Pulse and Market-Moving News full-width, pairing
-    the similarly sized Structure and Volatility cards between them. Mobile
-    follows this same DOM order."""
+    NOVA's product pillars are News, Journal and Assistant. Quotes, structure
+    and volatility support the news desk; they do not outrank it."""
     from ui.pages.market_news import MARKET_NEWS_HTML
     anchors_in_required_order = (
         'id="mkFresh"',        # 1. identity + freshness
         'id="mkRail"',         # 2. session and risk rail
-        'id="mkPulseBody"',    # 3. Cross-Asset Pulse
-        'id="mkStructBody"',   # 4. Market Structure
-        'id="mkVolBody"',      # 5. Volatility & Direction
-        'id="mkNewsBody"',     # 6. News & Catalysts
+        'id="mkNewsBody"',     # 3. live intelligence desk
+        'id="mkPulseBody"',    # 4. Cross-Asset Pulse
+        'id="mkStructBody"',   # 5. Market Structure
+        'id="mkVolBody"',      # 6. Volatility & Direction
         'id="mkProv"',         # 7. sources / provenance
     )
     positions = [MARKET_NEWS_HTML.index(a) for a in anchors_in_required_order]
@@ -1589,7 +1612,7 @@ def test_shell_checkpoint_exactly_five_nav_controls_no_duplicate_active():
     duplicate nav tree (e.g. a separate mobile nav block) alongside the
     single responsive one."""
     from ui.html import DASHBOARD_HTML
-    assert DASHBOARD_HTML.count('<nav') == 1, 'exactly one <nav> element must exist'
+    assert DASHBOARD_HTML.count('<nav') == 1, 'exactly one application <nav> element must exist'
     assert DASHBOARD_HTML.count('class="sidebar"') == 1
     assert DASHBOARD_HTML.count('class="tab-btn') == 5
     assert DASHBOARD_HTML.count('class="tab-btn active"') == 1, (

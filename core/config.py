@@ -74,6 +74,7 @@ SETTINGS_FILE      = _data_file('nova_settings.json',             'donna_setting
 MACRO_EVENTS_FILE  = _data_file('nova_macro_events.json',         'donna_macro_events.json')
 MORNING_BRIEF_FILE = _data_file('nova_morning_brief_state.json',  'donna_morning_brief_state.json')
 JOURNAL_FILE       = _data_file('nova_journal.json',              'donna_journal.json')
+JOURNAL_WORKSPACE_FILE = _data_file('nova_journal_workspace.json', 'donna_journal_workspace.json')
 REJECTIONS_FILE    = _data_file('nova_rejections.json',           'donna_rejections.json')
 SIGNAL_LOG_FILE        = _data_file('nova_signal_log.json',           'donna_signal_log.json')
 TRACE_FILE             = _data_file('nova_execution_trace.json',       'donna_execution_trace.json')

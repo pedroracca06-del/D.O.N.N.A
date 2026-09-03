@@ -104,7 +104,23 @@ def test_live_news_carries_deterministic_impact_and_category():
          patch.object(engines, 'fetch_finnhub_market_news', return_value=sample):
         rows = engines.get_live_news()
     assert [(r['severity'], r['category']) for r in rows] == [
-        ('high', 'Fed & rates'),
         ('high', 'Geopolitics'),
+        ('high', 'Fed & rates'),
         ('low', 'Markets'),
     ]
+
+
+def test_live_news_rejects_non_market_publisher_traffic_and_keeps_timestamp():
+    sample = [
+        {'headline': 'Family shares a heartwarming travel story', 'source': 'CNBC', 'datetime': 100},
+        {'headline': 'Iran missile attack lifts oil and rattles stock futures',
+         'source': 'Reuters', 'datetime': 200, 'url': 'https://example.test/iran'},
+    ]
+    with patch.object(engines, 'cache_get', return_value=None), \
+         patch.object(engines, 'cache_set'), \
+         patch.object(engines, 'fetch_finnhub_market_news', return_value=sample):
+        rows = engines.get_live_news()
+    assert len(rows) == 1
+    assert rows[0]['category'] == 'Geopolitics'
+    assert rows[0]['published_at'] == 200
+    assert rows[0]['market_score'] > 0

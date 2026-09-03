@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from core.config import (
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE,
-    MACRO_EVENTS_FILE, JOURNAL_FILE, REJECTIONS_FILE,
+    MACRO_EVENTS_FILE, JOURNAL_FILE, JOURNAL_WORKSPACE_FILE, REJECTIONS_FILE,
     DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS, NY_TZ,
     now_ny, now_utc, utc_now_iso, day_name, session_label,
 )
@@ -52,6 +52,8 @@ def ensure_files():
         write_json_file(MACRO_EVENTS_FILE, DEFAULT_MACRO_EVENTS)
     if not JOURNAL_FILE.exists():
         write_json_file(JOURNAL_FILE, [])
+    if not JOURNAL_WORKSPACE_FILE.exists():
+        write_json_file(JOURNAL_WORKSPACE_FILE, default_journal_workspace())
     if not REJECTIONS_FILE.exists():
         write_json_file(REJECTIONS_FILE, [])
 
@@ -216,6 +218,40 @@ def journal_record_origin(trade: dict) -> str:
 
 def save_journal(trades: list):
     write_json_file(JOURNAL_FILE, trades)
+
+
+def default_journal_workspace() -> dict:
+    return {
+        'plans': [],
+        'reflections': [],
+        'studies': [],
+        'goals': [],
+        'system': {
+            'approved_models': ['KLR', 'OTE', 'ORB', 'POWELL_10AM'],
+            'max_trades_per_day': 2,
+            'daily_risk_pct': 1.0,
+            'max_losses_per_day': 2,
+            'live_sessions': ['NY_AM', 'NY_PM'],
+            'prime_steps': ['Position', 'Relevant Level', 'Interaction', 'Market Confirmation', 'Execution'],
+        },
+    }
+
+
+def load_journal_workspace() -> dict:
+    raw = read_json_file(JOURNAL_WORKSPACE_FILE, {})
+    default = default_journal_workspace()
+    if not isinstance(raw, dict):
+        return default
+    out = dict(default)
+    for key in ('plans', 'reflections', 'studies', 'goals'):
+        out[key] = raw.get(key) if isinstance(raw.get(key), list) else []
+    if isinstance(raw.get('system'), dict):
+        out['system'] = {**default['system'], **raw['system']}
+    return out
+
+
+def save_journal_workspace(workspace: dict):
+    write_json_file(JOURNAL_WORKSPACE_FILE, workspace)
 
 
 def update_trade_thesis_analysis(order_id: str, analysis: dict) -> bool:
