@@ -372,7 +372,7 @@ def test_news_headline_links_to_its_real_source_article():
     assert 'href="https://example.test/powell-rates"' in out['mkBreakingWire']['html']
 
 
-def test_news_is_a_live_desk_with_timestamp_and_nq_driver_context():
+def test_news_is_a_live_desk_with_timestamp_and_nq_and_es_driver_context():
     dash = dict(DASH, news=[{
         'headline': 'Iran escalation sends oil and index futures sharply higher',
         'summary': 'Energy prices and equity futures moved after the latest conflict update.',
@@ -387,6 +387,8 @@ def test_news_is_a_live_desk_with_timestamp_and_nq_driver_context():
     assert 'ET' in text
     assert 'Why NQ is moving' in text
     assert '+498.00 pts (+1.72%)' in text
+    assert 'Why ES is moving' in text
+    assert '+40.50 pts (+0.53%)' in text
     assert 'not verified causation' in text
     assert 'Open full article' in text
     assert 'href="https://example.test/iran-market-update"' in html

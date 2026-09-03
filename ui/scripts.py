@@ -4273,19 +4273,24 @@ function _mkRenderNews(dash) {
 
   html += '<div class="mk-news-lower"><section class="mk-news-section"><div class="mk-news-label">Why NQ is moving</div>';
   const nq = (_mkQuotes || []).filter(r => _mkNorm(r.symbol) === 'NQ')[0] || null;
+  const es = (_mkQuotes || []).filter(r => _mkNorm(r.symbol) === 'ES')[0] || null;
   const nqTerms = /\b(nq|nasdaq|tech|semiconductor|nvidia|fed|rate|yield|inflation|cpi|ppi|jobs|payroll|oil|iran|war|tariff|treasury)\b/i;
   const drivers = ranked.filter(n => String(n.severity || '').toLowerCase() !== 'low' &&
     nqTerms.test([n.headline, n.summary, n.category].filter(Boolean).join(' '))).slice(0, 3);
-  if (nq) {
-    const dir = _mkDir(nq.chg);
-    const move = nq.chg == null ? (nq.pct || '—') : _mkSigned(nq.chg, 2) + ' pts (' + (nq.pct || '—') + ')';
-    html += '<div class="mk-driver-box"><div class="mk-driver-move ' + dir + '">NQ ' + _mkEsc(move) + '</div>' +
+  const renderIndexDriver = (quote, symbol, related) => {
+    if (!quote) return '<div class="mk-note"><b>' + symbol + ' move unavailable</b>The quote service has not returned a current ' + symbol + ' move.</div>';
+    const dir = _mkDir(quote.chg);
+    const move = quote.chg == null ? (quote.pct || '—') : _mkSigned(quote.chg, 2) + ' pts (' + (quote.pct || '—') + ')';
+    return '<div class="mk-driver-box"><div class="mk-driver-move ' + dir + '">' + symbol + ' ' + _mkEsc(move) + '</div>' +
       '<div class="mk-driver-note">Potential live drivers for the current move. These headlines are correlated context, not verified causation.</div>' +
-      (drivers.length ? '<ul class="mk-driver-list">' + drivers.map(n => '<li>' + linkedTitle(n) + '</li>').join('') + '</ul>' :
+      (related.length ? '<ul class="mk-driver-list">' + related.map(n => '<li>' + linkedTitle(n) + '</li>').join('') + '</ul>' :
         '<div class="mk-driver-note" style="margin-top:10px">No high-confidence headline catalyst is present. NOVA will not invent a reason for the move.</div>') + '</div>';
-  } else {
-    html += '<div class="mk-note"><b>NQ move unavailable</b>The quote service has not returned a current NQ move.</div>';
-  }
+  };
+  html += renderIndexDriver(nq, 'NQ', drivers);
+  const esTerms = /\b(es|s&p|s&p 500|sp500|stocks|equities|fed|rate|yield|inflation|cpi|ppi|jobs|payroll|oil|iran|war|tariff|treasury)\b/i;
+  const esDrivers = ranked.filter(n => String(n.severity || '').toLowerCase() !== 'low' &&
+    esTerms.test([n.headline, n.summary, n.category].filter(Boolean).join(' '))).slice(0, 2);
+  html += '<div class="mk-driver-subhead">Why ES is moving</div>' + renderIndexDriver(es, 'ES', esDrivers);
   html += '</section><section class="mk-news-section"><div class="mk-news-label">Upcoming macro · date &amp; time ET</div>';
   events.slice(0, 6).forEach(e => {
     const imp = String(e.importance || 'low').toLowerCase();

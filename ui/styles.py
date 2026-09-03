@@ -95,6 +95,10 @@ body{
 }
 .wrap{max-width:1560px;margin:0 auto;padding:20px 24px 40px}
 
+/* News and Journal are dense work surfaces. Let them use the available
+   desktop canvas instead of preserving decorative gutters on wide screens. */
+.wrap:has(> #page-news.active),.wrap:has(> #page-journal.active){max-width:none;padding-left:12px;padding-right:12px}
+
 /* ── APP SHELL ── */
 .app-shell{display:flex;align-items:stretch;min-height:100vh}
 .main-content{flex:1;min-width:0}
@@ -1714,7 +1718,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .jn-dash-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .jn-dash-label{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-right:2px}
 .jn-dash-sep{width:1px;height:24px;background:var(--line);margin:0 5px}
-.jn-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(340px,1fr);gap:14px;margin-top:14px;align-items:stretch}
+.jn-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(360px,.95fr);gap:14px;margin-top:14px;align-items:stretch}
 .jn-dash-panel{background:var(--panel);border:1px solid var(--line);padding:14px 16px 16px;min-width:0}
 .jn-equity-panel,.jn-calendar-panel{min-width:0}
 .jn-dashboard-side{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -1733,7 +1737,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .jn-calendar{display:grid;grid-template-columns:repeat(7,1fr);margin:0 -16px -16px;min-width:620px}
 .jn-calendar-scroll{overflow-x:auto}
 .jn-cal-dow{padding:8px;text-align:center;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);border-bottom:1px solid var(--line2)}
-.jn-cal-day{min-height:70px;padding:7px;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
+.jn-cal-day{min-height:86px;padding:9px;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}
 .jn-cal-day:nth-child(7n){border-right:0}.jn-cal-day b{display:block;margin-top:9px;font-size:12px}.jn-cal-day.up{background:var(--green2)}.jn-cal-day.down{background:var(--red2)}.jn-cal-day.flat{background:rgba(197,155,81,.08)}
 .jn-weekly,.jn-models{display:flex;flex-direction:column}
 .jn-week-row,.jn-model-row{padding:11px 0;border-bottom:1px solid var(--line2)}.jn-week-row:last-child,.jn-model-row:last-child{border-bottom:0}
@@ -2138,7 +2142,7 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 .mk-news-row a{font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.38;color:var(--text);text-decoration:none}
 .mk-news-row a:hover{text-decoration:underline;text-underline-offset:2px}
 .mk-news-row small{display:block;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:3px}
-.mk-news-lower{display:grid;grid-template-columns:minmax(300px,.88fr) minmax(350px,1fr) minmax(0,1.25fr);gap:0;border-top:1px solid var(--line)}
+.mk-news-lower{display:grid;grid-template-columns:minmax(300px,.78fr) minmax(350px,.9fr) minmax(0,1.55fr);gap:0;border-top:1px solid var(--line)}
 .mk-news-section{padding:22px 24px 4px 0;min-width:0}
 .mk-news-section+.mk-news-section{border-left:1px solid var(--line);padding-left:24px}
 .mk-driver-box{background:rgba(143,33,59,.08);border:1px solid rgba(143,33,59,.28);border-radius:2px;padding:15px 16px;margin-top:10px}
@@ -2148,7 +2152,8 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 .mk-driver-list{margin:10px 0 0;padding:0;list-style:none}
 .mk-driver-list li{font-size:13px;line-height:1.4;color:var(--text);padding:8px 0;border-top:1px solid var(--line2)}
 .mk-driver-list a{color:inherit;text-decoration:none}.mk-driver-list a:hover{text-decoration:underline}
-.mk-all-news{max-height:298px;overflow:auto;padding-right:5px}
+.mk-driver-subhead{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-top:18px}
+.mk-all-news{max-height:430px;overflow:auto;padding-right:5px}
 .mk-all-news::-webkit-scrollbar{width:6px}.mk-all-news::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px}
 .mk-cat{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--line2);align-items:flex-start}
 .mk-cat:last-child{border-bottom:0}
