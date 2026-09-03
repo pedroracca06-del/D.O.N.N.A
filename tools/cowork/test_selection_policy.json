@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy_name": "nova-test-selection",
-  "description": "Fixed, reviewable data policy for the Cowork Test Selector. A focused selection is a fast local feedback aid ONLY. It can never satisfy A7.7, replace collection parity, replace the full regression suite required before a commit, claim that unselected tests would pass, or authorize staging, committing, pushing, merging, or deployment. Pure data: no executable construct, no regular expression, no command, no pytest flag beyond the fixed template, no environment assignment, no machine path, and no credential.",
+  "description": "Fixed, reviewable data policy for the Cowork Test Selector. A focused selection is a fast local feedback aid ONLY. It can never satisfy A7.7, replace collection parity, replace the full regression suite required before a commit, claim that unselected tests would pass, or authorize staging, committing, pushing, merging, or deployment. Pure data: no executable construct, no regular expression, no command, no pytest flag beyond the fixed template, no environment assignment, no machine path, and no credential. A test file whose own imports cannot be read statically is added to every focused selection instead of forcing the whole repository to the full suite; a CHANGED SOURCE file whose imports cannot be read still escalates. Every contract value below is fixed: a policy that disagrees is refused, so no field here can turn the safety inclusion off, exclude a dynamic test, or downgrade an escalation.",
   "contract": {
     "focused_selection_is_advisory_only": true,
     "full_regression_required": true,
@@ -13,7 +13,11 @@
     "authorizes_staging_or_commit": false,
     "unmappable_path_escalates_to_full_suite": true,
     "selector_invokes_collection": false,
-    "selector_imports_modules": false
+    "selector_imports_modules": false,
+    "dynamic_test_safety_inclusion_enabled": true,
+    "source_side_dynamic_ambiguity_escalates": true,
+    "dynamic_tests_can_be_excluded": false,
+    "policy_can_downgrade_an_escalation": false
   },
   "collection_count_history": {
     "note": "These are historical snapshots, never expected values. Collection must be re-measured against the current pinned HEAD every time, and parity compares exact node-ID sets. The Test Selector never invokes collection itself.",

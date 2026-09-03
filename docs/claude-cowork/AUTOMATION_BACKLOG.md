@@ -46,7 +46,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.4 | **Session Registry** — machine-local, outside every repo | Claude | AR→FA | registry file outside every repo | B1.2 | 104 registry tests (incl. 23 for `advance`); 10 planted demonstrations; collision, stale approval, lock contention, moved HEAD | **Named approval required for each real write** | **DONE** — local only; real registry initialized under separate approval; `advance` lifecycle correction added |
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | 86 validator tests; 9 planted demonstrations; tracked blobs, permission hash/counts, casing, submodule state, forbidden artifacts, registry compatibility | none | **DONE (tool)** — local only |
 | B1.6 | **Change Classifier** — determine the minimum approval class a change requires | Claude | AR | none | B1.3 | 216 classifier tests; 10 planted demonstrations; every class, every mode, most-restrictive aggregation, semantic escalation | none | **DONE (tool) — local only** |
-| B1.7 | **Test Selector** — changed paths → focused test list, advisory only | Claude | AR | none | P0.9, B1.1, B1.2, B1.3, B1.4 (optional collision check), B1.6 | 167 selector tests; 10 planted demonstrations; self / direct / transitive / relative / conftest-subtree / policy mapping, deletion, rename, case-only rename, escalation on unmapped-dynamic-wildcard-unresolved-syntax-binary, and a recomputed proof that no statically discovered test importing a changed module is omitted | none | **DONE (tool) — local only** |
+| B1.7 | **Test Selector** — changed paths → focused test list, advisory only | Claude | AR | none | P0.9, B1.1, B1.2, B1.3, B1.4 (optional collision check), B1.6 | 201 selector tests (167 + 34 from the Phase 3W refinement); self / direct / transitive / relative / conftest-subtree / policy / dynamic-safety mapping, deletion, rename, case-only rename, escalation on unmapped-wildcard-unresolved-syntax-binary and on a changed **source** with unresolved dynamic imports, a recomputed proof that no statically discovered test importing a changed module is omitted, and five real-tree demonstrations showing an ordinary source change now returns a focused subset | none | **DONE (tool) — local only** |
 
 ---
 
@@ -500,8 +500,12 @@ local only. Not pushed, not merged.**
 ### B1.7 Test Selector — implemented (tool; local only)
 
 `tools/cowork/test_selector.py` with the pure-data `test_selection_policy.json`
-(sha256 `b884fd2d6ceaaad8d6f92ea1fd94cc770cc26ef79aa4116f205abf968f014531`), and
-`tests/test_cowork_test_selector.py` (167 tests).
+(sha256 `5cf3a817854c2c898d544e653b47c5799c81d76804bc8b3d6b753e5d45abf87c`), and
+`tests/test_cowork_test_selector.py` (201 tests).
+
+> **Phase 3W refinement (2026-09-03).** The dynamic-import rule below was narrowed so
+> the tool is actually usable on this repository. Its status is unchanged:
+> **DONE (tool) — local only**. See *Phase 3W refinement* at the end of this section.
 
 **The governing rule, stated in every report.** A focused selection is a **fast
 local feedback aid only**. It can never satisfy A7.7 by itself, replace collection
@@ -518,7 +522,7 @@ satisfied in a test suite. It is replaced by mechanically verifiable evidence:
 
 | Evidence | Result |
 |---|---|
-| Countable focused test suite | 167 tests |
+| Countable focused test suite | 201 tests (snapshot of 2026-09-03, not a constant) |
 | Planted mapping demonstrations | 10, all as intended |
 | Direct-import coverage | a changed module selects its direct importers |
 | Transitive-import coverage | `core/base` → `core/middle` → `engines/top` → its test |
@@ -547,15 +551,17 @@ marker file was mapped correctly and the marker was never created; no
 `select-range`, `select-manifest`, `validate-policy`.
 
 **Mapping sources.** `self`, `direct import`, `transitive import`, `conftest scope`,
-`explicit policy`, `global fallback`. A direct edge is never downgraded to transitive.
+`explicit policy`, `dynamic-test safety inclusion`, `global fallback`. A direct edge
+is never downgraded to transitive, and a genuine mapping always outranks the safety
+inclusion in the reported source.
 
 **Escalation to full suite (exit 5).** An unmapped path, a global-impact path, a
-Python file that will not parse, a dynamic import (`importlib`, `__import__`,
-`exec`/`compile`) anywhere in a test file, a star import from an unresolvable module,
-an import that looks internal but resolves to no tracked file, an ambiguous bare
-module name matching several tracked files, a binary change, a deleted test file, or
-an explicit mapping that declares no target. **It never silently produces an empty or
-narrow selection.**
+Python file that will not parse, a **changed source file** whose own imports cannot
+be read statically, a star import from an unresolvable module in a changed source, an
+import that looks internal but resolves to no tracked file, an ambiguous bare module
+name matching several tracked files, a binary change, a deleted test file, an
+explicit mapping that declares no target, or a dynamic-test inventory that could not
+be completed. **It never silently produces an empty or narrow selection.**
 
 **Bare-module resolution.** The Cowork tools are imported by bare module name after a
 `sys.path` insertion, which package paths cannot express, so a single-segment name
@@ -578,21 +584,93 @@ and 1722 the Phase 3U observation. Collection must be re-measured against the cu
 pinned HEAD and compared as exact node-ID sets; the selector never invokes collection
 itself, and its source contains no expected collection constant.
 
-**Static safety.** Standard library only; no `eval`, `exec`, bare `compile`,
-`__import__`, `importlib`, or `runpy`; no subprocess, shell, or network; no
+**Static safety.** Standard library only; the dynamic names above appear only as
+data strings for AST comparison — no `eval`, `exec`, bare `compile`, `__import__`,
+`importlib`, or `runpy` is ever called; no subprocess, shell, or network; no
 environment reads; no write-mode `open`; no deletion, move, or rename; no Session
 Registry mutation. Its only writes are to stdout and stderr. Every Git call routes
 through the A7 read-only allowlist and asks only for `rev-parse`, `ls-files`, and
 `cat-file`. All output goes through the Evidence Formatter.
 
-**Known limitation, measured on this repository.** `tests/test_ui_modularization.py`
-uses `exec(compile(...))` and `importlib.import_module`, so its import set cannot be
-known by reading. Under the rule above, that makes **every** selection on the current
-NOVA repository escalate to full suite. The tool is correct and honest here; it is
-simply not yet useful on this tree. A narrower alternative — always *including*
-dynamic-import test files rather than escalating the whole run — would be equally
-safe and far more useful, but it changes a declared safety rule and is therefore not
-implemented without explicit approval.
+### Phase 3W refinement — dynamic tests are included, not an excuse to give up
+
+The limitation recorded above has been corrected under explicit approval. It read:
+`tests/test_ui_modularization.py` uses `exec(compile(...))` and
+`importlib.import_module`, so its import set cannot be known by reading, and under
+the old rule that made **every** selection on this repository escalate to the full
+suite. The tool was correct and honest, and completely unusable here.
+
+**What changed.** A test file whose own imports cannot be read statically is now
+added to **every** focused selection instead of forcing a global full-suite fallback.
+The selection can only get **broader**, never narrower, so nothing that should have
+run is dropped — and one such file no longer makes focused feedback impossible for
+every other change in the repository.
+
+**What did not change. None of the governing rules moved:**
+
+- Full regression before every commit remains **mandatory**. Every report still
+  carries `full_regression_required: true`.
+- Collection parity remains **mandatory** — `collection_parity_required: true`.
+- A focused selection is still **preliminary feedback only**. It never satisfies
+  A7.7 by itself, replaces nothing, and authorizes nothing.
+- Unresolved changed **source** code still escalates.
+- The selector still never invokes pytest and never imports a repository module.
+- The selector still never claims that unselected tests would pass.
+
+**Source-side ambiguity still escalates.** The concession is strictly test-side. If a
+*changed source file* uses unresolved dynamic imports, dependency discovery from it
+is unknowable — tests that should have been selected may be invisible — so it exits 5
+and requires the full suite. A source-side unknown is never converted into an
+always-include shortcut. Escalation is also unchanged for an unresolvable internal
+import, an ambiguous module name, unparseable changed Python, a binary or unmapped
+path, a changed or deleted test that cannot be identified, a global-impact policy
+path, and a dynamic-test inventory that could not be completed.
+
+**Detection is general and AST-based**, never a hard-coded filename. A test file is
+inventoried as dynamic when its AST shows `importlib` / `import_module`,
+`__import__`, `exec` or `eval`, `exec(compile(...))`, a dynamically constructed
+module name, a loader or finder call (`SourceFileLoader`, `spec_from_file_location`,
+`module_from_spec`, `exec_module`, `load_module`, `pkgutil`, `runpy`), an
+unresolvable star import, or a `sys.path` mutation that **leaves an import
+unresolved**. That last qualifier matters: the Cowork tools mutate `sys.path` and
+then import a sibling by bare name, which the tracked-basename fallback resolves
+exactly; treating every path mutation as unknowable would mark 54 of this
+repository's files dynamic and destroy the usefulness this refinement exists for.
+`re.compile` is deliberately *not* a trigger for the same reason.
+
+**The inclusion cannot be switched off.** Four contract values are fixed and a policy
+that disagrees is refused: `dynamic_test_safety_inclusion_enabled: true`,
+`source_side_dynamic_ambiguity_escalates: true`, `dynamic_tests_can_be_excluded:
+false`, `policy_can_downgrade_an_escalation: false`. Policy validation additionally
+refuses any `exclusions` entry that names a test file or a test pattern under a test
+root, and at runtime any tracked test file the scan could not classify is reported
+and escalates rather than being silently dropped. A manifest has no field that can
+remove a selected test; one that invents such a field is rejected as invalid.
+
+**Evidence added to every report.** A `Y0` line gives the number of dynamic tests
+detected and the number that could not be classified; one `Y###` line per dynamic
+test gives its sanitized repository-relative path and why it was included; `Y_ADD`
+records how many joined a focused selection versus how many were already selected by
+a stronger mapping. Each selected test still reports which mapping produced it.
+
+**Real-tree demonstrations (read-only, 2026-09-03, HEAD `4d7807a`).** Run against
+synthetic change manifests; no real file was modified. 54 tracked test files exist,
+one is dynamic (`tests/test_ui_modularization.py`), and none could not be classified.
+
+| Changed path (synthetic) | Exit | Result |
+|---|---|---|
+| `tools/cowork/evidence_formatter.py` | 0 | **9** focused targets — 1 direct, 7 transitive, plus the dynamic test added by safety inclusion |
+| `ui/styles.py` | 0 | **12** focused targets; the dynamic test was already selected by a genuine direct import, so 0 were added |
+| `docs/NOVA_KNOWLEDGE_MAP.md` | 0 | **no focused pytest target**, full regression still required |
+| `scripts/validate_alerts.py` | 5 | full suite — the changed Python file will not parse |
+| `pytest.ini` | 5 | full suite — a global-impact path |
+| `strange/thing.xyz` | 5 | full suite — the path is not mapped by any rule |
+| `engines/synthesis.py` | 5 | full suite — a changed **source** with unresolved dynamic imports |
+
+Before this refinement every one of those rows returned exit 5. The tool is now
+useful for ordinary mapped changes, and **a focused selection is still not test
+coverage** — it is preliminary feedback, and the full suite still runs before the
+commit.
 
 **Other limitations.** Mapping is static, so runtime-only coupling (fixtures
 resolved by name, plugin hooks, data loaded by path at runtime) is invisible unless

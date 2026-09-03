@@ -20,6 +20,19 @@ An unmappable or ambiguous changed path escalates to a full-suite-required resul
 It never silently produces an empty or narrow selection. "No focused test" never
 means "no testing required".
 
+DYNAMIC TESTS ARE INCLUDED, NOT AN EXCUSE TO GIVE UP. A test file whose own import
+behaviour cannot be known by reading is added to EVERY focused selection instead of
+collapsing the whole repository to the full suite. That is the conservative reading:
+the selection can only get broader, never narrower, and one such test file no longer
+makes focused feedback impossible for every other change. The inclusion is a safety
+net, not a mapping -- it is reported with its own mapping source so no one mistakes
+it for proof that the test depends on the change.
+
+The concession is strictly test-side. A CHANGED SOURCE file whose own imports cannot
+be resolved still escalates, because there the unknown is dependency discovery
+itself: tests that should have been selected may be invisible. A source-side
+ambiguity is never converted into an always-include shortcut.
+
 IT NEVER IMPORTS OR RUNS ANYTHING. It does not import an application or test
 module, and it does not invoke pytest -- not even `--collect-only`, which imports
 every test module and every conftest and would execute their module-level code.
@@ -100,10 +113,13 @@ SOURCE_DIRECT = "direct import"
 SOURCE_TRANSITIVE = "transitive import"
 SOURCE_CONFTEST = "conftest scope"
 SOURCE_POLICY = "explicit policy"
+SOURCE_DYNAMIC = "dynamic-test safety inclusion"
 SOURCE_GLOBAL = "global fallback"
 
+# Ordered strongest-first. A test that has a real mapping keeps it; the safety
+# inclusion is only ever the label of last resort before the global fallback.
 MAPPING_SOURCES = (SOURCE_SELF, SOURCE_DIRECT, SOURCE_TRANSITIVE, SOURCE_CONFTEST,
-                   SOURCE_POLICY, SOURCE_GLOBAL)
+                   SOURCE_POLICY, SOURCE_DYNAMIC, SOURCE_GLOBAL)
 
 _MACHINE_PATH_RE = re.compile(
     r"([A-Za-z]:[\\/]|\\\\[A-Za-z0-9._-]+\\|/(?:home|Users)/[A-Za-z0-9._-]+|"
@@ -115,9 +131,22 @@ _UNSAFE_INPUT_RE = re.compile(
     r"https?://|ssh://|git@|api[_-]?key\s*[:=]|secret\s*[:=]|token\s*[:=]|"
     r"password\s*[:=]|sk-ant-|ghp_|AKIA[0-9A-Z]{16}|-----BEGIN|^[A-Z_]{3,}=)")
 
-# Names that make a module's import set unknowable by static reading.
+# Names that make a module's import set unknowable by static reading. Matched as
+# AST identifiers and attribute names -- these are data strings here, never called.
 _DYNAMIC_IMPORT_NAMES = ("__import__", "importlib", "import_module", "exec", "eval",
-                         "load_module", "SourceFileLoader", "pkgutil")
+                         "load_module", "SourceFileLoader", "pkgutil", "runpy",
+                         "spec_from_file_location", "module_from_spec",
+                         "exec_module", "find_module")
+# `compile` is deliberately absent: `re.compile` is not code loading, and matching
+# it would mark most of the repository dynamic. The `exec(compile(...))` shape is
+# already caught by `exec`.
+
+# Mutating the interpreter search path only defeats static reading when it leaves an
+# import that cannot be tied to a tracked file. The Cowork tools mutate the path and
+# then import a sibling by bare name, which the tracked-basename fallback resolves
+# exactly; treating that as unknowable would make almost every file dynamic and
+# would destroy the very usefulness this selector exists for.
+_PATH_MUTATION_METHODS = ("insert", "append", "extend", "remove", "pop", "clear")
 
 # A credential-shaped value anywhere in the policy, which is data only.
 _CREDENTIAL_RE = re.compile(
@@ -165,6 +194,10 @@ CONTRACT_FIXED = {
     "unmappable_path_escalates_to_full_suite": True,
     "selector_invokes_collection": False,
     "selector_imports_modules": False,
+    "dynamic_test_safety_inclusion_enabled": True,
+    "source_side_dynamic_ambiguity_escalates": True,
+    "dynamic_tests_can_be_excluded": False,
+    "policy_can_downgrade_an_escalation": False,
 }
 
 _POLICY_EXECUTABLE_RE = re.compile(
@@ -296,6 +329,19 @@ def validate_policy(policy):
             raise PolicyError("%s must be a non-empty list" % field)
         norms = [_policy_path(v, "%s entry" % field) for v in values]
         _check_no_case_dupes(norms, field)
+
+    # A policy must not be able to hide a test file from the dynamic inventory.
+    # This refuses the literal form; the runtime inventory refuses the rest by
+    # reporting any tracked test file it could not classify, which escalates.
+    for pattern in policy["exclusions"]:
+        norm = _norm(pattern)
+        if is_test_file(norm, policy) or (
+                any(_under(r, norm) for r in policy["test_roots"])
+                and any(fnmatch.fnmatch(posixpath.basename(norm), pat)
+                        for pat in policy["test_file_patterns"])):
+            raise PolicyError(
+                "exclusions may not name a test file (%s); a dynamic test can never "
+                "be excluded from the safety inclusion by policy" % pattern)
 
     pats = policy["test_file_patterns"]
     if not isinstance(pats, list) or not pats:
@@ -479,7 +525,7 @@ def internal_top_levels(policy, tracked):
 
 class Graph:
     __slots__ = ("imports", "unresolved", "dynamic", "unparseable", "files",
-                 "internal")
+                 "internal", "path_mutation", "absent")
 
     def __init__(self):
         self.imports = {}        # path -> set(path)
@@ -488,6 +534,8 @@ class Graph:
         self.unparseable = set()
         self.files = set()
         self.internal = set()
+        self.path_mutation = set()   # paths that mutate the interpreter search path
+        self.absent = set()          # tracked paths with no blob at the pinned HEAD
 
 
 def _module_candidates(module, tracked_set, basenames=None):
@@ -548,6 +596,32 @@ def _resolve_relative(path, level, module):
     return base.strip("/")
 
 
+def _dotted_target(node):
+    """`sys.path` for an Attribute chain, or None. Reads the AST only."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _mutates_search_path(node):
+    """True if this AST node rebinds or mutates `sys.path`."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+            and node.func.attr in _PATH_MUTATION_METHODS:
+        return _dotted_target(node.func.value) == "sys.path"
+    if isinstance(node, (ast.Assign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            base = target.value if isinstance(target, ast.Subscript) else target
+            if _dotted_target(base) == "sys.path":
+                return True
+    return False
+
+
 def parse_module(path, text, tracked_set, internal, graph, basenames):
     """Record one file's static import edges. Never imports, never executes."""
     graph.files.add(path)
@@ -561,6 +635,8 @@ def parse_module(path, text, tracked_set, internal, graph, basenames):
         return
 
     for node in ast.walk(tree):
+        if _mutates_search_path(node):
+            graph.path_mutation.add(path)
         # A dynamic import makes this file's import set unknowable by reading.
         if isinstance(node, ast.Name) and node.id in _DYNAMIC_IMPORT_NAMES:
             graph.dynamic.add(path)
@@ -621,6 +697,11 @@ def parse_module(path, text, tracked_set, internal, graph, basenames):
                         elif sub:
                             edges.add(sub)
 
+    # A search-path mutation is only unknowable when it actually leaves an import
+    # this reader could not tie to a tracked file.
+    if path in graph.path_mutation and unresolved:
+        graph.dynamic.add(path)
+
     graph.imports[path] = edges
     graph.unresolved[path] = unresolved
 
@@ -665,6 +746,10 @@ def build_graph(repo, policy, limits, read_blob):
                                       "the scan maximum")
         raw = read_blob(path, limits)
         if raw is None:
+            # Tracked but with no blob at the pinned HEAD: a staged addition or
+            # rename destination. It is unreadable here, but it is not a file whose
+            # content defeated the parser, and the two are not the same finding.
+            graph.absent.add(path)
             graph.unparseable.add(path)
             graph.files.add(path)
             graph.imports[path] = set()
@@ -798,6 +883,67 @@ def select_for_path(path, kind, graph, index, policy, selection, tracked_set):
         return
 
     selection.escalate(path, "the path is not mapped by any rule")
+
+
+def dynamic_test_inventory(graph, policy, tracked_set, changed_paths=()):
+    """The deterministic always-include set, plus any gap that blocks completing it.
+
+    Returns `(dynamic_tests, incomplete)`.
+
+    `dynamic_tests` is a sorted list of tracked TEST files whose own import
+    behaviour cannot be known by reading them: `import_module`, `__import__`, a
+    compile-and-run construct, a loader or finder call, a dynamically constructed
+    module name, an unresolvable star import, or a search-path mutation that leaves
+    an import unresolved. Every finding comes from the AST of a tracked blob. No
+    file here is imported, executed, or opened for its side effects, and hostile
+    module-level code in one of them is never run by this tool.
+
+    `incomplete` lists `(path, reason)` for every tracked test file whose dynamic
+    status could NOT be determined -- excluded from the scan, never parsed, or
+    unparseable. If it is non-empty the inventory cannot be completed and the
+    caller escalates to the full suite rather than shipping a partial safety net.
+
+    One case is deliberately not a gap: a tracked test file with no blob at the
+    pinned HEAD that is itself one of the observed changes. It is a staged addition
+    or a rename destination, so there is nothing at the baseline to classify, and it
+    is already selected on its own account. A baseline-absent test file that is NOT
+    among the observed changes is still a gap.
+    """
+    changed = {_norm(p) for p in changed_paths}
+    dynamic_tests, incomplete = [], []
+    for path in sorted(tracked_set):
+        if not is_test_file(path, policy):
+            continue
+        if is_excluded(path, policy):
+            incomplete.append((path, "a tracked test file is excluded from the "
+                                     "static scan, so its dynamic status is unknown"))
+        elif path not in graph.files:
+            incomplete.append((path, "a tracked test file was never parsed at the "
+                                     "baseline, so its dynamic status is unknown"))
+        elif path in graph.absent:
+            if path not in changed:
+                incomplete.append(
+                    (path, "a tracked test file has no content at the pinned HEAD "
+                           "and is not among the observed changes, so its dynamic "
+                           "status is unknown"))
+        elif path in graph.unparseable:
+            incomplete.append((path, "a tracked test file could not be parsed, so "
+                                     "its dynamic status is unknown"))
+        elif path in graph.dynamic:
+            dynamic_tests.append(path)
+    return dynamic_tests, incomplete
+
+
+def dynamic_inclusion_reason(path, graph):
+    """Why one dynamic test joins every focused selection. Evidence, not a mapping."""
+    why = "unresolved star import or dynamic import indirection"
+    if path in graph.path_mutation and graph.unresolved.get(path):
+        why = "search-path mutation leaving %d unresolved import name(s)" \
+              % len(graph.unresolved[path])
+    return ("its import set cannot be known by static reading (%s), so it is "
+            "included conservatively rather than allowing it to force every "
+            "selection to the full suite; this is a safety net, not evidence that "
+            "the test depends on the change" % why)
 
 
 def verify_no_dependent_omitted(selected, changed_python, index):
@@ -1057,12 +1203,13 @@ def main(argv=None):
 
     # These two are constants of the contract, printed on every single report.
     contract_checks = [
-        _chk("K1", "full_regression_required", "warning", "true -- always; a focused "
-             "selection never replaces the complete regression suite required "
-             "before a commit"),
-        _chk("K2", "collection_parity_required", "warning", "true -- always; "
-             "collection must be re-measured against the current pinned HEAD and "
-             "compared as exact node-ID sets"),
+        _chk("K1", "full_regression_required", "warning",
+             "full_regression_required: true -- always; a focused selection never "
+             "replaces the complete regression suite required before a commit"),
+        _chk("K2", "collection_parity_required", "warning",
+             "collection_parity_required: true -- always; collection must be "
+             "re-measured against the current pinned HEAD and compared as exact "
+             "node-ID sets"),
         _chk("K3", "A7.7", "warning", "a focused selection is optional preliminary "
              "evidence and never satisfies A7.7 by itself"),
         _chk("K4", "unselected tests", "pass", "no claim is made that unselected "
@@ -1071,6 +1218,10 @@ def main(argv=None):
              "not staging, committing, pushing, merging, or deployment"),
         _chk("K6", "execution", "pass", "no module was imported and pytest was not "
              "invoked, including --collect-only"),
+        _chk("K7", "dynamic tests", "pass", "a test file with dynamic imports is "
+             "included conservatively and can never be excluded by policy or "
+             "manifest; a CHANGED SOURCE file with unresolved dynamic imports "
+             "still escalates to the full suite"),
     ]
 
     try:
@@ -1176,15 +1327,21 @@ def main(argv=None):
             selection.observed = changes
             changed_python = set()
 
-            # A dynamic import anywhere in a test file makes the whole static
-            # mapping unprovable, so it escalates rather than quietly narrowing.
-            dynamic_tests = sorted(p for p in graph.dynamic
-                                   if is_test_file(p, policy))
-            if dynamic_tests:
+            # A test file whose imports cannot be read is included in every focused
+            # selection instead of collapsing the repository to the full suite. The
+            # inventory must be complete for that promise to hold; if any tracked
+            # test file could not be classified, escalate instead.
+            observed_paths = set()
+            for change in changes:
+                observed_paths.add(_norm(change["path"]))
+                if change.get("source_path"):
+                    observed_paths.add(_norm(change["source_path"]))
+            dynamic_tests, inventory_gaps = dynamic_test_inventory(
+                graph, policy, tracked_set, observed_paths)
+            for gap_path, gap_reason in inventory_gaps:
                 selection.escalate(
-                    dynamic_tests[0],
-                    "%d test file(s) use dynamic or unresolved star imports, so no "
-                    "static mapping can be proven complete" % len(dynamic_tests))
+                    gap_path, "the dynamic-test inventory could not be completed: %s"
+                    % gap_reason)
 
             for change in changes:
                 if change.get("binary"):
@@ -1197,6 +1354,17 @@ def main(argv=None):
                 for path, kind in targets:
                     if is_python(path, policy) and not is_excluded(path, policy):
                         changed_python.add(_norm(path))
+                        # Source-side ambiguity is NOT covered by the test-side
+                        # safety inclusion. If a changed non-test module's own
+                        # imports cannot be read, dependency discovery from it is
+                        # unknowable and tests that should be selected may be
+                        # invisible, so it still escalates.
+                        norm = _norm(path)
+                        if norm in graph.dynamic and not is_test_file(norm, policy):
+                            selection.escalate(
+                                path, "the changed source file uses unresolved "
+                                      "dynamic imports, so dependency discovery "
+                                      "from it cannot be proven complete")
                     select_for_path(path, kind, graph, index, policy, selection,
                                     tracked_set)
                 unresolved_here = graph.unresolved.get(_norm(change["path"]), set())
@@ -1227,7 +1395,38 @@ def main(argv=None):
 
             full_suite = bool(selection.escalations) or bool(missing)
 
+            # The dynamic-test inventory is evidence on every report, whatever the
+            # outcome: how many were detected, exactly which, and why each is added.
+            checks.append(_chk(
+                "Y0", "dynamic test inventory",
+                "pass" if not inventory_gaps else "warning",
+                "%d tracked test file(s) use dynamic imports and are included "
+                "conservatively in every focused selection; %d tracked test file(s) "
+                "could not be classified"
+                % (len(dynamic_tests), len(inventory_gaps))))
+            for n, dyn_path in enumerate(dynamic_tests, 1):
+                checks.append(_chk("Y%03d" % n, ef.sanitize_text(dyn_path),
+                                   "informational",
+                                   "%s -- %s" % (SOURCE_DYNAMIC,
+                                                 dynamic_inclusion_reason(dyn_path,
+                                                                          graph))))
+
+            # Conservative inclusion applies to a real focused selection. A
+            # documentation-only change still reports NO focused target, so nobody
+            # reads a safety net as a test plan for a change that has none.
+            ordinary_selected = len(selection.selected)
             if selection.selected and not full_suite:
+                for dyn_path in dynamic_tests:
+                    selection.add(dyn_path, SOURCE_DYNAMIC,
+                                  dynamic_inclusion_reason(dyn_path, graph))
+                added = [t for t in dynamic_tests
+                         if selection.selected[t][0] == SOURCE_DYNAMIC]
+                checks.append(_chk(
+                    "Y_ADD", "dynamic safety inclusion", "pass",
+                    "%d of %d dynamic test(s) added to a focused selection of %d "
+                    "ordinarily mapped test file(s); the remainder were already "
+                    "selected by a stronger mapping"
+                    % (len(added), len(dynamic_tests), ordinary_selected)))
                 checks.append(_chk("S0", "focused selection", "pass",
                                    "%d test file(s)" % len(selection.selected)))
                 for n, (test_path, (source, reason)) in enumerate(

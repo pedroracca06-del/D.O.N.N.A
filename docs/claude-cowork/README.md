@@ -55,7 +55,7 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 
 6. ~~**Change Classifier**~~ — **implemented locally** as `tools/cowork/change_classifier.py` with the pure-data `change_policy.json` (216 tests). Answers what *minimum* approval class a change requires, and **never approves anything**. See below.
 
-7. ~~**Test Selector**~~ — **implemented locally** as `tools/cowork/test_selector.py` with the pure-data `test_selection_policy.json` (167 tests). Proposes a focused test list from changed paths and **never replaces the full regression suite**. See below.
+7. ~~**Test Selector**~~ — **implemented locally** as `tools/cowork/test_selector.py` with the pure-data `test_selection_policy.json` (201 tests). Proposes a focused test list from changed paths and **never replaces the full regression suite**. See below.
 
 All seven are read-only in effect. Items 1-3 and 5-7 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. **Tier 1 — the read-only trust layer — is now complete.** Nothing beyond it is scheduled, and nothing here is pushed or merged.
 
@@ -80,19 +80,35 @@ It is an aid while working, not a gate.
 - **Six read-only modes**: `select-worktree`, `select-staged`, `select-commit`,
   `select-range`, `select-manifest`, `validate-policy`.
 - **Mapping sources**: self, direct import, transitive import, conftest scope,
-  explicit policy, global fallback.
+  explicit policy, dynamic-test safety inclusion, global fallback.
 - **Ambiguity escalates, never narrows.** An unmapped path, a global-impact path, an
-  unparseable file, a dynamic or unresolvable import, an ambiguous module name, or a
-  binary change all produce "full suite required" (exit 5). **"No focused test" never
-  means "no testing required"** — a documentation-only change says so explicitly.
+  unparseable file, a **changed source** with unresolved dynamic imports, an
+  ambiguous module name, or a binary change all produce "full suite required"
+  (exit 5). **"No focused test" never means "no testing required"** — a
+  documentation-only change says so explicitly.
+- **Dynamic tests are included, not a reason to give up.** A *test* file whose own
+  imports cannot be read statically is added to **every** focused selection rather
+  than collapsing the whole repository to the full suite. The selection only gets
+  broader, never narrower. The concession is test-side only: a changed *source* with
+  unresolved dynamic imports still escalates. Detection is general and AST-based, and
+  the inclusion cannot be switched off by policy or manifest.
 - **Collection counts are snapshots.** 926 (P0.9) and 1722 (Phase 3U) are history,
   not expectations; collection is re-measured against the current pinned HEAD and
   compared as exact node-ID sets.
 
-**Measured limitation:** `tests/test_ui_modularization.py` uses `exec(compile(...))`
-and `importlib.import_module`, so its imports cannot be read statically. Under the
-escalation rule that makes **every** selection on this repository fall back to the
-full suite today. The tool is correct; it is not yet useful here.
+**Phase 3W refinement (2026-09-03) — B1.7 remains DONE (tool) — local only.**
+`tests/test_ui_modularization.py` uses `exec(compile(...))` and
+`importlib.import_module`, so its imports cannot be read statically. That used to
+force **every** selection on this repository to the full suite. It no longer does:
+the file is now included conservatively in every focused selection instead. Measured
+on this tree at HEAD `4d7807a`, a change to `tools/cowork/evidence_formatter.py`
+returns **9** focused test files out of 54, and a change to `ui/styles.py` returns
+**12** — where both previously returned "full suite required".
+
+Nothing about the contract moved. Full regression before every commit and collection
+parity both remain **mandatory and unconditional**, a focused selection remains
+**preliminary feedback only**, source-side ambiguity still escalates, and **a focused
+selection is never test coverage**.
 
 See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b17-test-selector--implemented-tool-local-only).
 

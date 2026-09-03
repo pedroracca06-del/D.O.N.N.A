@@ -150,6 +150,27 @@ def escalations(out):
             if c["id"].startswith("E") and c["id"][1:].isdigit()}
 
 
+def dynamic_inventory(out):
+    """The Y-block: repository-relative paths reported as dynamic tests."""
+    return [c["label"] for c in checks(out)
+            if c["id"].startswith("Y") and c["id"][1:].isdigit()
+            and c["id"] != "Y0"]
+
+
+def dynamic_summary(out):
+    for c in checks(out):
+        if c["id"] == "Y0":
+            return c["evidence"]
+    return None
+
+
+def dynamic_added(out):
+    for c in checks(out):
+        if c["id"] == "Y_ADD":
+            return c["evidence"]
+    return None
+
+
 def documentation(out):
     return sorted(c["label"] for c in checks(out)
                   if c["id"].startswith("D") and c["id"][1:].isdigit())
@@ -209,6 +230,10 @@ def test_shipped_policy_validates():
     ("unmappable_path_escalates_to_full_suite", False),
     ("selector_invokes_collection", True),
     ("selector_imports_modules", True),
+    ("dynamic_test_safety_inclusion_enabled", False),
+    ("source_side_dynamic_ambiguity_escalates", False),
+    ("dynamic_tests_can_be_excluded", True),
+    ("policy_can_downgrade_an_escalation", True),
 ])
 def test_contract_values_are_fixed(tmp_path, key, bad):
     doc = policy_doc()
@@ -499,29 +524,53 @@ def test_syntax_error_escalates(tmp_path):
     "def test_d():\n    mod = __import__('core.base')\n    assert mod\n",
     "src = 'X = 1'\nns = {}\nexec(compile(src, 'x', 'exec'), ns)\n\n\ndef test_e():\n    assert ns\n",
 ])
-def test_dynamic_import_escalates(tmp_path, body):
+def test_dynamic_import_test_is_always_included(tmp_path, body):
+    """A dynamic TEST is included conservatively; it no longer forces the full suite.
+
+    This replaces the earlier all-or-nothing rule. The safety intent is unchanged --
+    a test whose imports cannot be read is never dropped -- but one such file may no
+    longer collapse every other change to a full-suite fallback.
+    """
     repo = make_repo(tmp_path)
     write(repo / "tests" / "test_dynamic.py", body)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "dynamic")
     pol = write_policy(tmp_path, demo_policy())
-    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
-                        inp=manifest(["ui/panel.py"]))
-    assert rc == FULL
-    assert any("dynamic" in v for v in escalations(out).values())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert selected(out)["tests/test_dynamic.py"] == "dynamic-test safety inclusion"
+    assert selected(out)["tests/test_panel.py"] == "direct import"
+    assert escalations(out) == {}
+    assert dynamic_inventory(out) == ["tests/test_dynamic.py"]
 
 
-def test_unsafe_wildcard_import_escalates(tmp_path):
-    """A star import from a module that cannot be resolved is unknowable."""
+def test_unsafe_wildcard_import_in_a_test_is_included_not_dropped(tmp_path):
+    """A star import from an unresolvable module is unknowable, so the test joins
+    every focused selection instead of forcing the whole repository to run."""
     repo = make_repo(tmp_path)
     write(repo / "tests" / "test_star.py",
           "from core.missing_module import *\n\n\ndef test_s():\n    assert True\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "star")
     pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert selected(out)["tests/test_star.py"] == "dynamic-test safety inclusion"
+
+
+def test_unsafe_wildcard_import_in_changed_source_escalates(tmp_path):
+    """The concession is test-side only: an unknowable SOURCE still escalates."""
+    repo = make_repo(tmp_path)
+    write(repo / "engines" / "star_src.py", "from core.missing_module import *\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "star source")
+    pol = write_policy(tmp_path, demo_policy())
     rc, out, _err = run("select-manifest", repo=repo, policy=pol,
-                        inp=manifest(["ui/panel.py"]))
+                        inp=manifest(["engines/star_src.py"]))
     assert rc == FULL
+    assert "engines/star_src.py" in escalations(out)
 
 
 def test_resolvable_wildcard_import_is_an_ordinary_edge(tmp_path):
@@ -1491,4 +1540,421 @@ def test_argument_token_allowlist_is_tiny_and_fixed():
 def test_mapping_source_vocabulary_is_complete():
     assert set(ts.MAPPING_SOURCES) == {
         "self", "direct import", "transitive import", "conftest scope",
-        "explicit policy", "global fallback"}
+        "explicit policy", "dynamic-test safety inclusion", "global fallback"}
+
+
+def test_dynamic_safety_inclusion_is_the_weakest_real_mapping():
+    """A genuine mapping always outranks the safety net in the reported source."""
+    order = list(ts.MAPPING_SOURCES)
+    assert order.index("dynamic-test safety inclusion") == len(order) - 2
+    assert order[-1] == "global fallback"
+
+
+# ------------------------------------------- dynamic-test safety inclusion
+
+_NL = chr(10)          # newline, built without an escape so this file stays literal
+
+DYNAMIC_BODIES = {
+    "module": "import importlib" + _NL + "m = importlib.import_module('core.base')"
+              + _NL + _NL + _NL + "def test_a():" + _NL + "    assert m" + _NL,
+    "builtin": "def test_b():" + _NL + "    mod = __import__('core.base')" + _NL
+               + "    assert mod" + _NL,
+    "compiled": "src = 'X = 1'" + _NL + "ns = {}" + _NL
+                + "exec(compile(src, 'x', 'exec'), ns)" + _NL + _NL + _NL
+                + "def test_c():" + _NL + "    assert ns" + _NL,
+    "built_name": "import importlib" + _NL + "part = 'ba' + 'se'" + _NL
+                  + "m = importlib.import_module('core.' + part)" + _NL + _NL + _NL
+                  + "def test_d():" + _NL + "    assert m" + _NL,
+    "star": "from core.missing_module import *" + _NL + _NL + _NL
+            + "def test_e():" + _NL + "    assert True" + _NL,
+}
+
+
+def make_dynamic_repo(tmp_path, names, name="nova-dyn"):
+    """The demo repository plus one dynamic test per requested body kind."""
+    repo = make_repo(tmp_path, name=name)
+    for key in names:
+        write(repo / "tests" / ("test_dyn_%s.py" % key), DYNAMIC_BODIES[key])
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "dynamic tests")
+    return repo
+
+
+def dynamic_reasons(out):
+    return {c["label"]: c["evidence"] for c in checks(out)
+            if c["id"].startswith("Y") and c["id"][1:].isdigit() and c["id"] != "Y0"}
+
+
+def test_every_dynamic_shape_is_detected(tmp_path):
+    """Each AST-detectable indirection lands in the inventory, none is executed."""
+    repo = make_dynamic_repo(tmp_path, sorted(DYNAMIC_BODIES))
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert dynamic_inventory(out) == sorted(
+        "tests/test_dyn_%s.py" % k for k in DYNAMIC_BODIES)
+
+
+def test_multiple_dynamic_tests_are_included_deterministically(tmp_path):
+    """All of them are selected, in one stable order, on every run."""
+    repo = make_dynamic_repo(tmp_path, ["module", "builtin", "star"])
+    pol = write_policy(tmp_path, demo_policy())
+    runs = [run("select-manifest", repo=repo, policy=pol,
+                inp=manifest(["core/base.py"])) for _ in range(3)]
+    assert {r[0] for r in runs} == {OK}
+    assert len({r[1] for r in runs}) == 1, "output was not byte-identical"
+    got = selected(runs[0][1])
+    for key in ("module", "builtin", "star"):
+        assert got["tests/test_dyn_%s.py" % key] == "dynamic-test safety inclusion"
+    assert dynamic_inventory(runs[0][1]) == ["tests/test_dyn_builtin.py",
+                                             "tests/test_dyn_module.py",
+                                             "tests/test_dyn_star.py"]
+
+
+def test_a_dynamic_test_never_forces_every_selection_to_the_full_suite(tmp_path):
+    """The Phase 3W correction itself: one dynamic test used to escalate everything."""
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    for changed, expect in (("core/base.py", "tests/test_base_direct.py"),
+                            ("ui/panel.py", "tests/test_panel.py"),
+                            ("engines/top.py", "tests/test_top.py")):
+        rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                           inp=manifest([changed]))
+        assert rc == OK, (changed, err + out)
+        assert expect in selected(out), changed
+        assert "tests/test_dyn_module.py" in selected(out), changed
+
+
+def test_ordinary_source_change_is_a_genuine_subset_plus_dynamic(tmp_path):
+    """A focused selection must be smaller than the suite, not a disguised fallback."""
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    got = selected(out)
+    all_tests = [p for p in git(repo, "ls-files").splitlines()
+                 if p.startswith("tests/")
+                 and p.rsplit("/", 1)[-1].startswith("test_")]
+    assert len(got) < len(all_tests), (sorted(got), all_tests)
+    assert got["tests/test_panel.py"] == "direct import"
+    assert got["tests/test_dyn_module.py"] == "dynamic-test safety inclusion"
+    assert "tests/test_top.py" not in got
+    assert "tests/test_base_direct.py" not in got
+
+
+def test_a_stronger_mapping_outranks_the_safety_label(tmp_path):
+    """A dynamic test that genuinely imports the change reports the real mapping."""
+    repo = make_repo(tmp_path)
+    write(repo / "tests" / "test_dyn_panel.py",
+          "import importlib" + _NL + "from ui.panel import PANEL" + _NL
+          + "m = importlib.import_module('core.base')" + _NL + _NL + _NL
+          + "def test_p():" + _NL + "    assert PANEL and m" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "dynamic panel test")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert selected(out)["tests/test_dyn_panel.py"] == "direct import"
+    assert dynamic_inventory(out) == ["tests/test_dyn_panel.py"]
+    assert "0 of 1 dynamic test" in dynamic_added(out)
+
+
+# ------------------------------------------ source-side ambiguity escalates
+
+def test_changed_dynamic_source_module_still_escalates(tmp_path):
+    """A source whose own imports cannot be read hides dependency discovery."""
+    repo = make_repo(tmp_path)
+    write(repo / "engines" / "dyn_src.py",
+          "import importlib" + _NL
+          + "mod = importlib.import_module('core.' + 'base')" + _NL + "V = 1" + _NL)
+    write(repo / "tests" / "test_dyn_src.py",
+          "from engines.dyn_src import V" + _NL + _NL + _NL
+          + "def test_v():" + _NL + "    assert V == 1" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "dynamic source")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["engines/dyn_src.py"]))
+    assert rc == FULL
+    assert "dependency discovery" in escalations(out)["engines/dyn_src.py"]
+    assert proposed(out) == "python -B -m pytest -q"
+
+
+def test_a_dynamic_source_is_not_rescued_by_the_test_side_inclusion(tmp_path):
+    """The always-include set must never absorb a source-side unknown."""
+    repo = make_repo(tmp_path)
+    write(repo / "engines" / "dyn_src.py",
+          "import importlib" + _NL + "mod = importlib.import_module('core.base')"
+          + _NL + "V = 1" + _NL)
+    write(repo / "tests" / "test_dyn_only.py",
+          "import importlib" + _NL + "m = importlib.import_module('core.base')"
+          + _NL + _NL + _NL + "def test_o():" + _NL + "    assert m" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "both dynamic")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["engines/dyn_src.py"]))
+    assert rc == FULL
+    assert selected(out) == {}
+
+
+def test_search_path_mutation_alone_is_not_dynamic(tmp_path):
+    """Mutating sys.path and then importing a RESOLVABLE sibling is knowable.
+
+    Treating it as unknowable would mark most of the repository dynamic and destroy
+    the usefulness this refinement exists for.
+    """
+    repo = make_repo(tmp_path)
+    write(repo / "tests" / "test_pathmut.py",
+          "import sys, os" + _NL
+          + "sys.path.insert(0, os.path.dirname(__file__))" + _NL
+          + "from core.base import VALUE" + _NL + _NL + _NL
+          + "def test_m():" + _NL + "    assert VALUE == 1" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "path mutation")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert dynamic_inventory(out) == []
+    assert "tests/test_pathmut.py" not in selected(out)
+
+
+def test_search_path_mutation_with_an_unresolved_import_is_dynamic(tmp_path):
+    """Mutation that leaves an internal import unresolvable IS unknowable."""
+    repo = make_repo(tmp_path)
+    write(repo / "tests" / "test_pathmut_bad.py",
+          "import sys, os" + _NL
+          + "sys.path.insert(0, os.path.dirname(__file__))" + _NL
+          + "from core.nowhere import Z" + _NL + _NL + _NL
+          + "def test_m():" + _NL + "    assert Z" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "path mutation unresolved")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert dynamic_inventory(out) == ["tests/test_pathmut_bad.py"]
+    assert "search-path mutation" in dynamic_reasons(out)["tests/test_pathmut_bad.py"]
+
+
+@pytest.mark.parametrize("path", ["pytest.ini", ".gitignore", "requirements.txt"])
+def test_global_impact_still_selects_the_full_suite_with_dynamic_tests(tmp_path, path):
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest([path]))
+    assert rc == FULL
+    assert "global-impact" in escalations(out)[path]
+    assert selected(out) == {}
+
+
+def test_unresolved_internal_import_still_escalates_with_dynamic_tests(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    write(repo / "engines" / "bad2.py", "from core.does_not_exist import Z" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "bad import")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["engines/bad2.py"]))
+    assert rc == FULL
+
+
+def test_ambiguous_module_name_still_escalates_with_dynamic_tests(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    write(repo / "engines" / "shared.py", "A = 1" + _NL)
+    write(repo / "ui" / "shared.py", "B = 2" + _NL)
+    write(repo / "tests" / "test_ambig2.py",
+          "import shared" + _NL + _NL + _NL + "def test_a():" + _NL
+          + "    assert shared" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "ambiguous")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["tests/test_ambig2.py"]))
+    assert rc == FULL
+
+
+def test_unparseable_changed_source_still_escalates_with_dynamic_tests(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    write(repo / "engines" / "broken2.py", "def oops(:" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "broken")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["engines/broken2.py"]))
+    assert rc == FULL
+    assert "could not be parsed" in escalations(out)["engines/broken2.py"]
+
+
+def test_an_unparseable_test_stops_the_inventory_and_escalates(tmp_path):
+    """If one tracked test cannot be classified, the safety net is not complete."""
+    repo = make_repo(tmp_path)
+    write(repo / "tests" / "test_broken_test.py", "def test_x(:" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "broken test")
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["ui/panel.py"]))
+    assert rc == FULL
+    reason = escalations(out)["tests/test_broken_test.py"]
+    assert "dynamic-test inventory could not be completed" in reason
+    assert "could not be classified" in dynamic_summary(out)
+
+
+# ------------------------------------------- the inclusion cannot be turned off
+
+def test_policy_may_not_exclude_a_test_file(tmp_path):
+    doc = demo_policy()
+    doc["exclusions"] = doc["exclusions"] + ["tests/test_dyn_module.py"]
+    rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
+    assert rc == INVALID
+    assert "may not name a test file" in err
+
+
+def test_policy_may_not_exclude_a_test_pattern_under_a_test_root(tmp_path):
+    doc = demo_policy()
+    doc["exclusions"] = doc["exclusions"] + ["tests/test_*.py"]
+    rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
+    assert rc == INVALID
+    assert "may not name a test file" in err
+
+
+def test_shipped_policy_excludes_no_test_file():
+    for pattern in policy_doc()["exclusions"]:
+        assert not pattern.startswith("tests/"), pattern
+
+
+def test_a_manifest_cannot_remove_a_dynamic_test(tmp_path):
+    """A manifest describes changes; it has no field that drops a selected test."""
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    for doc in (manifest(["ui/panel.py"]),
+                manifest(["ui/panel.py"], notes=["please skip the dynamic test"]),
+                manifest(["ui/panel.py", "core/base.py"])):
+        rc, out, err = run("select-manifest", repo=repo, policy=pol, inp=doc)
+        assert rc == OK, err + out
+        assert "tests/test_dyn_module.py" in selected(out)
+    doc = manifest(["ui/panel.py"])
+    doc["exclude_tests"] = ["tests/test_dyn_module.py"]
+    rc, _out, err = run("select-manifest", repo=repo, policy=pol, inp=doc)
+    assert rc == INVALID and "unrecognized" in err
+
+
+def test_contract_locks_the_dynamic_rules_in_the_shipped_policy():
+    contract = policy_doc()["contract"]
+    assert contract["dynamic_test_safety_inclusion_enabled"] is True
+    assert contract["source_side_dynamic_ambiguity_escalates"] is True
+    assert contract["dynamic_tests_can_be_excluded"] is False
+    assert contract["policy_can_downgrade_an_escalation"] is False
+
+
+def test_flags_stay_true_on_a_dynamic_selection(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module", "star"])
+    pol = write_policy(tmp_path, demo_policy())
+    for doc in (manifest(["ui/panel.py"]), manifest(["docs/guide.md"]),
+                manifest(["pytest.ini"])):
+        rc, out, _err = run("select-manifest", repo=repo, policy=pol, inp=doc)
+        ids = {c["id"]: c["evidence"] for c in checks(out)}
+        assert "full_regression_required: true" in ids["K1"]
+        assert "collection_parity_required: true" in ids["K2"]
+        assert "still escalates" in ids["K7"]
+
+
+def test_documentation_only_gets_no_focused_target_even_with_dynamic_tests(tmp_path):
+    """A safety net is not a test plan for a change that has no focused target."""
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["docs/guide.md"]))
+    assert rc == OK, err + out
+    assert selected(out) == {}
+    assert proposed(out) == "(none)"
+    assert documentation(out) == ["docs/guide.md"]
+    assert dynamic_inventory(out) == ["tests/test_dyn_module.py"]
+    body = json.dumps(json.loads(out))
+    assert "NO focused pytest target" in body
+    assert "does not mean no testing is required" in body
+
+
+# --------------------------------------------------- safety of the inventory
+
+def test_hostile_dynamic_test_is_never_executed(tmp_path):
+    """Module-level code in a dynamic test must not run while it is inventoried."""
+    repo = make_repo(tmp_path)
+    marker = repo / "DYNAMIC_RAN.txt"
+    write(repo / "tests" / "test_hostile_dyn.py",
+          "import importlib, pathlib" + _NL
+          + "pathlib.Path(__file__).parent.parent.joinpath('DYNAMIC_RAN.txt')"
+          + ".write_text('executed')" + _NL
+          + "m = importlib.import_module('core.base')" + _NL + _NL + _NL
+          + "def test_h():" + _NL + "    assert m" + _NL)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "hostile dynamic")
+    pol = write_policy(tmp_path, demo_policy())
+    before = _tree_digest(repo)
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["ui/panel.py"]))
+    assert rc == OK, err + out
+    assert dynamic_inventory(out) == ["tests/test_hostile_dyn.py"]
+    assert not marker.exists(), "the selector executed a dynamic test"
+    assert not (repo / ".pytest_cache").exists()
+    assert _tree_digest(repo) == before
+
+
+def test_dynamic_selection_writes_nothing_and_leaves_no_residue(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module", "builtin", "star"])
+    pol = write_policy(tmp_path, demo_policy())
+    pol_before = pol.read_bytes()
+    before = _tree_digest(repo)
+    run("select-manifest", repo=repo, policy=pol, inp=manifest(["core/base.py"]))
+    run("select-worktree", repo=repo, policy=pol)
+    assert _tree_digest(repo) == before
+    assert pol.read_bytes() == pol_before
+    for name in (".pytest_cache", "__pycache__", "COLLECTED.txt"):
+        assert not (repo / name).exists(), name
+    assert not list(tmp_path.glob("*.lock"))
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_dynamic_evidence_carries_no_machine_path_or_secret(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, err = run("select-manifest", repo=repo, policy=pol,
+                       inp=manifest(["core/base.py"]))
+    blob = out + err
+    assert str(tmp_path) not in blob
+    assert "C:" + chr(92) + "Users" not in blob and "C:/Users" not in blob
+    for path in dynamic_inventory(out):
+        assert path.startswith("tests/") and ":" not in path
+
+
+def test_dynamic_inventory_helpers_open_and_run_nothing():
+    """The inventory reads an already-parsed graph; it opens and runs nothing."""
+    assert hasattr(ts, "dynamic_test_inventory")
+    tree = ast.parse(SELECTOR.read_text(encoding="utf-8"))
+    seen = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in (
+                "dynamic_test_inventory", "dynamic_inclusion_reason",
+                "_mutates_search_path", "_dotted_target"):
+            seen.add(node.name)
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                    assert call.func.id not in ("open", "compile", "eval", "exec",
+                                                "__import__"), node.name
+    assert seen == {"dynamic_test_inventory", "dynamic_inclusion_reason",
+                    "_mutates_search_path", "_dotted_target"}
+
+
+def test_dynamic_evidence_hardens_no_count_into_a_constant(tmp_path):
+    repo = make_dynamic_repo(tmp_path, ["module"])
+    pol = write_policy(tmp_path, demo_policy())
+    rc, out, _err = run("select-manifest", repo=repo, policy=pol,
+                        inp=manifest(["core/base.py"]))
+    body = json.dumps(json.loads(out))
+    assert "expected count" not in body
+    assert "must collect" not in body
