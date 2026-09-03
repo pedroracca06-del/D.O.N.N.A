@@ -3097,11 +3097,35 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
   if (dashDaily) {
     if (!recentDays.length) dashDaily.innerHTML = '<div class="jn-none">No daily results in this book.</div>';
     else {
-      const maxAbs = Math.max(1, ...recentDays.map(d => Math.abs(daily[d])));
-      dashDaily.innerHTML = recentDays.map(d => {
-        const p = daily[d], cls = _jnPnlClass(p), h = Math.max(3, Math.abs(p) / maxAbs * 88);
-        return '<div class="jn-dd-col"><span class="jn-dd-val ' + cls + '">' + _jnEsc(_jnMoney(p)) + '</span><i class="jn-dd-bar ' + cls + '" style="--h:' + h.toFixed(1) + '%"></i><span class="jn-dd-date">' + d.slice(5).replace('-', '/') + '</span></div>';
+      const vals = recentDays.map(d => daily[d]);
+      const maxPos = Math.max(0, ...vals);
+      const maxNeg = Math.max(0, ...vals.map(v => -v));
+      const left = 58, right = 682, top = 25, bottom = 190, plotH = bottom - top;
+      const zeroY = maxPos && maxNeg ? top + (maxPos / (maxPos + maxNeg)) * plotH : (maxPos ? bottom : top);
+      const trackW = Math.min(right - left, recentDays.length * 94);
+      const startX = (left + right - trackW) / 2;
+      const step = trackW / recentDays.length;
+      const barW = Math.min(40, step * .48);
+      const bars = recentDays.map((d, i) => {
+        const p = daily[d], cls = _jnPnlClass(p), x = startX + step * i + (step - barW) / 2;
+        const flat = Math.abs(p) < .005;
+        const h = flat ? 3 : (p > 0 ? (p / maxPos) * (zeroY - top) : (-p / maxNeg) * (bottom - zeroY));
+        const y = flat ? zeroY - 1.5 : (p > 0 ? zeroY - h : zeroY);
+        const labelY = p > 0 ? Math.max(14, y - 7) : (p < 0 ? Math.min(207, y + h + 14) : zeroY - 7);
+        const fill = cls === 'up' ? 'var(--green)' : (cls === 'down' ? 'var(--red)' : 'var(--gold)');
+        return '<g class="jn-dash-bar ' + cls + '"><rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + Math.max(3, h).toFixed(1) + '" rx="3" fill="' + fill + '"><title>' + _jnEsc(d + ' · ' + _jnMoney(p)) + '</title></rect>' +
+          '<text class="jn-dash-val ' + cls + '" x="' + (x + barW / 2).toFixed(1) + '" y="' + labelY.toFixed(1) + '">' + _jnEsc(_jnMoney(p)) + '</text>' +
+          '<text class="jn-dash-date" x="' + (x + barW / 2).toFixed(1) + '" y="218">' + _jnEsc(d.slice(5).replace('-', '/')) + '</text></g>';
       }).join('');
+      const topLabel = maxPos ? _jnMoneyAxis(maxPos) : '$0';
+      const bottomLabel = maxNeg ? _jnMoneyAxis(-maxNeg) : '$0';
+      dashDaily.innerHTML = '<svg class="jn-dash-chart" viewBox="0 0 740 228" role="img" aria-label="Daily profit and loss chart for the latest ' + recentDays.length + ' sessions">' +
+        '<line class="jn-dash-grid" x1="' + left + '" y1="' + top + '" x2="' + right + '" y2="' + top + '"></line>' +
+        '<line class="jn-dash-grid" x1="' + left + '" y1="' + ((top + bottom) / 2).toFixed(1) + '" x2="' + right + '" y2="' + ((top + bottom) / 2).toFixed(1) + '"></line>' +
+        '<line class="jn-dash-grid" x1="' + left + '" y1="' + bottom + '" x2="' + right + '" y2="' + bottom + '"></line>' +
+        '<line class="jn-dash-zero" x1="' + left + '" y1="' + zeroY.toFixed(1) + '" x2="' + right + '" y2="' + zeroY.toFixed(1) + '"></line>' +
+        '<text class="jn-dash-axis" x="4" y="' + (top + 4) + '">' + _jnEsc(topLabel) + '</text>' +
+        '<text class="jn-dash-axis" x="4" y="' + Math.min(205, bottom + 4) + '">' + _jnEsc(bottomLabel) + '</text>' + bars + '</svg>';
     }
   }
 

@@ -1726,11 +1726,15 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .jn-equity svg{display:block;width:100%;height:220px;overflow:visible}
 .jn-eq-grid{stroke:var(--line2);stroke-width:1}.jn-eq-line{fill:none;stroke:var(--green);stroke-width:2.25}.jn-eq-area{fill:rgba(60,196,140,.08)}.jn-eq-dot{fill:var(--green)}
 .jn-eq-axis{fill:var(--muted2);font-family:'Space Mono',monospace;font-size:11px}
-.jn-dash-daily{min-height:226px;display:flex;align-items:flex-end;gap:8px;padding:24px 2px 4px;border-bottom:1px solid var(--line2)}
-.jn-dd-col{height:190px;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:0}
-.jn-dd-val{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:5px;white-space:nowrap}
-.jn-dd-bar{width:62%;max-width:34px;height:var(--h);min-height:3px;background:var(--green)}.jn-dd-bar.down{background:var(--red)}.jn-dd-bar.flat{background:var(--gold)}
-.jn-dd-date{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:6px}
+.jn-dash-daily{min-height:226px;margin-top:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.jn-dash-chart{display:block;width:100%;height:228px;overflow:visible}
+.jn-dash-grid{stroke:var(--line2);stroke-width:1;opacity:.68}
+.jn-dash-zero{stroke:var(--muted2);stroke-width:1.25}
+.jn-dash-axis,.jn-dash-date,.jn-dash-val{font-family:'Space Mono',monospace;font-size:11px;font-variant-numeric:tabular-nums}
+.jn-dash-axis,.jn-dash-date{fill:var(--muted2)}
+.jn-dash-date{text-anchor:middle}
+.jn-dash-val{text-anchor:middle;font-weight:700;fill:var(--muted)}
+.jn-dash-val.up{fill:var(--green)}.jn-dash-val.down{fill:var(--red)}.jn-dash-val.flat{fill:var(--gold)}
 .jn-calendar-summary{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line);margin:0 -16px}
 .jn-cal-stat{padding:11px 12px;text-align:center;border-left:1px solid var(--line2)}.jn-cal-stat:first-child{border-left:0}
 .jn-cal-stat b{display:block;font-family:'Space Mono',monospace;font-size:15px}.jn-cal-stat span{font-size:11px;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px}
@@ -1781,7 +1785,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
   .jn-workspace-head{align-items:flex-start;flex-direction:column}
   .jn-calendar-summary{min-width:620px}
   .jn-equity svg{height:190px}
-  .jn-dash-daily{overflow-x:auto;justify-content:flex-start}.jn-dd-col{min-width:48px}
+  .jn-dash-daily{overflow-x:auto;justify-content:flex-start}.jn-dash-chart{min-width:620px}
   /* The approved mobile reference has no full-width action band. Log Trade
      becomes a compact action beside the title; the connection/version meta
      drops to its own line beneath. Touch target stays at 44px. */

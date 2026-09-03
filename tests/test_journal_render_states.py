@@ -620,6 +620,20 @@ def test_daily_colours_follow_the_sign():
     assert 'jn-dbar flat' in html
 
 
+def test_dashboard_daily_pnl_is_a_compact_diverging_chart():
+    trades = [_trade(order_id='w', trade_date='2026-08-31', realized_pnl=617.50, outcome='WIN'),
+              _trade(order_id='b', trade_date='2026-09-01', realized_pnl=1289.00, outcome='WIN'),
+              _trade(order_id='l', trade_date='2026-09-02', realized_pnl=-518.20, outcome='LOSS'),
+              _trade(order_id='f', trade_date='2026-09-03', realized_pnl=0.0, outcome='BREAKEVEN')]
+    out = _run({'payload': _payload(trades)})
+    html = out['jnDashDaily']['html']
+    assert 'class="jn-dash-chart"' in html
+    assert 'class="jn-dash-zero"' in html
+    assert html.count('class="jn-dash-bar ') == 4
+    assert '+$1,289.00' in html
+    assert '-$518.20' in html
+
+
 def test_daily_bar_heights_are_proportional_to_the_largest_absolute_result():
     trades = [_trade(order_id='a', trade_date='2026-06-22', realized_pnl=400.0),
               _trade(order_id='b', trade_date='2026-06-23', realized_pnl=100.0)]
