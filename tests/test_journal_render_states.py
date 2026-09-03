@@ -634,6 +634,16 @@ def test_dashboard_daily_pnl_is_a_compact_diverging_chart():
     assert '-$518.20' in html
 
 
+def test_single_trade_equity_curve_spans_the_full_plot():
+    out = _run({'payload': _payload([
+        _trade(order_id='only', trade_date='2026-09-03', realized_pnl=0.0, outcome='BREAKEVEN')
+    ])})
+    html = out['jnEquity']['html']
+    assert '48.0,109.0 680.0,109.0' in html
+    assert html.count('class="jn-eq-dot"') == 2
+    assert 'Starting balance' in html
+
+
 def test_daily_bar_heights_are_proportional_to_the_largest_absolute_result():
     trades = [_trade(order_id='a', trade_date='2026-06-22', realized_pnl=400.0),
               _trade(order_id='b', trade_date='2026-06-23', realized_pnl=100.0)]

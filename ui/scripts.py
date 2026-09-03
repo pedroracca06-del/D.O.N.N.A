@@ -3075,14 +3075,20 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
     if (!days.length) equity.innerHTML = '<div class="jn-none">No dated closed trades in this book.</div>';
     else {
       let running = 0;
-      const values = days.map(d => ({date:d, value:(running += daily[d])}));
+      // Anchor every equity curve at a genuine zero starting balance. A
+      // one-session population otherwise collapses to a lone midpoint dot
+      // and leaves the entire plotting surface visually unused.
+      const values = [{date:'Starting balance', value:0}].concat(
+        days.map(d => ({date:d, value:(running += daily[d])})));
       const min = Math.min(0, ...values.map(v => v.value));
       const max = Math.max(0, ...values.map(v => v.value));
+      const flatRange = Math.abs(max - min) < .005;
       const span = Math.max(1, max - min);
-      const x = i => values.length === 1 ? 360 : 48 + i * (632 / (values.length - 1));
-      const y = v => 184 - ((v - min) / span) * 150;
+      const x = i => 48 + i * (632 / (values.length - 1));
+      const y = v => flatRange ? 109 : 184 - ((v - min) / span) * 150;
       const points = values.map((v, i) => x(i).toFixed(1) + ',' + y(v.value).toFixed(1)).join(' ');
-      const area = '48,184 ' + points + ' ' + x(values.length - 1).toFixed(1) + ',184';
+      const zeroY = y(0).toFixed(1);
+      const area = '48,' + zeroY + ' ' + points + ' ' + x(values.length - 1).toFixed(1) + ',' + zeroY;
       equity.innerHTML = '<svg viewBox="0 0 700 205" role="img" aria-label="Cumulative P and L from ' + _jnEsc(days[0]) + ' through ' + _jnEsc(days[days.length-1]) + '">' +
         '<line class="jn-eq-grid" x1="48" y1="34" x2="680" y2="34"></line><line class="jn-eq-grid" x1="48" y1="109" x2="680" y2="109"></line><line class="jn-eq-grid" x1="48" y1="184" x2="680" y2="184"></line>' +
         '<text class="jn-eq-axis" x="2" y="38">' + _jnEsc(_jnMoney(max)) + '</text><text class="jn-eq-axis" x="18" y="188">' + _jnEsc(_jnMoney(min)) + '</text>' +
