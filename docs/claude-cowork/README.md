@@ -147,10 +147,27 @@ and one structured verdict back. **It is transport only.**
   detects corruption or partial rewriting. It is **not** tamper-proof against
   someone who can rewrite the mailbox and archive together, and the policy says so.
 
-**Still to do, none of it authorized yet:** the one-shot Codex runner, a
-controlled first live review, and initializing the real mailbox at
-`${HOME}/.claude/nova-relay/`. **Automatic Claude/Codex communication is not
-complete.**
+### The one-shot runner
+
+`tools/cowork/codex_review_runner.py` is the only component that may start a model,
+and it may do so **exactly once** per pending request. Three operations
+(`validate-policy`, `inspect`, `review-once`), no aliases. It accepts no prompt, no
+model, no executable path, no output destination, no retry count, and no sandbox or
+approval override — all fixed by `codex_runner_policy.json`.
+
+The invocation is fixed: `codex exec -C <repo> -s read-only -a never
+-m gpt-5.6-luna -c model_reasoning_effort="low" --ephemeral --ignore-user-config
+--output-schema <schema> -o <private temp> -`, with the prompt on **stdin** (the
+`-` form, proven from local `codex exec --help` on 0.153.0). Only ten allowlisted
+environment names reach the child; planted API, broker, Anthropic, and trading
+variables are proven excluded. **The attempt is consumed the moment the child
+starts** — success, failure, or timeout — so there is no retry and no usage
+runaway.
+
+**Still to do, and not authorized:** a controlled first live review, and
+initializing the real mailbox at `${HOME}/.claude/nova-relay/`. **No live review has
+ever been performed, and automatic Claude/Codex communication is not
+operational.**
 
 See [CODEX_RELAY_CONTRACT.md](CODEX_RELAY_CONTRACT.md).
 

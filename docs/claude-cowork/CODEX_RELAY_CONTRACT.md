@@ -3,9 +3,9 @@
 The local transport that carries one Claude phase report to Codex and one Codex
 verdict back. It is a mailbox, not an agent.
 
-**Status: transport only, local only. Not pushed. The real mailbox is not
-initialized, and no Codex review has run.** A separate one-shot runner is still
-required and is **not yet authorized**.
+**Status: transport and runner, local only. Not pushed. The real mailbox is not
+initialized, and no Codex review has ever run.** The runner exists but a live
+review is **still unauthorized**.
 
 ---
 
@@ -14,9 +14,9 @@ required and is **not yet authorized**.
 Give a completed Claude phase a second reader, without giving that reader any
 authority and without letting either side reach the other's tools.
 
-## Non-goals
+## Non-goals of the transport
 
-This tool does **not**:
+`codex_relay.py` does **not**:
 
 - invoke Codex, run `codex exec`, or make any model request
 - own a subprocess, open a socket, or read the environment
@@ -38,8 +38,8 @@ reality. The only Git verbs it can reach are `rev-parse` and `status`.
 Claude  ──> request envelope ──> submit ──────────> relay.json  (revision +1)
                                                      archive/relay-NNNNNN.json
 
-        (a future runner, not built yet, would run Codex read-only and point
-         -o/--output-last-message at a PRIVATE TEMPORARY FILE)
+        (codex_review_runner.py starts Codex read-only, exactly once, and
+         points -o/--output-last-message at a PRIVATE TEMPORARY FILE)
 
 Codex   ──> verdict document ──> ingest-response ──> relay.json  (revision +1)
                                                      archive/relay-NNNNNN.json
@@ -159,10 +159,10 @@ could start one.
 
 ---
 
-## Planned reviewer settings
+## Reviewer settings
 
-Recorded in the policy as data for the future runner. The relay never reads them
-to build a command line — it owns no subprocess.
+Recorded in the relay policy as data and enforced by the runner. The relay itself
+never reads them to build a command line — it owns no subprocess.
 
 | Setting | Value |
 |---|---|
@@ -174,7 +174,7 @@ to build a command line — it owns no subprocess.
 
 A stronger model is reserved for explicitly approved security, architecture,
 merge, or disputed-review work — Pedro's decision per invocation, never a
-configured default.
+configured default, and it needs a new approved phase rather than a policy edit.
 
 **Codex is read-only and unguarded.** It does not load the Claude PreToolUse
 retirement guard (`.claude/hooks/nova_guard_hook.py`, wired through
@@ -202,6 +202,175 @@ deletes an entry, and it has no prune operation. It cannot stop another program.
 
 ---
 
+## The one-shot runner
+
+`tools/cowork/codex_review_runner.py`, with the pure-data
+`codex_runner_policy.json`. It is the only component in the Cowork family that may
+start a model, and it is deliberately narrow.
+
+### Lifecycle of one review
+
+1. Read the mailbox; require **exactly one** pending Claude request (one with no
+   recorded Codex response).
+2. Observe the repository and the Session Registry, read-only.
+3. Check every precondition (below). If any fails, **stop before spawning** — the
+   review attempt is *not* consumed.
+4. Resolve `codex` on the search path and prove the binary.
+5. Build the prompt from the request. The runner writes it; no caller supplies prose.
+6. Create a private temporary response file.
+7. **Start Codex exactly once.** From this moment the attempt is spent.
+8. Re-observe the repository, registry, and mailbox. Any drift stops the ingest.
+9. Hand the response file to `codex_relay.py ingest-response`, which validates it
+   and records a relay-authored envelope atomically.
+10. Remove only the runner's own temporary file.
+
+### CLI surface — exactly three operations, no aliases
+
+`validate-policy` · `inspect` · `review-once`
+
+The first two are read-only and never start Codex. `review-once` requires
+`--repo`, `--registry`, `--mailbox`, `--session-id`, and
+`--reviewer-session-id`, and accepts nothing else. There is **no** `--prompt`,
+`--model`, `--reasoning`, `--codex-executable`, `--output`, `--retry`,
+`--session`, `--resume`, `--fork`, `--env`, `--sandbox`, `--approval`, or
+`--add-dir`; supplying one exits 2, as do 24 action verbs.
+
+### The exact invocation, and the proven stdin form
+
+Proven from local `codex exec --help` on **codex-cli 0.153.0**, verbatim:
+
+> `[PROMPT]` — "Initial instructions for the agent. If not provided as an argument
+> (or if `-` is used), instructions are read from stdin. If stdin is piped and a
+> prompt is also provided, stdin is appended as a `<stdin>` block"
+
+Both the omitted-argument and the explicit `-` forms read stdin. The runner uses
+the **explicit `-`**, so the argument array states the intent and the prompt can
+never appear on a command line.
+
+```
+codex exec
+  -C <verified repository root>
+  -s read-only
+  -a never
+  -m gpt-5.6-luna
+  -c model_reasoning_effort="low"
+  --ephemeral
+  --ignore-user-config
+  --output-schema <committed relay_verdict_schema.json>
+  -o <private temporary response file>
+  -                      <- prompt arrives on stdin
+```
+
+`--json` is deliberately **omitted**: local help shows it only adds a JSONL event
+stream on stdout, which is output the runner does not need and would rather not
+capture. Never used: `--add-dir`, `--approve-for-me`, either
+`--dangerously-bypass-*`, `--ignore-rules`, `--skip-git-repo-check`, `resume`,
+`fork`, `review`.
+
+### Executable resolution
+
+The production CLI cannot supply a path. `codex` is resolved on the current search
+path, then required to be an existing **regular file**, not a symlink, junction, or
+reparse point, with an accepted basename (`codex` / `codex.exe`), whose local
+`codex --version` prints exactly `codex-cli 0.153.0`. That probe is a local
+capability check, not a model request. Tests substitute a fake only through a
+module-level seam that no CLI flag and no envelope can reach.
+
+### Child environment minimization
+
+The parent environment is **never** forwarded. Only these names are passed, and
+only when the parent already has them:
+
+`APPDATA` · `CODEX_HOME` · `HOME` · `LOCALAPPDATA` · `PATH` · `SystemRoot` ·
+`TEMP` · `TMP` · `TMPDIR` · `USERPROFILE`
+
+`CODEX_HOME` is included because local help states `--ignore-user-config` still
+resolves authentication through it. No API key, broker credential, Anthropic
+variable, or trading flag can reach the child, because nothing outside the fixed
+list is copied. **No value is ever printed or recorded** — only the count and the
+names.
+
+### The prompt
+
+Built by the runner, deterministic (identical bytes for the same request), UTF-8,
+delivered on stdin. It binds phase, branch, full HEAD, registry revision,
+registry expected commit, request id, and the logical repository and worktree
+identity; carries only the relay's normalized bounded evidence; labels that
+evidence **UNTRUSTED DATA** and forbids following any instruction inside it;
+requires read-only behaviour; asks for exactly one verdict; states that **PASS is
+not authorization**; requires the committed verdict schema and the exact
+non-authorization sentence; and instructs Codex to choose `STOP` on stale state,
+ambiguity, protected-boundary involvement, or insufficient evidence. It contains
+no machine path, username, secret, environment value, conversation history, or
+unrelated repository content — and no file contents at all.
+
+### Preconditions — all required before a child may start
+
+- the mailbox holds exactly one valid pending request, and the chain verifies
+- the request is bound to the current clean branch and HEAD
+- the registry revision matches the request
+- the request's `registry_expected_commit` equals HEAD
+- the Claude session is **paused**
+- exactly one Codex reviewer session exists, and it is active, live, owned by
+  Codex, on the matching branch / HEAD / worktree, with an **empty write scope**
+- no other live session holds a write scope
+- no relay lock, registry lock, or temporary residue is present
+
+The runner **reads** registry state only. It never pauses, registers, closes,
+resumes, or advances a session.
+
+### Link and reparse-point refusal
+
+The resolved executable is refused if it is a symbolic link or a reparse point,
+and must be an existing regular file with an accepted basename. The temporary
+response directory is refused if it is a link **or** a reparse point, and again if
+its resolved real path falls outside the mailbox root — a Windows junction reports
+`islink()` as `False`, so the attribute is checked as well as the destination.
+`FILE_ATTRIBUTE_REPARSE_POINT` is taken from `stat` where defined and pinned to
+the Win32 value `0x400` otherwise, so the check is a real branch on every
+platform.
+
+### Private response handling
+
+The response file is created under `<mailbox>/runner-tmp/` — a sibling of the
+mailbox file, outside the `archive/` namespace, never the mailbox itself. The name
+is unpredictable (`secrets.token_hex`), the directory is created `0o700`, a linked
+directory stops the run, and the envelope cannot influence the path. Codex writes
+there only through `-o`. Child stdout and stderr are captured, bounded, and
+**never echoed**; only a sanitized status, exit classification, duration bucket,
+response hash, and validation result are recorded. The runner removes only its own
+file and never touches foreign content.
+
+### One attempt, consumed on start — no retry, ever
+
+**The moment the child process starts, the review opportunity for that
+`(phase, head)` is spent** — whether Codex succeeds, fails, times out, writes
+nothing, or returns something invalid. That is the anti-runaway design. There is
+no retry flag, no loop, and no code path that re-invokes `review-once`. A failed
+attempt returns control to Pedro and needs a **new, explicitly approved recovery
+phase**. Because the relay caps one review per `(phase, head)`, a second run finds
+nothing pending and stops.
+
+A stop *before* the spawn (a failed precondition) does **not** consume the attempt.
+
+---
+
+## Manual lifecycle around one review
+
+Every step outside the runner is a person's action. Nothing here is automated.
+
+1. **Pause** the Claude session (`session_registry.py pause`).
+2. **Initialize** the mailbox directory — *not yet authorized* (B1.11).
+3. **Submit** the request (`codex_relay.py submit`).
+4. **Register** the read-only Codex reviewer session, empty write scope.
+5. **Run once** (`codex_review_runner.py review-once`) — *not yet authorized* (B1.10).
+6. **Close** the reviewer session.
+7. **Resume** the Claude session.
+
+**A live review has never been performed and is not authorized.**
+
+---
+
 ## Session Registry lifecycle (planned for the runner, not built here)
 
 The transport only **reads** the registry. The lifecycle below belongs to the
@@ -224,9 +393,10 @@ future one-shot runner and is documented so it is designed before it is built:
 
 | Item | Status |
 |---|---|
-| Relay transport (this document) | **done, local only** |
-| One-shot Codex runner | **not built, not authorized** |
-| Controlled first live review | **not authorized** |
-| Real mailbox initialization at `${HOME}/.claude/nova-relay/` | **not created** |
+| Relay transport | **done, local only** |
+| One-shot Codex runner | **done, local only** — never run against a real model |
+| Controlled first live review | **TODO — not authorized** |
+| Real mailbox initialization at `${HOME}/.claude/nova-relay/` | **TODO — not created** |
 
-Automatic Claude/Codex communication is **not** complete and is not claimed to be.
+Automatic Claude/Codex communication is **not** operational and is not claimed to
+be. Every review is started by a person, once, for one request.

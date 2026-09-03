@@ -48,7 +48,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.6 | **Change Classifier** — determine the minimum approval class a change requires | Claude | AR | none | B1.3 | 216 classifier tests; 10 planted demonstrations; every class, every mode, most-restrictive aggregation, semantic escalation | none | **DONE (tool) — local only** |
 | B1.7 | **Test Selector** — changed paths → focused test list, advisory only | Claude | AR | none | P0.9, B1.1, B1.2, B1.3, B1.4 (optional collision check), B1.6 | 201 selector tests (167 + 34 from the Phase 3W refinement); self / direct / transitive / relative / conftest-subtree / policy / dynamic-safety mapping, deletion, rename, case-only rename, escalation on unmapped-wildcard-unresolved-syntax-binary and on a changed **source** with unresolved dynamic imports, a recomputed proof that no statically discovered test importing a changed module is omitted, and five real-tree demonstrations showing an ordinary source change now returns a focused subset | none | **DONE (tool) — local only** |
 | B1.8 | **Codex relay transport** — carry one report and one verdict, locally | Claude | AR | machine-local mailbox outside every repository (NOT created) | B1.1, B1.2, B1.3, B1.4 (read-only) | Relay test suite; seven fixed operations and 25 refused action verbs; canonical serialization and recomputed evidence digest; all four verdicts; planted false-PASS, prompt-injection, shell-payload, command-smuggling, traversal, machine-path, credential, replay, chain-corruption, stale-HEAD, dirty-tree, foreign-lock, archive-collision and simulated-replace-failure demonstrations | none — it approves nothing | **DONE (transport tool) — local only** |
-| B1.9 | **One-shot Codex runner** — invoke Codex read-only, once, per completed phase | Claude | AAM | reads the repository read-only; writes one private temporary file | B1.8 | Not started | **Pedro, per invocation** | **TODO — not built, not authorized** |
+| B1.9 | **One-shot Codex runner** — invoke Codex read-only, once, per completed phase | Claude | AAM | reads the repository read-only; writes one private temporary file | B1.8 | Runner test suite against a fake Codex: fixed three-operation CLI, exact argument array, proven stdin prompt, deterministic prompt bytes, one spawn only, no retry after success/non-zero/timeout/invalid-JSON/schema-failure/missing-output/drift, attempt consumed on start, allowlisted child environment with planted secrets excluded, stdout/stderr canaries contained, executable name/type/version/symlink/reparse refused, a real Windows junction escape refused, every precondition demonstrated, **zero skips** | **Pedro, per invocation** | **DONE (tool) — local only; never run against a real model** |
 | B1.10 | **Controlled first live review** — one billed Codex review | Pedro | AM | one model request | B1.9 | Not started | **Pedro, every time** | **TODO — not authorized** |
 | B1.11 | **Real mailbox initialization** at `${HOME}/.claude/nova-relay/` | Claude | AAM | creates a directory outside every repository | B1.8 | Not started | **Named approval required** | **TODO — not created** |
 
@@ -754,6 +754,75 @@ equality. And the command-key blocklist matched `path` and `allow`, which are
 legitimate structural names in `diff_numstat` and `permission_state`; both were
 removed from the blocklist, with path *values* still validated as
 repository-relative.
+
+---
+
+### B1.9 One-shot Codex review runner — implemented (tool; local only)
+
+`tools/cowork/codex_review_runner.py` with the pure-data
+`codex_runner_policy.json`, tested by `tests/test_cowork_codex_review_runner.py`.
+Full contract: [CODEX_RELAY_CONTRACT.md](CODEX_RELAY_CONTRACT.md).
+
+**No live review has ever run.** Every test uses a generated fake Codex executable
+under `tmp_path`. B1.10 (a controlled first live review) and B1.11 (real mailbox
+initialization) remain TODO and unauthorized, and automatic Claude/Codex
+communication is **not** operational.
+
+**The stdin form was proven locally, not assumed.** `codex exec --help` on
+codex-cli 0.153.0 states that the PROMPT argument reads from stdin when it is
+omitted *or* when `-` is used. The runner uses the explicit `-` so the argument
+array shows the intent and the prompt never touches a command line.
+
+**Fixed invocation.** `codex exec -C <repo> -s read-only -a never -m gpt-5.6-luna
+-c model_reasoning_effort="low" --ephemeral --ignore-user-config --output-schema
+<committed schema> -o <private temp> -`. `--json` is omitted on purpose: local help
+shows it only adds a stdout event stream the runner does not need. `--add-dir`,
+`--approve-for-me`, both `--dangerously-bypass-*`, `--ignore-rules`,
+`--skip-git-repo-check`, `resume`, `fork`, and `review` are never used, and a
+policy naming any of them is refused.
+
+**One attempt, consumed on start.** The review opportunity for a `(phase, head)`
+is spent the moment the child process starts — success, failure, timeout, or
+garbage alike. There is no retry flag, no loop, and no path that re-invokes
+`review-once`; a static test proves the string never appears in a constructed
+argument list. A precondition failure stops *before* the spawn and does not consume
+the attempt.
+
+**Environment minimization.** Ten allowlisted names, forwarded only when already
+present. Tests plant `ANTHROPIC_API_KEY`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`,
+`OPENAI_API_KEY`, `GITHUB_TOKEN`, `NOVA_AUTO_EXECUTE`, and
+`NOVA_TRADING_SUBSYSTEM_ENABLED`, and assert the fake child's observed environment
+contains none of them. No value is ever printed.
+
+**Registry is read, never written.** A static test asserts the only
+`session_registry` calls are `read_registry` and `classify`. The runner never
+pauses, registers, closes, resumes, or advances a session — those stay manual.
+
+**Ingest goes through the transport.** A valid response is recorded by calling
+`codex_relay.main(["ingest-response", ...])`. The runner never opens the mailbox
+for writing; a static test bounds every `codex_relay` call it makes.
+
+**Zero skips, including the link branches.** The suite adds no permanent skip and
+does not move the repository's skipped baseline. This machine grants junction
+creation but refuses symbolic links without elevation, so the link branches are
+covered three ways rather than skipped: a **real Windows junction** pointing
+outside the mailbox root is created with `mklink /J` and refused; the
+symlink branches are driven through the one path primitive they depend on; and
+the file-shaped reparse point -- which a real junction cannot represent, since
+junctions are directories and `S_ISREG` rejects them first -- is supplied as
+controlled stat metadata. To make that last branch reachable at all,
+`FILE_ATTRIBUTE_REPARSE_POINT` is now taken from `stat` when defined and pinned
+to the Win32 value `0x400` otherwise, and the temporary directory refuses a
+reparse point **by name** as well as by destination. Both are strengthenings; no
+production check was relaxed to remove a skip.
+
+**Windows test seam, disclosed.** Windows cannot execute an extension-less file, so
+a portable fake Codex must run through an interpreter. Two module-level seams
+(`_TEST_EXECUTABLE_OVERRIDE`, `_TEST_SPAWN_PREFIX`) exist for that. They are
+`None` in production, no CLI option sets either, no envelope can reach them, an
+autouse fixture asserts they are `None` before and after every test, and the spawn
+seam *substitutes the executable* while leaving the production argument tail intact
+— so the argument-contract tests assert on the real array.
 
 ---
 
