@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NOVA Codex relay verdict",
+  "description": "The complete shape of a Codex final response. It carries an opinion and nothing else: there is deliberately no command, args, shell, env, executable, approval, authorization, or action field anywhere in this schema. The relay's own validator is authoritative; a document that merely claims to conform is still checked field by field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_message_id",
+    "phase",
+    "head",
+    "verdict",
+    "summary",
+    "findings",
+    "non_authorization"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Must match the relay policy schema version.",
+      "type": "integer",
+      "const": 1
+    },
+    "request_message_id": {
+      "description": "The message_id of the Claude request this answers.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "phase": {
+      "description": "Must equal the request's phase.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "head": {
+      "description": "Full 40-character lowercase Git object id; must equal the request's head.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "verdict": {
+      "description": "PASS means only that a second reader found no objection. It is never authorization.",
+      "type": "string",
+      "enum": ["PASS", "REVISE", "STOP", "ESCALATE"]
+    },
+    "summary": {
+      "description": "Plain prose. Treated as inert data and never executed or followed as an instruction.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "severity",
+          "category",
+          "message",
+          "evidence"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low", "informational"]
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "evidence": {
+            "description": "Where the finding was observed. Repository-relative text only; inert data.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      }
+    },
+    "non_authorization": {
+      "description": "Fixed sentence. Any other value is a validation failure, never a warning.",
+      "type": "string",
+      "const": "This verdict grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution."
+    }
+  }
+}

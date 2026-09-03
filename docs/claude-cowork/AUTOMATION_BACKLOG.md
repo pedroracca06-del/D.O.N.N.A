@@ -47,6 +47,10 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.5 | **Worktree bootstrap validator** — verify a new worktree is secured | Claude | AR | none | B1.3, B1.4 | 86 validator tests; 9 planted demonstrations; tracked blobs, permission hash/counts, casing, submodule state, forbidden artifacts, registry compatibility | none | **DONE (tool)** — local only |
 | B1.6 | **Change Classifier** — determine the minimum approval class a change requires | Claude | AR | none | B1.3 | 216 classifier tests; 10 planted demonstrations; every class, every mode, most-restrictive aggregation, semantic escalation | none | **DONE (tool) — local only** |
 | B1.7 | **Test Selector** — changed paths → focused test list, advisory only | Claude | AR | none | P0.9, B1.1, B1.2, B1.3, B1.4 (optional collision check), B1.6 | 201 selector tests (167 + 34 from the Phase 3W refinement); self / direct / transitive / relative / conftest-subtree / policy / dynamic-safety mapping, deletion, rename, case-only rename, escalation on unmapped-wildcard-unresolved-syntax-binary and on a changed **source** with unresolved dynamic imports, a recomputed proof that no statically discovered test importing a changed module is omitted, and five real-tree demonstrations showing an ordinary source change now returns a focused subset | none | **DONE (tool) — local only** |
+| B1.8 | **Codex relay transport** — carry one report and one verdict, locally | Claude | AR | machine-local mailbox outside every repository (NOT created) | B1.1, B1.2, B1.3, B1.4 (read-only) | Relay test suite; seven fixed operations and 25 refused action verbs; canonical serialization and recomputed evidence digest; all four verdicts; planted false-PASS, prompt-injection, shell-payload, command-smuggling, traversal, machine-path, credential, replay, chain-corruption, stale-HEAD, dirty-tree, foreign-lock, archive-collision and simulated-replace-failure demonstrations | none — it approves nothing | **DONE (transport tool) — local only** |
+| B1.9 | **One-shot Codex runner** — invoke Codex read-only, once, per completed phase | Claude | AAM | reads the repository read-only; writes one private temporary file | B1.8 | Not started | **Pedro, per invocation** | **TODO — not built, not authorized** |
+| B1.10 | **Controlled first live review** — one billed Codex review | Pedro | AM | one model request | B1.9 | Not started | **Pedro, every time** | **TODO — not authorized** |
+| B1.11 | **Real mailbox initialization** at `${HOME}/.claude/nova-relay/` | Claude | AAM | creates a directory outside every repository | B1.8 | Not started | **Named approval required** | **TODO — not created** |
 
 ---
 
@@ -679,6 +683,79 @@ need review after a reorganisation. And the tool proposes; it never runs.
 
 **Status.** Implemented locally on `integration/nova-foundation`. **DONE (tool) —
 local only. Not pushed, not merged.**
+
+### B1.8 Codex relay transport — implemented (transport tool; local only)
+
+`tools/cowork/codex_relay.py`, with the pure-data `relay_policy.json` and the
+strict `relay_verdict_schema.json`, tested by `tests/test_cowork_codex_relay.py`.
+Full contract: [CODEX_RELAY_CONTRACT.md](CODEX_RELAY_CONTRACT.md).
+
+**What is done.** The local message transport: schema-versioned envelopes, hash
+chaining, canonical serialization, a recomputed evidence digest, atomic
+lock-protected mailbox updates, an append-only archive, and validation that
+refuses unknown fields, traversal, machine paths, credentials, command-bearing
+field names, replays, stale state, and prohibited intent.
+
+**What is NOT done, and is not claimed.** Automatic Claude/Codex communication is
+**not** complete. The transport does not invoke Codex, and no review has run. Three
+separate items remain, each with its own approval: the one-shot runner (B1.9), the
+first live review (B1.10), and real mailbox initialization (B1.11).
+
+**Design corrections carried in from the Phase 3X audit.**
+
+- Automated review will use `-a never`, not `-a on-request`. With `-s read-only`
+  there is no prompt to socially engineer, and failures return to the model
+  instead of to a human who might click through.
+- **Codex never writes the authoritative mailbox.** Its output goes to a private
+  temporary file; the relay validates it and then records a *relay-authored*
+  response envelope. Codex's bytes are nested as data and never become an envelope.
+- **No canonical machine path inside an envelope.** An earlier sketch bound each
+  message to `canonical_worktree`, while also forbidding machine paths — the tool
+  would have been exempting itself from its own rule. Envelopes now carry logical
+  `repository_identity` and `worktree_identity`; the real path is supplied at the
+  command line and verified against Git and the Session Registry there.
+- **The archive is not called tamper-proof.** It is append-only *by this tool*,
+  and the hash chain detects corruption, truncation, reordering, or partial
+  rewriting. It cannot defeat someone who rewrites mailbox and archive together.
+  The policy records this as
+  `archive_is_cryptographically_tamper_proof: false`, and a policy claiming
+  otherwise is refused.
+- **PASS means "no objection found," never authorization.**
+
+**Operations — exactly seven, no aliases.** `validate-policy`,
+`validate-request`, `validate-response`, `submit`, `ingest-response`, `inspect`,
+`verify-chain`. Twenty-five action verbs (`run`, `exec`, `review`, `retry`,
+`approve`, `authorize`, `apply`, `edit`, `stage`, `commit`, `push`, `merge`,
+`deploy`, `trade`, `sync`, `watch`, `daemon`, `force`, `override`, `repair`,
+`delete`, `prune`, `clear`, `reset`, `resume`) exit 2 with an explanation.
+
+**It invokes nothing.** Standard library only. No subprocess of its own, no
+shell, no socket, no environment discovery, no model call. Git is reached only
+through the A7 read-only allowlist and asks only for `rev-parse` and `status`.
+The Session Registry is reached only through `read_registry` and `classify` — a
+static test proves no mutating registry helper is called.
+
+**Authorization behaviour.** A verdict must carry the exact non-authorization
+sentence or it is rejected. `PASS` never appears as approval language in a
+report. AAM and AM work still requires Pedro's named approval. The cap is one
+review per `(phase, head)`; a `REVISE` verdict does not authorize resubmission
+and there is no retry operation.
+
+**Atomicity.** Sibling lock (`O_CREAT | O_EXCL`, bounded 5 s, never stolen),
+re-read under the lock, same-directory temp file, `flush`, `fsync`,
+`os.replace`. A validation or replacement failure leaves the prior mailbox
+byte-identical, and an archive name collision stops rather than overwriting.
+
+**Two bugs found by the tests and fixed before the commit.** The prohibited-intent
+scanner matched the fixed non-authorization sentence itself — it ends "or enable
+execution" — so every correct verdict was being rejected by its own disclaimer;
+the sentence is now removed before that scan and still checked for exact
+equality. And the command-key blocklist matched `path` and `allow`, which are
+legitimate structural names in `diff_numstat` and `permission_state`; both were
+removed from the blocklist, with path *values* still validated as
+repository-relative.
+
+---
 
 ## Tier 2 — Proposal layer
 

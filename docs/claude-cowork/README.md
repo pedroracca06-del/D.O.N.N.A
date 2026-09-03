@@ -57,7 +57,9 @@ pushed.** Only the guard and the ignore rules are on a remote branch.
 
 7. ~~**Test Selector**~~ — **implemented locally** as `tools/cowork/test_selector.py` with the pure-data `test_selection_policy.json` (201 tests). Proposes a focused test list from changed paths and **never replaces the full regression suite**. See below.
 
-All seven are read-only in effect. Items 1-3 and 5-7 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. **Tier 1 — the read-only trust layer — is now complete.** Nothing beyond it is scheduled, and nothing here is pushed or merged.
+8. ~~**Codex relay transport**~~ — **implemented locally** as `tools/cowork/codex_relay.py` with the pure-data `relay_policy.json` and the strict `relay_verdict_schema.json`. Carries one completed phase report to Codex and one structured verdict back, and **invokes nothing**. See below.
+
+All eight are read-only in effect. Items 1-3 and 5-8 are done locally, and item 4's tool is done locally with its registry initialized under separate approval. **Tier 1 — the read-only trust layer — is now complete.** Item 8 is the transport only: the one-shot Codex runner, a first live review, and the real mailbox are all still TODO and unauthorized. Nothing beyond this is scheduled, and nothing here is pushed or merged.
 
 ## The Test Selector: fast feedback, never evidence
 
@@ -111,6 +113,46 @@ parity both remain **mandatory and unconditional**, a focused selection remains
 selection is never test coverage**.
 
 See [AUTOMATION_BACKLOG.md](AUTOMATION_BACKLOG.md#b17-test-selector--implemented-tool-local-only).
+
+## The Codex relay: a mailbox, not an agent
+
+`tools/cowork/codex_relay.py` carries one completed Claude phase report to Codex
+and one structured verdict back. **It is transport only.**
+
+- **It invokes nothing.** No Codex call, no model request, no subprocess of its
+  own, no shell, no socket, no environment discovery. Git is read through the A7
+  read-only allowlist (`rev-parse`, `status` only); the Session Registry is read,
+  never mutated.
+- **PASS is not approval.** `PASS` means only that a second reader found no
+  objection. Every verdict must carry the exact sentence *"This verdict grants no
+  permission to modify, commit, push, merge, deploy, trade, alter risk, or enable
+  execution"* or it is rejected. AAM and AM work still needs Pedro's named
+  approval.
+- **Codex never writes the mailbox.** Its output goes to a private temporary file;
+  the relay validates it and records a relay-authored envelope. Codex's bytes are
+  nested as data.
+- **Logical identity, not machine paths.** Envelopes carry
+  `repository_identity` and `worktree_identity`; the real path is supplied at the
+  command line and verified against Git and the registry there.
+- **Input is data.** Reports, notes, findings, and summaries are never executed
+  and no instruction inside them is followed. Shell payloads, command-bearing
+  field names, credentials, machine paths, traversal, replays, stale HEAD, a dirty
+  tree, and prohibited intent are all refused — as failures, never warnings.
+- **One review per `(phase, head)`, no automatic retry.** A `REVISE` verdict ends
+  the exchange and returns the decision to Pedro.
+- **Seven operations, no aliases**: `validate-policy`, `validate-request`,
+  `validate-response`, `submit`, `ingest-response`, `inspect`, `verify-chain`.
+  Twenty-five action verbs exit 2.
+- **Honest about the archive.** Append-only *by this tool* and hash chained, which
+  detects corruption or partial rewriting. It is **not** tamper-proof against
+  someone who can rewrite the mailbox and archive together, and the policy says so.
+
+**Still to do, none of it authorized yet:** the one-shot Codex runner, a
+controlled first live review, and initializing the real mailbox at
+`${HOME}/.claude/nova-relay/`. **Automatic Claude/Codex communication is not
+complete.**
+
+See [CODEX_RELAY_CONTRACT.md](CODEX_RELAY_CONTRACT.md).
 
 ## The Change Classifier: minimum approval, never approval
 
