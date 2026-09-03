@@ -20,3 +20,7 @@ def test_news_driver_cards_fill_their_column_without_mobile_regression():
     assert ".mk-news-lower>.mk-news-section:first-child .mk-driver-box{height:calc(100% - 10px)}" in DASHBOARD_CSS
     assert ".mk-news-lower>.mk-news-section:first-child{display:block}" in DASHBOARD_CSS
     assert ".mk-news-lower>.mk-news-section:first-child .mk-driver-box{height:auto}" in DASHBOARD_CSS
+
+
+def test_locked_nova_system_matches_goal_form_height():
+    assert ".jn-goals-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.8fr);gap:14px;align-items:stretch}" in DASHBOARD_CSS
