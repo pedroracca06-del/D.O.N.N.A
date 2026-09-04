@@ -3037,6 +3037,79 @@ function _jnDailyTotals(rows) {
   return out;
 }
 
+function _jnBindEquityInteraction(host, points) {
+  if (!host || typeof host.querySelector !== 'function') return;
+  const svg = host.querySelector('svg');
+  const guide = svg && svg.querySelector('.jn-eq-guide');
+  const tooltip = host && host.querySelector('.jn-eq-tooltip');
+  if (!svg || !guide || !tooltip || !points.length) return;
+
+  const tooltipDate = tooltip.querySelector('.jn-eq-tooltip-date');
+  const tooltipSession = tooltip.querySelector('[data-eq-session]');
+  const tooltipCumulative = tooltip.querySelector('[data-eq-cumulative]');
+  const tooltipTrades = tooltip.querySelector('[data-eq-trades]');
+  let activeDot = null;
+
+  function showPoint(index) {
+    const point = points[index];
+    const dot = svg.querySelector('[data-eq-index="' + index + '"]');
+    if (!point || !dot) return;
+    if (activeDot) activeDot.classList.remove('is-active');
+    activeDot = dot;
+    activeDot.classList.add('is-active');
+
+    const cx = parseFloat(dot.getAttribute('cx'));
+    const cy = parseFloat(dot.getAttribute('cy'));
+    guide.setAttribute('x1', cx);
+    guide.setAttribute('x2', cx);
+    guide.hidden = false;
+    tooltipDate.textContent = point.date;
+    tooltipSession.textContent = _jnMoney(point.sessionPnl);
+    tooltipSession.className = point.sessionPnl > 0 ? 'up' : (point.sessionPnl < 0 ? 'down' : '');
+    tooltipCumulative.textContent = _jnMoney(point.value);
+    tooltipCumulative.className = point.value > 0 ? 'up' : (point.value < 0 ? 'down' : '');
+    tooltipTrades.textContent = point.tradeCount + (point.tradeCount === 1 ? ' trade' : ' trades');
+    tooltip.hidden = false;
+
+    const svgBox = svg.getBoundingClientRect();
+    const hostBox = host.getBoundingClientRect();
+    const rawLeft = svgBox.left - hostBox.left + (cx / 700) * svgBox.width;
+    const rawTop = svgBox.top - hostBox.top + (cy / 205) * svgBox.height;
+    tooltip.classList.toggle('is-below', rawTop < 95);
+    tooltip.style.left = Math.max(105, Math.min(host.clientWidth - 105, rawLeft)) + 'px';
+    tooltip.style.top = rawTop + 'px';
+  }
+
+  function hidePoint() {
+    if (activeDot) activeDot.classList.remove('is-active');
+    activeDot = null;
+    guide.hidden = true;
+    tooltip.hidden = true;
+  }
+
+  svg.addEventListener('pointermove', event => {
+    if (event.pointerType === 'touch') return;
+    const box = svg.getBoundingClientRect();
+    const svgX = ((event.clientX - box.left) / box.width) * 700;
+    let nearest = 0;
+    let distance = Infinity;
+    points.forEach((point, index) => {
+      const d = Math.abs(point.x - svgX);
+      if (d < distance) { distance = d; nearest = index; }
+    });
+    showPoint(nearest);
+  });
+  svg.addEventListener('pointerleave', event => {
+    if (event.pointerType !== 'touch') hidePoint();
+  });
+  svg.querySelectorAll('.jn-eq-dot[data-eq-index]').forEach(dot => {
+    const index = Number(dot.dataset.eqIndex);
+    dot.addEventListener('click', event => { event.stopPropagation(); showPoint(index); });
+    dot.addEventListener('focus', () => showPoint(index));
+    dot.addEventListener('blur', hidePoint);
+  });
+}
+
 function _jnRenderDashboard(rows, allTrades, accounts) {
   const controls = document.getElementById('jDashboardControls');
   if (controls) {
@@ -3078,8 +3151,12 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
       // Anchor every equity curve at a genuine zero starting balance. A
       // one-session population otherwise collapses to a lone midpoint dot
       // and leaves the entire plotting surface visually unused.
-      const values = [{date:'Starting balance', value:0}].concat(
-        days.map(d => ({date:d, value:(running += daily[d])})));
+      const counts = {};
+      rows.forEach(t => {
+        if (_jnValidDate(t.trade_date)) counts[t.trade_date] = (counts[t.trade_date] || 0) + 1;
+      });
+      const values = [{date:'Starting balance', value:0, sessionPnl:0, tradeCount:0}].concat(
+        days.map(d => ({date:d, value:(running += daily[d]), sessionPnl:daily[d], tradeCount:counts[d] || 0})));
       const min = Math.min(0, ...values.map(v => v.value));
       const max = Math.max(0, ...values.map(v => v.value));
       const flatRange = Math.abs(max - min) < .005;
@@ -3089,11 +3166,21 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
       const points = values.map((v, i) => x(i).toFixed(1) + ',' + y(v.value).toFixed(1)).join(' ');
       const zeroY = y(0).toFixed(1);
       const area = '48,' + zeroY + ' ' + points + ' ' + x(values.length - 1).toFixed(1) + ',' + zeroY;
-      equity.innerHTML = '<svg viewBox="0 0 700 205" role="img" aria-label="Cumulative P and L from ' + _jnEsc(days[0]) + ' through ' + _jnEsc(days[days.length-1]) + '">' +
+      const interactivePoints = values.slice(1).map((v, index) => ({...v, x:x(index + 1)}));
+      equity.innerHTML = '<svg viewBox="0 0 700 205" role="img" aria-label="Interactive cumulative P and L from ' + _jnEsc(days[0]) + ' through ' + _jnEsc(days[days.length-1]) + '">' +
         '<line class="jn-eq-grid" x1="48" y1="34" x2="680" y2="34"></line><line class="jn-eq-grid" x1="48" y1="109" x2="680" y2="109"></line><line class="jn-eq-grid" x1="48" y1="184" x2="680" y2="184"></line>' +
         '<text class="jn-eq-axis" x="2" y="38">' + _jnEsc(_jnMoney(max)) + '</text><text class="jn-eq-axis" x="18" y="188">' + _jnEsc(_jnMoney(min)) + '</text>' +
         '<polygon class="jn-eq-area" points="' + area + '"></polygon><polyline class="jn-eq-line" points="' + points + '"></polyline>' +
-        values.map((v,i) => '<circle class="jn-eq-dot" cx="' + x(i).toFixed(1) + '" cy="' + y(v.value).toFixed(1) + '" r="3"><title>' + _jnEsc(v.date + ' · ' + _jnMoney(v.value)) + '</title></circle>').join('') + '</svg>';
+        '<line class="jn-eq-guide" x1="48" y1="28" x2="48" y2="184" hidden></line>' +
+        '<rect class="jn-eq-hit" x="48" y="28" width="632" height="156"></rect>' +
+        values.map((v,i) => '<circle class="jn-eq-dot" cx="' + x(i).toFixed(1) + '" cy="' + y(v.value).toFixed(1) + '" r="3"' + (i ? ' data-eq-index="' + (i - 1) + '" tabindex="0" role="button" aria-label="' + _jnEsc(v.date + ', session P and L ' + _jnMoney(v.sessionPnl) + ', cumulative P and L ' + _jnMoney(v.value)) + '"' : '') + '><title>' + _jnEsc(v.date + ' · ' + _jnMoney(v.value)) + '</title></circle>').join('') + '</svg>' +
+        '<div class="jn-eq-tooltip" role="status" aria-live="polite" hidden><span class="jn-eq-tooltip-date"></span>' +
+        '<span class="jn-eq-tooltip-row">Session P&amp;L <b data-eq-session></b></span>' +
+        '<span class="jn-eq-tooltip-row">Cumulative P&amp;L <b data-eq-cumulative></b></span>' +
+        '<span class="jn-eq-tooltip-row">Closed <b data-eq-trades></b></span></div>';
+      if (typeof _jnBindEquityInteraction === 'function') {
+        _jnBindEquityInteraction(equity, interactivePoints);
+      }
     }
   }
 

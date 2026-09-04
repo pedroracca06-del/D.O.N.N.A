@@ -1725,9 +1725,14 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .jn-calendar-panel{grid-column:1/3;display:flex;flex-direction:column;min-width:0}
 .jn-dashboard-side{grid-column:1/3;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;min-width:0}
 .jn-dashboard-side>.jn-dash-panel{height:100%}
-.jn-equity{min-height:226px;margin-top:10px}
+.jn-equity{min-height:226px;margin-top:10px;position:relative}
 .jn-equity svg{display:block;width:100%;height:220px;overflow:visible}
-.jn-eq-grid{stroke:var(--line2);stroke-width:1}.jn-eq-line{fill:none;stroke:var(--green);stroke-width:2.25}.jn-eq-area{fill:rgba(60,196,140,.08)}.jn-eq-dot{fill:var(--green)}
+.jn-eq-grid{stroke:var(--line2);stroke-width:1}.jn-eq-line{fill:none;stroke:var(--green);stroke-width:2.25}.jn-eq-area{fill:rgba(60,196,140,.08)}.jn-eq-dot{fill:var(--green);cursor:crosshair;transition:r .12s,stroke-width .12s}.jn-eq-dot.is-active{r:5;stroke:var(--panel);stroke-width:2}.jn-eq-dot:focus-visible{outline:none;stroke:var(--gold);stroke-width:3}
+.jn-eq-guide{stroke:var(--muted2);stroke-width:1;stroke-dasharray:3 3;pointer-events:none}
+.jn-eq-hit{fill:transparent;cursor:crosshair}
+.jn-eq-tooltip{position:absolute;z-index:3;min-width:190px;padding:10px 12px;border:1px solid var(--line);background:var(--bg);box-shadow:0 10px 24px rgba(0,0,0,.38);pointer-events:none;transform:translate(-50%,calc(-100% - 12px));font-family:'Space Mono',monospace;font-size:11px;line-height:1.5;font-variant-numeric:tabular-nums}
+.jn-eq-tooltip.is-below{transform:translate(-50%,12px)}
+.jn-eq-tooltip-date{display:block;color:var(--gold);font-weight:700;margin-bottom:5px}.jn-eq-tooltip-row{display:flex;justify-content:space-between;gap:16px;color:var(--muted2)}.jn-eq-tooltip-row b{color:var(--text);font-weight:700}.jn-eq-tooltip-row b.up{color:var(--green)}.jn-eq-tooltip-row b.down{color:var(--red)}
 .jn-eq-axis{fill:var(--muted2);font-family:'Space Mono',monospace;font-size:11px}
 .jn-dash-daily{min-height:226px;margin-top:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .jn-dash-chart{display:block;width:100%;height:228px;overflow:visible}
