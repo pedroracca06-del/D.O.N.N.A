@@ -488,6 +488,31 @@ def test_rail_says_not_available_rather_than_inventing_a_level():
     assert 'Not available' in out['mkMacroRisk']['text']
 
 
+def test_upcoming_macro_prioritizes_today_over_six_expired_events():
+    old = [
+        {'title': f'Expired event {i}', 'date': f'2026-09-0{1 + (i // 3)}',
+         'time_et': '10:00', 'importance': 'medium', 'currency': 'USD'}
+        for i in range(7)
+    ]
+    jobs = [
+        {'title': 'Average Hourly Earnings m/m', 'date': '2026-09-04', 'time_et': '08:30',
+         'importance': 'high', 'currency': 'USD', 'note': 'Actual: 0.3% | Forecast: 0.3% | Prev: 0.2%'},
+        {'title': 'Non-Farm Employment Change', 'date': '2026-09-04', 'time_et': '08:30',
+         'importance': 'high', 'currency': 'USD', 'note': 'Actual: 162K | Forecast: 55K | Prev: 21K'},
+        {'title': 'Unemployment Rate', 'date': '2026-09-04', 'time_et': '08:30',
+         'importance': 'high', 'currency': 'USD', 'note': 'Actual: 4.1% | Forecast: 4.1% | Prev: 4.1%'},
+    ]
+    dash = {'risk': {'donna_time_ny': '2026-09-04T08:39:00-04:00'},
+            'news': [], 'calendar': {'events': old + jobs}}
+    text = _run({'dash': dash})['mkNewsBody']['text']
+
+    assert 'Non-Farm Employment Change' in text
+    assert 'Unemployment Rate' in text
+    assert 'Average Hourly Earnings m/m' in text
+    assert 'Actual: 162K' in text
+    assert 'Expired event 0' not in text
+
+
 def test_provenance_names_each_source_and_its_age():
     out = _run(LIVE)
     prov = out['mkProv']['text']

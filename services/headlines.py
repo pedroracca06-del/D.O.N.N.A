@@ -31,7 +31,7 @@ FMP_API_KEY = os.getenv('FMP_API_KEY', '').strip()
 
 # Event names that automatically trigger red_folder_week
 _RED_FOLDER_NAMES = {
-    'cpi', 'nonfarm payroll', 'nfp', 'fomc', 'fed rate',
+    'cpi', 'nonfarm payroll', 'non-farm employment', 'nfp', 'fomc', 'fed rate',
     'ppi', 'retail sales', 'federal reserve', 'interest rate decision',
     'unemployment rate', 'core cpi', 'core pce',
 }
@@ -123,7 +123,7 @@ def _category(title: str) -> str:
         return 'fed'
     if any(w in t for w in ['cpi', 'pce', 'inflation', 'ppi']):
         return 'inflation'
-    if any(w in t for w in ['jobs', 'payroll', 'unemployment', 'jobless', 'nfp']):
+    if any(w in t for w in ['jobs', 'payroll', 'non-farm', 'employment change', 'unemployment', 'jobless', 'nfp']):
         return 'employment'
     if any(w in t for w in ['gdp', 'growth', 'recession']):
         return 'growth'
@@ -190,6 +190,7 @@ def _fetch_fmp_calendar(mon_str: str, fri_str: str) -> list[dict]:
             except Exception:
                 pass
 
+        actual   = str(item.get('actual', '') if item.get('actual') is not None else '').strip() or 'Pending'
         forecast = str(item.get('estimate', '') or '').strip() or '—'
         previous = str(item.get('previous', '') or '').strip() or '—'
 
@@ -198,7 +199,10 @@ def _fetch_fmp_calendar(mon_str: str, fri_str: str) -> list[dict]:
             'time_et':    time_et,
             'importance': importance,
             'category':   _category(title),
-            'note':       f'Forecast: {forecast} | Prev: {previous}',
+            'actual':     actual,
+            'forecast':   forecast,
+            'previous':   previous,
+            'note':       f'Actual: {actual} | Forecast: {forecast} | Prev: {previous}',
             'date':       date_str,
             'currency':   'USD',
             'source':     'FMP',
@@ -267,6 +271,7 @@ def _fetch_ff_json_calendar() -> list[dict]:
                 except ValueError:
                     pass
 
+        actual   = str(item.get('actual', '') if item.get('actual') is not None else '').strip() or 'Pending'
         forecast = str(item.get('forecast', '') or '').strip() or '—'
         previous = str(item.get('previous', '') or '').strip() or '—'
 
@@ -275,7 +280,10 @@ def _fetch_ff_json_calendar() -> list[dict]:
             'time_et':    time_et,
             'importance': importance,
             'category':   _category(title),
-            'note':       f'Forecast: {forecast} | Prev: {previous}',
+            'actual':     actual,
+            'forecast':   forecast,
+            'previous':   previous,
+            'note':       f'Actual: {actual} | Forecast: {forecast} | Prev: {previous}',
             'date':       date_str,
             'currency':   'USD',
             'source':     'ForexFactory',
@@ -362,7 +370,7 @@ def is_red_folder_week() -> bool:
 
 # ── public: check_todays_breaking_events (on-demand / startup) ──
 _BREAKING_KEYWORDS = {
-    'cpi', 'core cpi', 'inflation', 'nonfarm payroll', 'nfp',
+    'cpi', 'core cpi', 'inflation', 'nonfarm payroll', 'non-farm employment', 'nfp',
     'fomc', 'fed rate', 'federal reserve', 'interest rate decision',
     'ppi', 'retail sales', 'unemployment rate', 'core pce',
 }

@@ -23,6 +23,25 @@ def test_weekday_calendar_keeps_current_trading_week():
         assert headlines._week_bounds() == ('2026-08-24', '2026-08-28')
 
 
+def test_forex_factory_jobs_report_keeps_actual_forecast_and_previous():
+    payload = [{
+        'title': 'Non-Farm Employment Change',
+        'country': 'USD',
+        'date': '2026-09-04T08:30:00-04:00',
+        'impact': 'High',
+        'actual': '162K',
+        'forecast': '55K',
+        'previous': '21K',
+    }]
+    with patch.object(headlines, '_safe_get', return_value=payload):
+        events = headlines._fetch_ff_json_calendar()
+
+    assert len(events) == 1
+    assert events[0]['category'] == 'employment'
+    assert events[0]['actual'] == '162K'
+    assert events[0]['note'] == 'Actual: 162K | Forecast: 55K | Prev: 21K'
+
+
 def test_calendar_cycle_retains_last_good_current_week_on_provider_dropout(tmp_path):
     macro_path = tmp_path / 'macro.json'
     risk_path = tmp_path / 'risk.json'

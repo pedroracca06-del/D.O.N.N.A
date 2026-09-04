@@ -4318,6 +4318,18 @@ function _mkRenderNews(dash) {
   }
   const news = dash.news || [];
   const events = ((dash.calendar || {}).events) || [];
+  const riskDate = String(((dash.risk || {}).donna_time_ny) || '').slice(0, 10);
+  const todayEt = riskDate || (() => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date()).reduce((out, p) => { out[p.type] = p.value; return out; }, {});
+    return parts.year + '-' + parts.month + '-' + parts.day;
+  })();
+  const byEventTime = (a, b) => String(a.date || '').localeCompare(String(b.date || '')) ||
+    String(a.time_et || '').localeCompare(String(b.time_et || ''));
+  const currentEvents = events.filter(e => String(e.date || '') >= todayEt).sort(byEventTime);
+  const recentEvents = events.filter(e => String(e.date || '') < todayEt).sort(byEventTime).reverse();
+  const displayedEvents = currentEvents.concat(recentEvents).slice(0, 6);
   const severityWeight = {high: 3, medium: 2, low: 1};
   const ranked = news.slice().sort((a, b) => {
     const score = (n) => {
@@ -4415,7 +4427,7 @@ function _mkRenderNews(dash) {
     esTerms.test([n.headline, n.summary, n.category].filter(Boolean).join(' '))).slice(0, 2);
   html += '<div class="mk-driver-subhead">Why ES is moving</div>' + renderIndexDriver(es, 'ES', esDrivers);
   html += '</section><section class="mk-news-section"><div class="mk-news-label">Upcoming macro · date &amp; time ET</div>';
-  events.slice(0, 6).forEach(e => {
+  displayedEvents.forEach(e => {
     const imp = String(e.importance || 'low').toLowerCase();
     html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc((e.date ? e.date + ' · ' : '') + (e.time_et || '—') + ' ET') + '</span>' +
       '<span class="mk-imp ' + _mkEsc(imp) + '" aria-hidden="true"></span>' +
