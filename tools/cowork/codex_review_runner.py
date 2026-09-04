@@ -188,6 +188,14 @@ MAX_MANIFEST_BYTES = 65536
 # argument array states the intent and the prompt never reaches a command line.
 PROMPT_ARGUMENT = "-"
 
+# The approval policy is delivered as a configuration override, not as a flag.
+# `codex exec` on 0.153.0 rejects `-a` / `--ask-for-approval` outright -- those
+# live only on the top-level command -- while `-c approval_policy="never"` parses
+# and names the same setting. Both halves were proven against the real binary.
+APPROVAL_DELIVERY = "config-override"
+APPROVAL_CONFIG_KEY = "approval_policy"
+APPROVAL_FORBIDDEN_ARGUMENTS = ("-a", "--ask-for-approval")
+
 ENVIRONMENT_ALLOWLIST = ("APPDATA", "CODEX_HOME", "HOME", "LOCALAPPDATA", "PATH",
                          "SystemRoot", "TEMP", "TMP", "TMPDIR", "USERPROFILE")
 
@@ -320,6 +328,11 @@ def validate_policy(policy):
             or cli.get("prompt_argument") != PROMPT_ARGUMENT:
         raise RunnerError("the prompt is delivered on stdin using the proven "
                           "`-` form; this is fixed")
+    if cli.get("approval_delivery") != APPROVAL_DELIVERY \
+            or cli.get("approval_config_key") != APPROVAL_CONFIG_KEY:
+        raise RunnerError("the approval policy is delivered as the %r "
+                          "configuration override; `codex exec` rejects the "
+                          "flag form" % APPROVAL_CONFIG_KEY)
 
     npm = policy["npm_package"]
     if not isinstance(npm, dict):
@@ -890,13 +903,25 @@ def _remove_own(path):
 # --------------------------------------------------------------------------
 
 def build_argv(executable, repo, schema_path, response_path, policy):
-    """The complete fixed argument array. No caller value ever enters it."""
+    """The complete fixed argument array. No caller value ever enters it.
+
+    The approval policy travels as a `-c` configuration override, NOT as `-a`.
+    On codex-cli 0.153.0 `-a` / `--ask-for-approval` exists only on the top-level
+    command; `codex exec` rejects it outright with `unexpected argument '-a'`
+    before doing any work. `approval_policy` is the recognised configuration key
+    for the same setting, and it is delivered the same way the reasoning effort
+    already is. Only `never` is ever emitted: `validate_policy` pins the value,
+    and the assertion below refuses anything else even if that check were bypassed.
+    """
     flags = policy["fixed_flags"]
+    if flags["ask_for_approval"] != "never":
+        raise sg.StoppedError("the approval policy is fixed at never; the runner "
+                              "never emits a value that can prompt or approve")
     argv = [
         executable, "exec",
         "-C", repo,
         "-s", flags["sandbox"],
-        "-a", flags["ask_for_approval"],
+        "-c", "approval_policy=%s" % json.dumps(flags["ask_for_approval"]),
         "-m", flags["model"],
         "-c", "model_reasoning_effort=%s" % json.dumps(flags["model_reasoning_effort"]),
         "--ephemeral",
@@ -1182,8 +1207,9 @@ def main(argv=None):
             argv_used = build_argv(executable, repo_obs["repo"], schema_path,
                                    response_path, policy)
             checks.append(_chk("X4", "argument array", "informational",
-                               "codex exec -C <repo> -s read-only -a never "
-                               "-m %s -c model_reasoning_effort=\"low\" --ephemeral "
+                               "codex exec -C <repo> -s read-only "
+                               "-c approval_policy=\"never\" -m %s "
+                               "-c model_reasoning_effort=\"low\" --ephemeral "
                                "--ignore-user-config --output-schema <schema> "
                                "-o <private temp> %s"
                                % (policy["fixed_flags"]["model"], PROMPT_ARGUMENT)))

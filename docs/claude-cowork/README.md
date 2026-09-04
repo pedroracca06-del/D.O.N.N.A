@@ -155,8 +155,8 @@ and it may do so **exactly once** per pending request. Three operations
 model, no executable path, no output destination, no retry count, and no sandbox or
 approval override — all fixed by `codex_runner_policy.json`.
 
-The invocation is fixed: `codex exec -C <repo> -s read-only -a never
--m gpt-5.6-luna -c model_reasoning_effort="low" --ephemeral --ignore-user-config
+The invocation is fixed: `codex exec -C <repo> -s read-only
+-c approval_policy="never" -m gpt-5.6-luna -c model_reasoning_effort="low" --ephemeral --ignore-user-config
 --output-schema <schema> -o <private temp> -`, with the prompt on **stdin** (the
 `-` form, proven from local `codex exec --help` on 0.153.0). Only ten allowlisted
 environment names reach the child; planted API, broker, Anthropic, and trading

@@ -169,7 +169,7 @@ never reads them to build a command line — it owns no subprocess.
 | Routine model | `gpt-5.6-luna` |
 | Routine reasoning effort | `low` |
 | Sandbox | `-s read-only` |
-| Approval policy | `-a never` |
+| Approval policy | `-c approval_policy="never"` |
 | Forbidden | `--add-dir`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust` |
 
 A stronger model is reserved for explicitly approved security, architecture,
@@ -252,7 +252,7 @@ never appear on a command line.
 codex exec
   -C <verified repository root>
   -s read-only
-  -a never
+  -c approval_policy="never"
   -m gpt-5.6-luna
   -c model_reasoning_effort="low"
   --ephemeral
@@ -267,6 +267,26 @@ stream on stdout, which is output the runner does not need and would rather not
 capture. Never used: `--add-dir`, `--approve-for-me`, either
 `--dangerously-bypass-*`, `--ignore-rules`, `--skip-git-repo-check`, `resume`,
 `fork`, `review`.
+
+#### The approval policy is an override, not a flag
+
+`-a` / `--ask-for-approval` exists **only on the top-level command** in 0.153.0.
+`codex exec` refuses it, parse-only and proven against the genuine binary:
+
+```
+codex exec -a never --help                 -> exit 2, unexpected argument '-a'
+codex exec --ask-for-approval never --help -> exit 2, unexpected argument
+codex exec -c approval_policy="never" --help -> exit 0
+```
+
+`approval_policy` is the recognised configuration key for the same setting — it
+appears in the binary's own configuration-key table beside `sandbox_mode` and
+`model`, and in its diagnostic text as `approval_policy = "never"` — and it is
+delivered exactly the way the reasoning effort already is. Only `never` is ever
+emitted: the policy pins the value, and the array builder refuses anything else
+even if that check were bypassed. The sandbox stays `read-only` regardless, which
+is the protection that actually matters; the override removes the prompt rather
+than granting anything.
 
 ### Executable resolution
 

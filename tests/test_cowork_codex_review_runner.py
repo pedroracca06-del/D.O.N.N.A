@@ -584,7 +584,7 @@ def test_argument_array_is_exact(tmp_path):
         "/x/codex", "exec",
         "-C", "/repo",
         "-s", "read-only",
-        "-a", "never",
+        "-c", 'approval_policy="never"',
         "-m", "gpt-5.6-luna",
         "-c", 'model_reasoning_effort="low"',
         "--ephemeral",
@@ -593,6 +593,74 @@ def test_argument_array_is_exact(tmp_path):
         "-o", "/tmp/resp.json",
         "-",
     ]
+
+
+def test_the_approval_flag_form_is_never_emitted():
+    """`codex exec` rejects `-a`; the override form is what must appear."""
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    argv = rr.build_argv("/x/codex", "/repo", "/schema.json", "/tmp/resp.json",
+                         policy)
+    for banned in rr.APPROVAL_FORBIDDEN_ARGUMENTS:
+        assert banned not in argv, banned
+    assert "-a" not in argv
+    assert "--ask-for-approval" not in argv
+
+
+def test_exactly_one_approval_override_and_it_is_never():
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    argv = rr.build_argv("/x/codex", "/repo", "/schema.json", "/tmp/resp.json",
+                         policy)
+    overrides = [a for a in argv if a.startswith("approval_policy=")]
+    assert overrides == ['approval_policy="never"'], overrides
+    # every override is introduced by its own -c, and none is a bare positional
+    for value in overrides:
+        assert argv[argv.index(value) - 1] == "-c"
+
+
+def test_the_sandbox_stays_read_only_beside_the_new_override():
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    argv = rr.build_argv("/x/codex", "/repo", "/schema.json", "/tmp/resp.json",
+                         policy)
+    assert argv[argv.index("-s") + 1] == "read-only"
+    assert "workspace-write" not in argv
+    assert "danger-full-access" not in argv
+
+
+@pytest.mark.parametrize("permissive", ["on-request", "untrusted", "on-failure",
+                                        "never-ask", "auto"])
+def test_the_runner_cannot_select_an_approval_permitting_value(tmp_path,
+                                                               permissive):
+    """A policy that loosens approval is refused, and never reaches an array."""
+    doc = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    doc["fixed_flags"]["ask_for_approval"] = permissive
+    p = tmp_path / "p.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    rc, _out, err = run_cli("validate-policy", extra=["--policy", str(p)])
+    assert rc == INVALID and "ask_for_approval" in err
+    # and even if validation were bypassed, the array builder still refuses
+    loose = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    loose["fixed_flags"]["ask_for_approval"] = permissive
+    with pytest.raises(Exception) as exc:
+        rr.build_argv("/x/codex", "/repo", "/s.json", "/r.json", loose)
+    assert "fixed at never" in str(exc.value)
+
+
+def test_the_approval_delivery_is_pinned_in_the_policy(tmp_path):
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    assert policy["codex_cli"]["approval_delivery"] == rr.APPROVAL_DELIVERY
+    assert policy["codex_cli"]["approval_config_key"] == rr.APPROVAL_CONFIG_KEY
+    for key, bad in (("approval_delivery", "flag"),
+                     ("approval_config_key", "ask_for_approval")):
+        doc = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+        doc["codex_cli"][key] = bad
+        p = tmp_path / ("%s.json" % key)
+        p.write_text(json.dumps(doc), encoding="utf-8")
+        rc, _out, err = run_cli("validate-policy", extra=["--policy", str(p)])
+        assert rc == INVALID and "approval_policy" in err
 
 
 def test_argument_array_contains_no_forbidden_flag_or_subcommand(tmp_path):
@@ -621,7 +689,10 @@ def test_prompt_is_delivered_on_stdin_not_the_command_line(bench, tmp_path,
     assert child_argv[0] == "exec"
     assert child_argv[-1] == "-"
     assert "-s" in child_argv and child_argv[child_argv.index("-s") + 1] == "read-only"
-    assert "-a" in child_argv and child_argv[child_argv.index("-a") + 1] == "never"
+    # The approval policy reaches the child as a config override, never as `-a`,
+    # which `codex exec` rejects outright on 0.153.0.
+    assert 'approval_policy="never"' in child_argv
+    assert "-a" not in child_argv and "--ask-for-approval" not in child_argv
     assert "-m" in child_argv and child_argv[child_argv.index("-m") + 1] == "gpt-5.6-luna"
     assert "--ephemeral" in child_argv and "--ignore-user-config" in child_argv
     prompt = promptrec.read_bytes()
@@ -1138,6 +1209,40 @@ def test_the_real_install_resolves_and_probes_without_inference():
     for flag in ("--output-schema", "--output-last-message", "--ephemeral",
                  "--ignore-user-config", "--sandbox", "--model"):
         assert flag in text, flag
+
+
+def _parse_only(argv):
+    """Run a command with a trailing --help so clap parses, prints, and exits.
+
+    Nothing is sent on stdin and no prompt is supplied, so this reaches the
+    argument parser and stops. It is not inference and starts no review.
+    """
+    return subprocess.run(list(argv) + ["--help"], capture_output=True,
+                          timeout=180, shell=False, stdin=subprocess.DEVNULL)
+
+
+def test_the_genuine_parser_accepts_the_fixed_array_and_rejects_the_flag_form():
+    """Regression cover for the 0.153.0 approval surface, without inference.
+
+    `-a` / `--ask-for-approval` are top-level only; `codex exec` exits 2 on them.
+    The `approval_policy` override is the recognised form and parses cleanly.
+    """
+    policy = loaded_policy()
+    shim = REAL_NPM_PREFIX / "codex"
+    if not shim.is_file():
+        # No install here: assert the same contract deterministically.
+        argv = rr.build_argv("/x/codex", "/repo", "/s.json", "/r.json", policy)
+        assert "-a" not in argv and "--ask-for-approval" not in argv
+        assert 'approval_policy="never"' in argv
+        return
+    native = rr.bundled_native_executable(shim, policy)
+    argv = rr.build_argv(native, str(REPO_ROOT), "schema.json", "resp.json",
+                         policy)
+    assert _parse_only(argv).returncode == 0, "the fixed array must parse"
+    for banned in (["-a", "never"], ["--ask-for-approval", "never"]):
+        rejected = _parse_only([native, "exec"] + banned)
+        assert rejected.returncode != 0, banned
+        assert b"unexpected argument" in rejected.stderr, banned
 
 
 def test_the_real_mailbox_stays_absent_and_no_attempt_is_recorded():

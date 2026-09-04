@@ -56,7 +56,10 @@
     "subcommand": "exec",
     "prompt_delivery": "stdin",
     "prompt_argument": "-",
-    "prompt_delivery_note": "Proven from local `codex exec --help` on 0.153.0: the PROMPT argument states that if it is not provided as an argument, or if `-` is used, instructions are read from stdin. The explicit `-` form is used so the argument array shows the intent and the prompt never appears on a command line."
+    "prompt_delivery_note": "Proven from local `codex exec --help` on 0.153.0: the PROMPT argument states that if it is not provided as an argument, or if `-` is used, instructions are read from stdin. The explicit `-` form is used so the argument array shows the intent and the prompt never appears on a command line.",
+    "approval_delivery": "config-override",
+    "approval_config_key": "approval_policy",
+    "approval_delivery_note": "Proven against the genuine 0.153.0 binary, parse-only. `-a` / `--ask-for-approval` exists ONLY on the top-level command: `codex exec -a never --help` and `codex exec --ask-for-approval never --help` both exit 2 with `unexpected argument`, so the flag form can never reach a model. `approval_policy` is the recognised configuration key for the same setting -- it appears in the binary's own configuration-key table beside `sandbox_mode` and `model`, and in its diagnostic text as `approval_policy = \"never\"` -- and `codex exec -c approval_policy=\"never\" --help` exits 0. It is delivered exactly the way the reasoning effort already is. Only `never` is ever emitted; the value is pinned here and re-checked when the array is built."
   },
   "npm_package": {
     "name": "@openai/codex",

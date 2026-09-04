@@ -703,7 +703,8 @@ first live review (B1.10), and real mailbox initialization (B1.11).
 
 **Design corrections carried in from the Phase 3X audit.**
 
-- Automated review will use `-a never`, not `-a on-request`. With `-s read-only`
+- Automated review pins `approval_policy="never"`, not `on-request`. With
+  `-s read-only`
   there is no prompt to socially engineer, and failures return to the model
   instead of to a human who might click through.
 - **Codex never writes the authoritative mailbox.** Its output goes to a private
@@ -768,6 +769,15 @@ under `tmp_path`. B1.10 (a controlled first live review) and B1.11 (real mailbox
 initialization) remain TODO and unauthorized, and automatic Claude/Codex
 communication is **not** operational.
 
+**The approval policy is delivered as a config override, not `-a`.** On
+codex-cli 0.153.0 `-a` / `--ask-for-approval` exists only on the top-level
+command; `codex exec` exits 2 with `unexpected argument` on both spellings, so the
+flag form could never have reached a model. `-c approval_policy="never"` names the
+same setting, is the key the binary itself lists beside `sandbox_mode` and
+`model`, and parses cleanly. Proven parse-only against the genuine native binary
+with a trailing `--help`; no prompt, no stdin, no inference. The sandbox remains
+`read-only` and only `never` is ever emitted.
+
 **Windows executable resolution was corrected against the real install.** A global
 npm install ships only shims — an extension-less POSIX shell script, a `.cmd`, and
 a `.ps1` — and none is an executable image; Windows fails them with `WinError 193`
@@ -785,7 +795,8 @@ codex-cli 0.153.0 states that the PROMPT argument reads from stdin when it is
 omitted *or* when `-` is used. The runner uses the explicit `-` so the argument
 array shows the intent and the prompt never touches a command line.
 
-**Fixed invocation.** `codex exec -C <repo> -s read-only -a never -m gpt-5.6-luna
+**Fixed invocation.** `codex exec -C <repo> -s read-only
+-c approval_policy="never" -m gpt-5.6-luna
 -c model_reasoning_effort="low" --ephemeral --ignore-user-config --output-schema
 <committed schema> -o <private temp> -`. `--json` is omitted on purpose: local help
 shows it only adds a stdout event stream the runner does not need. `--add-dir`,
