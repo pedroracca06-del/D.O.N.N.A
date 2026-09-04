@@ -3839,6 +3839,77 @@ function _jwRecord(section, r) {
     '<button class="danger" type="button" onclick="deleteJournalWorkspaceRecord(&quot;'+section+'&quot;,&quot;'+_jnEsc(r.id)+'&quot;)">Delete</button></div></div>'+body+(r.chart_snapshot?'<img class="jn-record-shot" src="'+_jnEsc(r.chart_snapshot)+'" alt="Attached '+_jnEsc(section.slice(0,-1))+' chart screenshot">':'')+'</article>';
 }
 
+let _jwSystemEditing = false;
+
+function _jwSystemCheckbox(name, value, label, selected) {
+  return '<label class="jn-system-check"><input type="checkbox" name="' + name + '" value="' +
+    _jnEsc(value) + '"' + (selected ? ' checked' : '') + '> ' + _jnEsc(label) + '</label>';
+}
+
+function _jwRenderSystem(system) {
+  const editBtn = document.getElementById('jSystemEditBtn');
+  if (editBtn) editBtn.hidden = _jwSystemEditing;
+  if (!_jwSystemEditing) {
+    setHtml('jSystemSummary','<div class="jn-system-list"><div class="jn-system-row"><span>Approved live models</span><b>'+_jnEsc((system.approved_models||[]).join(' · '))+'</b></div><div class="jn-system-row"><span>Risk rules</span><b>'+_jnEsc((system.daily_risk_pct||1)+'% daily · '+(system.max_trades_per_day||2)+' trades max · '+(system.max_losses_per_day||2)+' losses then done')+'</b></div><div class="jn-system-row"><span>Funded sessions</span><b>'+_jnEsc((system.live_sessions||[]).join(' · '))+'</b></div><div class="jn-system-row"><span>PRIME</span><b>'+_jnEsc((system.prime_steps||[]).join(' → '))+'</b></div></div>');
+    return;
+  }
+  const models = system.approved_models || [];
+  const sessions = system.live_sessions || [];
+  setHtml('jSystemSummary','<form class="jn-system-form" id="jSystemForm">' +
+    '<fieldset class="jn-system-fieldset"><legend>Approved live models</legend><div class="jn-system-checks">' +
+    _jwSystemCheckbox('jSystemModel','KLR','KLR',models.includes('KLR')) +
+    _jwSystemCheckbox('jSystemModel','OTE','OTE',models.includes('OTE')) +
+    _jwSystemCheckbox('jSystemModel','ORB','ORB',models.includes('ORB')) +
+    _jwSystemCheckbox('jSystemModel','POWELL_10AM','Powell 10AM',models.includes('POWELL_10AM')) + '</div></fieldset>' +
+    '<div class="jn-system-numbers"><label class="jn-system-field"><span>Daily risk %</span><input id="jSystemRisk" type="number" min="0.1" max="5" step="0.1" value="'+_jnEsc(system.daily_risk_pct == null ? 1 : system.daily_risk_pct)+'" required></label>' +
+    '<label class="jn-system-field"><span>Max trades</span><input id="jSystemMaxTrades" type="number" min="1" max="20" value="'+_jnEsc(system.max_trades_per_day || 2)+'" required></label>' +
+    '<label class="jn-system-field"><span>Max losses</span><input id="jSystemMaxLosses" type="number" min="1" max="20" value="'+_jnEsc(system.max_losses_per_day || 2)+'" required></label></div>' +
+    '<fieldset class="jn-system-fieldset"><legend>Funded sessions</legend><div class="jn-system-checks">' +
+    _jwSystemCheckbox('jSystemSession','NY_AM','NY AM',sessions.includes('NY_AM')) +
+    _jwSystemCheckbox('jSystemSession','NY_PM','NY PM',sessions.includes('NY_PM')) + '</div></fieldset>' +
+    '<label class="jn-system-field"><span>PRIME steps · one per line</span><textarea id="jSystemPrime" required>'+_jnEsc((system.prime_steps||[]).join('\\n'))+'</textarea></label>' +
+    '<div class="jn-system-actions"><button class="jn-action" type="submit">Save changes</button><button class="jn-system-cancel" type="button" onclick="cancelJournalSystemEdit()">Cancel</button></div></form>');
+  const form = document.getElementById('jSystemForm');
+  if (form) form.addEventListener('submit', saveJournalSystem);
+}
+
+function editJournalSystem() {
+  _jwSystemEditing = true;
+  _jwStatus('jSystemStatus','',true);
+  _jwRenderSystem((_journalWorkspace && _journalWorkspace.system) || {});
+}
+
+function cancelJournalSystemEdit() {
+  _jwSystemEditing = false;
+  _jwStatus('jSystemStatus','',true);
+  _jwRenderSystem((_journalWorkspace && _journalWorkspace.system) || {});
+}
+
+async function saveJournalSystem(event) {
+  event.preventDefault();
+  const checked = name => Array.from(document.querySelectorAll('input[name="'+name+'"]:checked')).map(el => el.value);
+  const payload = {
+    approved_models: checked('jSystemModel'),
+    daily_risk_pct: Number(_jwVal('jSystemRisk')),
+    max_trades_per_day: Number(_jwVal('jSystemMaxTrades')),
+    max_losses_per_day: Number(_jwVal('jSystemMaxLosses')),
+    live_sessions: checked('jSystemSession'),
+    prime_steps: _jwVal('jSystemPrime').split('\\n').map(v => v.trim()).filter(Boolean),
+  };
+  _jwStatus('jSystemStatus','Saving…',true);
+  try {
+    const res = await fetch('/journal/workspace/'+'system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') throw new Error(data.detail || 'Rules could not be saved.');
+    _journalWorkspace.system = data.system;
+    _jwSystemEditing = false;
+    _jwRenderSystem(data.system);
+    _jwStatus('jSystemStatus','Rules saved to NOVA.',true);
+  } catch (e) {
+    _jwStatus('jSystemStatus',e.message || 'Rules could not be saved.',false);
+  }
+}
+
 function renderJournalWorkspace(data) {
   _journalWorkspace = data;
   const sections = [['plans','jPlanList'],['reflections','jReflectionList'],['studies','jStudyList'],['goals','jGoalList']];
@@ -3847,7 +3918,7 @@ function renderJournalWorkspace(data) {
     setHtml(id, records.length ? records.map(r=>_jwRecord(section,r)).join('') : '<div class="jn-empty-records">No '+section+' saved yet.</div>');
   });
   const system = data.system || {};
-  setHtml('jSystemSummary','<div class="jn-system-list"><div class="jn-system-row"><span>Approved live models</span><b>'+_jnEsc((system.approved_models||[]).join(' · '))+'</b></div><div class="jn-system-row"><span>Risk rules</span><b>'+_jnEsc((system.daily_risk_pct||1)+'% daily · '+(system.max_trades_per_day||2)+' trades max · '+(system.max_losses_per_day||2)+' losses then done')+'</b></div><div class="jn-system-row"><span>Funded sessions</span><b>'+_jnEsc((system.live_sessions||[]).join(' · '))+'</b></div><div class="jn-system-row"><span>PRIME</span><b>'+_jnEsc((system.prime_steps||[]).join(' → '))+'</b></div></div>');
+  _jwRenderSystem(system);
   const planSelect=document.getElementById('jPremarketPlan');
   if(planSelect){const current=planSelect.value;planSelect.innerHTML='<option value="">— No linked plan —</option>'+(data.plans||[]).slice().reverse().map(p=>'<option value="'+_jnEsc(p.id)+'">'+_jnEsc((p.date||'')+' · '+(p.bias||'PLAN')+' · '+(p.account||p.book||''))+'</option>').join('');planSelect.value=current;}
 }

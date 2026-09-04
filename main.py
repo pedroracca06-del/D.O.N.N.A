@@ -2987,6 +2987,8 @@ async def journal_workspace_get():
 
 @app.post('/journal/workspace/{section}')
 async def journal_workspace_upsert(section: str, request: Request):
+    if section == 'system':
+        return await _journal_system_update(request)
     body = await request.json()
     workspace = load_journal_workspace()
     record = _journal_workspace_record(section, body)
@@ -3024,15 +3026,64 @@ async def journal_workspace_delete(section: str, request: Request):
 
 @app.post('/journal/workspace/system')
 async def journal_workspace_system_update(request: Request):
+    return await _journal_system_update(request)
+
+
+async def _journal_system_update(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail='System settings must be an object')
+    allowed = {'approved_models', 'max_trades_per_day', 'daily_risk_pct',
+               'max_losses_per_day', 'live_sessions', 'prime_steps'}
+    unknown = set(body) - allowed
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'Unknown system field: {sorted(unknown)[0]}')
+
+    valid_models = {'KLR', 'OTE', 'ORB', 'POWELL_10AM'}
+    models = body.get('approved_models')
+    if not isinstance(models, list) or not models:
+        raise HTTPException(status_code=400, detail='Select at least one approved model')
+    models = list(dict.fromkeys(str(v).strip().upper() for v in models))
+    if any(v not in valid_models for v in models):
+        raise HTTPException(status_code=400, detail='Approved models contain an unsupported value')
+
+    valid_sessions = {'NY_AM', 'NY_PM'}
+    sessions = body.get('live_sessions')
+    if not isinstance(sessions, list) or not sessions:
+        raise HTTPException(status_code=400, detail='Select at least one funded session')
+    sessions = list(dict.fromkeys(str(v).strip().upper() for v in sessions))
+    if any(v not in valid_sessions for v in sessions):
+        raise HTTPException(status_code=400, detail='Funded sessions must be NY_AM or NY_PM')
+
+    raw_max_trades = body.get('max_trades_per_day')
+    raw_max_losses = body.get('max_losses_per_day')
+    if (isinstance(raw_max_trades, bool) or isinstance(raw_max_losses, bool) or
+            not isinstance(raw_max_trades, int) or not isinstance(raw_max_losses, int)):
+        raise HTTPException(status_code=400, detail='Maximum trades and losses must be whole numbers')
+    max_trades = raw_max_trades
+    max_losses = raw_max_losses
+    daily_risk = _require_finite('Daily risk', body.get('daily_risk_pct'), 0.1, 5)
+    if not 1 <= max_trades <= 20:
+        raise HTTPException(status_code=400, detail='Maximum trades must be between 1 and 20')
+    if not 1 <= max_losses <= max_trades:
+        raise HTTPException(status_code=400, detail='Maximum losses must be between 1 and maximum trades')
+    steps = body.get('prime_steps')
+    if not isinstance(steps, list):
+        raise HTTPException(status_code=400, detail='PRIME steps must be a list')
+    steps = [str(v).strip()[:80] for v in steps if str(v).strip()]
+    if not 1 <= len(steps) <= 10:
+        raise HTTPException(status_code=400, detail='Enter between 1 and 10 PRIME steps')
+
     workspace = load_journal_workspace()
-    allowed = ('approved_models', 'max_trades_per_day', 'daily_risk_pct',
-               'max_losses_per_day', 'live_sessions', 'prime_steps')
-    for key in allowed:
-        if key in body:
-            workspace['system'][key] = body[key]
+    workspace['system'] = {
+        **workspace['system'],
+        'approved_models': models,
+        'max_trades_per_day': max_trades,
+        'daily_risk_pct': daily_risk,
+        'max_losses_per_day': max_losses,
+        'live_sessions': sessions,
+        'prime_steps': steps,
+    }
     save_journal_workspace(workspace)
     return {'status': 'ok', 'system': workspace['system']}
 
