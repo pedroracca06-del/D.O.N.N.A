@@ -24,7 +24,7 @@ protections apply to a Codex session. Assume you are unguarded and behave
 accordingly.
 
 A Codex repository review therefore runs read-only: use `-s read-only` and
-`-a never`; do **not** use `--add-dir`, `--approve-for-me`,
+`-c approval_policy="never"`; do **not** use `--add-dir`, `--approve-for-me`,
 `--dangerously-bypass-approvals-and-sandbox`, or
 `--dangerously-bypass-hook-trust`.
 
