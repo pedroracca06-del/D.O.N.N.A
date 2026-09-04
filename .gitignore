@@ -86,3 +86,14 @@ data/_*.html
 # pending Pedro's copyright policy decision. Derived summaries and analysis
 # under nova_knowledge_core/ remain tracked -- only the raw capture is hidden.
 nova_knowledge_core/TRANSCRIPTS_RAW/
+
+# Machine-local Claude Code permission overrides. Intentionally untracked and
+# never versioned: the allow/ask/deny lists are specific to one machine.
+#
+# This rule is repository-local ON PURPOSE. The file was already covered by a
+# user-level ignore, which a sandboxed read-only reviewer cannot see -- it lives
+# outside the worktree -- so the reviewer's `git status` reported the worktree
+# dirty and stopped. Stating the rule here makes cleanliness verifiable from the
+# repository alone, with no extra readable root and no access to global Git
+# configuration.
+.claude/settings.local.json

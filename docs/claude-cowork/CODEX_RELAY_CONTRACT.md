@@ -3,9 +3,10 @@
 The local transport that carries one Claude phase report to Codex and one Codex
 verdict back. It is a mailbox, not an agent.
 
-**Status: transport and runner, local only. Not pushed. The real mailbox is not
-initialized, and no Codex review has ever run.** The runner exists but a live
-review is **still unauthorized**.
+**Status: transport and runner, local only. Not pushed.** The machine-local
+mailbox is initialized and in use, and live reviews have run under Pedro's
+per-invocation authorization. Every review remains one attempt per
+`(phase, head)`, explicitly authorized each time; nothing here runs on its own.
 
 ---
 
@@ -170,6 +171,9 @@ never reads them to build a command line — it owns no subprocess.
 | Routine reasoning effort | `low` |
 | Sandbox | `-s read-only` |
 | Approval policy | `-c approval_policy="never"` |
+| Windows sandbox backend | `-c windows.sandbox="elevated"` |
+| Pinned CLI | `codex-cli 0.153.3` |
+| Pinned native binary | sha256 `e5ef3c4b81d2fb861f3731c91a773d45a1973c6a0b480d6449f80bc8fd749e96` |
 | Forbidden | `--add-dir`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust` |
 
 A stronger model is reserved for explicitly approved security, architecture,
@@ -238,7 +242,7 @@ The first two are read-only and never start Codex. `review-once` requires
 
 ### The exact invocation, and the proven stdin form
 
-Proven from local `codex exec --help` on **codex-cli 0.153.0**, verbatim:
+Proven from local `codex exec --help` on **codex-cli 0.153.3**, verbatim:
 
 > `[PROMPT]` — "Initial instructions for the agent. If not provided as an argument
 > (or if `-` is used), instructions are read from stdin. If stdin is piped and a
@@ -252,6 +256,7 @@ never appear on a command line.
 codex exec
   -C <verified repository root>
   -s read-only
+  -c windows.sandbox="elevated"
   -c approval_policy="never"
   -m gpt-5.6-luna
   -c model_reasoning_effort="low"
@@ -268,9 +273,37 @@ capture. Never used: `--add-dir`, `--approve-for-me`, either
 `--dangerously-bypass-*`, `--ignore-rules`, `--skip-git-repo-check`, `resume`,
 `fork`, `review`.
 
+#### The Windows sandbox backend is fixed at elevated
+
+On Windows a `read-only` sandbox is served **only** by the elevated backend. With
+the unelevated backend Codex refuses outright --
+
+```
+windows sandbox failed: Restricted read-only access requires the
+elevated Windows sandbox backend
+```
+
+-- and the child can read nothing, which is exactly how the first live review
+failed: it returned STOP because it could not inspect the repository at all. The
+runner therefore fixes `windows.sandbox="elevated"` in its own argument array.
+
+This is **not** a loosening: it selects the stronger backend, and the sandbox mode
+stays `read-only`. It is runner-owned -- no flag, caller, or envelope can set,
+change, or remove it, and a policy naming any other backend is refused both by
+`validate-policy` and again when the array is built.
+
+#### The binary itself is pinned, not just its package
+
+`npm_package.native_sha256` pins the **content** of the bundled executable
+(`e5ef3c4b…d749e96` for 0.153.3). Package name, version, platform, and
+architecture are checked first; then the resolved file is digested and compared.
+A substituted or tampered binary inside an otherwise well-formed, correctly
+versioned package tree is still refused. The pin moves only with an approved
+version change.
+
 #### The approval policy is an override, not a flag
 
-`-a` / `--ask-for-approval` exists **only on the top-level command** in 0.153.0.
+`-a` / `--ask-for-approval` exists **only on the top-level command** in 0.153.3.
 `codex exec` refuses it, parse-only and proven against the genuine binary:
 
 ```
@@ -278,6 +311,10 @@ codex exec -a never --help                 -> exit 2, unexpected argument '-a'
 codex exec --ask-for-approval never --help -> exit 2, unexpected argument
 codex exec -c approval_policy="never" --help -> exit 0
 ```
+
+The complete fixed array, including `-c windows.sandbox="elevated"`, was proven
+parse-only against the genuine 0.153.3 binary (a trailing `--help` makes clap
+parse, print, and exit without inference) and exits 0.
 
 `approval_policy` is the recognised configuration key for the same setting — it
 appears in the binary's own configuration-key table beside `sandbox_mode` and
@@ -293,7 +330,7 @@ than granting anything.
 The production CLI cannot supply a path. `codex` is resolved on the current search
 path, then required to be an existing **regular file**, not a symlink, junction, or
 reparse point, with an accepted basename (`codex` / `codex.exe`), whose local
-`codex --version` prints exactly `codex-cli 0.153.0`. That probe is a local
+`codex --version` prints exactly `codex-cli 0.153.3`. That probe is a local
 capability check, not a model request. Tests substitute a fake only through a
 module-level seam that no CLI flag and no envelope can reach.
 

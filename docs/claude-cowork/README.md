@@ -156,13 +156,19 @@ model, no executable path, no output destination, no retry count, and no sandbox
 approval override — all fixed by `codex_runner_policy.json`.
 
 The invocation is fixed: `codex exec -C <repo> -s read-only
--c approval_policy="never" -m gpt-5.6-luna -c model_reasoning_effort="low" --ephemeral --ignore-user-config
+-c windows.sandbox="elevated" -c approval_policy="never" -m gpt-5.6-luna
+-c model_reasoning_effort="low" --ephemeral --ignore-user-config
 --output-schema <schema> -o <private temp> -`, with the prompt on **stdin** (the
-`-` form, proven from local `codex exec --help` on 0.153.0). Only ten allowlisted
+`-` form, proven from local `codex exec --help` on 0.153.3). Only ten allowlisted
 environment names reach the child; planted API, broker, Anthropic, and trading
 variables are proven excluded. **The attempt is consumed the moment the child
 starts** — success, failure, or timeout — so there is no retry and no usage
 runaway.
+
+The CLI is pinned at `codex-cli 0.153.3`, and the bundled native binary is pinned
+by content (sha256 `e5ef3c4b…d749e96`), so a substituted executable is refused even
+inside a well-formed package tree. On Windows the sandbox backend is fixed at
+`elevated`, because a `read-only` sandbox is served by no weaker backend.
 
 On Windows a global npm install ships only shims — an extension-less POSIX shell
 script, a `.cmd`, and a `.ps1` — and none of them can be started with

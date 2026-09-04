@@ -794,13 +794,31 @@ initialization) remain TODO and unauthorized, and automatic Claude/Codex
 communication is **not** operational.
 
 **The approval policy is delivered as a config override, not `-a`.** On
-codex-cli 0.153.0 `-a` / `--ask-for-approval` exists only on the top-level
+codex-cli 0.153.3 `-a` / `--ask-for-approval` exists only on the top-level
 command; `codex exec` exits 2 with `unexpected argument` on both spellings, so the
 flag form could never have reached a model. `-c approval_policy="never"` names the
 same setting, is the key the binary itself lists beside `sandbox_mode` and
 `model`, and parses cleanly. Proven parse-only against the genuine native binary
 with a trailing `--help`; no prompt, no stdin, no inference. The sandbox remains
 `read-only` and only `never` is ever emitted.
+
+**The CLI and the binary itself are pinned.** The accepted version is
+`codex-cli 0.153.3`, and `npm_package.native_sha256` pins the CONTENT of the
+bundled executable at
+`e5ef3c4b81d2fb861f3731c91a773d45a1973c6a0b480d6449f80bc8fd749e96`. Package name,
+version, platform and architecture are validated first; the resolved file is then
+digested and compared, so a substituted or tampered binary inside an otherwise
+well-formed, correctly versioned package tree is still refused. The pin moves only
+with an approved version change.
+
+**The Windows sandbox backend is fixed at elevated.** A `read-only` sandbox is
+served only by the elevated backend; the unelevated one refuses with
+`Restricted read-only access requires the elevated Windows sandbox backend` and
+the child can read nothing -- which is exactly why the first live review returned
+STOP without inspecting anything. The runner therefore fixes
+`-c windows.sandbox="elevated"` in its own argument array. It is not a loosening
+(the sandbox mode stays `read-only` and the stronger backend is selected) and it
+is runner-owned: no flag, caller, or envelope can set, change, or remove it.
 
 **Windows executable resolution was corrected against the real install.** A global
 npm install ships only shims — an extension-less POSIX shell script, a `.cmd`, and
@@ -815,12 +833,12 @@ rule are unchanged. The genuine binary is touched only for `--version` and
 `exec --help`, neither of which is inference.
 
 **The stdin form was proven locally, not assumed.** `codex exec --help` on
-codex-cli 0.153.0 states that the PROMPT argument reads from stdin when it is
+codex-cli 0.153.3 states that the PROMPT argument reads from stdin when it is
 omitted *or* when `-` is used. The runner uses the explicit `-` so the argument
 array shows the intent and the prompt never touches a command line.
 
 **Fixed invocation.** `codex exec -C <repo> -s read-only
--c approval_policy="never" -m gpt-5.6-luna
+-c windows.sandbox="elevated" -c approval_policy="never" -m gpt-5.6-luna
 -c model_reasoning_effort="low" --ephemeral --ignore-user-config --output-schema
 <committed schema> -o <private temp> -`. `--json` is omitted on purpose: local help
 shows it only adds a stdout event stream the runner does not need. `--add-dir`,
