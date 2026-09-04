@@ -109,6 +109,7 @@ CONTRACT_FIXED = {
 FIXED_FLAGS = {
     "sandbox": "read-only",
     "ask_for_approval": "never",
+    "windows_sandbox": "elevated",
     "model": "gpt-5.6-luna",
     "model_reasoning_effort": "low",
     "ephemeral": True,
@@ -126,7 +127,7 @@ FORBIDDEN_FLAGS = ("--add-dir", "--approve-for-me",
 FORBIDDEN_SUBCOMMANDS = ("fork", "resume", "review")
 
 ACCEPTED_BASENAMES = ("codex", "codex.exe")
-ACCEPTED_VERSION_OUTPUT = "codex-cli 0.153.0"
+ACCEPTED_VERSION_OUTPUT = "codex-cli 0.153.3"
 
 # --------------------------------------------------------------------------
 # The official npm layout, read out of the installed launcher, not invented.
@@ -143,7 +144,7 @@ ACCEPTED_VERSION_OUTPUT = "codex-cli 0.153.0"
 # resolution -- shim as LOCATOR ONLY -- and starts the same native binary the
 # launcher would have started, with no shell and no interpreter in between.
 NPM_PACKAGE_NAME = "@openai/codex"
-NPM_PACKAGE_VERSION = "0.153.0"
+NPM_PACKAGE_VERSION = "0.153.3"
 NPM_SCOPE_DIRNAME = "@openai"
 NPM_MODULES_DIRNAME = "node_modules"
 NPM_PACKAGE_DIRNAME = "codex"
@@ -181,6 +182,22 @@ NPM_CPU_BY_MACHINE = {
 
 # A package manifest is small metadata. Anything larger is not one.
 MAX_MANIFEST_BYTES = 65536
+
+# The exact bundled native binary this runner will start. Pinning the content --
+# not just the package metadata around it -- means a substituted or tampered
+# executable inside an otherwise well-formed package tree is still refused.
+# It moves only with an approved version change.
+NATIVE_EXECUTABLE_SHA256 = (
+    "e5ef3c4b81d2fb861f3731c91a773d45a1973c6a0b480d6449f80bc8fd749e96")
+
+# The Windows sandbox backend the runner requires. `read-only` is served ONLY by
+# the elevated backend on Windows: with the unelevated backend Codex refuses with
+# "Restricted read-only access requires the elevated Windows sandbox backend" and
+# the child can read nothing. This is fixed and runner-owned -- it is not a
+# loosening, it selects the STRONGER backend, and no caller or envelope can set,
+# change, or remove it.
+WINDOWS_SANDBOX_BACKEND = "elevated"
+WINDOWS_SANDBOX_CONFIG_KEY = "windows.sandbox"
 
 # Proven from local `codex exec --help` on 0.153.0. The PROMPT argument reads:
 # "Initial instructions for the agent. If not provided as an argument (or if `-`
@@ -345,6 +362,10 @@ def validate_policy(policy):
                           % NPM_PACKAGE_VERSION)
     if npm.get("vendor_dirname") != NPM_VENDOR_DIRNAME:
         raise RunnerError("npm_package vendor_dirname is fixed")
+    if npm.get("native_sha256") != NATIVE_EXECUTABLE_SHA256:
+        raise RunnerError("npm_package native_sha256 is fixed at the pinned "
+                          "build; a different binary is a new, separately "
+                          "approved phase")
     if npm.get("shim_is_executable") is not False:
         raise RunnerError("npm_package shim_is_executable must be false; the "
                           "npm shim is a locator, never an executable")
@@ -458,6 +479,19 @@ def _trusted_path(path, what, want_dir=False):
     return info
 
 
+def _file_sha256(path):
+    """Content digest of one file, read in bounded chunks."""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        raise sg.StoppedError("the resolved native codex executable could not "
+                              "be read")
+    return h.hexdigest()
+
+
 def _read_manifest(path, what):
     """Load one `package.json` as bounded, structured metadata."""
     _trusted_path(path, what)
@@ -554,6 +588,11 @@ def bundled_native_executable(shim, policy):
         raise sg.StoppedError("the resolved native executable escapes the npm "
                               "package tree")
     _trusted_path(native, "resolved native codex executable")
+    digest = _file_sha256(native)
+    if digest != npm["native_sha256"]:
+        raise sg.StoppedError("the bundled native executable does not match the "
+                              "pinned build; a substituted or tampered binary is "
+                              "refused even inside a well-formed package tree")
     return native
 
 
@@ -917,10 +956,16 @@ def build_argv(executable, repo, schema_path, response_path, policy):
     if flags["ask_for_approval"] != "never":
         raise sg.StoppedError("the approval policy is fixed at never; the runner "
                               "never emits a value that can prompt or approve")
+    if flags["windows_sandbox"] != WINDOWS_SANDBOX_BACKEND:
+        raise sg.StoppedError("the Windows sandbox backend is fixed at %s; the "
+                              "read-only sandbox is served by no weaker backend"
+                              % WINDOWS_SANDBOX_BACKEND)
     argv = [
         executable, "exec",
         "-C", repo,
         "-s", flags["sandbox"],
+        "-c", "%s=%s" % (WINDOWS_SANDBOX_CONFIG_KEY,
+                         json.dumps(flags["windows_sandbox"])),
         "-c", "approval_policy=%s" % json.dumps(flags["ask_for_approval"]),
         "-m", flags["model"],
         "-c", "model_reasoning_effort=%s" % json.dumps(flags["model_reasoning_effort"]),
@@ -1208,6 +1253,7 @@ def main(argv=None):
                                    response_path, policy)
             checks.append(_chk("X4", "argument array", "informational",
                                "codex exec -C <repo> -s read-only "
+                               "-c windows.sandbox=\"elevated\" "
                                "-c approval_policy=\"never\" -m %s "
                                "-c model_reasoning_effort=\"low\" --ephemeral "
                                "--ignore-user-config --output-schema <schema> "

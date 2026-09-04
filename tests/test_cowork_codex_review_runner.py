@@ -164,7 +164,7 @@ sys.exit(0)
 
 
 def make_fake(tmp_path, request=None, mode="pass", verdict="PASS",
-              non_authorization=None, version="codex-cli 0.153.0",
+              non_authorization=None, version="codex-cli 0.153.3",
               summary="No objection found.", basename=None, records=None,
               repo=None, **extra):
     """A fake Codex executable plus its launcher script, config baked in."""
@@ -585,6 +585,7 @@ def test_argument_array_is_exact(tmp_path):
         "/x/codex", "exec",
         "-C", "/repo",
         "-s", "read-only",
+        "-c", 'windows.sandbox="elevated"',
         "-c", 'approval_policy="never"',
         "-m", "gpt-5.6-luna",
         "-c", 'model_reasoning_effort="low"',
@@ -691,8 +692,9 @@ def test_prompt_is_delivered_on_stdin_not_the_command_line(bench, tmp_path,
     assert child_argv[-1] == "-"
     assert "-s" in child_argv and child_argv[child_argv.index("-s") + 1] == "read-only"
     # The approval policy reaches the child as a config override, never as `-a`,
-    # which `codex exec` rejects outright on 0.153.0.
+    # which `codex exec` rejects outright on this CLI version.
     assert 'approval_policy="never"' in child_argv
+    assert 'windows.sandbox="elevated"' in child_argv
     assert "-a" not in child_argv and "--ask-for-approval" not in child_argv
     assert "-m" in child_argv and child_argv[child_argv.index("-m") + 1] == "gpt-5.6-luna"
     assert "--ephemeral" in child_argv and "--ignore-user-config" in child_argv
@@ -924,7 +926,7 @@ def test_missing_executable_stops(bench, monkeypatch, tmp_path):
 # assertion runs on every platform rather than only on Windows.
 
 def make_npm_install(tmp_path, prefix_name="npm-prefix", key=None,
-                     name="@openai/codex", version="0.153.0",
+                     name="@openai/codex", version="0.153.3",
                      plat_name=None, plat_version=None, plat_os=None,
                      plat_cpu=None, directory=None, native=True,
                      extra_package=None):
@@ -969,9 +971,20 @@ def make_npm_install(tmp_path, prefix_name="npm-prefix", key=None,
     return prefix, exe
 
 
-def loaded_policy():
+# Every synthetic native binary below is this exact placeholder, so its digest is
+# deterministic. The shipped policy pins the REAL 0.153.3 build, which no fixture
+# can reproduce, so fixture-driven tests repin to the placeholder's digest. The
+# shipped values are asserted separately, and a wrong digest is proven refused.
+FIXTURE_NATIVE_BYTES = b"placeholder"
+FIXTURE_NATIVE_SHA256 = hashlib.sha256(FIXTURE_NATIVE_BYTES).hexdigest()
+
+
+def loaded_policy(native_sha256=FIXTURE_NATIVE_SHA256):
+    """The shipped policy, repinned to a fixture binary unless told otherwise."""
     policy, _ = rr.load_policy()
     rr.validate_policy(policy)
+    if native_sha256 is not None:
+        policy["npm_package"]["native_sha256"] = native_sha256
     return policy
 
 
@@ -1048,7 +1061,7 @@ def test_path_shadowing_takes_the_first_prefix_and_still_validates(tmp_path):
     ({"name": "@evil/codex"}, "is not @openai/codex"),
     ({"version": "0.999.0"}, "not the accepted Codex version"),
     ({"plat_name": "@openai/codex-win32-x64"}, "platform package is not"),
-    ({"plat_version": "0.153.0-win32-x86"}, "not the accepted Codex build"),
+    ({"plat_version": "0.153.3-win32-x86"}, "not the accepted Codex build"),
     ({"plat_os": "sunos"}, "not built for this operating system"),
     ({"plat_cpu": "mips"}, "not built for this architecture"),
     ({"native": False}, "could not be inspected"),
@@ -1189,19 +1202,19 @@ REAL_NPM_PREFIX = Path.home() / "AppData" / "Roaming" / "npm"
 
 
 def test_the_real_install_resolves_and_probes_without_inference():
-    policy = loaded_policy()
+    policy = loaded_policy(native_sha256=None)          # the shipped pin
     shim = REAL_NPM_PREFIX / "codex"
     if not shim.is_file():
-        assert policy["npm_package"]["version"] == "0.153.0"
+        assert policy["npm_package"]["version"] == "0.153.3"
         assert policy["codex_cli"]["accepted_version_output"] == \
-            "codex-cli 0.153.0"
+            "codex-cli 0.153.3"
         return
     native = Path(rr.bundled_native_executable(shim, policy))
     assert native.is_file()
     assert native.name.lower() == ("codex.exe" if os.name == "nt" else "codex")
     assert not native.is_symlink()
     env = rr.child_environment(policy)
-    assert rr.probe_version(str(native), policy, env) == "codex-cli 0.153.0"
+    assert rr.probe_version(str(native), policy, env) == "codex-cli 0.153.3"
     help_text = subprocess.run([str(native), "exec", "--help"],
                                capture_output=True, timeout=120, shell=False)
     assert help_text.returncode == 0
@@ -1223,12 +1236,12 @@ def _parse_only(argv):
 
 
 def test_the_genuine_parser_accepts_the_fixed_array_and_rejects_the_flag_form():
-    """Regression cover for the 0.153.0 approval surface, without inference.
+    """Regression cover for the 0.153.3 approval surface, without inference.
 
     `-a` / `--ask-for-approval` are top-level only; `codex exec` exits 2 on them.
     The `approval_policy` override is the recognised form and parses cleanly.
     """
-    policy = loaded_policy()
+    policy = loaded_policy(native_sha256=None)          # the shipped pin
     shim = REAL_NPM_PREFIX / "codex"
     if not shim.is_file():
         # No install here: assert the same contract deterministically.
@@ -1247,21 +1260,28 @@ def test_the_genuine_parser_accepts_the_fixed_array_and_rejects_the_flag_form():
 
 
 def test_the_real_mailbox_records_no_attempt():
-    """The live-review authorization is still unspent after the suite runs.
+    """No review attempt is left outstanding by this suite.
 
-    The machine-local relay root may now exist -- B1.11 initialized it -- but an
-    initialized mailbox is an EMPTY one: the committed transport authors
-    `relay.json` on first submission, so while that file is absent and the
-    archive is empty, no request has ever been sent and no review attempt has
-    been recorded. The suite must never be what changes that; the autouse
-    fixture separately proves the directory's presence is unaltered by any test.
+    The machine-local relay is now initialized AND used -- a completed request
+    and its verdict are recorded -- so the invariant is no longer "empty". What
+    must hold is that the chain verifies and no request is left PENDING, because
+    a pending request is an unspent attempt waiting for a child. The autouse
+    fixture separately proves no test alters the mailbox at all.
     """
     if not REAL_MAILBOX.exists():
         return                                  # not initialized on this machine
-    assert not (REAL_MAILBOX / "relay.json").exists(), "a request was recorded"
-    archive = REAL_MAILBOX / "archive"
-    if archive.exists():
-        assert list(archive.iterdir()) == [], "an archived envelope exists"
+    mailbox = REAL_MAILBOX / "relay.json"
+    if not mailbox.exists():
+        return                                  # initialized but never used
+    box = cr.read_mailbox(str(mailbox))
+    assert cr.verify_chain(box) == [], "the real mailbox chain is broken"
+    # Whatever exchanges it holds must be COMPLETE. A pending request would mean
+    # a review attempt is outstanding, which no test may ever create or leave.
+    try:
+        pending = rr.find_pending_request(box)
+    except Exception:
+        pending = None
+    assert pending is None, "a pending review request is outstanding"
     assert [p.name for p in REAL_MAILBOX.rglob("*")
             if p.name.endswith((".lock", ".tmp"))] == [], "relay residue"
 
@@ -2209,3 +2229,161 @@ def test_the_writer_cannot_resume_underneath_a_live_reviewer(tmp_path):
     assert records["claude-x"]["status"] == "active"
     assert records["codex-reviewer"]["status"] == "closed"
     assert len(records) == 2, "no record is deleted"
+
+
+# ------------------------------------------- 0.153.3 pin + elevated backend
+#
+# Two facts established by live diagnostics, now enforced:
+#   * the installed Codex is 0.153.3, and the bundled binary's CONTENT is pinned,
+#     so a substituted executable inside a well-formed package tree is refused;
+#   * on Windows the read-only sandbox is served ONLY by the elevated backend, so
+#     the runner fixes `windows.sandbox="elevated"` in its own argument array.
+
+REAL_NATIVE_SHA256 = "e5ef3c4b81d2fb861f3731c91a773d45a1973c6a0b480d6449f80bc8fd749e96"
+
+
+def test_the_shipped_policy_pins_the_verified_0_153_3_build():
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    assert policy["codex_cli"]["accepted_version_output"] == "codex-cli 0.153.3"
+    assert policy["npm_package"]["version"] == "0.153.3"
+    assert policy["npm_package"]["native_sha256"] == REAL_NATIVE_SHA256
+    assert rr.ACCEPTED_VERSION_OUTPUT == "codex-cli 0.153.3"
+    assert rr.NPM_PACKAGE_VERSION == "0.153.3"
+    assert rr.NATIVE_EXECUTABLE_SHA256 == REAL_NATIVE_SHA256
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("accepted_version_output", "codex-cli 0.153.0"),
+    ("accepted_version_output", "codex-cli 0.154.0"),
+])
+def test_the_superseded_version_is_rejected(tmp_path, field, bad):
+    doc = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    doc["codex_cli"][field] = bad
+    p = tmp_path / "p.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    rc, _out, err = run_cli("validate-policy", extra=["--policy", str(p)])
+    assert rc == INVALID and "0.153.3" in err
+
+
+def test_a_superseded_npm_package_version_is_rejected(tmp_path):
+    doc = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    doc["npm_package"]["version"] = "0.153.0"
+    p = tmp_path / "p.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    rc, _out, err = run_cli("validate-policy", extra=["--policy", str(p)])
+    assert rc == INVALID and "0.153.3" in err
+
+
+def test_a_0_153_0_package_tree_is_refused(tmp_path):
+    """Even a well-formed tree is refused when it is the superseded build."""
+    prefix, _exe = make_npm_install(tmp_path, version="0.153.0")
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert "not the accepted Codex version" in str(err.value)
+
+
+def test_a_wrong_native_hash_is_refused(tmp_path):
+    """The package metadata is right; only the binary's content is wrong."""
+    prefix, exe = make_npm_install(tmp_path)
+    exe.write_text("tampered", encoding="utf-8")          # same path, new bytes
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert "does not match the pinned build" in str(err.value)
+
+
+def test_the_pinned_hash_is_what_admits_the_binary(tmp_path):
+    """Positive control: the same tree passes when the digest matches."""
+    prefix, exe = make_npm_install(tmp_path)
+    got = rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert Path(got) == exe
+    with pytest.raises(Exception):
+        rr.bundled_native_executable(prefix / "codex",
+                                     loaded_policy(native_sha256="0" * 64))
+
+
+def test_a_policy_with_a_different_native_hash_is_rejected(tmp_path):
+    doc = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    doc["npm_package"]["native_sha256"] = "b" * 64
+    p = tmp_path / "p.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    rc, _out, err = run_cli("validate-policy", extra=["--policy", str(p)])
+    assert rc == INVALID and "native_sha256" in err
+
+
+def test_the_runtime_cache_executable_is_never_selected():
+    """The managed-runtime copy is a different binary and is not on the walk."""
+    alt = (Path.home() / "AppData" / "Local" / "OpenAI" / "Codex")
+    policy = loaded_policy(native_sha256=None)
+    shim = REAL_NPM_PREFIX / "codex"
+    if not shim.is_file():
+        assert policy["npm_package"]["native_sha256"] == REAL_NATIVE_SHA256
+        return
+    native = Path(rr.bundled_native_executable(shim, policy))
+    assert alt not in native.parents, native.name
+    assert REAL_NPM_PREFIX in native.parents
+    import hashlib as _h
+    digest = _h.sha256(native.read_bytes()).hexdigest()
+    assert digest == REAL_NATIVE_SHA256
+
+
+def test_the_elevated_backend_is_a_fixed_runner_owned_argument():
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    assert policy["fixed_flags"]["windows_sandbox"] == "elevated"
+    assert policy["codex_cli"]["windows_sandbox_config_key"] == "windows.sandbox"
+    argv = rr.build_argv("/x/codex", "/repo", "/s.json", "/r.json", policy)
+    assert 'windows.sandbox="elevated"' in argv
+    assert argv[argv.index('windows.sandbox="elevated"') - 1] == "-c"
+    # exactly one, and the sandbox itself is still read-only
+    assert len([a for a in argv if a.startswith("windows.sandbox=")]) == 1
+    assert argv[argv.index("-s") + 1] == "read-only"
+    assert 'approval_policy="never"' in argv
+    assert 'model_reasoning_effort="low"' in argv
+
+
+@pytest.mark.parametrize("weaker", ["unelevated", "", "none", "auto", "elevated "])
+def test_a_weaker_windows_backend_is_refused(tmp_path, weaker):
+    doc = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    doc["fixed_flags"]["windows_sandbox"] = weaker
+    p = tmp_path / "p.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    rc, _out, err = run_cli("validate-policy", extra=["--policy", str(p)])
+    assert rc == INVALID and "windows_sandbox" in err
+    # and the array builder refuses even if validation were bypassed
+    loose = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    loose["fixed_flags"]["windows_sandbox"] = weaker
+    with pytest.raises(Exception) as exc:
+        rr.build_argv("/x/codex", "/repo", "/s.json", "/r.json", loose)
+    assert "fixed at elevated" in str(exc.value)
+
+
+def test_no_caller_input_can_reach_the_elevated_selection(bench):
+    """There is no CLI surface that sets, changes, or removes the backend."""
+    repo, registry, mailbox, _req = bench
+    for token in ("--windows-sandbox", "--sandbox", "--elevated", "--unelevated",
+                  "--backend"):
+        rc, _out, err = run_cli("review-once", extra=[token, "unelevated"])
+        assert rc == INVALID, token
+    src = RUNNER.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr == "add_argument":
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    assert "sandbox" not in arg.value.lower(), arg.value
+                    assert "windows" not in arg.value.lower(), arg.value
+
+
+def test_the_envelope_cannot_influence_the_backend(bench, tmp_path):
+    """A hostile request cannot change the argument array the child receives."""
+    repo, registry, mailbox, request = bench
+    argvrec = tmp_path / "argv.json"
+    exe, script = make_fake(tmp_path, request, repo=repo,
+                            records={"argv_record": str(argvrec)})
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    assert code == OK, stopped_reasons(doc)
+    child_argv = json.loads(argvrec.read_text(encoding="utf-8"))
+    assert 'windows.sandbox="elevated"' in child_argv
+    assert "unelevated" not in " ".join(child_argv)

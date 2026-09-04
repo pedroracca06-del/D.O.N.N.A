@@ -52,18 +52,23 @@
   ],
   "codex_cli": {
     "accepted_basenames": ["codex", "codex.exe"],
-    "accepted_version_output": "codex-cli 0.153.0",
+    "accepted_version_output": "codex-cli 0.153.3",
     "subcommand": "exec",
     "prompt_delivery": "stdin",
     "prompt_argument": "-",
     "prompt_delivery_note": "Proven from local `codex exec --help` on 0.153.0: the PROMPT argument states that if it is not provided as an argument, or if `-` is used, instructions are read from stdin. The explicit `-` form is used so the argument array shows the intent and the prompt never appears on a command line.",
+    "windows_sandbox_delivery": "config-override",
+    "windows_sandbox_config_key": "windows.sandbox",
+    "windows_sandbox_note": "On Windows the read-only sandbox is served ONLY by the elevated backend: with the unelevated backend Codex refuses with `Restricted read-only access requires the elevated Windows sandbox backend` and the child can read nothing, which is exactly how the first live review failed. The runner therefore fixes `windows.sandbox=\"elevated\"` in its own argument array. This is not a loosening -- it selects the STRONGER backend -- and it is runner-owned: no caller, flag, or envelope can set, change, or remove it.",
     "approval_delivery": "config-override",
     "approval_config_key": "approval_policy",
     "approval_delivery_note": "Proven against the genuine 0.153.0 binary, parse-only. `-a` / `--ask-for-approval` exists ONLY on the top-level command: `codex exec -a never --help` and `codex exec --ask-for-approval never --help` both exit 2 with `unexpected argument`, so the flag form can never reach a model. `approval_policy` is the recognised configuration key for the same setting -- it appears in the binary's own configuration-key table beside `sandbox_mode` and `model`, and in its diagnostic text as `approval_policy = \"never\"` -- and `codex exec -c approval_policy=\"never\" --help` exits 0. It is delivered exactly the way the reasoning effort already is. Only `never` is ever emitted; the value is pinned here and re-checked when the array is built."
   },
   "npm_package": {
     "name": "@openai/codex",
-    "version": "0.153.0",
+    "version": "0.153.3",
+    "native_sha256": "e5ef3c4b81d2fb861f3731c91a773d45a1973c6a0b480d6449f80bc8fd749e96",
+    "native_sha256_note": "The exact bundled binary the runner will start, verified locally against the installed 0.153.3 platform package. Pinning the CONTENT, not just the metadata around it, means a substituted or tampered executable inside an otherwise well-formed package tree is still refused. It moves only with an approved version change.",
     "vendor_dirname": "vendor",
     "shim_is_executable": false,
     "layout_note": "Read out of the installed launcher, not invented. `npm i -g @openai/codex` writes only shims -- `codex` (a `#!/bin/sh` script), `codex.cmd`, and `codex.ps1` -- and none of them is an executable image; each merely re-execs `node <prefix>/node_modules/@openai/codex/bin/codex.js`. That launcher computes a Rust target triple from platform and architecture, resolves the matching optional dependency, and spawns `<platform package>/vendor/<triple>/bin/codex(.exe)` directly. Windows cannot start an extension-less `#!/bin/sh` file, so the runner reproduces the same resolution with the shim as a locator only, and starts the identical native binary with no shell, no cmd.exe, and no Node in between. The published platform packages carry the scope name `@openai/codex` rather than their directory name, and pin the build in the version as `<version>-<os>-<cpu>`; both are checked.",
@@ -103,6 +108,7 @@
   "fixed_flags": {
     "sandbox": "read-only",
     "ask_for_approval": "never",
+    "windows_sandbox": "elevated",
     "model": "gpt-5.6-luna",
     "model_reasoning_effort": "low",
     "ephemeral": true,
