@@ -36,6 +36,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform as _platform
 import secrets
 import stat
 import subprocess
@@ -127,6 +128,60 @@ FORBIDDEN_SUBCOMMANDS = ("fork", "resume", "review")
 ACCEPTED_BASENAMES = ("codex", "codex.exe")
 ACCEPTED_VERSION_OUTPUT = "codex-cli 0.153.0"
 
+# --------------------------------------------------------------------------
+# The official npm layout, read out of the installed launcher, not invented.
+#
+# `npm i -g @openai/codex` writes three shims next to the npm prefix -- an
+# extension-less POSIX shell script, a `.cmd`, and a `.ps1` -- and NONE of them is
+# an executable image. All three only re-exec the JavaScript launcher shipped in
+# the package, and that launcher computes a Rust target triple from the running
+# platform and architecture, resolves the matching optional dependency, and
+# spawns `<platform package>/vendor/<triple>/bin/codex(.exe)` directly.
+#
+# Windows cannot CreateProcess an extension-less shell script, so selecting the
+# shim yields WinError 193. The runner therefore reproduces the launcher's own
+# resolution -- shim as LOCATOR ONLY -- and starts the same native binary the
+# launcher would have started, with no shell and no interpreter in between.
+NPM_PACKAGE_NAME = "@openai/codex"
+NPM_PACKAGE_VERSION = "0.153.0"
+NPM_SCOPE_DIRNAME = "@openai"
+NPM_MODULES_DIRNAME = "node_modules"
+NPM_PACKAGE_DIRNAME = "codex"
+NPM_VENDOR_DIRNAME = "vendor"
+NPM_BIN_DIRNAME = "bin"
+NPM_MANIFEST_FILENAME = "package.json"
+
+# `<os>-<cpu>` in npm's vocabulary -> the launcher's fixed layout for it.
+NPM_PLATFORM_PACKAGES = {
+    "win32-x64": {"directory": "codex-win32-x64",
+                  "target_triple": "x86_64-pc-windows-msvc",
+                  "executable_name": "codex.exe"},
+    "win32-arm64": {"directory": "codex-win32-arm64",
+                    "target_triple": "aarch64-pc-windows-msvc",
+                    "executable_name": "codex.exe"},
+    "linux-x64": {"directory": "codex-linux-x64",
+                  "target_triple": "x86_64-unknown-linux-musl",
+                  "executable_name": "codex"},
+    "linux-arm64": {"directory": "codex-linux-arm64",
+                    "target_triple": "aarch64-unknown-linux-musl",
+                    "executable_name": "codex"},
+    "darwin-x64": {"directory": "codex-darwin-x64",
+                   "target_triple": "x86_64-apple-darwin",
+                   "executable_name": "codex"},
+    "darwin-arm64": {"directory": "codex-darwin-arm64",
+                     "target_triple": "aarch64-apple-darwin",
+                     "executable_name": "codex"},
+}
+
+# `platform.machine()` spellings -> npm's `process.arch` spelling.
+NPM_CPU_BY_MACHINE = {
+    "amd64": "x64", "x86_64": "x64", "x64": "x64",
+    "arm64": "arm64", "aarch64": "arm64",
+}
+
+# A package manifest is small metadata. Anything larger is not one.
+MAX_MANIFEST_BYTES = 65536
+
 # Proven from local `codex exec --help` on 0.153.0. The PROMPT argument reads:
 # "Initial instructions for the agent. If not provided as an argument (or if `-`
 # is used), instructions are read from stdin." The explicit `-` is used so the
@@ -190,8 +245,8 @@ def _reject_constant(_name):
 # --------------------------------------------------------------------------
 
 POLICY_REQUIRED = ("schema_version", "policy_name", "contract", "operations",
-                   "forbidden_operation_words", "codex_cli", "fixed_flags",
-                   "forbidden_flags", "forbidden_subcommands",
+                   "forbidden_operation_words", "codex_cli", "npm_package",
+                   "fixed_flags", "forbidden_flags", "forbidden_subcommands",
                    "environment_allowlist", "environment_note", "limits",
                    "expected_verdicts", "non_authorization_sentence",
                    "reviewer_session")
@@ -266,6 +321,25 @@ def validate_policy(policy):
         raise RunnerError("the prompt is delivered on stdin using the proven "
                           "`-` form; this is fixed")
 
+    npm = policy["npm_package"]
+    if not isinstance(npm, dict):
+        raise RunnerError("npm_package must be a mapping")
+    if npm.get("name") != NPM_PACKAGE_NAME:
+        raise RunnerError("npm_package name is fixed at %r" % NPM_PACKAGE_NAME)
+    if npm.get("version") != NPM_PACKAGE_VERSION:
+        raise RunnerError("npm_package version is fixed at %r; a different "
+                          "Codex build is a new, separately approved phase"
+                          % NPM_PACKAGE_VERSION)
+    if npm.get("vendor_dirname") != NPM_VENDOR_DIRNAME:
+        raise RunnerError("npm_package vendor_dirname is fixed")
+    if npm.get("shim_is_executable") is not False:
+        raise RunnerError("npm_package shim_is_executable must be false; the "
+                          "npm shim is a locator, never an executable")
+    packages = npm.get("platform_packages")
+    if not isinstance(packages, dict) or packages != NPM_PLATFORM_PACKAGES:
+        raise RunnerError("npm_package platform_packages is fixed to the "
+                          "layout published by the Codex launcher")
+
     flags = policy["fixed_flags"]
     if not isinstance(flags, dict) or set(flags) != set(FIXED_FLAGS):
         raise RunnerError("fixed_flags must define exactly the fixed flags")
@@ -318,10 +392,16 @@ def validate_policy(policy):
 # Codex executable resolution
 # --------------------------------------------------------------------------
 
-def _which(name, search_path):
-    exts = [""]
-    if os.name == "nt":
-        exts = ["", ".exe"]
+def _which(name, search_path, exts=None):
+    """First `name`+ext that exists, scanning PATH in order.
+
+    `exts` lets the caller separate the two Windows cases the resolver treats
+    very differently: a real `codex.exe`, which may be executed, and the
+    extension-less npm shim, which may only be used as a locator. `.cmd` and
+    `.ps1` are absent by construction -- they are never candidates.
+    """
+    if exts is None:
+        exts = ["", ".exe"] if os.name == "nt" else [""]
     for directory in search_path.split(os.pathsep):
         if not directory:
             continue
@@ -332,20 +412,140 @@ def _which(name, search_path):
     return None
 
 
-def resolve_codex(policy, search_path=None):
-    """Find `codex` on the search path and prove it is the expected binary.
+def _canonical(path):
+    """Absolute, link-free, case-normalised. Used for every containment test."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
-    Never accepts a caller-supplied path. The only substitution point is the
-    module-level test seam, which no CLI flag and no envelope can reach.
+
+def _within(child, parent):
+    """True when `child` is `parent` or lies beneath it, after canonicalising.
+
+    Both sides are canonicalised first, so a `..` segment, a symlinked parent, or
+    a junction part-way down cannot smuggle the final path out of the package.
     """
-    if _TEST_EXECUTABLE_OVERRIDE:
-        path = _TEST_EXECUTABLE_OVERRIDE
+    c, p = _canonical(child), _canonical(parent)
+    return c == p or c.startswith(p + os.sep)
+
+
+def _trusted_path(path, what, want_dir=False):
+    """Refuse anything that is not a plain, unlinked entry of the wanted kind."""
+    if os.path.islink(path):
+        raise sg.StoppedError("the %s is a symbolic link" % what)
+    try:
+        info = os.lstat(path)
+    except OSError:
+        raise sg.StoppedError("the %s could not be inspected" % what)
+    if is_reparse_point(info):
+        raise sg.StoppedError("the %s is a reparse point" % what)
+    if want_dir:
+        if not stat.S_ISDIR(info.st_mode):
+            raise sg.StoppedError("the %s is not a directory" % what)
+    elif not stat.S_ISREG(info.st_mode):
+        raise sg.StoppedError("the %s is not a regular file" % what)
+    return info
+
+
+def _read_manifest(path, what):
+    """Load one `package.json` as bounded, structured metadata."""
+    _trusted_path(path, what)
+    try:
+        raw = open(path, "rb").read(MAX_MANIFEST_BYTES + 1)
+    except OSError:
+        raise sg.StoppedError("the %s could not be read" % what)
+    if len(raw) > MAX_MANIFEST_BYTES:
+        raise sg.StoppedError("the %s is larger than a package manifest" % what)
+    try:
+        doc = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
+    except ef.ValidationError:
+        raise sg.StoppedError("the %s contains a non-standard numeric value"
+                              % what)
+    except Exception:
+        raise sg.StoppedError("the %s is not valid JSON" % what)
+    if not isinstance(doc, dict):
+        raise sg.StoppedError("the %s is not a JSON object" % what)
+    return doc
+
+
+def host_platform_key():
+    """This host as `<os>-<cpu>` in npm's vocabulary, e.g. `win32-x64`."""
+    cpu = NPM_CPU_BY_MACHINE.get(_platform.machine().lower())
+    if sys.platform.startswith("win"):
+        os_name = "win32"
+    elif sys.platform.startswith("darwin"):
+        os_name = "darwin"
+    elif sys.platform.startswith("linux"):
+        os_name = "linux"
     else:
-        path = _which("codex", search_path if search_path is not None
-                      else os.environ.get("PATH", ""))
-    if not path:
-        raise sg.StoppedError("the codex executable was not found on the search "
-                              "path")
+        os_name = None
+    if not os_name or not cpu:
+        raise sg.StoppedError("this host is not a platform Codex publishes a "
+                              "native binary for")
+    return "%s-%s" % (os_name, cpu)
+
+
+def bundled_native_executable(shim, policy):
+    """Reproduce the launcher's resolution, using the shim only as a locator.
+
+    The shim itself is never executed. Its DIRECTORY names the npm prefix, and
+    every step from there is fixed layout plus validated manifest metadata: the
+    package must really be `@openai/codex` at the accepted version, the platform
+    package must really be built for this operating system and architecture, and
+    the executable that falls out must still lie inside the package tree.
+    """
+    npm = policy["npm_package"]
+    prefix = os.path.dirname(os.path.abspath(shim))
+
+    package_root = os.path.join(prefix, NPM_MODULES_DIRNAME, NPM_SCOPE_DIRNAME,
+                                NPM_PACKAGE_DIRNAME)
+    _trusted_path(package_root, "codex npm package directory", want_dir=True)
+    manifest = _read_manifest(os.path.join(package_root, NPM_MANIFEST_FILENAME),
+                              "codex npm package manifest")
+    if manifest.get("name") != npm["name"]:
+        raise sg.StoppedError("the npm package beside the shim is not %s"
+                              % npm["name"])
+    if manifest.get("version") != npm["version"]:
+        raise sg.StoppedError("the npm package is not the accepted Codex "
+                              "version")
+
+    key = host_platform_key()
+    target = npm["platform_packages"].get(key)
+    if target is None:
+        raise sg.StoppedError("no accepted Codex platform package for this host")
+
+    platform_root = os.path.join(package_root, NPM_MODULES_DIRNAME,
+                                 NPM_SCOPE_DIRNAME, target["directory"])
+    _trusted_path(platform_root, "codex platform package directory",
+                  want_dir=True)
+    plat = _read_manifest(os.path.join(platform_root, NPM_MANIFEST_FILENAME),
+                          "codex platform package manifest")
+    # The published platform packages carry the SCOPE name, not the directory
+    # name, and pin the build in the version. Both are checked, so a renamed or
+    # substituted directory cannot pass itself off as the platform package.
+    if plat.get("name") != npm["name"]:
+        raise sg.StoppedError("the platform package is not %s" % npm["name"])
+    if plat.get("version") != "%s-%s" % (npm["version"], key):
+        raise sg.StoppedError("the platform package is not the accepted Codex "
+                              "build for this host")
+    os_name, cpu = key.split("-", 1)
+    if list(plat.get("os") or []) != [os_name]:
+        raise sg.StoppedError("the platform package is not built for this "
+                              "operating system")
+    if list(plat.get("cpu") or []) != [cpu]:
+        raise sg.StoppedError("the platform package is not built for this "
+                              "architecture")
+
+    native = os.path.join(platform_root, npm["vendor_dirname"],
+                          target["target_triple"], NPM_BIN_DIRNAME,
+                          target["executable_name"])
+    if not _within(native, package_root):
+        raise sg.StoppedError("the resolved native executable escapes the npm "
+                              "package tree")
+    _trusted_path(native, "resolved native codex executable")
+    return native
+
+
+def _accept_executable(path, policy):
+    """The final gate every candidate passes, however it was located."""
     path = os.path.abspath(path)
     if os.path.islink(path):
         raise sg.StoppedError("the resolved codex path is a symbolic link")
@@ -360,7 +560,46 @@ def resolve_codex(policy, search_path=None):
     base = os.path.basename(path).lower()
     if base not in [b.lower() for b in policy["codex_cli"]["accepted_basenames"]]:
         raise sg.StoppedError("the resolved executable is not named codex")
+    if os.name == "nt" and not base.endswith(".exe"):
+        raise sg.StoppedError("the extension-less npm shim is never executed; "
+                              "only a native codex.exe is started")
     return path
+
+
+def resolve_codex(policy, search_path=None):
+    """Find `codex` on the search path and prove it is the expected binary.
+
+    Never accepts a caller-supplied path. The only substitution point is the
+    module-level test seam, which no CLI flag and no envelope can reach.
+
+    On Windows a real `codex.exe` on PATH wins outright. Otherwise the npm shim
+    is used ONLY to locate its own installed package, and the native binary that
+    package ships is what starts -- never the shim, never `codex.cmd`, never
+    `codex.ps1`, never Node, and never a shell.
+    """
+    if _TEST_EXECUTABLE_OVERRIDE:
+        return _accept_executable(_TEST_EXECUTABLE_OVERRIDE, policy)
+
+    path_value = (search_path if search_path is not None
+                  else os.environ.get("PATH", ""))
+
+    if os.name == "nt":
+        direct = _which("codex", path_value, exts=(".exe",))
+        if direct:
+            return _accept_executable(direct, policy)
+        shim = _which("codex", path_value, exts=("",))
+        if not shim:
+            raise sg.StoppedError("the codex executable was not found on the "
+                                  "search path")
+        _trusted_path(shim, "codex npm shim")
+        return _accept_executable(bundled_native_executable(shim, policy),
+                                  policy)
+
+    path = _which("codex", path_value)
+    if not path:
+        raise sg.StoppedError("the codex executable was not found on the search "
+                              "path")
+    return _accept_executable(path, policy)
 
 
 def probe_version(executable, policy, env):

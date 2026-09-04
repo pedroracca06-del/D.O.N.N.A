@@ -164,6 +164,14 @@ variables are proven excluded. **The attempt is consumed the moment the child
 starts** — success, failure, or timeout — so there is no retry and no usage
 runaway.
 
+On Windows a global npm install ships only shims — an extension-less POSIX shell
+script, a `.cmd`, and a `.ps1` — and none of them can be started with
+`shell=False`. The runner therefore prefers a real `codex.exe` on the search path
+and otherwise uses the shim **only as a locator**, walking the validated
+`@openai/codex` package to the bundled native binary that the official launcher
+would itself have started. No shell, no command interpreter, and no Node process
+sits between the runner and that binary.
+
 **Still to do, and not authorized:** a controlled first live review, and
 initializing the real mailbox at `${HOME}/.claude/nova-relay/`. **No live review has
 ever been performed, and automatic Claude/Codex communication is not

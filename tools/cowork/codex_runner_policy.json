@@ -58,6 +58,45 @@
     "prompt_argument": "-",
     "prompt_delivery_note": "Proven from local `codex exec --help` on 0.153.0: the PROMPT argument states that if it is not provided as an argument, or if `-` is used, instructions are read from stdin. The explicit `-` form is used so the argument array shows the intent and the prompt never appears on a command line."
   },
+  "npm_package": {
+    "name": "@openai/codex",
+    "version": "0.153.0",
+    "vendor_dirname": "vendor",
+    "shim_is_executable": false,
+    "layout_note": "Read out of the installed launcher, not invented. `npm i -g @openai/codex` writes only shims -- `codex` (a `#!/bin/sh` script), `codex.cmd`, and `codex.ps1` -- and none of them is an executable image; each merely re-execs `node <prefix>/node_modules/@openai/codex/bin/codex.js`. That launcher computes a Rust target triple from platform and architecture, resolves the matching optional dependency, and spawns `<platform package>/vendor/<triple>/bin/codex(.exe)` directly. Windows cannot start an extension-less `#!/bin/sh` file, so the runner reproduces the same resolution with the shim as a locator only, and starts the identical native binary with no shell, no cmd.exe, and no Node in between. The published platform packages carry the scope name `@openai/codex` rather than their directory name, and pin the build in the version as `<version>-<os>-<cpu>`; both are checked.",
+    "platform_packages": {
+      "win32-x64": {
+        "directory": "codex-win32-x64",
+        "target_triple": "x86_64-pc-windows-msvc",
+        "executable_name": "codex.exe"
+      },
+      "win32-arm64": {
+        "directory": "codex-win32-arm64",
+        "target_triple": "aarch64-pc-windows-msvc",
+        "executable_name": "codex.exe"
+      },
+      "linux-x64": {
+        "directory": "codex-linux-x64",
+        "target_triple": "x86_64-unknown-linux-musl",
+        "executable_name": "codex"
+      },
+      "linux-arm64": {
+        "directory": "codex-linux-arm64",
+        "target_triple": "aarch64-unknown-linux-musl",
+        "executable_name": "codex"
+      },
+      "darwin-x64": {
+        "directory": "codex-darwin-x64",
+        "target_triple": "x86_64-apple-darwin",
+        "executable_name": "codex"
+      },
+      "darwin-arm64": {
+        "directory": "codex-darwin-arm64",
+        "target_triple": "aarch64-apple-darwin",
+        "executable_name": "codex"
+      }
+    }
+  },
   "fixed_flags": {
     "sandbox": "read-only",
     "ask_for_approval": "never",

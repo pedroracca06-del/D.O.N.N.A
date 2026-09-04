@@ -48,7 +48,7 @@ automatic · **AR** automatic read-only · **AAM** approval before mutation ·
 | B1.6 | **Change Classifier** — determine the minimum approval class a change requires | Claude | AR | none | B1.3 | 216 classifier tests; 10 planted demonstrations; every class, every mode, most-restrictive aggregation, semantic escalation | none | **DONE (tool) — local only** |
 | B1.7 | **Test Selector** — changed paths → focused test list, advisory only | Claude | AR | none | P0.9, B1.1, B1.2, B1.3, B1.4 (optional collision check), B1.6 | 201 selector tests (167 + 34 from the Phase 3W refinement); self / direct / transitive / relative / conftest-subtree / policy / dynamic-safety mapping, deletion, rename, case-only rename, escalation on unmapped-wildcard-unresolved-syntax-binary and on a changed **source** with unresolved dynamic imports, a recomputed proof that no statically discovered test importing a changed module is omitted, and five real-tree demonstrations showing an ordinary source change now returns a focused subset | none | **DONE (tool) — local only** |
 | B1.8 | **Codex relay transport** — carry one report and one verdict, locally | Claude | AR | machine-local mailbox outside every repository (NOT created) | B1.1, B1.2, B1.3, B1.4 (read-only) | Relay test suite; seven fixed operations and 25 refused action verbs; canonical serialization and recomputed evidence digest; all four verdicts; planted false-PASS, prompt-injection, shell-payload, command-smuggling, traversal, machine-path, credential, replay, chain-corruption, stale-HEAD, dirty-tree, foreign-lock, archive-collision and simulated-replace-failure demonstrations | none — it approves nothing | **DONE (transport tool) — local only** |
-| B1.9 | **One-shot Codex runner** — invoke Codex read-only, once, per completed phase | Claude | AAM | reads the repository read-only; writes one private temporary file | B1.8 | Runner test suite against a fake Codex: fixed three-operation CLI, exact argument array, proven stdin prompt, deterministic prompt bytes, one spawn only, no retry after success/non-zero/timeout/invalid-JSON/schema-failure/missing-output/drift, attempt consumed on start, allowlisted child environment with planted secrets excluded, stdout/stderr canaries contained, executable name/type/version/symlink/reparse refused, a real Windows junction escape refused, every precondition demonstrated, **zero skips** | **Pedro, per invocation** | **DONE (tool) — local only; never run against a real model** |
+| B1.9 | **One-shot Codex runner** — invoke Codex read-only, once, per completed phase | Claude | AAM | reads the repository read-only; writes one private temporary file | B1.8 | Runner test suite against a fake Codex: fixed three-operation CLI, exact argument array, proven stdin prompt, deterministic prompt bytes, one spawn only, no retry after success/non-zero/timeout/invalid-JSON/schema-failure/missing-output/drift, attempt consumed on start, allowlisted child environment with planted secrets excluded, stdout/stderr canaries contained, executable name/type/version/symlink/reparse refused, a real Windows junction escape refused, every precondition demonstrated, plus bundled-native npm resolution proven on a full synthetic package layout (shim/`.cmd`/`.ps1` never spawned, wrong name/version/platform/architecture, absent binary, path escape, link and reparse cases, impostor package, PATH shadowing) and the genuine binary probed with `--version` and `exec --help` only, **zero skips** | **Pedro, per invocation** | **DONE (tool) — local only; never run against a real model** |
 | B1.10 | **Controlled first live review** — one billed Codex review | Pedro | AM | one model request | B1.9 | Not started | **Pedro, every time** | **TODO — not authorized** |
 | B1.11 | **Real mailbox initialization** at `${HOME}/.claude/nova-relay/` | Claude | AAM | creates a directory outside every repository | B1.8 | Not started | **Named approval required** | **TODO — not created** |
 
@@ -767,6 +767,18 @@ Full contract: [CODEX_RELAY_CONTRACT.md](CODEX_RELAY_CONTRACT.md).
 under `tmp_path`. B1.10 (a controlled first live review) and B1.11 (real mailbox
 initialization) remain TODO and unauthorized, and automatic Claude/Codex
 communication is **not** operational.
+
+**Windows executable resolution was corrected against the real install.** A global
+npm install ships only shims — an extension-less POSIX shell script, a `.cmd`, and
+a `.ps1` — and none is an executable image; Windows fails them with `WinError 193`
+under the mandatory `shell=False` spawn. The resolver now prefers a real
+`codex.exe` on the search path and otherwise treats the shim purely as a locator,
+walking the validated `@openai/codex` package to the bundled native binary the
+official launcher would itself have started. Package name, version, platform,
+architecture, link status, and tree containment are all checked. The subcommand,
+fixed flags, stdin form, environment allowlist, one-attempt rule, and no-retry
+rule are unchanged. The genuine binary is touched only for `--version` and
+`exec --help`, neither of which is inference.
 
 **The stdin form was proven locally, not assumed.** `codex exec --help` on
 codex-cli 0.153.0 states that the PROMPT argument reads from stdin when it is

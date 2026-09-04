@@ -215,7 +215,8 @@ start a model, and it is deliberately narrow.
 2. Observe the repository and the Session Registry, read-only.
 3. Check every precondition (below). If any fails, **stop before spawning** — the
    review attempt is *not* consumed.
-4. Resolve `codex` on the search path and prove the binary.
+4. Resolve `codex` on the search path and prove the binary — on Windows this
+   walks the npm package to the bundled native executable (see below).
 5. Build the prompt from the request. The runner writes it; no caller supplies prose.
 6. Create a private temporary response file.
 7. **Start Codex exactly once.** From this moment the attempt is spent.
@@ -275,6 +276,40 @@ reparse point, with an accepted basename (`codex` / `codex.exe`), whose local
 `codex --version` prints exactly `codex-cli 0.153.0`. That probe is a local
 capability check, not a model request. Tests substitute a fake only through a
 module-level seam that no CLI flag and no envelope can reach.
+
+#### The Windows npm install ships no executable
+
+A global install writes three shims beside the npm prefix — an extension-less
+POSIX shell script, a `.cmd`, and a `.ps1` — and **none of them is an executable
+image**. Each merely re-execs the JavaScript launcher inside the package, which
+computes a Rust target triple from the running platform and architecture,
+resolves the matching optional dependency, and starts the native binary directly.
+
+Windows cannot `CreateProcess` an extension-less shell script, so selecting the
+shim fails with `WinError 193`. Since the runner spawns with `shell=False` — which
+is not negotiable — it reproduces the launcher's own resolution instead:
+
+1. A real `codex.exe` on the search path wins outright and is used directly.
+2. Otherwise the shim is used **as a locator only**, never executed. Its directory
+   names the npm prefix, and from there the layout is fixed:
+   `node_modules/@openai/codex` → `node_modules/@openai/codex-<os>-<cpu>` →
+   `vendor/<target triple>/bin/codex.exe`.
+
+Every step is validated before the next: both manifests must name the package
+exactly `@openai/codex`; the root version must equal the accepted version; the
+platform package must pin `<version>-<os>-<cpu>` and declare this `os` and `cpu`;
+no component may be a symlink, junction, or reparse point; and the final path is
+canonicalised and required to remain **inside** the package tree. A missing,
+malformed, oversized, renamed, mismatched, or substituted package stops the run.
+
+`codex.cmd` and `codex.ps1` are never candidates by construction, and no shell,
+command interpreter, or Node process is ever placed between the runner and the
+binary. The internal `.plugin-appserver` executable is not on the search path and
+is never reachable by this walk.
+
+This changes only *which file is started*. The subcommand, every fixed flag, the
+stdin prompt form, the child environment allowlist, the one-attempt rule, and the
+no-retry rule are all unchanged.
 
 ### Child environment minimization
 

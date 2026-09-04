@@ -843,6 +843,332 @@ def test_missing_executable_stops(bench, monkeypatch, tmp_path):
                for r in stopped_reasons(doc)), stopped_reasons(doc)
 
 
+# ------------------------------------------- npm layout / bundled native binary
+#
+# The real global install ships only shims -- an extension-less POSIX shell
+# script, a `.cmd`, and a `.ps1` -- none of which Windows can start. These build
+# the same layout under tmp_path so resolution is proven without touching the
+# machine's install, and drive `bundled_native_executable` directly so every
+# assertion runs on every platform rather than only on Windows.
+
+def make_npm_install(tmp_path, prefix_name="npm-prefix", key=None,
+                     name="@openai/codex", version="0.153.0",
+                     plat_name=None, plat_version=None, plat_os=None,
+                     plat_cpu=None, directory=None, native=True,
+                     extra_package=None):
+    """A faithful copy of the official npm layout, under tmp_path."""
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    key = key or rr.host_platform_key()
+    target = policy["npm_package"]["platform_packages"][key]
+    os_name, cpu = key.split("-", 1)
+
+    prefix = tmp_path / prefix_name
+    prefix.mkdir(parents=True, exist_ok=True)
+    for shim in ("codex", "codex.cmd", "codex.ps1"):
+        (prefix / shim).write_text("shim placeholder\n", encoding="utf-8")
+
+    pkg = prefix / "node_modules" / "@openai" / "codex"
+    (pkg / "bin").mkdir(parents=True, exist_ok=True)
+    (pkg / "bin" / "codex.js").write_text("// launcher\n", encoding="utf-8")
+    (pkg / "package.json").write_text(
+        json.dumps({"name": name, "version": version,
+                    "bin": {"codex": "bin/codex.js"}}), encoding="utf-8")
+
+    plat = pkg / "node_modules" / "@openai" / (directory or target["directory"])
+    plat.mkdir(parents=True, exist_ok=True)
+    (plat / "package.json").write_text(
+        json.dumps({"name": plat_name or name,
+                    "version": plat_version or ("%s-%s" % (version, key)),
+                    "os": [plat_os or os_name], "cpu": [plat_cpu or cpu]}),
+        encoding="utf-8")
+    binroot = plat / "vendor" / target["target_triple"] / "bin"
+    binroot.mkdir(parents=True, exist_ok=True)
+    exe = binroot / target["executable_name"]
+    if native:
+        exe.write_text("placeholder", encoding="utf-8")
+
+    if extra_package:
+        other = pkg / "node_modules" / "@openai" / extra_package
+        other.mkdir(parents=True, exist_ok=True)
+        (other / "package.json").write_text(
+            json.dumps({"name": "@evil/impostor", "version": "9.9.9",
+                        "os": [os_name], "cpu": [cpu]}), encoding="utf-8")
+    return prefix, exe
+
+
+def loaded_policy():
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    return policy
+
+
+def test_bundled_native_is_resolved_through_the_official_layout(tmp_path):
+    prefix, exe = make_npm_install(tmp_path)
+    got = rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert Path(got) == exe
+    assert Path(got).is_file()
+
+
+def test_the_extensionless_shim_is_never_the_resolved_executable(tmp_path):
+    prefix, exe = make_npm_install(tmp_path)
+    got = Path(rr.bundled_native_executable(prefix / "codex", loaded_policy()))
+    assert got != prefix / "codex"
+    assert got.name.lower() in ("codex", "codex.exe")
+    assert got.read_text(encoding="utf-8") == "placeholder"
+
+
+def test_cmd_and_ps1_shims_are_never_candidates(tmp_path):
+    """Neither Windows shim can be selected, by construction."""
+    prefix, exe = make_npm_install(tmp_path)
+    assert (prefix / "codex.cmd").is_file()
+    assert (prefix / "codex.ps1").is_file()
+    for exts in (None, ("",), (".exe",)):
+        found = (rr._which("codex", str(prefix)) if exts is None
+                 else rr._which("codex", str(prefix), exts=exts))
+        if found is not None:
+            assert not str(found).lower().endswith((".cmd", ".ps1"))
+    got = rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert not str(got).lower().endswith((".cmd", ".ps1"))
+
+
+def test_resolution_prefers_a_direct_codex_exe_on_the_path(tmp_path):
+    """A real `codex.exe` on PATH is taken directly, with no package walk."""
+    d = tmp_path / "direct"
+    d.mkdir()
+    exe = d / ("codex.exe" if os.name == "nt" else "codex")
+    exe.write_text("placeholder", encoding="utf-8")
+    got = rr.resolve_codex(loaded_policy(), search_path=str(d))
+    assert Path(got) == exe
+
+
+def test_path_search_walks_the_package_when_only_a_shim_is_present(tmp_path):
+    """End to end through PATH: shim locates, native starts.
+
+    On Windows the shim can only ever be a locator. On a POSIX host the shim is
+    itself executable and remains what the resolver returns, which is the
+    documented pre-existing behaviour this phase deliberately leaves alone.
+    """
+    prefix, exe = make_npm_install(tmp_path)
+    got = Path(rr.resolve_codex(loaded_policy(), search_path=str(prefix)))
+    if os.name == "nt":
+        assert got == exe
+    else:
+        assert got == prefix / "codex"
+
+
+def test_path_shadowing_takes_the_first_prefix_and_still_validates(tmp_path):
+    """An earlier PATH entry wins -- and a bad one there is refused, not skipped."""
+    bad, _ = make_npm_install(tmp_path, prefix_name="first", name="@evil/codex")
+    good, exe = make_npm_install(tmp_path, prefix_name="second")
+    search = os.pathsep.join([str(bad), str(good)])
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(bad / "codex", loaded_policy())
+    assert "is not @openai/codex" in str(err.value)
+    if os.name == "nt":
+        with pytest.raises(Exception):
+            rr.resolve_codex(loaded_policy(), search_path=search)
+    assert Path(rr.bundled_native_executable(good / "codex",
+                                             loaded_policy())) == exe
+
+
+@pytest.mark.parametrize("kwargs,fragment", [
+    ({"name": "@evil/codex"}, "is not @openai/codex"),
+    ({"version": "0.999.0"}, "not the accepted Codex version"),
+    ({"plat_name": "@openai/codex-win32-x64"}, "platform package is not"),
+    ({"plat_version": "0.153.0-win32-x86"}, "not the accepted Codex build"),
+    ({"plat_os": "sunos"}, "not built for this operating system"),
+    ({"plat_cpu": "mips"}, "not built for this architecture"),
+    ({"native": False}, "could not be inspected"),
+    ({"directory": "codex-renamed"}, "could not be inspected"),
+])
+def test_bundled_resolution_refuses_a_bad_package(tmp_path, kwargs, fragment):
+    prefix, _exe = make_npm_install(tmp_path, **kwargs)
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert fragment in str(err.value), str(err.value)
+
+
+def test_a_malicious_adjacent_package_is_ignored(tmp_path):
+    """An impostor beside the platform package cannot be selected."""
+    prefix, exe = make_npm_install(tmp_path, extra_package="codex-evil-x64")
+    got = Path(rr.bundled_native_executable(prefix / "codex", loaded_policy()))
+    assert got == exe
+    assert "evil" not in str(got).lower()
+
+
+def test_a_malformed_manifest_is_refused(tmp_path):
+    prefix, _exe = make_npm_install(tmp_path)
+    manifest = prefix / "node_modules" / "@openai" / "codex" / "package.json"
+    manifest.write_text("{not json", encoding="utf-8")
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert "not valid JSON" in str(err.value)
+
+
+def test_an_oversized_manifest_is_refused(tmp_path):
+    prefix, _exe = make_npm_install(tmp_path)
+    manifest = prefix / "node_modules" / "@openai" / "codex" / "package.json"
+    manifest.write_text("{\"pad\": \"%s\"}" % ("x" * (rr.MAX_MANIFEST_BYTES + 8)),
+                        encoding="utf-8")
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert "larger than a package manifest" in str(err.value)
+
+
+def test_a_path_escaping_the_package_tree_is_refused(tmp_path, monkeypatch):
+    """Even if the layout pointed outside, containment refuses the result."""
+    prefix, _exe = make_npm_install(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    escaped = outside / "codex.exe"
+    escaped.write_text("placeholder", encoding="utf-8")
+    policy = loaded_policy()
+    key = rr.host_platform_key()
+    hijacked = json.loads(json.dumps(policy["npm_package"]["platform_packages"]))
+    hijacked[key]["target_triple"] = os.path.join(
+        "..", "..", "..", "..", "..", "..", "outside")
+    monkeypatch.setitem(policy["npm_package"], "platform_packages", hijacked)
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", policy)
+    assert "escapes the npm package tree" in str(err.value)
+
+
+def test_containment_helper_rejects_traversal(tmp_path):
+    root = tmp_path / "root"
+    (root / "inner").mkdir(parents=True)
+    assert rr._within(root / "inner", root)
+    assert rr._within(root, root)
+    assert not rr._within(tmp_path / "elsewhere", root)
+    assert not rr._within(root / ".." / "elsewhere", root)
+
+
+def test_a_linked_package_directory_is_refused(tmp_path, monkeypatch):
+    """A junction or symlink anywhere on the walk stops resolution."""
+    prefix, _exe = make_npm_install(tmp_path)
+    policy = loaded_policy()
+    monkeypatch.setattr(os.path, "islink", lambda p: True)
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", policy)
+    assert "symbolic link" in str(err.value)
+
+
+def test_a_reparse_point_package_directory_is_refused(tmp_path, monkeypatch):
+    prefix, _exe = make_npm_install(tmp_path)
+    policy = loaded_policy()
+    monkeypatch.setattr(os.path, "islink", lambda p: False)
+    monkeypatch.setattr(os, "lstat",
+                        lambda p: FakeStat(0o040755,
+                                           rr.REPARSE_POINT_ATTRIBUTE))
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", policy)
+    assert "reparse point" in str(err.value)
+
+
+def test_a_real_junction_in_the_package_tree_is_refused(tmp_path):
+    """Where the platform permits a junction, prove the real thing is refused."""
+    prefix, _exe = make_npm_install(tmp_path)
+    scope = prefix / "node_modules" / "@openai"
+    target = tmp_path / "junction-target"
+    target.mkdir()
+    import shutil
+    shutil.rmtree(scope / "codex")
+    kind = link_dir(scope / "codex", target)
+    if kind is None:
+        assert rr.is_reparse_point(FakeStat(0o040755,
+                                            rr.REPARSE_POINT_ATTRIBUTE))
+        return
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    message = str(err.value)
+    assert ("symbolic link" in message or "reparse point" in message
+            or "could not be inspected" in message), (kind, message)
+
+
+def test_a_file_where_the_package_directory_belongs_is_refused(tmp_path):
+    prefix, _exe = make_npm_install(tmp_path)
+    scope = prefix / "node_modules" / "@openai"
+    import shutil
+    shutil.rmtree(scope / "codex")
+    (scope / "codex").write_text("not a directory", encoding="utf-8")
+    with pytest.raises(Exception) as err:
+        rr.bundled_native_executable(prefix / "codex", loaded_policy())
+    assert "not a directory" in str(err.value)
+
+
+def test_host_platform_key_is_one_the_policy_publishes():
+    key = rr.host_platform_key()
+    assert key in loaded_policy()["npm_package"]["platform_packages"]
+    assert key.count("-") == 1
+
+
+def test_an_unsupported_host_has_no_platform_package(monkeypatch):
+    monkeypatch.setattr(rr._platform, "machine", lambda: "s390x")
+    with pytest.raises(Exception) as err:
+        rr.host_platform_key()
+    assert "native binary" in str(err.value)
+
+
+# The genuine binary is touched for `--version` and `exec --help` only. Neither
+# is inference: both are local capability probes that print and exit. When the
+# machine has no install, the same properties are asserted deterministically so
+# the suite never skips.
+REAL_NPM_PREFIX = Path.home() / "AppData" / "Roaming" / "npm"
+
+
+def test_the_real_install_resolves_and_probes_without_inference():
+    policy = loaded_policy()
+    shim = REAL_NPM_PREFIX / "codex"
+    if not shim.is_file():
+        assert policy["npm_package"]["version"] == "0.153.0"
+        assert policy["codex_cli"]["accepted_version_output"] == \
+            "codex-cli 0.153.0"
+        return
+    native = Path(rr.bundled_native_executable(shim, policy))
+    assert native.is_file()
+    assert native.name.lower() == ("codex.exe" if os.name == "nt" else "codex")
+    assert not native.is_symlink()
+    env = rr.child_environment(policy)
+    assert rr.probe_version(str(native), policy, env) == "codex-cli 0.153.0"
+    help_text = subprocess.run([str(native), "exec", "--help"],
+                               capture_output=True, timeout=120, shell=False)
+    assert help_text.returncode == 0
+    text = help_text.stdout.decode("utf-8", "replace")
+    assert "Run Codex non-interactively" in text
+    for flag in ("--output-schema", "--output-last-message", "--ephemeral",
+                 "--ignore-user-config", "--sandbox", "--model"):
+        assert flag in text, flag
+
+
+def test_the_real_mailbox_stays_absent_and_no_attempt_is_recorded():
+    """Phase 4B's single attempt is still unspent after the whole suite runs.
+
+    Nothing here may create the machine-local relay, and with no mailbox there is
+    no attempt record, so the `(4A, HEAD)` opportunity remains available.
+    """
+    assert not REAL_MAILBOX.exists(), REAL_MAILBOX
+    assert not (REAL_MAILBOX / "relay.json").exists()
+    assert not (REAL_MAILBOX / "archive").exists()
+
+
+def test_only_the_resolved_native_binary_is_ever_spawned(bench, tmp_path):
+    """The path that resolution returns is the path the child is started from."""
+    repo, registry, mailbox, request = bench
+    counter = tmp_path / "spawns.txt"
+    argv_record = tmp_path / "argv.json"
+    exe, script = make_fake(tmp_path, request, repo=repo,
+                            records={"spawn_count": str(counter),
+                                     "argv_record": str(argv_record)})
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    assert code == OK, stopped_reasons(doc)
+    assert counter.read_text(encoding="utf-8") == "x"
+    tail = json.loads(argv_record.read_text(encoding="utf-8"))
+    assert tail[0] == "exec"
+    for banned in (".cmd", ".ps1"):
+        assert not any(str(a).lower().endswith(banned) for a in tail), tail
+    assert ids(doc)["X1"].startswith("resolved on the search path")
+
+
 def test_production_cli_cannot_supply_an_executable(bench):
     repo, registry, mailbox, _req = bench
     rc, _out, err = run_cli("review-once", extra=[
@@ -1514,11 +1840,79 @@ def test_every_launch_goes_through_the_spawn_helper():
                 assert first.func.id == "_spawn_command", ast.dump(first)
 
 
-def test_no_other_executable_is_ever_named():
-    src = RUNNER.read_text(encoding="utf-8")
+def _code_string_literals(path):
+    """Every string literal in the module, with docstrings and comments gone.
+
+    Comments never become `ast.Constant`, and module/class/function docstrings
+    are subtracted, so what is left is the text the runner can actually use.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            text = ast.get_docstring(node, clean=False)
+            if text is not None:
+                docstrings.add(text)
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and n.value not in docstrings]
+
+
+def _command_shaped(text):
+    """A bare, space-free token a spawn could plausibly use as argv[0].
+
+    Diagnostics and prose carry spaces or format placeholders; a command name
+    does not. This is what separates `node_modules` from `the npm package ...`.
+    """
+    return bool(text) and " " not in text and "%" not in text
+
+
+def test_no_shell_or_interpreter_is_ever_named():
+    """No shell, interpreter, or downloader appears anywhere in the runner.
+
+    This stays a whole-file substring ban, case-insensitively, because none of
+    these has any legitimate reason to be mentioned even in a comment.
+    """
+    src = RUNNER.read_text(encoding="utf-8").lower()
     for banned in ("cmd.exe", "powershell", "pwsh", "/bin/sh", "bash",
-                   "wsl", "node", "npm", "curl", "wget", "ssh"):
+                   "wsl", "curl", "wget", "ssh"):
         assert banned not in src, banned
+
+
+# The only command-shaped literals allowed to mention node or npm: one package
+# directory the resolver must walk, and one policy field name. Anything else
+# command-shaped that mentions either word would be a new executable reference.
+NODE_LAYOUT_LITERALS = {"node_modules", "npm_package"}
+
+
+def test_node_and_npm_name_only_the_package_layout():
+    """`node`/`npm` may name package layout, never something to execute.
+
+    A blunt substring ban cannot survive Phase 4C: the resolver has to walk
+    `node_modules` and has to say `npm` in its diagnostics. The stronger property
+    is asserted instead -- every command-shaped literal mentioning either word is
+    a known layout directory, so none of them can be a program name.
+    """
+    for text in _code_string_literals(RUNNER):
+        low = text.lower()
+        if "node" not in low and "npm" not in low:
+            continue
+        if _command_shaped(text):
+            assert text in NODE_LAYOUT_LITERALS, text
+        for bare in ("node", "npm", "node.exe", "npm.cmd", "npx"):
+            assert low != bare, text
+
+
+def test_the_shim_is_never_the_thing_that_starts():
+    """Whatever is resolved, the final gate only passes a real codex binary."""
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    assert set(policy["codex_cli"]["accepted_basenames"]) == {"codex",
+                                                              "codex.exe"}
+    assert policy["npm_package"]["shim_is_executable"] is False
+    for target in policy["npm_package"]["platform_packages"].values():
+        assert target["executable_name"] in ("codex", "codex.exe")
 
 
 def test_no_network_capability():
