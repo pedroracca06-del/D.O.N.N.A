@@ -1187,3 +1187,188 @@ def test_advance_never_creates_a_registry_or_parent(tmp_path):
                         "--previous-commit", "a" * 40], capture_output=True)
     assert p.returncode == 4
     assert not (tmp_path / "absent").exists()
+
+
+# ------------------------------------------- paused writer / read-only handoff
+#
+# A writer that has explicitly paused holds its write scope in reserve. A
+# proposal that writes nothing may be registered beside it -- that is the review
+# handoff Phase 4F needed. Everything after the first test is a negative control
+# proving the carve-out did not become a general override.
+
+WRITER_SCOPE = ["tools/cowork/**", "tests/**"]
+READER_SCOPE = ["tools/cowork/**", "tests/**"]
+STALE_BEAT = "2026-09-02T09:00:00Z"          # one hour before T0
+FUTURE_BEAT = "2026-09-02T11:00:00Z"         # one hour after T0
+
+
+def _writer(status="active", beat=T0, sid="claude-writer"):
+    return session(sid=sid, wt="nova-foundation", branch="integration/nova",
+                   write=WRITER_SCOPE, status=status, beat=beat)
+
+
+def _reader(write=(), read=READER_SCOPE, prot=(), commit="a" * 40):
+    return session(sid="codex-reader", wt="nova-foundation",
+                   branch="integration/nova", read=read, write=write, prot=prot,
+                   commit=commit, owner="Codex CLI")
+
+
+def test_paused_writer_admits_a_read_only_reviewer(tmp_path):
+    """The handoff: a freshly paused writer no longer blocks a pure reader."""
+    reg = init_registry(tmp_path, [_writer(status="paused")], revision=7)
+    rc, out, _ = run("register", reg, payload=_reader())
+    assert rc == 0, out
+    after = load(reg)
+    assert after["revision"] == 8
+    assert {s["session_id"] for s in after["sessions"]} == {"claude-writer",
+                                                            "codex-reader"}
+    reviewer = [s for s in after["sessions"] if s["session_id"] == "codex-reader"][0]
+    assert reviewer["status"] == "active"
+    assert reviewer["write_scope"] == []
+
+
+def test_active_writer_still_blocks_a_read_only_reviewer(tmp_path):
+    """Negative control: only pausing releases the worktree."""
+    reg = init_registry(tmp_path, [_writer(status="active")], revision=7)
+    before = Path(reg).read_bytes()
+    rc, out, _ = run("register", reg, payload=_reader())
+    assert rc == 1, out
+    assert "same-worktree-with-write" in categories(out)
+    assert "read-write-overlap" in categories(out)
+    assert Path(reg).read_bytes() == before
+
+
+def test_paused_writer_still_blocks_a_second_writer(tmp_path):
+    """A writer never coexists with a writer, paused or not."""
+    reg = init_registry(tmp_path, [_writer(status="paused")], revision=7)
+    before = Path(reg).read_bytes()
+    rc, out, _ = run("register", reg, payload=_reader(write=WRITER_SCOPE, read=()))
+    assert rc == 1, out
+    assert "same-worktree-with-write" in categories(out)
+    assert Path(reg).read_bytes() == before
+
+
+def test_stale_paused_writer_does_not_silently_admit_a_reviewer(tmp_path):
+    """Staleness is not a licence: it escalates to Pedro rather than passing."""
+    reg = init_registry(tmp_path, [_writer(status="paused", beat=STALE_BEAT)],
+                        revision=7)
+    before = Path(reg).read_bytes()
+    rc, out, _ = run("register", reg, payload=_reader())
+    assert rc == 5, out
+    assert "same-worktree-with-write" in categories(out)
+    assert Path(reg).read_bytes() == before
+
+
+def test_ambiguous_future_heartbeat_paused_writer_escalates(tmp_path):
+    """A heartbeat from the future is ambiguous, so nothing is discounted."""
+    reg = init_registry(tmp_path,
+                        [_writer(status="paused", beat=FUTURE_BEAT)], revision=7)
+    before = Path(reg).read_bytes()
+    rc, out, _ = run("register", reg, payload=_reader())
+    assert rc == 5, out
+    assert Path(reg).read_bytes() == before
+
+
+def test_closing_writer_still_blocks_a_reviewer(tmp_path):
+    reg = init_registry(tmp_path, [_writer(status="closing")], revision=7)
+    rc, out, _ = run("register", reg, payload=_reader())
+    assert rc == 1, out
+
+
+def test_a_live_third_session_still_blocks_the_reviewer(tmp_path):
+    """Pausing one writer does not clear a different, active one."""
+    other = session(sid="other-active", wt="nova-foundation",
+                    branch="integration/nova", write=["docs/**"])
+    reg = init_registry(tmp_path, [_writer(status="paused"), other], revision=7)
+    before = Path(reg).read_bytes()
+    rc, out, _ = run("register", reg, payload=_reader())
+    assert rc == 1, out
+    assert Path(reg).read_bytes() == before
+
+
+def test_paused_writer_baseline_mismatch_still_blocks(tmp_path):
+    """expected-commit-mismatch is untouched by the handoff."""
+    reg = init_registry(tmp_path, [_writer(status="paused")], revision=7)
+    rc, out, _ = run("register", reg, payload=_reader(commit="b" * 40))
+    assert rc == 1, out
+    assert "expected-commit-mismatch" in categories(out)
+
+
+def test_paused_writer_protected_scope_overlap_still_blocks(tmp_path):
+    """A protected-scope claim still collides with a reserved write scope."""
+    reg = init_registry(tmp_path, [_writer(status="paused")], revision=7)
+    rc, out, _ = run("register", reg, payload=_reader(read=(), prot=WRITER_SCOPE))
+    assert rc == 1, out
+    assert "protected-write-overlap" in categories(out)
+
+
+def test_resume_is_refused_while_the_reviewer_is_live(tmp_path):
+    """The writer is evaluated as if already active, so it must wait."""
+    reg = init_registry(tmp_path, [_writer(status="paused"), _reader()],
+                        revision=7)
+    before = Path(reg).read_bytes()
+    rc, out, _ = run("resume", reg, sid="claude-writer")
+    assert rc == 1, out
+    assert Path(reg).read_bytes() == before, "a refused resume must not mutate"
+
+
+def test_resume_succeeds_once_the_reviewer_is_closed(tmp_path):
+    closed = dict(_reader(), status="closed")
+    reg = init_registry(tmp_path, [_writer(status="paused"), closed], revision=7)
+    rc, out, _ = run("resume", reg, sid="claude-writer")
+    assert rc == 0, out
+    after = load(reg)
+    assert after["revision"] == 8
+    writer = [s for s in after["sessions"] if s["session_id"] == "claude-writer"][0]
+    assert writer["status"] == "active"
+    assert len(after["sessions"]) == 2, "the closed reviewer is retained"
+
+
+def test_the_phase_4f_lifecycle_runs_end_to_end(tmp_path):
+    """active -> pause -> register reviewer -> close reviewer -> resume."""
+    repo = make_repo(tmp_path)
+    head = git(repo, "rev-parse", "HEAD")
+    writer = session(sid="claude-writer", wt=repo.name, branch="main",
+                     write=WRITER_SCOPE, commit=head, path=str(repo))
+    reg = init_registry(tmp_path, [writer], revision=1)
+    reader = session(sid="codex-reader", wt=repo.name, branch="main",
+                     read=READER_SCOPE, write=(), commit=head, path=str(repo),
+                     owner="Codex CLI")
+
+    assert run("pause", reg, sid="claude-writer")[0] == 0
+    assert load(reg)["revision"] == 2
+
+    rc, out, _ = run("register", reg, payload=reader, repo=repo)
+    assert rc == 0, out
+    assert load(reg)["revision"] == 3
+
+    # Exactly what the runner requires at this moment.
+    records = {s["session_id"]: s for s in load(reg)["sessions"]}
+    assert records["claude-writer"]["status"] == "paused"
+    assert records["codex-reader"]["status"] == "active"
+    assert records["codex-reader"]["write_scope"] == []
+    assert "codex" in records["codex-reader"]["owner"].lower()
+    assert records["codex-reader"]["expected_commit"] == head
+    assert records["claude-writer"]["expected_commit"] == head
+
+    assert run("close", reg, sid="codex-reader")[0] == 0
+    assert load(reg)["revision"] == 4
+
+    rc, out, _ = run("resume", reg, sid="claude-writer", repo=repo)
+    assert rc == 0, out
+    final = load(reg)
+    assert final["revision"] == 5
+    assert len(final["sessions"]) == 2, "no record is ever deleted"
+    by_id = {s["session_id"]: s for s in final["sessions"]}
+    assert by_id["claude-writer"]["status"] == "active"
+    assert by_id["codex-reader"]["status"] == "closed"
+    assert by_id["claude-writer"]["expected_commit"] == head
+    assert by_id["codex-reader"]["expected_commit"] == head
+
+
+def test_the_handoff_adds_no_override_flag():
+    """The carve-out is a lifecycle fact, not a switch anyone can throw."""
+    src = REGISTRY_TOOL.read_text(encoding="utf-8")
+    for banned in ("--force", "--override", "--approve", "--approved-by",
+                   "--ignore-collision", "--no-collision"):
+        assert banned not in src, banned

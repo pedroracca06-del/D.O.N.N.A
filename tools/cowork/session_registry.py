@@ -423,11 +423,34 @@ def find_collisions(proposal, registry, observed_at, stale_seconds,
                          == normalize_scope(proposal["canonical_worktree_path"]))
         either_writes = bool(p_write) or bool(other["write_scope"])
 
-        if same_worktree and either_writes:
+        # ---- the read-only review handoff -------------------------------
+        #
+        # A writer that has EXPLICITLY paused, and whose heartbeat still proves
+        # it alive, holds its write scope in reserve rather than in use. A
+        # proposal that writes NOTHING may therefore be registered beside it --
+        # that is the whole point of pausing for a review, and it is a
+        # lifecycle-state fact, not an approval or an override.
+        #
+        # Deliberately narrow. This does nothing at all when:
+        #   * the proposal has any write scope of its own (a writer never
+        #     coexists with a writer, paused or otherwise);
+        #   * the other session is active or closing (a working writer still
+        #     blocks, exactly as before);
+        #   * the other session is stale, ambiguous, or has a future heartbeat
+        #     (`state` is then not "live", so nothing is discounted and the
+        #     existing approval-severity path still stops the operation).
+        #
+        # Only the three write-derived collisions below are discounted. The
+        # duplicate-id, expected-commit-mismatch, and every protected-scope
+        # check remain exactly as they were.
+        dormant_writer = (other["status"] == "paused" and state == "live"
+                          and not p_write)
+
+        if same_worktree and either_writes and not dormant_writer:
             out.append(("same-worktree-with-write", other["session_id"],
                         "another %s session holds this worktree" % state, severity))
         if (other["branch"] == proposal["branch"] and not same_worktree
-                and either_writes):
+                and either_writes and not dormant_writer):
             out.append(("same-branch-different-worktree", other["session_id"],
                         "branch is held by a %s session in another worktree" % state,
                         severity))
@@ -435,12 +458,17 @@ def find_collisions(proposal, registry, observed_at, stale_seconds,
             out.append(("expected-commit-mismatch", other["session_id"],
                         "same worktree recorded against a different baseline", severity))
 
-        for label, mine, theirs in (
-                ("write-write-overlap", p_write, other["write_scope"]),
-                ("write-read-overlap", p_write, other["read_scope"]),
-                ("read-write-overlap", p_read, other["write_scope"]),
-                ("write-protected-overlap", p_write, other["protected_scope"]),
-                ("protected-write-overlap", p_prot, other["write_scope"])):
+        pairs = [("write-write-overlap", p_write, other["write_scope"]),
+                 ("write-read-overlap", p_write, other["read_scope"]),
+                 ("read-write-overlap", p_read, other["write_scope"]),
+                 ("write-protected-overlap", p_write, other["protected_scope"]),
+                 ("protected-write-overlap", p_prot, other["write_scope"])]
+        if dormant_writer:
+            # Only the reserved write scope is discounted, and only against a
+            # plain read. A protected-scope claim still collides with it.
+            pairs = [t for t in pairs if t[0] != "read-write-overlap"]
+
+        for label, mine, theirs in pairs:
             hits, ambiguous = any_overlap(mine, theirs)
             if hits:
                 sev = "approval" if (ambiguous or severity == "approval") else "blocking"

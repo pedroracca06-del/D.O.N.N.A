@@ -172,6 +172,18 @@ and otherwise uses the shim **only as a locator**, walking the validated
 would itself have started. No shell, no command interpreter, and no Node process
 sits between the runner and that binary.
 
+The Session Registry supports the handoff this needs: a writer that has
+explicitly **paused**, and is still demonstrably alive, holds its write scope in
+reserve, so a reviewer with an empty write scope may register beside it. An
+active writer still blocks, a second writer still blocks, and a stale or
+ambiguous paused session still escalates to Pedro. `resume` is refused while the
+reviewer is live and succeeds once it is closed. There is no force or override
+flag.
+
+The machine-local mailbox at `${HOME}/.claude/nova-relay/` is now initialized and
+**empty** — `relay.json` is absent until the first `submit`, so no review request
+has ever been sent.
+
 **Still to do, and not authorized:** a controlled first live review, and
 initializing the real mailbox at `${HOME}/.claude/nova-relay/`. **No live review has
 ever been performed, and automatic Claude/Codex communication is not

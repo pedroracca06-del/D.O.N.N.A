@@ -433,14 +433,38 @@ future one-shot runner and is documented so it is designed before it is built:
 
 1. Claude submits only from a clean tree with HEAD == registered `expected_commit`.
 2. Claude transitions its own record to `paused` before the review.
-3. The reviewer is registered as a separate record with an **empty write scope**,
-   which is what makes it structurally non-colliding.
+3. The reviewer is registered as a separate record with an **empty write scope**.
 4. Existing collision rules are unchanged — nothing is loosened for convenience.
 5. The reviewer record is `close`d; `session_registry.py` has no delete or prune,
    so history is preserved.
 6. Claude resumes its own record. Because the review is read-only,
    `expected_commit` is untouched and stays correct by construction.
 7. Any staleness mid-review **stops** the exchange and goes to Pedro.
+
+### Why an empty write scope is not sufficient on its own
+
+Step 3 was originally written as though an empty write scope made the reviewer
+structurally non-colliding. It does not, and Phase 4F stopped on exactly that:
+`same-worktree-with-write` fires when **either** side writes, so the paused
+Claude record kept blocking the reviewer no matter how small its read scope was —
+an empty reviewer scope still collided. Meanwhile the runner requires the Claude
+record to be `paused`, and only a `closed` record avoided the collision, which in
+turn failed that requirement.
+
+The registry now treats an explicit pause as what it is. A writer that has
+**paused** and whose heartbeat still proves it alive holds its write scope *in
+reserve*, so a proposal with **no write scope of its own** may register beside
+it. Only `same-worktree-with-write`, `same-branch-different-worktree`, and
+`read-write-overlap` are discounted, and only in that situation.
+
+This is a lifecycle-state fact, not an approval. It does nothing when the
+proposal writes, when the other session is active or closing, or when that
+session is stale, ambiguous, or shows a future heartbeat — those still block or
+escalate to Pedro. `duplicate-session-id`, `expected-commit-mismatch`, every
+protected-scope check, and all write/write and write/read overlaps are untouched.
+`resume` judges the returning writer by its scopes, as if already active, so it
+is refused while a live reviewer is reading and succeeds once that reviewer is
+closed. No `--force`, `--override`, or approval flag exists.
 
 ---
 

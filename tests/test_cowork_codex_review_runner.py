@@ -37,6 +37,7 @@ REAL_MAILBOX = Path.home() / ".claude" / "nova-relay"
 
 sys.path.insert(0, str(COWORK))
 import codex_relay as cr                  # noqa: E402
+import session_registry as sr             # noqa: E402
 import codex_review_runner as rr          # noqa: E402
 sys.path.pop(0)
 
@@ -1245,15 +1246,24 @@ def test_the_genuine_parser_accepts_the_fixed_array_and_rejects_the_flag_form():
         assert b"unexpected argument" in rejected.stderr, banned
 
 
-def test_the_real_mailbox_stays_absent_and_no_attempt_is_recorded():
-    """Phase 4B's single attempt is still unspent after the whole suite runs.
+def test_the_real_mailbox_records_no_attempt():
+    """The live-review authorization is still unspent after the suite runs.
 
-    Nothing here may create the machine-local relay, and with no mailbox there is
-    no attempt record, so the `(4A, HEAD)` opportunity remains available.
+    The machine-local relay root may now exist -- B1.11 initialized it -- but an
+    initialized mailbox is an EMPTY one: the committed transport authors
+    `relay.json` on first submission, so while that file is absent and the
+    archive is empty, no request has ever been sent and no review attempt has
+    been recorded. The suite must never be what changes that; the autouse
+    fixture separately proves the directory's presence is unaltered by any test.
     """
-    assert not REAL_MAILBOX.exists(), REAL_MAILBOX
-    assert not (REAL_MAILBOX / "relay.json").exists()
-    assert not (REAL_MAILBOX / "archive").exists()
+    if not REAL_MAILBOX.exists():
+        return                                  # not initialized on this machine
+    assert not (REAL_MAILBOX / "relay.json").exists(), "a request was recorded"
+    archive = REAL_MAILBOX / "archive"
+    if archive.exists():
+        assert list(archive.iterdir()) == [], "an archived envelope exists"
+    assert [p.name for p in REAL_MAILBOX.rglob("*")
+            if p.name.endswith((".lock", ".tmp"))] == [], "relay residue"
 
 
 def test_only_the_resolved_native_binary_is_ever_spawned(bench, tmp_path):
@@ -2112,3 +2122,90 @@ def test_contract_checks_state_the_limits(bench):
     assert "no retry" in got["K3"]
     assert "nothing in them is executed" in got["K4"]
     assert "committed relay transport" in got["K6"]
+
+
+# ------------------------------- registry produced by the real committed CLI
+#
+# Every other test in this file writes the registry file directly, which proves
+# what the runner accepts but not that the Session Registry can actually PRODUCE
+# that state. Phase 4F failed exactly there: the runner wanted a paused Claude
+# session, and `register` refused the reviewer beside it. These drive the real
+# CLI so the two tools are proven to compose.
+
+REGISTRY_TOOL = COWORK / "session_registry.py"
+
+
+def registry_cli(op, registry, payload=None, sid=None, repo=None):
+    cmd = [sys.executable, "-B", str(REGISTRY_TOOL), op,
+           "--registry", str(registry), "--format", "json"]
+    if sid:
+        cmd += ["--session-id", sid]
+    if repo:
+        cmd += ["--repo", str(repo)]
+    data = json.dumps(payload).encode("utf-8") if payload is not None else b""
+    p = subprocess.run(cmd, input=data, capture_output=True)
+    return p.returncode, p.stdout.decode("utf-8", "replace")
+
+
+def test_the_real_registry_cli_can_produce_what_the_runner_requires(tmp_path):
+    """active -> pause -> register reviewer, through the committed operations."""
+    repo = make_repo(tmp_path)
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 1, "revision": 1,
+        "sessions": [session_record(repo, "claude-x", "active", "Claude Code",
+                                    write_scope=["tools/**", "tests/**"])],
+    }, indent=2), encoding="utf-8")
+
+    rc, out = registry_cli("pause", registry, sid="claude-x")
+    assert rc == 0, out
+
+    reviewer = session_record(repo, "codex-reviewer", "active",
+                              "Codex CLI reviewer")
+    reviewer["read_scope"] = ["tools/**", "tests/**"]
+    rc, out = registry_cli("register", registry, payload=reviewer, repo=repo)
+    assert rc == 0, out
+
+    # Now ask the runner itself whether this state is acceptable.
+    policy, _ = rr.load_policy()
+    rr.validate_policy(policy)
+    repo_obs = cr.observe_repository(str(repo))
+    live = sr.read_registry(str(registry))
+    request = {
+        "head": repo_obs["head"], "branch": repo_obs["branch"],
+        "worktree_identity": repo_obs["identity"],
+        "registry_revision": live["revision"],
+        "registry_expected_commit": repo_obs["head"],
+    }
+    problems = rr.check_preconditions(request, repo_obs, live, "claude-x",
+                                      "codex-reviewer", policy)
+    assert problems == [], problems
+
+
+def test_the_writer_cannot_resume_underneath_a_live_reviewer(tmp_path):
+    """The reviewer reads a fixed tree, so the writer waits until it closes."""
+    repo = make_repo(tmp_path)
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 1, "revision": 1,
+        "sessions": [
+            session_record(repo, "claude-x", "paused", "Claude Code",
+                           write_scope=["tools/**", "tests/**"]),
+            session_record(repo, "codex-reviewer", "active",
+                           "Codex CLI reviewer"),
+        ],
+    }, indent=2), encoding="utf-8")
+    before = registry.read_bytes()
+
+    rc, out = registry_cli("resume", registry, sid="claude-x", repo=repo)
+    assert rc != 0, out
+    assert registry.read_bytes() == before, "a refused resume must not mutate"
+
+    assert registry_cli("close", registry, sid="codex-reviewer")[0] == 0
+    rc, out = registry_cli("resume", registry, sid="claude-x", repo=repo)
+    assert rc == 0, out
+    records = {s["session_id"]: s
+               for s in json.loads(registry.read_text(encoding="utf-8"))["sessions"]}
+    assert records["claude-x"]["status"] == "active"
+    assert records["codex-reviewer"]["status"] == "closed"
+    assert len(records) == 2, "no record is deleted"
