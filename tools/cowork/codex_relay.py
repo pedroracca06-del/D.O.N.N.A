@@ -77,7 +77,7 @@ EXIT_LIMIT = 3
 EXIT_STOPPED = 4
 
 OPERATIONS = ("validate-policy", "validate-request", "validate-response",
-              "cancel-request",
+              "cancel-request", "record-rejection",
               "submit", "ingest-response", "inspect", "verify-chain")
 
 # A verb that would imply doing something rather than carrying a message. Refused
@@ -140,6 +140,19 @@ CANCELLATION_FIELDS = (
     "created_at", "sender", "recipient", "message_type", "cancelled_request_id",
     "cancelled_sequence", "phase", "head", "registry_revision", "reason",
     "cancelled_by",
+)
+
+# The other way a request finishes without a verdict: the child DID run and DID
+# answer, but the answer failed validation and was never recorded. Leaving that
+# request pending would block the mailbox and hide the fact that the one attempt
+# was spent. This terminal states both plainly. It is not a verdict and not an
+# approval, and it never permits a retry -- a new attempt needs a NEW request.
+REJECTION_TYPE = "response_rejected"
+REJECTION_FIELDS = (
+    "schema_version", "message_id", "sequence", "previous_message_sha256",
+    "created_at", "sender", "recipient", "message_type", "cancelled_request_id",
+    "cancelled_sequence", "phase", "head", "registry_revision",
+    "rejection_reason", "attempt_consumed", "recorded_by",
 )
 
 VERDICT_FIELDS = ("schema_version", "request_message_id", "phase", "head",
@@ -724,16 +737,30 @@ def is_cancellation(msg):
     return isinstance(msg, dict) and msg.get("message_type") == CANCELLATION_TYPE
 
 
+def is_rejection(msg):
+    """True for a terminal rejection: a response was produced and refused."""
+    return isinstance(msg, dict) and msg.get("message_type") == REJECTION_TYPE
+
+
+def is_terminal(msg):
+    """Either terminal kind. Both retire exactly one request, append-only."""
+    return is_cancellation(msg) or is_rejection(msg)
+
+
 def is_review_request(msg):
-    """True for an actual Claude review request, never for a cancellation."""
+    """True for an actual Claude review request, never for a terminal."""
     return (isinstance(msg, dict) and msg.get("sender") == "claude"
-            and not is_cancellation(msg))
+            and not is_terminal(msg))
 
 
 def cancelled_request_ids(mailbox_doc):
-    """Every request id retired by a cancellation already in the chain."""
+    """Every request id retired by a terminal already in the chain.
+
+    Named for the first terminal kind it covered; it now covers both, because
+    anything downstream only needs to know a request is finished, not how.
+    """
     return {m.get("cancelled_request_id") for m in mailbox_doc["messages"]
-            if is_cancellation(m)}
+            if is_terminal(m)}
 
 
 def validate_cancellation(doc, policy):
@@ -766,6 +793,46 @@ def validate_cancellation(doc, policy):
             _bad("cancellation %s must be a non-empty string" % name)
     if len(canonical_bytes(doc)) > limits["max_envelope_bytes"]:
         raise ef.SafetyLimitError("the cancellation envelope exceeds the maximum size")
+
+
+def validate_rejection(doc, policy):
+    """Field-by-field check of a terminal response-rejection envelope."""
+    limits = _limits(policy)
+    _require(doc, REJECTION_FIELDS, "rejection envelope")
+    _walk(doc, limits)
+
+    if doc["schema_version"] != SCHEMA_VERSION:
+        _bad("unsupported rejection schema_version")
+    _str_field(doc, "message_id", _UUID_RE, "rejection")
+    _str_field(doc, "cancelled_request_id", _UUID_RE, "rejection")
+    _str_field(doc, "previous_message_sha256", _SHA256_RE, "rejection")
+    _str_field(doc, "created_at", _TIMESTAMP_RE, "rejection")
+    _str_field(doc, "phase", _PHASE_RE, "rejection")
+    _str_field(doc, "head", _OID_RE, "rejection")
+    for name in ("sequence", "cancelled_sequence"):
+        if not isinstance(doc[name], int) or isinstance(doc[name], bool) \
+                or doc[name] < 1:
+            _bad("rejection %s must be a positive integer" % name)
+    if not isinstance(doc["registry_revision"], int) \
+            or isinstance(doc["registry_revision"], bool) \
+            or doc["registry_revision"] < 0:
+        _bad("rejection registry_revision must be a non-negative integer")
+    if doc["sender"] != "claude":
+        _bad("a rejection envelope must be sent by claude")
+    if doc["recipient"] != "codex":
+        _bad("a rejection envelope must be addressed to codex")
+    if doc["message_type"] != REJECTION_TYPE:
+        _bad("message_type must be %r" % REJECTION_TYPE)
+    # The attempt is always spent: the child ran to produce the refused answer.
+    # Recording anything else would misstate what happened.
+    if doc["attempt_consumed"] is not True:
+        _bad("a rejection always records attempt_consumed true; the child ran")
+    for name in ("rejection_reason", "recorded_by"):
+        if not isinstance(doc[name], str) or not doc[name].strip():
+            _bad("rejection %s must be a non-empty string" % name)
+    if len(canonical_bytes(doc)) > limits["max_envelope_bytes"]:
+        raise ef.SafetyLimitError("the rejection envelope exceeds the maximum size")
+    return doc
     return doc
 
 
@@ -1075,13 +1142,13 @@ def verify_chain(mailbox):
         if mid in seen_ids:
             problems.append((n, "message %d repeats a message_id" % n))
         seen_ids.add(mid)
-        if is_cancellation(msg):
+        if is_terminal(msg):
             target = msg.get("cancelled_request_id")
             if target not in seen_request_ids:
-                problems.append((n, "message %d cancels something that is not an "
-                                    "earlier review request" % n))
+                problems.append((n, "message %d terminates something that is not "
+                                    "an earlier review request" % n))
             if target in seen_cancelled:
-                problems.append((n, "message %d cancels an already-cancelled "
+                problems.append((n, "message %d terminates an already-terminated "
                                     "request" % n))
             seen_cancelled.add(target)
         elif msg.get("sender") == "claude":
@@ -1248,6 +1315,11 @@ def build_parser():
                         help="cancel-request: the pending request to retire")
     parser.add_argument("--reason", default=None,
                         help="cancel-request: why the request became unusable")
+    parser.add_argument("--rejection-reason", default=None,
+                        help="record-rejection: sanitized reason the response "
+                             "was refused")
+    parser.add_argument("--recorded-by", default=None,
+                        help="record-rejection: the actor recording the terminal")
     parser.add_argument("--cancelled-by", default=None,
                         help="cancel-request: the person authorizing the retirement")
     parser.add_argument("--expect-mailbox-revision", type=int, default=None,
@@ -1579,13 +1651,102 @@ def main(argv=None):
                                "consumed, and nothing approved"))
             _record(args, policy, message, checks)
 
+        elif op == "record-rejection":
+            for name, value in (("--request-id", args.request_id),
+                                ("--rejection-reason", args.rejection_reason),
+                                ("--recorded-by", args.recorded_by)):
+                if not value:
+                    _bad("record-rejection requires %s" % name)
+
+            current = read_mailbox(_require_mailbox(args)[1])
+            problems = verify_chain(current)
+            if problems:
+                raise sg.StoppedError("the mailbox chain is broken: %s"
+                                      % problems[0][1])
+            checks.append(_chk("X1", "chain", "pass",
+                               "%d message(s) verified before recording"
+                               % len(current["messages"])))
+
+            if args.expect_mailbox_revision is not None and \
+                    current["revision"] != args.expect_mailbox_revision:
+                raise sg.StoppedError("the mailbox is at revision %d, not the "
+                                      "expected %d; refusing rather than racing"
+                                      % (current["revision"],
+                                         args.expect_mailbox_revision))
+            checks.append(_chk("X2", "revision guard", "pass",
+                               "mailbox revision %d" % current["revision"]))
+
+            target = None
+            for msg in current["messages"]:
+                if msg.get("message_id") == args.request_id:
+                    target = msg
+                    break
+            if target is None:
+                _bad("no recorded message has that id")
+            if not is_review_request(target):
+                _bad("that id does not name a Claude review request")
+            for msg in current["messages"]:
+                if msg.get("sender") == "codex" and \
+                        msg.get("request_message_id") == args.request_id:
+                    _bad("a response for that request is already recorded")
+            if args.request_id in cancelled_request_ids(current):
+                _bad("that request is already terminated")
+
+            answered = {m.get("request_message_id") for m in current["messages"]
+                        if m.get("sender") == "codex"}
+            retired = cancelled_request_ids(current)
+            pending = [m for m in current["messages"] if is_review_request(m)
+                       and m.get("message_id") not in answered
+                       and m.get("message_id") not in retired]
+            if len(pending) != 1:
+                raise sg.StoppedError(
+                    "the mailbox holds %d pending request(s); recording a "
+                    "rejection requires exactly one so no ambiguity is left"
+                    % len(pending))
+            if pending[0]["message_id"] != args.request_id:
+                _bad("the supplied request id is not the pending request")
+            checks.append(_chk("X3", "target", "pass",
+                               "request %s, sequence %s, phase %s"
+                               % (target["message_id"], target["sequence"],
+                                  target["phase"])))
+
+            message = {
+                "schema_version": SCHEMA_VERSION,
+                "message_id": _new_message_id(),
+                "sequence": len(current["messages"]) + 1,
+                "previous_message_sha256": chain_hash(current["messages"]),
+                "created_at": datetime.now(timezone.utc)
+                                      .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "sender": "claude",
+                "recipient": "codex",
+                "message_type": REJECTION_TYPE,
+                "cancelled_request_id": target["message_id"],
+                "cancelled_sequence": target["sequence"],
+                "phase": target["phase"],
+                "head": target["head"],
+                "registry_revision": target["registry_revision"],
+                "rejection_reason": args.rejection_reason,
+                "attempt_consumed": True,
+                "recorded_by": args.recorded_by,
+            }
+            validate_rejection(message, policy)
+            checks.append(_chk("X4", "rejection", "warning",
+                               "the child ran and answered; the answer failed "
+                               "validation and was never recorded, so the one "
+                               "attempt is spent and a retry needs a NEW request"))
+            _record(args, policy, message, checks)
+
         elif op == "inspect":
             current = read_mailbox(_require_mailbox(args)[1])
             checks.append(_chk("I1", "mailbox", "pass",
                                "revision %d, %d message(s)"
                                % (current["revision"], len(current["messages"]))))
             for n, msg in enumerate(current["messages"], 1):
-                if is_cancellation(msg):
+                if is_rejection(msg):
+                    detail = ("REJECTED response for request %s, phase %s"
+                              % (msg.get("cancelled_request_id"),
+                                 msg.get("phase")))
+                elif is_cancellation(msg):
                     detail = ("CANCELLED request %s, phase %s"
                               % (msg.get("cancelled_request_id"),
                                  msg.get("phase")))

@@ -921,6 +921,31 @@ def make_response_path(mailbox_root):
     return path
 
 
+class _CapturingStderr:
+    """Keep a nested tool's error text so it can be sanitized into a terminal.
+
+    The relay writes its refusal to stderr. That sentence is the honest reason a
+    response was rejected, so it is captured, sanitized, and recorded -- never
+    echoed raw and never allowed to carry a machine path.
+    """
+
+    def __init__(self):
+        self._chunks = []
+        self.buffer = self
+
+    def write(self, data):
+        if isinstance(data, bytes):
+            data = data.decode("utf-8", "replace")
+        self._chunks.append(data)
+        return len(data)
+
+    def flush(self):
+        return None
+
+    def text(self):
+        return "".join(self._chunks)
+
+
 class _CapturedStdout:
     """Silence a nested tool's report so this tool emits exactly one document.
 
@@ -1337,17 +1362,45 @@ def main(argv=None):
                 ingest_argv += ["--policy", args.relay_policy]
             if args.verdict_schema:
                 ingest_argv += ["--verdict-schema", args.verdict_schema]
-            real_stdout = sys.stdout
+            real_stdout, real_stderr = sys.stdout, sys.stderr
             sys.stdout = _CapturedStdout()
+            captured = _CapturingStderr()
+            sys.stderr = captured
             try:
                 rc = cr.main(ingest_argv)
             finally:
-                sys.stdout = real_stdout
+                sys.stdout, sys.stderr = real_stdout, real_stderr
             checks.append(_chk("X9", "ingest", "pass" if rc == cr.EXIT_OK else "fail",
                                "codex_relay ingest-response exit %d" % rc))
             if rc != cr.EXIT_OK:
+                # The child DID run and DID answer; the answer was refused and
+                # never recorded. Leaving the request pending would block the
+                # mailbox and hide that the one attempt is spent, so a terminal
+                # is appended stating both. It permits no retry: a further
+                # attempt needs a new request.
+                reason = ef.sanitize_text(captured.text().strip()) \
+                    or ("the response failed relay validation (exit %d)" % rc)
+                rej_argv = ["record-rejection", "--format", "json",
+                            "--mailbox", root,
+                            "--request-id", request["message_id"],
+                            "--rejection-reason", reason[:2000],
+                            "--recorded-by", "codex_review_runner",
+                            "--expect-mailbox-revision", str(box_after["revision"])]
+                if args.relay_policy:
+                    rej_argv += ["--policy", args.relay_policy]
+                sys.stdout = _CapturedStdout()
+                try:
+                    rej_rc = cr.main(rej_argv)
+                finally:
+                    sys.stdout = real_stdout
+                checks.append(_chk("X10", "rejection terminal",
+                                   "pass" if rej_rc == cr.EXIT_OK else "fail",
+                                   "recorded through the relay (exit %d); the "
+                                   "request is terminal and no retry is "
+                                   "permitted" % rej_rc))
                 raise sg.StoppedError("the response failed relay validation and was "
-                                      "not recorded; the attempt is consumed")
+                                      "not recorded; the attempt is consumed and a "
+                                      "terminal rejection was appended")
             final = cr.read_mailbox(mailbox_path)
             verdict = (final["messages"][-1].get("response") or {}).get("verdict")
             checks.append(_chk("R1", "verdict", "warning",

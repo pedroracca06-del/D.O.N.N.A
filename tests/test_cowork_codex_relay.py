@@ -420,11 +420,12 @@ def test_schema_that_softens_non_authorization_is_refused(tmp_path):
 
 # --------------------------------------------------------- operation surface
 
-def test_operations_are_exactly_eight():
-    """`cancel-request` is the eighth and last; it appends, it never removes."""
+def test_operations_are_exactly_nine():
+    """The two terminals append; neither removes anything."""
     assert cr.OPERATIONS == ("validate-policy", "validate-request",
-                             "validate-response", "cancel-request", "submit",
-                             "ingest-response", "inspect", "verify-chain")
+                             "validate-response", "cancel-request",
+                             "record-rejection", "submit", "ingest-response",
+                             "inspect", "verify-chain")
 
 
 @pytest.mark.parametrize("verb", [
@@ -1920,7 +1921,7 @@ def test_chain_still_rejects_a_double_cancellation():
                                      cr.chain_hash([req, first]))
     box = {"schema_version": 1, "revision": 3, "messages": [req, first, second]}
     problems = cr.verify_chain(box)
-    assert any("already-cancelled" in p[1] for p in problems), problems
+    assert any("already-terminated" in p[1] for p in problems), problems
 
 
 def test_the_real_mailbox_cancellation_targets_a_request():

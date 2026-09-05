@@ -1656,7 +1656,11 @@ def test_pass_claiming_approval_is_rejected(bench, tmp_path):
     assert code == STOPPED
     assert any("failed relay validation" in r for r in stopped_reasons(doc))
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1, "a false PASS was recorded"
+    # No verdict is recorded -- but the refusal IS, as a terminal, so the
+    # request cannot sit pending and the spent attempt is not hidden.
+    assert not any(m.get("sender") == "codex" for m in box["messages"]),         "a false PASS was recorded"
+    assert cr.is_rejection(box["messages"][-1])
+    assert box["messages"][-1]["attempt_consumed"] is True
 
 
 # A literal, not uuid4(): a parametrize argument is evaluated at import time, so
@@ -1675,7 +1679,54 @@ def test_wrong_request_phase_or_head_is_rejected(bench, tmp_path, field, value):
     code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
     assert code == STOPPED
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1
+    assert not any(m.get("sender") == "codex" for m in box["messages"])
+    assert cr.is_rejection(box["messages"][-1])
+
+
+def test_a_refused_response_leaves_no_pending_request(bench, tmp_path):
+    """Requirement 8: the refusal is recorded and the request stops pending."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    assert code == STOPPED
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term)
+    assert term["cancelled_request_id"] == request["message_id"]
+    assert term["attempt_consumed"] is True
+    assert term["rejection_reason"].strip()
+    assert term["recorded_by"] == "codex_review_runner"
+    assert cr.verify_chain(box) == []
+    with pytest.raises(Exception) as exc:
+        rr.find_pending_request(box)
+    assert "no pending review request" in str(exc.value)
+    assert any("X10" == c["id"] for c in doc["checks"])
+
+
+def test_a_refused_response_records_a_sanitized_reason(bench, tmp_path):
+    """The reason is kept, but never as raw stderr and never with a machine path."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    term = cr.read_mailbox(str(mailbox / "relay.json"))["messages"][-1]
+    reason = term["rejection_reason"]
+    assert len(reason) <= 2000
+    assert STDERR_CANARY not in reason and STDOUT_CANARY not in reason
+    for planted in ENV_CANARIES.values():
+        assert planted not in reason
+
+
+def test_a_refused_response_permits_no_retry(bench, tmp_path):
+    """The same request cannot be run again; a retry needs a NEW request."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    counter = tmp_path / "spawns.txt"
+    exe2, script2 = make_fake(tmp_path, request, repo=repo,
+                              records={"spawn_count": str(counter)})
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe2, script2)
+    assert code == STOPPED
+    assert not counter.exists(), "a second child was started for the same request"
 
 
 def test_ingest_goes_through_the_relay_not_a_direct_write():
