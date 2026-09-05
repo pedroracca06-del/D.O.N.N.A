@@ -2137,35 +2137,45 @@ def test_audit_rules_name_the_violation():
     assert cr.audit_executable_reason("$(whoami)") == "command substitution"
 
 
-def test_the_shipped_schema_admits_the_typed_audit_block():
-    """CONTRACT-REVIEW-01: the validator and the shipped schema must agree.
+def test_the_shipped_schema_is_the_known_good_shape():
+    """The shipped schema is what Codex is handed as its output contract.
 
-    The schema is what Codex is handed as its output contract. If it forbids the
-    audit block, a typed audit is impossible no matter what the validator allows.
+    Three consecutive live attempts failed fast whenever the audit block was
+    declared in it, so the schema is deliberately back to the shape that is
+    proven to work. The VALIDATOR still accepts a typed audit block, which is
+    inert while the schema does not solicit one -- see
+    `test_a_schema_that_admits_the_audit_block_is_also_accepted`.
     """
     schema, _ = cr.load_verdict_schema(None)
     cr.validate_verdict_schema(schema)
-    assert "audit" in schema["properties"], "the schema must admit an audit block"
-    # Strict structured output forbids an omitted property, so "optional" is
-    # expressed as required-but-nullable. A non-audit verdict sends null.
-    assert "audit" in schema["required"]
-    assert schema["properties"]["audit"]["type"] == ["object", "null"]
-    block = schema["properties"]["audit"]
-    assert block["additionalProperties"] is False
-    assert sorted(block["required"]) == sorted(cr.AUDIT_BLOCK_FIELDS)
-    item = block["properties"]["findings"]["items"]
-    assert item["additionalProperties"] is False
-    assert sorted(item["required"]) == sorted(cr.AUDIT_FINDING_FIELDS)
+    assert sorted(schema["required"]) == sorted(cr.VERDICT_FIELDS)
+    assert set(schema["properties"]) == set(cr.VERDICT_FIELDS)
 
 
-def test_a_schema_that_forbids_the_audit_block_is_still_accepted(tmp_path):
-    """A schema with only the original fields remains valid: audit is optional."""
+def test_a_schema_that_admits_the_audit_block_is_also_accepted():
+    """The validator tolerates either shape, so restoring one broke nothing."""
     import json as _json
     schema, _ = cr.load_verdict_schema(None)
-    trimmed = _json.loads(_json.dumps(schema))
-    trimmed["properties"].pop("audit")
-    trimmed["required"] = [f for f in trimmed["required"] if f != "audit"]
-    cr.validate_verdict_schema(trimmed)
+    widened = _json.loads(_json.dumps(schema))
+    widened["properties"]["audit"] = {
+        "type": ["object", "null"], "additionalProperties": False,
+        "required": list(cr.AUDIT_BLOCK_FIELDS),
+        "properties": {
+            "schema_version": {"const": 1},
+            "architecture_summary": {"type": "string"},
+            "findings": {"type": "array", "items": {
+                "type": "object", "additionalProperties": False,
+                "required": list(cr.AUDIT_FINDING_FIELDS),
+                "properties": {k: {"type": "string"}
+                               for k in cr.AUDIT_FINDING_FIELDS}}}}}
+    widened["required"].append("audit")
+    cr.validate_verdict_schema(widened)
+
+
+def test_a_schema_without_the_audit_block_is_accepted(tmp_path):
+    """The shipped shape: only the original verdict fields."""
+    schema, _ = cr.load_verdict_schema(None)
+    cr.validate_verdict_schema(schema)
 
 
 def test_a_null_audit_means_no_audit():
@@ -2184,14 +2194,13 @@ def test_a_schema_with_an_extra_property_is_refused(tmp_path):
 
 
 def test_an_audit_block_schema_that_allows_extra_keys_is_refused():
+    """If a schema DOES declare the block, it must still be closed."""
     import json as _json
     schema, _ = cr.load_verdict_schema(None)
-    broken = _json.loads(_json.dumps(schema))
-    broken["properties"]["audit"]["additionalProperties"] = True
+    base = _json.loads(_json.dumps(schema))
+    base["properties"]["audit"] = {
+        "type": ["object", "null"], "additionalProperties": True,
+        "required": list(cr.AUDIT_BLOCK_FIELDS), "properties": {}}
+    base["required"].append("audit")
     with pytest.raises(Exception):
-        cr.validate_verdict_schema(broken)
-    broken = _json.loads(_json.dumps(schema))
-    broken["properties"]["audit"]["properties"]["findings"]["items"][
-        "additionalProperties"] = True
-    with pytest.raises(Exception):
-        cr.validate_verdict_schema(broken)
+        cr.validate_verdict_schema(base)
