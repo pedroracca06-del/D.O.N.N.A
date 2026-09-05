@@ -2546,3 +2546,25 @@ def test_a_failure_terminal_uses_the_revision_guard():
     src = RUNNER.read_text(encoding="utf-8")
     assert "--expect-mailbox-revision" in src
     assert "record-rejection" in src
+
+
+def test_a_validation_refusal_records_the_relay_sentence(bench, tmp_path):
+    """The relay's own refusal names the offending field and is kept.
+
+    It is OUR text, not the child's, so recording it leaks nothing the child
+    controls -- and without it a refused response says only "exit 2".
+    """
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    term = cr.read_mailbox(str(mailbox / "relay.json"))["messages"][-1]
+    assert term["failure_category"] == "validation_rejected"
+    assert term["rejection_reason"].startswith("codex_relay:")
+
+
+def test_the_relay_sentence_is_still_scrubbed():
+    out = rr.sanitize_relay_message(
+        "codex_relay: invalid input: key = sk-ant-api03-AAAAAAAAAAAAAAAAAAAA")
+    assert "sk-ant" not in out
+    assert out.startswith("codex_relay:")
+    assert len(out) <= rr.DIAGNOSTIC_MAX_CHARS

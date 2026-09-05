@@ -943,6 +943,26 @@ _DIAG_DROP = (
 )
 
 
+def sanitize_relay_message(text):
+    """Keep OUR OWN validator's refusal sentence.
+
+    This is the relay's text, not the child's, so recording it leaks nothing the
+    child controls -- and it is the only thing that says WHY a response was
+    refused. It is still scrubbed and bounded, because a refusal quotes the
+    offending field.
+    """
+    if not text:
+        return ""
+    for rx in _DIAG_DROP:
+        text = rx.sub("<redacted>", text)
+    text = ef.sanitize_text(text)
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("codex_relay:"):
+            return line[:DIAGNOSTIC_MAX_CHARS]
+    return " ".join(text.split())[:DIAGNOSTIC_MAX_CHARS]
+
+
 def sanitize_diagnostic(text, prompt_bytes=b""):
     """Scrub a child's stderr down to something safe to record."""
     if not text:
@@ -1475,7 +1495,9 @@ def main(argv=None):
                 # mailbox and hide that the one attempt is spent, so a terminal
                 # is appended stating both. It permits no retry: a further
                 # attempt needs a new request.
-                reason = sanitize_diagnostic(captured.text(), prompt) \
+                # The relay's own refusal names the offending field, and it is
+                # OUR text rather than the child's, so it is kept.
+                reason = sanitize_relay_message(captured.text()) \
                     or ("the response failed relay validation (exit %d)" % rc)
                 _record_child_failure(args, root, request,
                                       box_after["revision"],
