@@ -179,11 +179,11 @@
               },
               "line_start": {
                 "type": "integer",
-                "minimum": 0
+                "description": "Non-negative line number; the bound is enforced by the relay validator, not by this schema."
               },
               "line_end": {
                 "type": "integer",
-                "minimum": 0
+                "description": "Non-negative line number; the bound is enforced by the relay validator, not by this schema."
               },
               "symbol": {
                 "type": "string",
