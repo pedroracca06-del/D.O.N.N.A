@@ -296,3 +296,44 @@ def test_untrusted_text_still_reaches_the_model_as_data():
     assert "chased the entry" in out
     assert "ORB long, grade B" in out
     assert "MNQ" in out
+
+
+# ------------------------------------------------------- audit-quarantine-failure
+#
+# Found by the independent review of the corrections above (INTEL-FIX-REVIEW-01).
+# The first fix moved unreadable content aside, but SUPPRESSED a failed move and
+# still returned an empty list -- and _save replaces the file with os.replace,
+# which succeeds. So the evidence that could not be preserved was destroyed by
+# the very next write.
+
+def test_a_failed_quarantine_does_not_destroy_the_evidence(tmp_path, monkeypatch):
+    path = tmp_path / "usage.json"
+    path.write_text("UNREADABLE EVIDENCE", encoding="utf-8")
+    monkeypatch.setattr(audit, "_quarantine", lambda _p: False)
+    audit.write_record(_record("r1"), path)
+    assert path.read_text(encoding="utf-8") == "UNREADABLE EVIDENCE",         "content that could not be preserved was overwritten"
+
+
+def test_a_failed_quarantine_still_does_not_take_down_the_caller(tmp_path,
+                                                                 monkeypatch):
+    """Losing THIS record is the accepted cost; raising at the caller is not."""
+    path = tmp_path / "usage.json"
+    path.write_text("UNREADABLE EVIDENCE", encoding="utf-8")
+    monkeypatch.setattr(audit, "_quarantine", lambda _p: False)
+    audit.write_record(_record("r1"), path)          # must not raise
+
+
+def test_quarantine_reports_whether_it_actually_preserved(tmp_path):
+    path = tmp_path / "usage.json"
+    path.write_text("evidence", encoding="utf-8")
+    assert audit._quarantine(path) is True
+    assert list(tmp_path.glob("usage.json.unreadable-*"))
+    assert audit._quarantine(tmp_path / "missing.json") is False
+
+
+def _record(request_id: str):
+    return audit.AuditRecord(
+        request_id=request_id, feature="assistant", provider="anthropic",
+        model="m", cached=False, success=True, error_code=None,
+        input_tokens_estimate=1, input_tokens_actual=1, output_tokens=1,
+        estimated_cost_usd=0.0, latency_ms=1, timestamp=audit.utc_now_iso())
