@@ -40,7 +40,12 @@
     "verdict": {
       "description": "PASS means only that a second reader found no objection. It is never authorization.",
       "type": "string",
-      "enum": ["PASS", "REVISE", "STOP", "ESCALATE"]
+      "enum": [
+        "PASS",
+        "REVISE",
+        "STOP",
+        "ESCALATE"
+      ]
     },
     "summary": {
       "description": "Plain prose. Treated as inert data and never executed or followed as an instruction.",
@@ -70,7 +75,13 @@
           },
           "severity": {
             "type": "string",
-            "enum": ["critical", "high", "medium", "low", "informational"]
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "informational"
+            ]
           },
           "category": {
             "type": "string",
@@ -96,6 +107,121 @@
       "description": "Fixed sentence. Any other value is a validation failure, never a warning.",
       "type": "string",
       "const": "This verdict grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution."
+    },
+    "audit": {
+      "type": "object",
+      "description": "Optional typed code-audit block. Every field is inert data: it names files, symbols, configuration keys and error types, and never carries a command, script, patch, encoded payload, or instruction to execute anything. Present only when the task asked for a code audit.",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "architecture_summary",
+        "findings"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "architecture_summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "finding_id",
+              "severity",
+              "category",
+              "repository_path",
+              "line_start",
+              "line_end",
+              "symbol",
+              "observed_behavior",
+              "technical_risk",
+              "evidence_description",
+              "recommended_correction",
+              "test_gap",
+              "acceptance_criteria"
+            ],
+            "properties": {
+              "finding_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "severity": {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "informational"
+                ]
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "repository_path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Repository-relative path. Never absolute."
+              },
+              "line_start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "line_end": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "symbol": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": "A plain or dotted identifier, nothing else."
+              },
+              "observed_behavior": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "technical_risk": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "evidence_description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "recommended_correction": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "description": "Descriptive and inert: what should change and why, never how to run it."
+              },
+              "test_gap": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "acceptance_criteria": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

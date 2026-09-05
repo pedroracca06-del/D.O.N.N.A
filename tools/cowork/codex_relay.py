@@ -506,8 +506,28 @@ def validate_verdict_schema(schema):
     if sorted(schema.get("required", [])) != sorted(VERDICT_FIELDS):
         raise PolicyError("the verdict schema must require exactly the verdict fields")
     props = schema.get("properties")
-    if not isinstance(props, dict) or set(props) != set(VERDICT_FIELDS):
-        raise PolicyError("the verdict schema must define exactly the verdict fields")
+    # `audit` is the one optional property: required stays exactly the verdict
+    # fields, so a verdict without an audit block is still conforming, while a
+    # typed audit verdict is no longer non-conforming.
+    if not isinstance(props, dict)             or set(props) not in (set(VERDICT_FIELDS),
+                                  set(VERDICT_FIELDS) | {"audit"}):
+        raise PolicyError("the verdict schema must define exactly the verdict "
+                          "fields, plus at most the optional audit block")
+    audit = props.get("audit")
+    if audit is not None:
+        if audit.get("additionalProperties") is not False:
+            raise PolicyError("the audit block must set additionalProperties false")
+        if sorted(audit.get("required", [])) != sorted(AUDIT_BLOCK_FIELDS):
+            raise PolicyError("the audit block must require exactly its fields")
+        entry = audit.get("properties", {}).get("findings", {}).get("items", {})
+        if entry.get("additionalProperties") is not False:
+            raise PolicyError("an audit finding must set additionalProperties false")
+        if sorted(entry.get("required", [])) != sorted(AUDIT_FINDING_FIELDS):
+            raise PolicyError("an audit finding must require exactly its fields")
+        for key in sorted(set(audit.get("properties", {}))
+                          | set(entry.get("properties", {}))):
+            if _COMMAND_KEY_RE.match(key):
+                raise PolicyError("the audit block defines an action-bearing field")
     if props["verdict"].get("enum") != list(ENUMS_FIXED["response_verdict"]):
         raise PolicyError("the verdict schema enum is fixed")
     if props["non_authorization"].get("const") != NON_AUTHORIZATION_SENTENCE:

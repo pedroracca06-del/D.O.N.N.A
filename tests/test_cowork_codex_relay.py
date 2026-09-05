@@ -2135,3 +2135,53 @@ def test_audit_rules_name_the_violation():
     assert cr.audit_executable_reason("subprocess.run([1])") == "code invocation"
     assert cr.audit_executable_reason("a && b") == "command chaining"
     assert cr.audit_executable_reason("$(whoami)") == "command substitution"
+
+
+def test_the_shipped_schema_admits_the_typed_audit_block():
+    """CONTRACT-REVIEW-01: the validator and the shipped schema must agree.
+
+    The schema is what Codex is handed as its output contract. If it forbids the
+    audit block, a typed audit is impossible no matter what the validator allows.
+    """
+    schema, _ = cr.load_verdict_schema(None)
+    cr.validate_verdict_schema(schema)
+    assert "audit" in schema["properties"], "the schema must admit an audit block"
+    assert "audit" not in schema["required"], "the audit block stays optional"
+    block = schema["properties"]["audit"]
+    assert block["additionalProperties"] is False
+    assert sorted(block["required"]) == sorted(cr.AUDIT_BLOCK_FIELDS)
+    item = block["properties"]["findings"]["items"]
+    assert item["additionalProperties"] is False
+    assert sorted(item["required"]) == sorted(cr.AUDIT_FINDING_FIELDS)
+
+
+def test_a_schema_that_forbids_the_audit_block_is_still_accepted(tmp_path):
+    """A schema with only the original fields remains valid: audit is optional."""
+    import json as _json
+    schema, _ = cr.load_verdict_schema(None)
+    trimmed = _json.loads(_json.dumps(schema))
+    trimmed["properties"].pop("audit")
+    cr.validate_verdict_schema(trimmed)
+
+
+def test_a_schema_with_an_extra_property_is_refused(tmp_path):
+    import json as _json
+    schema, _ = cr.load_verdict_schema(None)
+    broken = _json.loads(_json.dumps(schema))
+    broken["properties"]["sidecar"] = {"type": "string"}
+    with pytest.raises(Exception):
+        cr.validate_verdict_schema(broken)
+
+
+def test_an_audit_block_schema_that_allows_extra_keys_is_refused():
+    import json as _json
+    schema, _ = cr.load_verdict_schema(None)
+    broken = _json.loads(_json.dumps(schema))
+    broken["properties"]["audit"]["additionalProperties"] = True
+    with pytest.raises(Exception):
+        cr.validate_verdict_schema(broken)
+    broken = _json.loads(_json.dumps(schema))
+    broken["properties"]["audit"]["properties"]["findings"]["items"][
+        "additionalProperties"] = True
+    with pytest.raises(Exception):
+        cr.validate_verdict_schema(broken)
