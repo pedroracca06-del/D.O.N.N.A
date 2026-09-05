@@ -213,7 +213,14 @@ _EXECUTABLE_RE = re.compile(
 # encoded payloads, tool invocations, and imperative "run this" instructions.
 _AUDIT_EXECUTABLE_RULES = (
     ("command substitution", re.compile(r"\$\(")),
-    ("command chaining", re.compile(r"&&|\|\||;\s*\w+\s")),
+    # A semicolon is shell chaining only when a COMMAND follows it. An audit
+    # writes ordinary English -- "a policy may lower any of these; it can
+    # never raise one" -- and a bare word after the semicolon refuses that
+    # prose while catching nothing the command-anchored form misses.
+    ("command chaining", re.compile(
+        r"&&|\|\||;\s*(?:rm|del|curl|wget|git|python|node|bash|sh|zsh|pwsh|"
+        r"powershell|cmd|npm|npx|pip|chmod|chown|sudo|nc|mv|cp|cat|echo|eval|"
+        r"exec|kill|dd|mkfs)\b")),
     ("pipe into interpreter",
      re.compile(r"(?i)\|\s*(?:bash|sh|zsh|python|node|pwsh|powershell)\b")),
     ("shell or tool invocation", re.compile(
