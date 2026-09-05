@@ -140,9 +140,18 @@ and one structured verdict back. **It is transport only.**
   tree, and prohibited intent are all refused — as failures, never warnings.
 - **One review per `(phase, head)`, no automatic retry.** A `REVISE` verdict ends
   the exchange and returns the decision to Pedro.
-- **Seven operations, no aliases**: `validate-policy`, `validate-request`,
-  `validate-response`, `submit`, `ingest-response`, `inspect`, `verify-chain`.
-  Twenty-five action verbs exit 2.
+- **Nine operations, no aliases**: `validate-policy`, `validate-request`,
+  `validate-response`, `cancel-request`, `record-rejection`, `submit`,
+  `ingest-response`, `inspect`, `verify-chain`. Twenty-five action verbs exit 2.
+  `cancel-request` retires a request that can never run; `record-rejection`
+  terminates one whose attempt was already spent. Both are terminal and
+  append-only, and neither permits a retry.
+- **A named symbol is data; an invocation is not.** A verdict describes code, so
+  it is scanned in prose mode: naming `powershell` or `subprocess` to report that
+  they are not used is allowed, while anything runnable is still refused. Only
+  the executable scan changes; credentials, machine paths, prohibited intent,
+  field names, depth and length are identical. Two calibration corpora ship as
+  tests.
 - **Honest about the archive.** Append-only *by this tool* and hash chained, which
   detects corruption or partial rewriting. It is **not** tamper-proof against
   someone who can rewrite the mailbox and archive together, and the policy says so.

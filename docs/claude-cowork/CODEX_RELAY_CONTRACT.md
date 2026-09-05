@@ -52,10 +52,16 @@ verdict schema *and* against the recorded request, and only then records a
 **relay-authored** response envelope through the locked atomic update. Codex's
 bytes are nested inside as data; they never become the envelope.
 
-### Operations — exactly eight, no aliases
+### Operations — exactly nine, no aliases
 
 `validate-policy` · `validate-request` · `validate-response` ·
-`cancel-request` · `submit` · `ingest-response` · `inspect` · `verify-chain`
+`cancel-request` · `record-rejection` · `submit` · `ingest-response` ·
+`inspect` · `verify-chain`
+
+`cancel-request` retires a request that can never run. `record-rejection`
+terminates one whose attempt was already spent: the child started, so the
+attempt is gone, and the request must not sit pending. Both are terminal, both
+are append-only, and neither permits a retry of the request it closes.
 
 Twenty-five action words (`run`, `exec`, `review`, `retry`, `approve`,
 `authorize`, `apply`, `edit`, `stage`, `commit`, `push`, `merge`, `deploy`,
@@ -133,6 +139,24 @@ a recognizable payload is refused outright rather than stored, and a field *name
 that looks like an action (`command`, `args`, `shell`, `env`, `approve`,
 `authorize`, `enable`, `trade`, `order`, `kill_switch`, …) is refused anywhere in
 an envelope.
+
+**A named symbol is data; an invocation is not.** A verdict and its audit block
+exist to describe code, so they are scanned in *prose mode*: a review has to be
+able to write `powershell`, `curl`, `subprocess` or `Invoke-Expression` in order
+to report that the runner does not use them, and to use a semicolon in an
+English sentence. Prose mode swaps exactly one rule — the executable scan — for
+a calibrated set that refuses an invocation (a tool name followed by a flag, a
+URL, a path, a quoted string, a variable, a redirect, a number, or another
+command name) while allowing a mention. Requests keep the stricter free-form
+rule, because Claude authors requests. Every other scan is identical in both
+modes: credentials, machine paths, prohibited intent, field names, depth, and
+length.
+
+The calibration is a regression test, not a judgement call: twenty sentences an
+honest audit would write must all validate, and thirty-one pieces of genuinely
+runnable content must all be refused. Two live reviews were refused by the
+earlier rules for naming a shell, and each refusal consumed an attempt that
+cannot be retried — which is why the corpora ship with the code.
 
 ---
 
