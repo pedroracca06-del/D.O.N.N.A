@@ -152,7 +152,19 @@ REJECTION_FIELDS = (
     "schema_version", "message_id", "sequence", "previous_message_sha256",
     "created_at", "sender", "recipient", "message_type", "cancelled_request_id",
     "cancelled_sequence", "phase", "head", "registry_revision",
-    "rejection_reason", "attempt_consumed", "recorded_by",
+    "failure_category", "exit_code", "rejection_reason", "attempt_consumed",
+    "recorded_by",
+)
+
+# Every way a run can end after the child starts. All of them spend the attempt
+# and all of them must terminate the request, or the mailbox silently blocks.
+FAILURE_CATEGORIES = (
+    "timeout",              # the child exceeded the runtime limit
+    "nonzero_exit",         # the child returned a failure status
+    "missing_output",       # the child wrote no response file
+    "oversized_output",     # the response exceeded the size limit
+    "malformed_output",     # the response was not usable JSON
+    "validation_rejected",  # the response was refused by the relay validator
 )
 
 VERDICT_FIELDS = ("schema_version", "request_message_id", "phase", "head",
@@ -845,6 +857,10 @@ def validate_rejection(doc, policy):
         _bad("a rejection envelope must be addressed to codex")
     if doc["message_type"] != REJECTION_TYPE:
         _bad("message_type must be %r" % REJECTION_TYPE)
+    if doc["failure_category"] not in FAILURE_CATEGORIES:
+        _bad("failure_category must be one of: %s" % ", ".join(FAILURE_CATEGORIES))
+    if not isinstance(doc["exit_code"], int) or isinstance(doc["exit_code"], bool):
+        _bad("rejection exit_code must be an integer")
     # The attempt is always spent: the child ran to produce the refused answer.
     # Recording anything else would misstate what happened.
     if doc["attempt_consumed"] is not True:
@@ -1339,6 +1355,10 @@ def build_parser():
                         help="cancel-request: the pending request to retire")
     parser.add_argument("--reason", default=None,
                         help="cancel-request: why the request became unusable")
+    parser.add_argument("--failure-category", default=None,
+                        help="record-rejection: which post-spawn failure occurred")
+    parser.add_argument("--exit-code", type=int, default=None,
+                        help="record-rejection: the child's exit status")
     parser.add_argument("--rejection-reason", default=None,
                         help="record-rejection: sanitized reason the response "
                              "was refused")
@@ -1678,9 +1698,15 @@ def main(argv=None):
         elif op == "record-rejection":
             for name, value in (("--request-id", args.request_id),
                                 ("--rejection-reason", args.rejection_reason),
-                                ("--recorded-by", args.recorded_by)):
+                                ("--recorded-by", args.recorded_by),
+                                ("--failure-category", args.failure_category)):
                 if not value:
                     _bad("record-rejection requires %s" % name)
+            if args.exit_code is None:
+                _bad("record-rejection requires --exit-code")
+            if args.failure_category not in FAILURE_CATEGORIES:
+                _bad("--failure-category must be one of: %s"
+                     % ", ".join(FAILURE_CATEGORIES))
 
             current = read_mailbox(_require_mailbox(args)[1])
             problems = verify_chain(current)
@@ -1749,6 +1775,8 @@ def main(argv=None):
                 "phase": target["phase"],
                 "head": target["head"],
                 "registry_revision": target["registry_revision"],
+                "failure_category": args.failure_category,
+                "exit_code": args.exit_code,
                 "rejection_reason": args.rejection_reason,
                 "attempt_consumed": True,
                 "recorded_by": args.recorded_by,

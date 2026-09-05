@@ -1604,7 +1604,9 @@ def test_oversized_response_is_refused(bench, tmp_path):
     code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
     assert code in (STOPPED, LIMIT)
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1, "an oversized response was ingested"
+    assert not any(m.get("sender") == "codex" for m in box["messages"]),         "an oversized response was ingested"
+    term = box["messages"][-1]
+    assert cr.is_rejection(term) and term["failure_category"] == "oversized_output"
 
 
 def test_state_drift_during_the_run_is_refused(bench, tmp_path):
@@ -2441,3 +2443,106 @@ def test_the_envelope_cannot_influence_the_backend(bench, tmp_path):
     child_argv = json.loads(argvrec.read_text(encoding="utf-8"))
     assert 'windows.sandbox="elevated"' in child_argv
     assert "unelevated" not in " ".join(child_argv)
+
+
+# ------------------------------- every post-spawn failure terminates the request
+#
+# The child running at all spends the attempt. If a failure left the request
+# pending, the mailbox would block and the spent attempt would be invisible.
+
+@pytest.mark.parametrize("mode,category", [
+    ("nonzero", "nonzero_exit"),
+    ("nofile", "missing_output"),
+    ("badjson", "validation_rejected"),
+])
+def test_each_post_spawn_failure_records_its_terminal(bench, tmp_path, mode,
+                                                      category):
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode=mode)
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    assert code == STOPPED
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term), mode
+    assert term["failure_category"] == category, mode
+    assert term["attempt_consumed"] is True
+    assert isinstance(term["exit_code"], int)
+    assert cr.verify_chain(box) == []
+    with pytest.raises(Exception):
+        rr.find_pending_request(box)
+
+
+def test_a_failure_terminal_is_unique_per_request(bench, tmp_path):
+    """Exactly one terminal, and the chain refuses a second."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    assert len([m for m in box["messages"] if cr.is_terminal(m)]) == 1
+    assert cr.verify_chain(box) == []
+
+
+def test_a_terminated_request_permits_no_retry(bench, tmp_path):
+    """A further attempt needs a NEW request, never the same one."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    counter = tmp_path / "spawns.txt"
+    exe2, script2 = make_fake(tmp_path, request, repo=repo,
+                              records={"spawn_count": str(counter)})
+    code, _doc = run_inproc(review_argv(repo, registry, mailbox), exe2, script2)
+    assert code == STOPPED
+    assert not counter.exists(), "a second child ran for a terminated request"
+
+
+def test_the_diagnostic_is_bounded_and_scrubbed(bench, tmp_path, env_canaries):
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    term = cr.read_mailbox(str(mailbox / "relay.json"))["messages"][-1]
+    reason = term["rejection_reason"]
+    assert 0 < len(reason) <= rr.DIAGNOSTIC_MAX_CHARS
+    assert STDOUT_CANARY not in reason and STDERR_CANARY not in reason
+    for planted in ENV_CANARIES.values():
+        assert planted not in reason
+    assert "pedro" not in reason.lower()
+
+
+def test_sanitize_diagnostic_drops_secrets_paths_and_prompt():
+    raw = "\n".join([
+        "api_key = sk-ant-api03-AAAAAAAAAAAAAAAAAAAA",
+        "token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "workdir: " + chr(67) + ":" + chr(92) + "Users" + chr(92) + "someone",
+        "A_PROMPT_LINE_THAT_MUST_NOT_LEAK",
+    ])
+    out = rr.sanitize_diagnostic(raw, b"A_PROMPT_LINE_THAT_MUST_NOT_LEAK\n")
+    for bad in ("sk-ant", "ghp_", "someone", "A_PROMPT_LINE_THAT_MUST_NOT_LEAK"):
+        assert bad not in out, bad
+    assert len(out) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+def test_sanitize_diagnostic_keeps_the_provider_message():
+    raw = ('ERROR: {"error":{"code":"invalid_json_schema","message":'
+           '"Invalid schema for response_format: schema must have a type key."}}')
+    out = rr.sanitize_diagnostic(raw)
+    assert "schema must have a type key" in out
+
+
+def test_raw_streams_are_never_recorded(bench, tmp_path, env_canaries):
+    """Nothing in the mailbox or archive carries raw child output."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    blob = (mailbox / "relay.json").read_text(encoding="utf-8")
+    for archive in (mailbox / "archive").iterdir():
+        blob += archive.read_text(encoding="utf-8")
+    assert STDOUT_CANARY not in blob and STDERR_CANARY not in blob
+    for planted in ENV_CANARIES.values():
+        assert planted not in blob
+
+
+def test_a_failure_terminal_uses_the_revision_guard():
+    """The runner passes a compare-and-swap guard when recording a terminal."""
+    src = RUNNER.read_text(encoding="utf-8")
+    assert "--expect-mailbox-revision" in src
+    assert "record-rejection" in src

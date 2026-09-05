@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 import platform as _platform
+import re
 import secrets
 import stat
 import subprocess
@@ -921,6 +922,85 @@ def make_response_path(mailbox_root):
     return path
 
 
+# Bounded, aggressively scrubbed diagnostics. The child's stderr is the only
+# place the real cause appears, and it is also the place a prompt, a credential,
+# or a machine path could leak, so it is never printed, never archived, and never
+# recorded raw. What survives is a category, an exit code, and a short scrubbed
+# excerpt of the provider's own error message.
+DIAGNOSTIC_MAX_CHARS = 700
+
+_DIAG_DROP = (
+    re.compile(r"(?i)sk-[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"(?i)\bgh[pousr]_[A-Za-z0-9]{8,}"),
+    re.compile(r"(?i)\bAKIA[0-9A-Z]{6,}"),
+    re.compile(r"(?i)\bxox[abprs]-[A-Za-z0-9-]{6,}"),
+    re.compile(r"(?i)\bAIza[0-9A-Za-z_\-]{10,}"),
+    re.compile(r"(?i)(api[_-]?key|secret|token|password|authorization)"
+               r"\s*[:=]\s*\S+"),
+    re.compile(r"[A-Za-z]:[\\/][^\s\"']*"),
+    re.compile(r"/(?:home|Users|c)/[^\s\"']*"),
+    re.compile(r"[A-Za-z0-9+/]{60,}={0,2}"),
+)
+
+
+def sanitize_diagnostic(text, prompt_bytes=b""):
+    """Scrub a child's stderr down to something safe to record."""
+    if not text:
+        return ""
+    # Anything that appeared in the prompt is dropped outright: the prompt is
+    # never echoed back into the mailbox, not even in fragments.
+    for line in set(prompt_bytes.decode("utf-8", "replace").splitlines()):
+        line = line.strip()
+        if len(line) >= 12:
+            text = text.replace(line, "<prompt>")
+    for rx in _DIAG_DROP:
+        text = rx.sub("<redacted>", text)
+    text = ef.sanitize_text(text)
+    # ONLY a recognized structured error sentence is kept. Free-form child output
+    # is never recorded: it is the one place a prompt fragment, a canary, or an
+    # unmodelled secret could ride along, and the caller has a fixed category
+    # sentence to fall back on. Silence is the safe default here.
+    match = re.search(r'"message"\s*:\s*"([^"]{1,400})', text)
+    if not match:
+        return ""
+    return " ".join(match.group(1).split())[:DIAGNOSTIC_MAX_CHARS]
+
+
+def _record_child_failure(args, root, request, box_revision, category,
+                          exit_code, diagnostic, checks):
+    """Terminate the request through the relay after any post-spawn failure.
+
+    Every path that reaches here has already spent the attempt: the child ran.
+    Recording a terminal is what stops the request sitting pending forever and
+    what keeps the spent attempt visible. It permits no retry -- a further
+    attempt needs a NEW request.
+    """
+    argv = ["record-rejection", "--format", "json", "--mailbox", root,
+            "--request-id", request["message_id"],
+            "--failure-category", category,
+            "--exit-code", str(int(exit_code)),
+            # A fixed, category-derived sentence whenever no structured provider
+            # message could be extracted. Never free-form child output.
+            "--rejection-reason",
+            diagnostic or ("the child failed after starting; category %s, exit %s"
+                           % (category, exit_code)),
+            "--recorded-by", "codex_review_runner",
+            "--expect-mailbox-revision", str(box_revision)]
+    if args.relay_policy:
+        argv += ["--policy", args.relay_policy]
+    real = sys.stdout
+    sys.stdout = _CapturedStdout()
+    try:
+        rc = cr.main(argv)
+    finally:
+        sys.stdout = real
+    checks.append(_chk("X10", "failure terminal",
+                       "pass" if rc == cr.EXIT_OK else "fail",
+                       "%s recorded through the relay (exit %d); the request is "
+                       "terminal and no retry is permitted" % (category, rc)))
+    return rc
+
+
 class _CapturingStderr:
     """Keep a nested tool's error text so it can be sanitized into a terminal.
 
@@ -1059,6 +1139,11 @@ def invoke_once(argv, prompt_bytes, env, policy):
         "stderr_bytes": len(err or b""),
         "stdout_truncated": len(out or b"") > cap,
         "stderr_truncated": len(err or b"") > cap,
+        # Kept ONLY so a failure can be diagnosed. Never printed, never archived,
+        # and never recorded raw: `sanitize_diagnostic` scrubs it to a short
+        # excerpt before anything reaches the mailbox. stdout is not kept at all;
+        # the answer itself belongs only in the private response file.
+        "stderr": (err or b"")[:cap],
     }
 
 
@@ -1319,19 +1404,31 @@ def main(argv=None):
                                   "timed out" if result["timed_out"] else "returned",
                                   _duration_bucket(result["duration_seconds"]),
                                   result["stdout_bytes"], result["stderr_bytes"])))
+            box_now = cr.read_mailbox(mailbox_path)["revision"]
+            diag = sanitize_diagnostic(
+                (result.get("stderr") or b"").decode("utf-8", "replace"), prompt)
+
             if result["timed_out"]:
+                _record_child_failure(args, root, request, box_now, "timeout",
+                                      -1, diag, checks)
                 raise sg.StoppedError("codex timed out; the attempt is consumed and "
-                                      "cannot be retried without a new approved "
-                                      "phase")
+                                      "cannot be retried without a new request")
             if result["returncode"] != 0:
+                _record_child_failure(args, root, request, box_now, "nonzero_exit",
+                                      result["returncode"], diag, checks)
                 raise sg.StoppedError("codex exited non-zero; the attempt is "
                                       "consumed and cannot be retried without a "
-                                      "new approved phase")
+                                      "new request")
             if not os.path.isfile(response_path):
+                _record_child_failure(args, root, request, box_now, "missing_output",
+                                      result["returncode"], diag, checks)
                 raise sg.StoppedError("codex wrote no response file; the attempt is "
                                       "consumed")
             size = os.path.getsize(response_path)
             if size > policy["limits"]["max_response_bytes"]:
+                _record_child_failure(args, root, request, box_now,
+                                      "oversized_output", result["returncode"],
+                                      "the response exceeded the size limit", checks)
                 raise ef.SafetyLimitError("the response exceeds the maximum size")
             raw = open(response_path, "rb").read()
             checks.append(_chk("X7", "response", "pass",
@@ -1378,29 +1475,14 @@ def main(argv=None):
                 # mailbox and hide that the one attempt is spent, so a terminal
                 # is appended stating both. It permits no retry: a further
                 # attempt needs a new request.
-                reason = ef.sanitize_text(captured.text().strip()) \
+                reason = sanitize_diagnostic(captured.text(), prompt) \
                     or ("the response failed relay validation (exit %d)" % rc)
-                rej_argv = ["record-rejection", "--format", "json",
-                            "--mailbox", root,
-                            "--request-id", request["message_id"],
-                            "--rejection-reason", reason[:2000],
-                            "--recorded-by", "codex_review_runner",
-                            "--expect-mailbox-revision", str(box_after["revision"])]
-                if args.relay_policy:
-                    rej_argv += ["--policy", args.relay_policy]
-                sys.stdout = _CapturedStdout()
-                try:
-                    rej_rc = cr.main(rej_argv)
-                finally:
-                    sys.stdout = real_stdout
-                checks.append(_chk("X10", "rejection terminal",
-                                   "pass" if rej_rc == cr.EXIT_OK else "fail",
-                                   "recorded through the relay (exit %d); the "
-                                   "request is terminal and no retry is "
-                                   "permitted" % rej_rc))
+                _record_child_failure(args, root, request,
+                                      box_after["revision"],
+                                      "validation_rejected", rc, reason, checks)
                 raise sg.StoppedError("the response failed relay validation and was "
                                       "not recorded; the attempt is consumed and a "
-                                      "terminal rejection was appended")
+                                      "terminal was appended")
             final = cr.read_mailbox(mailbox_path)
             verdict = (final["messages"][-1].get("response") or {}).get("verdict")
             checks.append(_chk("R1", "verdict", "warning",

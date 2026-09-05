@@ -2137,39 +2137,67 @@ def test_audit_rules_name_the_violation():
     assert cr.audit_executable_reason("$(whoami)") == "command substitution"
 
 
-def test_the_shipped_schema_is_the_known_good_shape():
-    """The shipped schema is what Codex is handed as its output contract.
+def test_the_shipped_schema_declares_the_typed_audit_block():
+    """The provider refused the block until every property declared a `type`.
 
-    Three consecutive live attempts failed fast whenever the audit block was
-    declared in it, so the schema is deliberately back to the shape that is
-    proven to work. The VALIDATOR still accepts a typed audit block, which is
-    inert while the schema does not solicit one -- see
-    `test_a_schema_that_admits_the_audit_block_is_also_accepted`.
+    The exact refusal was: schema must have a 'type' key, in context
+    properties/audit/.../schema_version -- a bare `const` carries no type. Every
+    property now declares one, every object is closed, and every property is
+    required (optional data is expressed as a nullable value).
     """
     schema, _ = cr.load_verdict_schema(None)
     cr.validate_verdict_schema(schema)
-    assert sorted(schema["required"]) == sorted(cr.VERDICT_FIELDS)
-    assert set(schema["properties"]) == set(cr.VERDICT_FIELDS)
+    block = schema["properties"]["audit"]
+    assert block["type"] == ["object", "null"]
+    assert "audit" in schema["required"], "structured output cannot omit a property"
+    assert block["additionalProperties"] is False
+    assert sorted(block["required"]) == sorted(cr.AUDIT_BLOCK_FIELDS)
+    item = block["properties"]["findings"]["items"]
+    assert item["additionalProperties"] is False
+    assert sorted(item["required"]) == sorted(cr.AUDIT_FINDING_FIELDS)
 
 
-def test_a_schema_that_admits_the_audit_block_is_also_accepted():
-    """The validator tolerates either shape, so restoring one broke nothing."""
-    import json as _json
+def test_every_schema_property_declares_a_type():
+    """The precise rule the provider enforced, asserted on the shipped file."""
     schema, _ = cr.load_verdict_schema(None)
-    widened = _json.loads(_json.dumps(schema))
-    widened["properties"]["audit"] = {
-        "type": ["object", "null"], "additionalProperties": False,
-        "required": list(cr.AUDIT_BLOCK_FIELDS),
-        "properties": {
-            "schema_version": {"const": 1},
-            "architecture_summary": {"type": "string"},
-            "findings": {"type": "array", "items": {
-                "type": "object", "additionalProperties": False,
-                "required": list(cr.AUDIT_FINDING_FIELDS),
-                "properties": {k: {"type": "string"}
-                               for k in cr.AUDIT_FINDING_FIELDS}}}}}
-    widened["required"].append("audit")
-    cr.validate_verdict_schema(widened)
+
+    def walk(node, path=()):
+        missing = []
+        if isinstance(node, dict):
+            for name, sub in (node.get("properties") or {}).items():
+                if isinstance(sub, dict) and "type" not in sub:
+                    missing.append("/".join(path + (name,)))
+                missing += walk(sub, path + (name,))
+            items = node.get("items")
+            if isinstance(items, dict):
+                missing += walk(items, path + ("items",))
+        return missing
+
+    assert walk(schema) == []
+
+
+def test_every_schema_object_is_closed_and_fully_required():
+    schema, _ = cr.load_verdict_schema(None)
+
+    def walk(node, path=()):
+        bad = []
+        if isinstance(node, dict):
+            t = node.get("type")
+            if t == "object" or (isinstance(t, list) and "object" in t):
+                if node.get("additionalProperties") is not False:
+                    bad.append("/".join(path) or "<root>")
+                extra = set(node.get("properties", {})) - set(node.get("required", []))
+                if extra:
+                    bad.append("%s optional: %s" % ("/".join(path) or "<root>",
+                                                    sorted(extra)))
+            for name, sub in (node.get("properties") or {}).items():
+                bad += walk(sub, path + (name,))
+            items = node.get("items")
+            if isinstance(items, dict):
+                bad += walk(items, path + ("items",))
+        return bad
+
+    assert walk(schema) == []
 
 
 def test_a_schema_without_the_audit_block_is_accepted(tmp_path):
