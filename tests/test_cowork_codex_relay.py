@@ -1934,3 +1934,203 @@ def test_the_real_mailbox_cancellation_targets_a_request():
     for m in box["messages"]:
         if cr.is_cancellation(m):
             assert m["cancelled_request_id"] in requests, m["message_id"]
+
+
+# ------------------------------------------- typed, inert code-audit contract
+#
+# A code audit has to name things: `intelligence/gateway.py`, `subprocess`,
+# `ProviderError`. The generic envelope rule cannot tell naming from invoking, so
+# it rejected a legitimate audit outright (INTEL-AUDIT-02). The fix is a typed
+# block with its own narrower rule -- not a relaxation of every free-text field.
+
+def audit_finding(**over):
+    f = {"finding_id": "AUD-001", "severity": "medium", "category": "architecture",
+         "repository_path": "intelligence/gateway.py",
+         "line_start": 10, "line_end": 42, "symbol": "Gateway.dispatch",
+         "observed_behavior": "The gateway calls subprocess for the child process.",
+         "technical_risk": "A provider timeout raises ProviderError without a retry.",
+         "evidence_description": "See intelligence/gateway.py around line 42.",
+         "recommended_correction": "Add a bounded retry and assert on ProviderError.",
+         "test_gap": "No test covers a provider timeout.",
+         "acceptance_criteria": "A timeout yields a degraded result, not a crash."}
+    f.update(over)
+    return f
+
+
+def audit_block(**over):
+    b = {"schema_version": 1,
+         "architecture_summary": "A provider-independent gateway in intelligence/gateway.py.",
+         "findings": [audit_finding()]}
+    b.update(over)
+    return b
+
+
+def _verdict_with(audit=None, **over):
+    d = {"schema_version": 1,
+         "request_message_id": "11111111-1111-1111-1111-111111111111",
+         "phase": "P1", "head": "a" * 40, "verdict": "REVISE",
+         "summary": "audit complete", "findings": [],
+         "non_authorization": cr.NON_AUTHORIZATION_SENTENCE}
+    if audit is not None:
+        d["audit"] = audit
+    d.update(over)
+    return d
+
+
+def _policy_and_schema():
+    pol, _ = cr.load_policy(None)
+    cr.validate_policy(pol)
+    schema, _ = cr.load_verdict_schema(None)
+    return pol, schema
+
+
+def test_a_legitimate_code_audit_is_accepted():
+    """Paths, dotted symbols, and error names are data, not smuggling."""
+    pol, schema = _policy_and_schema()
+    cr.validate_verdict(_verdict_with(audit_block()), pol, schema)
+
+
+def test_a_verdict_without_an_audit_block_still_validates():
+    pol, schema = _policy_and_schema()
+    cr.validate_verdict(_verdict_with(), pol, schema)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("observed_behavior", "It calls subprocess.run([1]) on every request"),
+    ("recommended_correction", "then run the following commands to fix it"),
+    ("evidence_description", "diff --git a/x b/x"),
+    ("technical_risk", "an attacker could use $(whoami) here"),
+    ("test_gap", "cat payload | bash"),
+    ("acceptance_criteria", "<script>alert(1)</script>"),
+    ("observed_behavior", "os.system(\"rm -rf /\") is reachable"),
+    ("technical_risk", "eval(user_input) is called directly"),
+])
+def test_executable_constructs_are_still_refused_in_audit_fields(field, value):
+    pol, schema = _policy_and_schema()
+    with pytest.raises(Exception) as exc:
+        cr.validate_verdict(
+            _verdict_with(audit_block(findings=[audit_finding(**{field: value})])),
+            pol, schema)
+    assert "audit" in str(exc.value).lower() or "not permitted" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", [
+    "intelligence/gateway.py", "tools/cowork/codex_relay.py",
+    "intelligence/providers/anthropic_adapter.py"])
+def test_repository_relative_paths_are_representable(value):
+    pol, schema = _policy_and_schema()
+    cr.validate_verdict(
+        _verdict_with(audit_block(findings=[audit_finding(repository_path=value)])),
+        pol, schema)
+
+
+@pytest.mark.parametrize("value", ["Gateway", "Gateway.dispatch",
+                                   "intelligence.budget.BudgetExceeded", "_private"])
+def test_symbols_are_representable(value):
+    pol, schema = _policy_and_schema()
+    cr.validate_verdict(
+        _verdict_with(audit_block(findings=[audit_finding(symbol=value)])),
+        pol, schema)
+
+
+@pytest.mark.parametrize("bad", ["rm -rf /", "a b", "sudo curl", "x;y", ""])
+def test_a_symbol_that_is_not_an_identifier_is_refused(bad):
+    pol, schema = _policy_and_schema()
+    with pytest.raises(Exception):
+        cr.validate_verdict(
+            _verdict_with(audit_block(findings=[audit_finding(symbol=bad)])),
+            pol, schema)
+
+
+@pytest.mark.parametrize("bad", ["C:/Users/x/gateway.py", "/etc/passwd",
+                                 "../outside.py"])
+def test_an_absolute_or_escaping_audit_path_is_refused(bad):
+    pol, schema = _policy_and_schema()
+    with pytest.raises(Exception):
+        cr.validate_verdict(
+            _verdict_with(audit_block(findings=[audit_finding(repository_path=bad)])),
+            pol, schema)
+
+
+def test_credentials_are_refused_inside_audit_fields():
+    pol, schema = _policy_and_schema()
+    with pytest.raises(Exception):
+        cr.validate_verdict(
+            _verdict_with(audit_block(findings=[audit_finding(
+                evidence_description="api_key = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAA'")])),
+            pol, schema)
+
+
+def test_unknown_audit_fields_are_refused():
+    """The typed shape cannot be used to smuggle a new key."""
+    pol, schema = _policy_and_schema()
+    with pytest.raises(Exception):
+        cr.validate_verdict(
+            _verdict_with(audit_block(findings=[audit_finding(command="ls")])),
+            pol, schema)
+    with pytest.raises(Exception):
+        cr.validate_verdict(_verdict_with(audit_block(extra="x")), pol, schema)
+
+
+def test_line_ranges_must_be_sane():
+    pol, schema = _policy_and_schema()
+    for bad in ({"line_start": -1}, {"line_end": 5, "line_start": 9},
+                {"line_start": "10"}):
+        with pytest.raises(Exception):
+            cr.validate_verdict(
+                _verdict_with(audit_block(findings=[audit_finding(**bad)])),
+                pol, schema)
+
+
+def test_the_intel_audit_02_shape_now_passes():
+    """Regression fixture modelled on the audit that was refused outright.
+
+    Sanitized of executable content: it names files, symbols and error types the
+    way a real gateway audit must, and nothing here asks anyone to run anything.
+    """
+    pol, schema = _policy_and_schema()
+    block = audit_block(
+        architecture_summary=(
+            "intelligence/gateway.py fronts a provider registry; "
+            "intelligence/budget.py enforces spend limits and "
+            "intelligence/providers/base.py defines the adapter contract."),
+        findings=[
+            audit_finding(finding_id="AUD-101", severity="high",
+                          category="error-handling",
+                          repository_path="intelligence/gateway.py",
+                          symbol="Gateway.dispatch", line_start=120, line_end=180,
+                          observed_behavior=(
+                              "A provider timeout propagates as ProviderError "
+                              "without a degraded-state fallback."),
+                          technical_risk=(
+                              "One slow provider fails the whole request path."),
+                          evidence_description=(
+                              "intelligence/gateway.py defines no retry around "
+                              "the adapter call."),
+                          recommended_correction=(
+                              "Introduce a bounded retry and a documented "
+                              "degraded result shape."),
+                          test_gap="tests/test_intelligence_gateway.py has no timeout case.",
+                          acceptance_criteria=(
+                              "A simulated timeout returns a degraded result and "
+                              "records an audit entry.")),
+            audit_finding(finding_id="AUD-102", severity="medium",
+                          category="observability",
+                          repository_path="intelligence/audit.py",
+                          symbol="AuditLog.record", line_start=1, line_end=86,
+                          observed_behavior="Audit records omit the provider identity.",
+                          technical_risk="Provider rotation cannot be attributed.",
+                          evidence_description="intelligence/audit.py records no provider field.",
+                          recommended_correction="Add an inert provider identifier field.",
+                          test_gap="No assertion covers provider attribution.",
+                          acceptance_criteria="Each record names the provider used.")])
+    cr.validate_verdict(_verdict_with(block), pol, schema)
+
+
+def test_audit_rules_name_the_violation():
+    assert cr.audit_executable_reason("intelligence/gateway.py") is None
+    assert cr.audit_executable_reason("subprocess") is None
+    assert cr.audit_executable_reason("ProviderError") is None
+    assert cr.audit_executable_reason("subprocess.run([1])") == "code invocation"
+    assert cr.audit_executable_reason("a && b") == "command chaining"
+    assert cr.audit_executable_reason("$(whoami)") == "command substitution"

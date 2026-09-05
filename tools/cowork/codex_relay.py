@@ -180,6 +180,64 @@ _EXECUTABLE_RE = re.compile(
     r"subprocess)\b|(?<![.\w*])sh\s+-c\b|<script|javascript:|"
     r"^[A-Z_]{3,}=|\bset-content\b|\bout-file\b)")
 
+# A code audit has to be able to SAY `subprocess`, `intelligence/gateway.py`, or
+# `ProviderError` without that counting as smuggling. The generic rule above
+# cannot distinguish naming a symbol from invoking one, so typed audit fields get
+# this narrower rule instead: a bare identifier is data, an INVOCATION is not.
+# Everything genuinely executable is still refused -- shells, chaining, scripts,
+# encoded payloads, tool invocations, and imperative "run this" instructions.
+_AUDIT_EXECUTABLE_RULES = (
+    ("command substitution", re.compile(r"\$\(")),
+    ("command chaining", re.compile(r"&&|\|\||;\s*\w+\s")),
+    ("pipe into interpreter",
+     re.compile(r"(?i)\|\s*(?:bash|sh|zsh|python|node|pwsh|powershell)\b")),
+    ("shell or tool invocation", re.compile(
+        r"(?i)(?<![.\w])(sudo|curl|wget|nc|netcat|chmod|chown|iex|"
+        r"invoke-expression|start-process|cmd\.exe|powershell|pwsh)\b")),
+    ("interpreter with flags",
+     re.compile(r"(?i)(?<![.\w])(?:sh|bash|python|node)\s+-\w")),
+    ("markup or scheme payload",
+     re.compile(r"(?i)<script|javascript:|data:text/html")),
+    # A NAMED symbol is data; an INVOCATION is not. `subprocess` passes,
+    # `subprocess.run(` does not.
+    ("code invocation", re.compile(
+        r"(?:os\.system|subprocess\.(?:run|Popen|call|check_output)|eval|exec|"
+        r"__import__|importlib\.import_module|compile)\s*\(")),
+    ("imperative instruction", re.compile(
+        r"(?i)\b(?:run|execute|apply|paste)\s+(?:the\s+|these\s+|this\s+)?"
+        r"(?:following|commands?|scripts?|patch|diff|snippet)\b")),
+    ("patch or diff payload",
+     re.compile(r"(?m)^\s*(?:diff --git|@@ -|\+\+\+ b/|--- a/)")),
+    ("encoded blob", re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")),
+)
+
+
+def audit_executable_reason(text):
+    """Name of the first rule a typed audit value violates, or None."""
+    for name, rx in _AUDIT_EXECUTABLE_RULES:
+        if rx.search(text):
+            return name
+    return None
+
+# The typed, inert fields a code audit may use. Anything outside this set inside
+# an audit block is rejected, so the shape cannot be used to smuggle new keys.
+AUDIT_FINDING_FIELDS = (
+    "finding_id", "severity", "category", "repository_path", "line_start",
+    "line_end", "symbol", "observed_behavior", "technical_risk",
+    "evidence_description", "recommended_correction", "test_gap",
+    "acceptance_criteria",
+)
+AUDIT_BLOCK_FIELDS = ("schema_version", "architecture_summary", "findings")
+AUDIT_SCHEMA_VERSION = 1
+# Fields that may carry inert code references; the rest stay under the generic
+# rule. `symbol` and `repository_path` are additionally shape-checked.
+AUDIT_CODE_FIELDS = frozenset({
+    "repository_path", "symbol", "observed_behavior", "technical_risk",
+    "evidence_description", "recommended_correction", "test_gap",
+    "acceptance_criteria", "architecture_summary",
+})
+_SYMBOL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
+
 # A key that would smuggle an action into a document that is supposed to be data.
 # Deliberately absent: `path` and `allow`. They are legitimate structural names
 # here -- `diff_numstat[].path` and `permission_state.allow` -- and banning them
@@ -757,11 +815,76 @@ def validate_request(doc, policy):
     return doc
 
 
+def validate_audit(block, policy):
+    """Typed, inert code-audit block. Names of things are data; running is not.
+
+    Every value here is still scanned for credentials and machine paths. What
+    differs from the generic rule is only the executable test: a code audit must
+    be able to say `subprocess`, `intelligence/gateway.py`, or `ProviderError`
+    without that counting as smuggling, while shells, chaining, scripts, patches,
+    encoded payloads, tool invocations, and "run this" instructions stay refused.
+    """
+    limits = _limits(policy)
+    _require(block, AUDIT_BLOCK_FIELDS, "audit block")
+    if block["schema_version"] != AUDIT_SCHEMA_VERSION:
+        _bad("unsupported audit schema_version")
+
+    def _inert(value, where):
+        if not isinstance(value, str) or not value.strip():
+            _bad("audit %s must be a non-empty string" % where)
+        if len(value) > 4096:
+            raise ef.SafetyLimitError("audit %s exceeds the maximum length" % where)
+        if _CREDENTIAL_RE.search(value):
+            _bad("a credential-shaped value was found in audit %s" % where)
+        if _MACHINE_PATH_RE.search(value):
+            _bad("a machine-specific path or username is not permitted in "
+                 "audit %s" % where)
+        reason = audit_executable_reason(value)
+        if reason:
+            _bad("audit %s carries %s; an audit describes code, it never ships "
+                 "something to run" % (where, reason))
+
+    _inert(block["architecture_summary"], "architecture_summary")
+    findings = block["findings"]
+    if not isinstance(findings, list):
+        _bad("audit findings must be a list")
+    if len(findings) > limits["max_findings"]:
+        raise ef.SafetyLimitError("audit findings exceeds the maximum count")
+    seen = set()
+    for f in findings:
+        _require(f, AUDIT_FINDING_FIELDS, "audit finding")
+        _str_field(f, "finding_id", _PHASE_RE, "audit finding")
+        if f["finding_id"] in seen:
+            _bad("a duplicate audit finding_id was supplied")
+        seen.add(f["finding_id"])
+        if f["severity"] not in ENUMS_FIXED["finding_severity"]:
+            _bad("audit finding severity is not one of the fixed severities")
+        _str_field(f, "category", _CATEGORY_RE, "audit finding")
+        _rel_path(f["repository_path"], "audit repository_path", limits)
+        if not _SYMBOL_RE.match(str(f["symbol"])):
+            _bad("audit symbol must be a plain identifier or dotted name")
+        for k in ("line_start", "line_end"):
+            if not isinstance(f[k], int) or isinstance(f[k], bool) or f[k] < 0:
+                _bad("audit %s must be a non-negative integer" % k)
+        if f["line_end"] < f["line_start"]:
+            _bad("audit line_end must not precede line_start")
+        for k in ("observed_behavior", "technical_risk", "evidence_description",
+                  "recommended_correction", "test_gap", "acceptance_criteria"):
+            _inert(f[k], k)
+    return block
+
+
 def validate_verdict(doc, policy, schema):
     """Check a Codex final response field by field against the shipped schema."""
     limits = _limits(policy)
-    _require(doc, VERDICT_FIELDS, "verdict document")
-    _walk(doc, limits)
+    audit = doc.get("audit")
+    fields = VERDICT_FIELDS + (("audit",) if audit is not None else ())
+    _require(doc, fields, "verdict document")
+    # The audit block carries typed inert code references and is validated by its
+    # own stricter-shaped rules; everything else stays under the generic scan.
+    _walk({k: v for k, v in doc.items() if k != "audit"}, limits)
+    if audit is not None:
+        validate_audit(audit, policy)
 
     if doc["schema_version"] != SCHEMA_VERSION:
         _bad("unsupported verdict schema_version")
