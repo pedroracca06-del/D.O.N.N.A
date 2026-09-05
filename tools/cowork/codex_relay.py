@@ -165,6 +165,8 @@ FAILURE_CATEGORIES = (
     "oversized_output",     # the response exceeded the size limit
     "malformed_output",     # the response was not usable JSON
     "validation_rejected",  # the response was refused by the relay validator
+    "state_changed",        # the repository, registry or mailbox moved mid-run
+    "internal_error",       # anything else that went wrong after the child ran
 )
 
 VERDICT_FIELDS = ("schema_version", "request_message_id", "phase", "head",

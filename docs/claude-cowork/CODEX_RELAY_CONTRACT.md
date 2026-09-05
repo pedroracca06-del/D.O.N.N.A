@@ -509,6 +509,32 @@ phase**. Because the relay caps one review per `(phase, head)`, a second run fin
 nothing pending and stops.
 
 A stop *before* the spawn (a failed precondition) does **not** consume the attempt.
+`invoke_once` sets the spawned flag the instant the child exists and never
+before, so a process that could not be started spends nothing and records
+nothing.
+
+**A spent attempt is always terminated.** Every path reachable after the child
+starts routes through one recorder, which writes exactly one `response_rejected`
+under a compare-and-swap mailbox revision guard and then lets the error
+propagate. That includes the paths that are not explicit branches: a mailbox or
+response-file read failure, and the four revalidation stops — the repository
+moved, the worktree became dirty, the registry changed, the mailbox changed. A
+catch-all handler covers anything unforeseen, so no exception escapes while an
+attempt is unaccounted for. Without this, a spent attempt left the request
+pending forever and blocked the mailbox on a review that could never happen.
+
+Failure categories: `timeout`, `nonzero_exit`, `missing_output`,
+`oversized_output`, `malformed_output`, `validation_rejected`, `state_changed`,
+`internal_error`. The recorder is idempotent, so the outer handlers never add a
+second terminal to a request an explicit branch already closed.
+
+**The diagnostic never carries the prompt back.** Only a recognized structured
+provider message is kept, and it is dropped entirely if it repeats any run of
+five consecutive words from the prompt — a whole-line substitution cannot see a
+fragment the child rewrapped or excerpted, and the child chooses its own
+standard error. When nothing survives, the caller records its fixed category
+sentence instead. Raw streams are never printed, never archived, and never
+recorded.
 
 ---
 

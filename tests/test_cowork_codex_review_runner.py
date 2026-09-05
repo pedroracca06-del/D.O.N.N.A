@@ -1610,14 +1610,27 @@ def test_oversized_response_is_refused(bench, tmp_path):
 
 
 def test_state_drift_during_the_run_is_refused(bench, tmp_path):
-    """The child dirties the tree; the runner revalidates and refuses to ingest."""
+    """The child dirties the tree; the runner revalidates and refuses to ingest.
+
+    The verdict is refused, but the attempt was still spent -- the child ran --
+    so the request is terminated rather than left pending. This test used to
+    assert that nothing was recorded here, which is precisely the accounting
+    gap RR04-001 named.
+    """
     repo, registry, mailbox, request = bench
     exe, script = make_fake(tmp_path, request, repo=repo, mode="dirty")
     code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
     assert code == STOPPED
     assert any("dirty while codex ran" in r for r in stopped_reasons(doc))
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1
+    assert len(box["messages"]) == 2, "the spent attempt was not accounted for"
+    term = box["messages"][-1]
+    assert cr.is_rejection(term)
+    assert term["failure_category"] == "state_changed"
+    assert term["attempt_consumed"] is True
+    assert cr.verify_chain(box) == []
+    # No verdict was ingested: the refusal stands.
+    assert not any(m.get("sender") == "codex" for m in box["messages"])
 
 
 def test_no_recursive_review_once_call():
@@ -2568,3 +2581,158 @@ def test_the_relay_sentence_is_still_scrubbed():
     assert "sk-ant" not in out
     assert out.startswith("codex_relay:")
     assert len(out) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+# ------------------------------------------------ RELIABILITY-REVIEW-04 findings
+#
+# RR04-001 (high): the explicit post-spawn branches covered timeout, non-zero
+# exit, missing output, oversized output and validation rejection -- but not the
+# code BETWEEN them. A mailbox read failure, a response-file read failure, or
+# any of the four revalidation stops left the request pending with the attempt
+# already spent.
+#
+# RR04-002 (high): the sanitizer replaced whole prompt LINES only, so a child
+# could put a prompt fragment inside a structured message and have it survive.
+
+
+def test_a_spent_attempt_is_terminated_when_the_repository_moves(bench, tmp_path):
+    """The child ran, then HEAD moved. The request must not stay pending."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo)
+
+    real_observe = cr.observe_repository
+    calls = {"n": 0}
+
+    def moving_observe(path):
+        calls["n"] += 1
+        obs = real_observe(path)
+        if calls["n"] > 1:            # the revalidation read, after the child
+            obs = dict(obs, head="f" * 40)
+        return obs
+
+    cr.observe_repository = moving_observe
+    try:
+        code, _doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    finally:
+        cr.observe_repository = real_observe
+
+    assert code == STOPPED
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term)
+    assert term["failure_category"] == "state_changed"
+    assert term["attempt_consumed"] is True
+    assert cr.verify_chain(box) == []
+    with pytest.raises(Exception):
+        rr.find_pending_request(box)
+
+
+def test_a_spent_attempt_is_terminated_when_an_unexpected_error_occurs(bench,
+                                                                      tmp_path):
+    """Nothing may escape while an attempt is unaccounted for."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo)
+
+    real_read = cr.read_mailbox
+    state = {"fail": False}
+
+    def flaky_read(path):
+        box = real_read(path)
+        if state["fail"]:
+            state["fail"] = False
+            raise RuntimeError("a deliberate failure after the child ran")
+        return box
+
+    real_invoke = rr.invoke_once
+
+    def invoke_then_break(*a, **kw):
+        result = real_invoke(*a, **kw)
+        state["fail"] = True
+        return result
+
+    cr.read_mailbox = flaky_read
+    rr.invoke_once = invoke_then_break
+    try:
+        code, _doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    finally:
+        cr.read_mailbox = real_read
+        rr.invoke_once = real_invoke
+
+    assert code == STOPPED
+    box = real_read(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term), "an unaccounted attempt escaped"
+    assert term["failure_category"] == "internal_error"
+    assert cr.verify_chain(box) == []
+
+
+def test_a_failed_spawn_consumes_nothing(bench, tmp_path):
+    """A process that never started spends no attempt, so nothing is recorded."""
+    repo, registry, mailbox, request = bench
+    before = cr.read_mailbox(str(mailbox / "relay.json"))
+    missing = tmp_path / "does-not-exist" / "codex.exe"
+    code, _doc = run_inproc(review_argv(repo, registry, mailbox), str(missing), None)
+    after = cr.read_mailbox(str(mailbox / "relay.json"))
+    assert code != 0
+    assert len(after["messages"]) == len(before["messages"]), \
+        "a terminal was recorded for an attempt that never started"
+    rr.find_pending_request(after)        # still pending, correctly
+
+
+def test_only_one_terminal_is_ever_written(bench, tmp_path):
+    """The recorder is idempotent: the outer handler must not add a second."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    terminals = [m for m in box["messages"] if cr.is_terminal(m)]
+    assert len(terminals) == 1, terminals
+    assert terminals[0]["failure_category"] == "nonzero_exit"
+    assert cr.verify_chain(box) == []
+
+
+# --------------------------------------------------------------- RR04-002
+
+PROMPT_LINE = (b"Focus: whether every path reachable after the child process "
+               b"starts terminates the pending request exactly once.\n")
+
+
+@pytest.mark.parametrize("leaked", [
+    # the whole line, as before
+    "every path reachable after the child process starts terminates the "
+    "pending request exactly once",
+    # a fragment of it -- what the old whole-line replacement could not see
+    "every path reachable after the child process starts",
+    # rewrapped, with the whitespace changed
+    "every   path\treachable after\nthe child process starts",
+    # embedded inside otherwise plausible provider text
+    "schema error near every path reachable after the child process starts",
+])
+def test_a_prompt_fragment_never_survives_into_the_diagnostic(leaked):
+    raw = 'ERROR: {"message":"%s"}' % leaked
+    assert rr.sanitize_diagnostic(raw, PROMPT_LINE) == "", leaked
+
+
+def test_a_genuine_provider_error_still_survives():
+    raw = ('ERROR: {"error":{"code":"invalid_json_schema","message":'
+           '"Invalid schema for response_format: schema must have a type key."}}')
+    out = rr.sanitize_diagnostic(raw, PROMPT_LINE)
+    assert "schema must have a type key" in out
+    assert 0 < len(out) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+def test_the_phrase_check_is_about_runs_not_single_words():
+    """A shared word or two is not a leak; a five-word run is."""
+    source = "the quick brown fox jumps over the lazy dog"
+    assert not rr._repeats_a_phrase("the dog was quick", source)
+    assert rr._repeats_a_phrase("x quick brown fox jumps over y", source)
+
+
+def test_our_own_messages_are_scrubbed_but_kept():
+    """A runner-authored sentence has no prompt-echo risk, so it is kept."""
+    out = rr.sanitize_own_message("the repository moved while codex ran")
+    assert out == "the repository moved while codex ran"
+    scrubbed = rr.sanitize_own_message(
+        "failed at " + chr(67) + ":" + chr(92) + "Users" + chr(92) + "someone")
+    assert "someone" not in scrubbed
+    assert len(scrubbed) <= rr.DIAGNOSTIC_MAX_CHARS
