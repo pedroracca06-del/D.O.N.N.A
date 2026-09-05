@@ -420,7 +420,7 @@ def _mock_adapter_result(text, input_tokens=20, output_tokens=10, model='claude-
     return AdapterResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens, model=model)
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_success_through_real_gateway_and_prompt_module(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -445,7 +445,7 @@ def test_end_to_end_success_through_real_gateway_and_prompt_module(mock_adapter_
     assert 'Session: NY_AM' in sent_prompt
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_malformed_output_through_real_gateway(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -464,7 +464,7 @@ def test_end_to_end_malformed_output_through_real_gateway(mock_adapter_cls):
     assert response.content is None
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_assistant_feature_never_cached(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 

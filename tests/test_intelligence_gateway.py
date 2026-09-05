@@ -26,6 +26,11 @@ from intelligence.errors import IntelligenceErrorCode
 from intelligence.providers.base import AdapterResult, ProviderError
 
 GATEWAY_MODULE = 'intelligence.gateway'
+# The adapter is resolved by the providers package now, so the patch seam
+# is the class in its own module rather than a name re-exported by the
+# gateway. resolve_adapter imports it on every call, so a patch here still
+# takes effect for the call under test.
+ADAPTER_TARGET = 'intelligence.providers.anthropic_adapter.AnthropicAdapter'
 
 
 # ── Isolation: temp budget/audit files, fresh cache dict, no real network ──
@@ -94,7 +99,7 @@ def test_missing_api_key_returns_provider_not_configured_before_cache(monkeypatc
 
 
 # ── Full success path ───────────────────────────────────────────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_full_success_path_returns_envelope_and_writes_cache_and_audit(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='hello', input_tokens=20, output_tokens=8)
@@ -121,7 +126,7 @@ def test_full_success_path_returns_envelope_and_writes_cache_and_audit(mock_adap
 
 
 # ── Cache hit bypasses circuit breaker, budget, prompt loading, provider ───
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_cache_hit_bypasses_everything(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result()
@@ -151,7 +156,7 @@ def test_cache_hit_bypasses_everything(mock_adapter_cls, monkeypatch):
 
 
 # ── Assistant is never cached ───────────────────────────────────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_assistant_feature_is_never_cached(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result()
@@ -165,7 +170,7 @@ def test_assistant_feature_is_never_cached(mock_adapter_cls, monkeypatch):
 
 
 # ── Circuit breaker: opens after 3 consecutive failures, blocks the 4th ────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_circuit_breaker_opens_after_three_failures(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = ProviderError(IntelligenceErrorCode.AUTH_FAILED, False)
@@ -182,7 +187,7 @@ def test_circuit_breaker_opens_after_three_failures(mock_adapter_cls, monkeypatc
 
 
 # ── Retry: retryable TIMEOUT gets exactly one retry ─────────────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_retryable_timeout_retries_exactly_once_then_succeeds(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = [
@@ -200,7 +205,7 @@ def test_retryable_timeout_retries_exactly_once_then_succeeds(mock_adapter_cls, 
 
 
 # ── Retry: retryable connection/5xx-style failure gets one retry, still fails ─
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_retryable_failure_exhausted_after_one_retry(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = [
@@ -224,7 +229,7 @@ def test_retryable_failure_exhausted_after_one_retry(mock_adapter_cls, monkeypat
     IntelligenceErrorCode.RATE_LIMITED,
     IntelligenceErrorCode.PROVIDER_NOT_CONFIGURED,
 ])
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_non_retryable_errors_are_never_retried(mock_adapter_cls, monkeypatch, code):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = ProviderError(code, False)
@@ -239,7 +244,7 @@ def test_non_retryable_errors_are_never_retried(mock_adapter_cls, monkeypatch, c
 
 
 # ── Non-retryable 404-style permanent INVALID_PROVIDER_RESPONSE ────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_permanent_invalid_provider_response_not_retried(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = ProviderError(IntelligenceErrorCode.INVALID_PROVIDER_RESPONSE, False)
@@ -253,7 +258,7 @@ def test_permanent_invalid_provider_response_not_retried(mock_adapter_cls, monke
 
 
 # ── Model not supported: zero provider calls, no reservation left behind ──
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_model_not_supported_makes_no_provider_call(mock_adapter_cls, monkeypatch):
     monkeypatch.setattr(config, 'NOVA_AI_MODEL', 'not-a-real-model')
     mock_adapter = MagicMock()
@@ -268,7 +273,7 @@ def test_model_not_supported_makes_no_provider_call(mock_adapter_cls, monkeypatc
 
 
 # ── Malformed output: correct envelope, never cached ────────────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_malformed_output_not_cached(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='not json')
@@ -291,7 +296,7 @@ def test_malformed_output_not_cached(mock_adapter_cls, monkeypatch):
 
 
 # ── Reservations released on every terminal path ────────────────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_reservation_released_after_non_retryable_failure(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = ProviderError(IntelligenceErrorCode.AUTH_FAILED, False)
@@ -305,7 +310,7 @@ def test_reservation_released_after_non_retryable_failure(mock_adapter_cls, monk
     assert state.request_count == 1
 
 
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_reservation_released_when_prompt_construction_fails(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter_cls.return_value = mock_adapter
@@ -325,7 +330,7 @@ def test_reservation_released_when_prompt_construction_fails(mock_adapter_cls, m
 
 
 # ── Corrective commit: settlement failure after a real provider attempt ────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_settlement_failure_after_provider_success_returns_budget_state_unavailable(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='should never reach the caller', input_tokens=30, output_tokens=15)
@@ -363,7 +368,7 @@ def test_settlement_failure_after_provider_success_returns_budget_state_unavaila
     assert cache.get_cached_response('journal_review', {'trade_id': 7}) is None
 
 
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_settlement_failure_after_provider_failure_omits_token_counts(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = ProviderError(IntelligenceErrorCode.AUTH_FAILED, False)
@@ -384,7 +389,7 @@ def test_settlement_failure_after_provider_failure_omits_token_counts(mock_adapt
 
 
 # ── Corrective commit: audit completeness on escape paths ──────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_prompt_build_failure_audits_once_without_exception_text(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter_cls.return_value = mock_adapter
@@ -408,7 +413,7 @@ def test_prompt_build_failure_audits_once_without_exception_text(mock_adapter_cl
     assert state.reserved_count == 0
 
 
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_unexpected_adapter_exception_audits_once_without_exception_text(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.side_effect = RuntimeError('unexpected internal SDK bug, must never be logged verbatim')
@@ -431,7 +436,7 @@ def test_unexpected_adapter_exception_audits_once_without_exception_text(mock_ad
 
 
 # ── Corrective commit: cache-read/write failures never block a valid request ─
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_cache_read_failure_is_treated_as_a_miss(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='fresh answer')
@@ -451,7 +456,7 @@ def test_cache_read_failure_is_treated_as_a_miss(mock_adapter_cls, monkeypatch):
     assert 'cache backend exploded' not in str(entries[0])
 
 
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_cache_write_failure_does_not_erase_result_or_skip_audit(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='valuable answer', input_tokens=11, output_tokens=6)
@@ -485,7 +490,7 @@ def test_prompt_module_not_imported_when_provider_not_configured(monkeypatch):
 
 
 # ── Audit: exactly one record per request, redacted ─────────────────────────
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_audit_writes_exactly_one_record_and_redacts_content(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='super secret model output')
@@ -504,7 +509,7 @@ def test_audit_writes_exactly_one_record_and_redacts_content(mock_adapter_cls, m
     assert 'sk-ant-test-key' not in serialized
 
 
-@patch(f'{GATEWAY_MODULE}.AnthropicAdapter')
+@patch(ADAPTER_TARGET)
 def test_audit_malformed_output_records_length_and_hash_not_content(mock_adapter_cls, monkeypatch):
     mock_adapter = MagicMock()
     mock_adapter.call.return_value = _adapter_result(text='not valid json content here')

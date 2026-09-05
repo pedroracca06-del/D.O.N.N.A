@@ -9,6 +9,7 @@ caller (gateway.py) — this module tracks one shared daily total, per spec.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 from contextlib import contextmanager
@@ -27,6 +28,11 @@ _MAX_ATTEMPTS_PER_RESERVATION = 2
 _LOCK_TIMEOUT_SECONDS = 5.0
 
 _lock = threading.Lock()
+
+
+def _reject_constant(name: str):
+    """json.loads hook: refuse NaN, Infinity and -Infinity outright."""
+    raise ValueError('budget state contains the non-finite constant %s' % name)
 
 
 class BudgetStateUnavailable(Exception):
@@ -93,8 +99,12 @@ def _read_state(path: Path) -> _DayState:
 
     try:
         raw = path.read_text(encoding='utf-8')
-        data = json.loads(raw)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # NaN, Infinity and -Infinity are accepted by json.loads by default and
+        # are not valid JSON. A NaN cost is worse than a corrupt one: it passes
+        # the negativity check below AND makes every ceiling comparison false,
+        # so it would silently disable the spend limit rather than trip it.
+        data = json.loads(raw, parse_constant=_reject_constant)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
         raise BudgetStateUnavailable('budget state file is unreadable or not valid JSON') from exc
 
     if not isinstance(data, dict):
@@ -114,6 +124,13 @@ def _read_state(path: Path) -> _DayState:
         )
     except (TypeError, ValueError) as exc:
         raise BudgetStateUnavailable('budget state file has invalid field types') from exc
+
+    if not math.isfinite(state.accrued_cost) or not math.isfinite(state.reserved_cost):
+        # Belt and braces: a non-finite value can also arrive as a float that
+        # was never parsed from a JSON constant. Comparing it against a limit
+        # always yields False, so it must be rejected explicitly rather than
+        # left to the range check below.
+        raise BudgetStateUnavailable('budget state file has non-finite cost values')
 
     if state.request_count < 0 or state.accrued_cost < 0 or state.reserved_count < 0 or state.reserved_cost < 0:
         raise BudgetStateUnavailable('budget state file has invalid negative values')

@@ -181,7 +181,7 @@ def _mock_adapter_result(text, input_tokens=60, output_tokens=40, model='claude-
     return AdapterResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens, model=model)
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_success_through_real_gateway_and_prompt_module(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -199,7 +199,7 @@ def test_end_to_end_success_through_real_gateway_and_prompt_module(mock_adapter_
     assert 'MES1!' in sent_prompt
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_empty_output_produces_malformed_output(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -218,7 +218,7 @@ def test_end_to_end_empty_output_produces_malformed_output(mock_adapter_cls):
 # 3. Cache identity, privacy, and explicit-selection guarantees
 # ═══════════════════════════════════════════════════════════════════════
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_cache_hit_on_identical_curated_input(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -236,7 +236,7 @@ def test_cache_hit_on_identical_curated_input(mock_adapter_cls):
     mock_adapter.call.assert_called_once()  # only the first call reached the provider
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_nova_review_and_nova_review_ts_do_not_affect_cache_key(mock_adapter_cls):
     """Excluding nova_review/nova_review_ts from input_data (main.py's job,
     verified in test_nova_review.py) means the cache key itself is stable
@@ -261,7 +261,7 @@ def test_cache_key_differs_for_different_trades():
     assert key_a != key_b
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_sensitive_trade_content_never_appears_in_audit_record(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -285,7 +285,7 @@ def test_sensitive_trade_content_never_appears_in_audit_record(mock_adapter_cls)
     assert 'sk-ant-test-key' not in serialized
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_malformed_output_audit_never_records_content(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 

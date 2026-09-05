@@ -15,6 +15,8 @@ everything this module needs.
 from __future__ import annotations
 
 import json
+
+from ._fencing import fence
 import re
 
 ASSISTANT_SYSTEM_PROMPT = (
@@ -29,8 +31,10 @@ ASSISTANT_SYSTEM_PROMPT = (
 
 
 def build_prompt(input_data: dict) -> str:
-    message = str(input_data.get('message', ''))
-    system_context = str(input_data.get('system_context', ''))
+    # Both values are untrusted: one is the user's own text, the other is
+    # generated from market data that includes third-party headlines.
+    message = fence(input_data.get('message', ''))
+    system_context = fence(input_data.get('system_context', ''))
     return (
         '=== NOVA INSTRUCTIONS (trusted, defines the output contract) ===\n'
         f'{ASSISTANT_SYSTEM_PROMPT}\n'

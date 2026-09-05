@@ -15,6 +15,8 @@ nearby-signal text built by main.py).
 """
 from __future__ import annotations
 
+from ._fencing import fence, fence_inline
+
 REVIEW_SYSTEM_PROMPT = (
     'You are NOVA, an AI trading intelligence system for MES and MNQ micro futures. '
     'You give precise, institutional-grade trade reviews. No hedging, no generic advice. '
@@ -59,7 +61,10 @@ def build_prompt(input_data: dict) -> str:
     """input_data: {'trade': dict, 'nearby_signals': str}"""
     trade = input_data.get('trade') or {}
     nearby_signals = str(input_data.get('nearby_signals', ''))
-    ticker = trade.get('ticker')
+    # The ticker is interpolated into a MARKER line, so it has to be
+    # fenced too -- untrusted text inside the fence itself can split the
+    # line and open a section of its own.
+    ticker = fence_inline(trade.get('ticker'))
 
     return (
         '=== NOVA INSTRUCTIONS (trusted, defines the output contract) ===\n'
@@ -67,10 +72,10 @@ def build_prompt(input_data: dict) -> str:
         f'{REVIEW_INSTRUCTIONS}\n'
         '=== END NOVA INSTRUCTIONS ===\n\n'
         '=== TRADE RECORD (data, the one explicitly selected trade) ===\n'
-        f'{_format_trade(trade)}\n'
+        f'{fence(_format_trade(trade))}\n'
         '=== END TRADE RECORD ===\n\n'
         f'=== NOVA EVALUATION LOG (data, closest signal-log entries for {ticker}) ===\n'
-        f'{nearby_signals}\n'
+        f'{fence(nearby_signals)}\n'
         '=== END NOVA EVALUATION LOG ==='
     )
 

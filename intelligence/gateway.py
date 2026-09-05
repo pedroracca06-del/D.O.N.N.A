@@ -28,11 +28,13 @@ from typing import Optional
 from . import audit, budget, cache, config
 from .envelope import IntelligenceResponse, UsageInfo
 from .errors import IntelligenceErrorCode
-from .providers.anthropic_adapter import AnthropicAdapter
+from .providers import SUPPORTED_PROVIDERS, resolve_adapter
 from .providers.base import ProviderError
 from .registry import FEATURE_REGISTRY
 
-_VALID_PROVIDERS = ('anthropic',)
+# Owned by the providers package, not restated here: a second provider must
+# not require an edit in this file.
+_VALID_PROVIDERS = SUPPORTED_PROVIDERS
 
 _MAX_BOUNDED_INPUT_TOKENS = 4_000  # spec §8 row 2 -- rough char-count guard, not exact tokenization
 
@@ -93,14 +95,9 @@ def _estimate_input_tokens(input_data: dict) -> int:
 
 
 def _resolve_adapter(provider_name: str):
-    # A plain conditional, not a module-level {name: ClassObject} dict --
-    # a dict built at import time would bind the real class by value,
-    # which a test-time patch of the module-level AnthropicAdapter name
-    # could never retroactively affect. This looks the name up fresh on
-    # every call, same as `AnthropicAdapter()` written inline would.
-    if provider_name == 'anthropic':
-        return AnthropicAdapter()
-    return None
+    # The providers package decides which providers exist and how one is built.
+    # The gateway only asks.
+    return resolve_adapter(provider_name)
 
 
 def request_intelligence(feature: str, input_data: dict, user_id: str, request_id: str) -> IntelligenceResponse:
@@ -160,7 +157,8 @@ def request_intelligence(feature: str, input_data: dict, user_id: str, request_i
     cache_enabled_for_feature = feature_config.cache_ttl_seconds is not None and config.NOVA_AI_CACHE_ENABLED
     if cache_enabled_for_feature:
         try:
-            cached_response = cache.get_cached_response(feature, input_data)
+            cached_response = cache.get_cached_response(
+                feature, input_data, provider_name, model)
         except Exception:
             cached_response = None
         if cached_response is not None:
@@ -345,6 +343,7 @@ def request_intelligence(feature: str, input_data: dict, user_id: str, request_i
                     input_tokens=result.input_tokens, output_tokens=result.output_tokens,
                 ),
                 feature_config.cache_ttl_seconds,
+                provider_name, model,
             )
         except Exception:
             pass
