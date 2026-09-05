@@ -1604,18 +1604,33 @@ def test_oversized_response_is_refused(bench, tmp_path):
     code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
     assert code in (STOPPED, LIMIT)
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1, "an oversized response was ingested"
+    assert not any(m.get("sender") == "codex" for m in box["messages"]),         "an oversized response was ingested"
+    term = box["messages"][-1]
+    assert cr.is_rejection(term) and term["failure_category"] == "oversized_output"
 
 
 def test_state_drift_during_the_run_is_refused(bench, tmp_path):
-    """The child dirties the tree; the runner revalidates and refuses to ingest."""
+    """The child dirties the tree; the runner revalidates and refuses to ingest.
+
+    The verdict is refused, but the attempt was still spent -- the child ran --
+    so the request is terminated rather than left pending. This test used to
+    assert that nothing was recorded here, which is precisely the accounting
+    gap RR04-001 named.
+    """
     repo, registry, mailbox, request = bench
     exe, script = make_fake(tmp_path, request, repo=repo, mode="dirty")
     code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
     assert code == STOPPED
     assert any("dirty while codex ran" in r for r in stopped_reasons(doc))
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1
+    assert len(box["messages"]) == 2, "the spent attempt was not accounted for"
+    term = box["messages"][-1]
+    assert cr.is_rejection(term)
+    assert term["failure_category"] == "state_changed"
+    assert term["attempt_consumed"] is True
+    assert cr.verify_chain(box) == []
+    # No verdict was ingested: the refusal stands.
+    assert not any(m.get("sender") == "codex" for m in box["messages"])
 
 
 def test_no_recursive_review_once_call():
@@ -1656,7 +1671,11 @@ def test_pass_claiming_approval_is_rejected(bench, tmp_path):
     assert code == STOPPED
     assert any("failed relay validation" in r for r in stopped_reasons(doc))
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1, "a false PASS was recorded"
+    # No verdict is recorded -- but the refusal IS, as a terminal, so the
+    # request cannot sit pending and the spent attempt is not hidden.
+    assert not any(m.get("sender") == "codex" for m in box["messages"]),         "a false PASS was recorded"
+    assert cr.is_rejection(box["messages"][-1])
+    assert box["messages"][-1]["attempt_consumed"] is True
 
 
 # A literal, not uuid4(): a parametrize argument is evaluated at import time, so
@@ -1675,7 +1694,54 @@ def test_wrong_request_phase_or_head_is_rejected(bench, tmp_path, field, value):
     code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
     assert code == STOPPED
     box = cr.read_mailbox(str(mailbox / "relay.json"))
-    assert len(box["messages"]) == 1
+    assert not any(m.get("sender") == "codex" for m in box["messages"])
+    assert cr.is_rejection(box["messages"][-1])
+
+
+def test_a_refused_response_leaves_no_pending_request(bench, tmp_path):
+    """Requirement 8: the refusal is recorded and the request stops pending."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    assert code == STOPPED
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term)
+    assert term["cancelled_request_id"] == request["message_id"]
+    assert term["attempt_consumed"] is True
+    assert term["rejection_reason"].strip()
+    assert term["recorded_by"] == "codex_review_runner"
+    assert cr.verify_chain(box) == []
+    with pytest.raises(Exception) as exc:
+        rr.find_pending_request(box)
+    assert "no pending review request" in str(exc.value)
+    assert any("X10" == c["id"] for c in doc["checks"])
+
+
+def test_a_refused_response_records_a_sanitized_reason(bench, tmp_path):
+    """The reason is kept, but never as raw stderr and never with a machine path."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    term = cr.read_mailbox(str(mailbox / "relay.json"))["messages"][-1]
+    reason = term["rejection_reason"]
+    assert len(reason) <= 2000
+    assert STDERR_CANARY not in reason and STDOUT_CANARY not in reason
+    for planted in ENV_CANARIES.values():
+        assert planted not in reason
+
+
+def test_a_refused_response_permits_no_retry(bench, tmp_path):
+    """The same request cannot be run again; a retry needs a NEW request."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    counter = tmp_path / "spawns.txt"
+    exe2, script2 = make_fake(tmp_path, request, repo=repo,
+                              records={"spawn_count": str(counter)})
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe2, script2)
+    assert code == STOPPED
+    assert not counter.exists(), "a second child was started for the same request"
 
 
 def test_ingest_goes_through_the_relay_not_a_direct_write():
@@ -1687,10 +1753,13 @@ def test_ingest_goes_through_the_relay_not_a_direct_write():
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "cr":
                 calls.add(node.func.attr)
     assert "main" in calls
+    # `is_review_request` and `cancelled_request_ids` are pure read helpers used
+    # to decide what is still pending; neither writes anything.
     assert calls <= {"main", "load_policy", "load_verdict_schema",
                      "validate_policy", "validate_verdict_schema",
                      "mailbox_paths", "read_mailbox", "observe_repository",
-                     "verify_chain", "evidence_digest_of"}, calls
+                     "verify_chain", "evidence_digest_of",
+                     "is_review_request", "cancelled_request_ids"}, calls
     src = RUNNER.read_text(encoding="utf-8")
     assert "relay.json" not in src.replace("`relay.json`", "")
 
@@ -2387,3 +2456,283 @@ def test_the_envelope_cannot_influence_the_backend(bench, tmp_path):
     child_argv = json.loads(argvrec.read_text(encoding="utf-8"))
     assert 'windows.sandbox="elevated"' in child_argv
     assert "unelevated" not in " ".join(child_argv)
+
+
+# ------------------------------- every post-spawn failure terminates the request
+#
+# The child running at all spends the attempt. If a failure left the request
+# pending, the mailbox would block and the spent attempt would be invisible.
+
+@pytest.mark.parametrize("mode,category", [
+    ("nonzero", "nonzero_exit"),
+    ("nofile", "missing_output"),
+    ("badjson", "validation_rejected"),
+])
+def test_each_post_spawn_failure_records_its_terminal(bench, tmp_path, mode,
+                                                      category):
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode=mode)
+    code, doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    assert code == STOPPED
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term), mode
+    assert term["failure_category"] == category, mode
+    assert term["attempt_consumed"] is True
+    assert isinstance(term["exit_code"], int)
+    assert cr.verify_chain(box) == []
+    with pytest.raises(Exception):
+        rr.find_pending_request(box)
+
+
+def test_a_failure_terminal_is_unique_per_request(bench, tmp_path):
+    """Exactly one terminal, and the chain refuses a second."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    assert len([m for m in box["messages"] if cr.is_terminal(m)]) == 1
+    assert cr.verify_chain(box) == []
+
+
+def test_a_terminated_request_permits_no_retry(bench, tmp_path):
+    """A further attempt needs a NEW request, never the same one."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    counter = tmp_path / "spawns.txt"
+    exe2, script2 = make_fake(tmp_path, request, repo=repo,
+                              records={"spawn_count": str(counter)})
+    code, _doc = run_inproc(review_argv(repo, registry, mailbox), exe2, script2)
+    assert code == STOPPED
+    assert not counter.exists(), "a second child ran for a terminated request"
+
+
+def test_the_diagnostic_is_bounded_and_scrubbed(bench, tmp_path, env_canaries):
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    term = cr.read_mailbox(str(mailbox / "relay.json"))["messages"][-1]
+    reason = term["rejection_reason"]
+    assert 0 < len(reason) <= rr.DIAGNOSTIC_MAX_CHARS
+    assert STDOUT_CANARY not in reason and STDERR_CANARY not in reason
+    for planted in ENV_CANARIES.values():
+        assert planted not in reason
+    assert "pedro" not in reason.lower()
+
+
+def test_sanitize_diagnostic_drops_secrets_paths_and_prompt():
+    raw = "\n".join([
+        "api_key = sk-ant-api03-AAAAAAAAAAAAAAAAAAAA",
+        "token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "workdir: " + chr(67) + ":" + chr(92) + "Users" + chr(92) + "someone",
+        "A_PROMPT_LINE_THAT_MUST_NOT_LEAK",
+    ])
+    out = rr.sanitize_diagnostic(raw, b"A_PROMPT_LINE_THAT_MUST_NOT_LEAK\n")
+    for bad in ("sk-ant", "ghp_", "someone", "A_PROMPT_LINE_THAT_MUST_NOT_LEAK"):
+        assert bad not in out, bad
+    assert len(out) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+def test_sanitize_diagnostic_keeps_the_provider_message():
+    raw = ('ERROR: {"error":{"code":"invalid_json_schema","message":'
+           '"Invalid schema for response_format: schema must have a type key."}}')
+    out = rr.sanitize_diagnostic(raw)
+    assert "schema must have a type key" in out
+
+
+def test_raw_streams_are_never_recorded(bench, tmp_path, env_canaries):
+    """Nothing in the mailbox or archive carries raw child output."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    blob = (mailbox / "relay.json").read_text(encoding="utf-8")
+    for archive in (mailbox / "archive").iterdir():
+        blob += archive.read_text(encoding="utf-8")
+    assert STDOUT_CANARY not in blob and STDERR_CANARY not in blob
+    for planted in ENV_CANARIES.values():
+        assert planted not in blob
+
+
+def test_a_failure_terminal_uses_the_revision_guard():
+    """The runner passes a compare-and-swap guard when recording a terminal."""
+    src = RUNNER.read_text(encoding="utf-8")
+    assert "--expect-mailbox-revision" in src
+    assert "record-rejection" in src
+
+
+def test_a_validation_refusal_records_the_relay_sentence(bench, tmp_path):
+    """The relay's own refusal names the offending field and is kept.
+
+    It is OUR text, not the child's, so recording it leaks nothing the child
+    controls -- and without it a refused response says only "exit 2".
+    """
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="badjson")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    term = cr.read_mailbox(str(mailbox / "relay.json"))["messages"][-1]
+    assert term["failure_category"] == "validation_rejected"
+    assert term["rejection_reason"].startswith("codex_relay:")
+
+
+def test_the_relay_sentence_is_still_scrubbed():
+    out = rr.sanitize_relay_message(
+        "codex_relay: invalid input: key = sk-ant-api03-AAAAAAAAAAAAAAAAAAAA")
+    assert "sk-ant" not in out
+    assert out.startswith("codex_relay:")
+    assert len(out) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+# ------------------------------------------------ RELIABILITY-REVIEW-04 findings
+#
+# RR04-001 (high): the explicit post-spawn branches covered timeout, non-zero
+# exit, missing output, oversized output and validation rejection -- but not the
+# code BETWEEN them. A mailbox read failure, a response-file read failure, or
+# any of the four revalidation stops left the request pending with the attempt
+# already spent.
+#
+# RR04-002 (high): the sanitizer replaced whole prompt LINES only, so a child
+# could put a prompt fragment inside a structured message and have it survive.
+
+
+def test_a_spent_attempt_is_terminated_when_the_repository_moves(bench, tmp_path):
+    """The child ran, then HEAD moved. The request must not stay pending."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo)
+
+    real_observe = cr.observe_repository
+    calls = {"n": 0}
+
+    def moving_observe(path):
+        calls["n"] += 1
+        obs = real_observe(path)
+        if calls["n"] > 1:            # the revalidation read, after the child
+            obs = dict(obs, head="f" * 40)
+        return obs
+
+    cr.observe_repository = moving_observe
+    try:
+        code, _doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    finally:
+        cr.observe_repository = real_observe
+
+    assert code == STOPPED
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term)
+    assert term["failure_category"] == "state_changed"
+    assert term["attempt_consumed"] is True
+    assert cr.verify_chain(box) == []
+    with pytest.raises(Exception):
+        rr.find_pending_request(box)
+
+
+def test_a_spent_attempt_is_terminated_when_an_unexpected_error_occurs(bench,
+                                                                      tmp_path):
+    """Nothing may escape while an attempt is unaccounted for."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo)
+
+    real_read = cr.read_mailbox
+    state = {"fail": False}
+
+    def flaky_read(path):
+        box = real_read(path)
+        if state["fail"]:
+            state["fail"] = False
+            raise RuntimeError("a deliberate failure after the child ran")
+        return box
+
+    real_invoke = rr.invoke_once
+
+    def invoke_then_break(*a, **kw):
+        result = real_invoke(*a, **kw)
+        state["fail"] = True
+        return result
+
+    cr.read_mailbox = flaky_read
+    rr.invoke_once = invoke_then_break
+    try:
+        code, _doc = run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    finally:
+        cr.read_mailbox = real_read
+        rr.invoke_once = real_invoke
+
+    assert code == STOPPED
+    box = real_read(str(mailbox / "relay.json"))
+    term = box["messages"][-1]
+    assert cr.is_rejection(term), "an unaccounted attempt escaped"
+    assert term["failure_category"] == "internal_error"
+    assert cr.verify_chain(box) == []
+
+
+def test_a_failed_spawn_consumes_nothing(bench, tmp_path):
+    """A process that never started spends no attempt, so nothing is recorded."""
+    repo, registry, mailbox, request = bench
+    before = cr.read_mailbox(str(mailbox / "relay.json"))
+    missing = tmp_path / "does-not-exist" / "codex.exe"
+    code, _doc = run_inproc(review_argv(repo, registry, mailbox), str(missing), None)
+    after = cr.read_mailbox(str(mailbox / "relay.json"))
+    assert code != 0
+    assert len(after["messages"]) == len(before["messages"]), \
+        "a terminal was recorded for an attempt that never started"
+    rr.find_pending_request(after)        # still pending, correctly
+
+
+def test_only_one_terminal_is_ever_written(bench, tmp_path):
+    """The recorder is idempotent: the outer handler must not add a second."""
+    repo, registry, mailbox, request = bench
+    exe, script = make_fake(tmp_path, request, repo=repo, mode="nonzero")
+    run_inproc(review_argv(repo, registry, mailbox), exe, script)
+    box = cr.read_mailbox(str(mailbox / "relay.json"))
+    terminals = [m for m in box["messages"] if cr.is_terminal(m)]
+    assert len(terminals) == 1, terminals
+    assert terminals[0]["failure_category"] == "nonzero_exit"
+    assert cr.verify_chain(box) == []
+
+
+# --------------------------------------------------------------- RR04-002
+
+PROMPT_LINE = (b"Focus: whether every path reachable after the child process "
+               b"starts terminates the pending request exactly once.\n")
+
+
+@pytest.mark.parametrize("leaked", [
+    # the whole line, as before
+    "every path reachable after the child process starts terminates the "
+    "pending request exactly once",
+    # a fragment of it -- what the old whole-line replacement could not see
+    "every path reachable after the child process starts",
+    # rewrapped, with the whitespace changed
+    "every   path\treachable after\nthe child process starts",
+    # embedded inside otherwise plausible provider text
+    "schema error near every path reachable after the child process starts",
+])
+def test_a_prompt_fragment_never_survives_into_the_diagnostic(leaked):
+    raw = 'ERROR: {"message":"%s"}' % leaked
+    assert rr.sanitize_diagnostic(raw, PROMPT_LINE) == "", leaked
+
+
+def test_a_genuine_provider_error_still_survives():
+    raw = ('ERROR: {"error":{"code":"invalid_json_schema","message":'
+           '"Invalid schema for response_format: schema must have a type key."}}')
+    out = rr.sanitize_diagnostic(raw, PROMPT_LINE)
+    assert "schema must have a type key" in out
+    assert 0 < len(out) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+def test_the_phrase_check_is_about_runs_not_single_words():
+    """A shared word or two is not a leak; a five-word run is."""
+    source = "the quick brown fox jumps over the lazy dog"
+    assert not rr._repeats_a_phrase("the dog was quick", source)
+    assert rr._repeats_a_phrase("x quick brown fox jumps over y", source)
+
+
+def test_our_own_messages_are_scrubbed_but_kept():
+    """A runner-authored sentence has no prompt-echo risk, so it is kept."""
+    out = rr.sanitize_own_message("the repository moved while codex ran")
+    assert out == "the repository moved while codex ran"
+    scrubbed = rr.sanitize_own_message(
+        "failed at " + chr(67) + ":" + chr(92) + "Users" + chr(92) + "someone")
+    assert "someone" not in scrubbed
+    assert len(scrubbed) <= rr.DIAGNOSTIC_MAX_CHARS

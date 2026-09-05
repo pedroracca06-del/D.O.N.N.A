@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 import platform as _platform
+import re
 import secrets
 import stat
 import subprocess
@@ -747,6 +748,29 @@ def build_prompt(request, policy):
         "   the binding above, if scope is ambiguous, if the change touches the",
         "   retired trading or execution boundary, or if the evidence is",
         "   insufficient to judge. Do not guess.",
+        "7. NEVER return a command, shell line, script, patch, diff, encoded",
+        "   payload, or any instruction asking anyone to execute something. You",
+        "   describe code; you never ship something to run. Naming a file, a",
+        "   symbol, a configuration key, or an error type is expected and fine.",
+        "",
+        "## Code audit",
+        "",
+        "When the task asks for a code audit, ALSO fill the optional `audit`",
+        "object using its typed, inert fields: `architecture_summary` for",
+        "architecture prose, and one `findings` entry per issue carrying",
+        "finding_id, severity, category, repository_path (repository relative),",
+        "line_start, line_end, symbol (a plain or dotted identifier),",
+        "observed_behavior, technical_risk, evidence_description,",
+        "recommended_correction, test_gap, and acceptance_criteria.",
+        "Three constraints are enforced and a breach costs the whole attempt:",
+        "`symbol` is ONE identifier or dotted name, with no parentheses, no",
+        "slash, and no spaces; `repository_path` is repository relative and",
+        "never absolute; and `line_end` must not precede `line_start`. When a",
+        "finding spans several places, name one and describe the rest in",
+        "`evidence_description`.",
+        "Recommendations must be descriptive and inert: say what should change",
+        "and why, never how to run it. Implementation is separately authorized",
+        "and is never granted by an audit.",
         "",
         "## Scope",
         "",
@@ -777,11 +801,14 @@ def _chk(cid, label, status, evidence):
 
 
 def find_pending_request(mailbox_doc):
-    """Exactly one Claude request with no recorded Codex response."""
+    """Exactly one Claude request with no recorded response and no cancellation."""
+    # A cancellation is also sent by Claude, so it is excluded twice over: it is
+    # never itself a pending request, and the request it names is terminal.
     claude_messages = [m for m in mailbox_doc["messages"]
-                       if m.get("sender") == "claude"]
+                       if cr.is_review_request(m)]
     answered = {m.get("request_message_id") for m in mailbox_doc["messages"]
                 if m.get("sender") == "codex"}
+    answered |= cr.cancelled_request_ids(mailbox_doc)
     pending = [m for m in claude_messages
                if m.get("message_id") not in answered]
     if not pending:
@@ -901,6 +928,171 @@ def make_response_path(mailbox_root):
     return path
 
 
+# Bounded, aggressively scrubbed diagnostics. The child's stderr is the only
+# place the real cause appears, and it is also the place a prompt, a credential,
+# or a machine path could leak, so it is never printed, never archived, and never
+# recorded raw. What survives is a category, an exit code, and a short scrubbed
+# excerpt of the provider's own error message.
+DIAGNOSTIC_MAX_CHARS = 700
+
+_DIAG_DROP = (
+    re.compile(r"(?i)sk-[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"(?i)\bgh[pousr]_[A-Za-z0-9]{8,}"),
+    re.compile(r"(?i)\bAKIA[0-9A-Z]{6,}"),
+    re.compile(r"(?i)\bxox[abprs]-[A-Za-z0-9-]{6,}"),
+    re.compile(r"(?i)\bAIza[0-9A-Za-z_\-]{10,}"),
+    re.compile(r"(?i)(api[_-]?key|secret|token|password|authorization)"
+               r"\s*[:=]\s*\S+"),
+    re.compile(r"[A-Za-z]:[\\/][^\s\"']*"),
+    re.compile(r"/(?:home|Users|c)/[^\s\"']*"),
+    re.compile(r"[A-Za-z0-9+/]{60,}={0,2}"),
+)
+
+
+def sanitize_relay_message(text):
+    """Keep OUR OWN validator's refusal sentence.
+
+    This is the relay's text, not the child's, so recording it leaks nothing the
+    child controls -- and it is the only thing that says WHY a response was
+    refused. It is still scrubbed and bounded, because a refusal quotes the
+    offending field.
+    """
+    if not text:
+        return ""
+    for rx in _DIAG_DROP:
+        text = rx.sub("<redacted>", text)
+    text = ef.sanitize_text(text)
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("codex_relay:"):
+            return line[:DIAGNOSTIC_MAX_CHARS]
+    return " ".join(text.split())[:DIAGNOSTIC_MAX_CHARS]
+
+
+def sanitize_own_message(text):
+    """Scrub a diagnostic this runner itself wrote.
+
+    Our own sentences cannot echo the prompt or the child's output, so they are
+    kept whole rather than put through the extraction rule -- but they can still
+    quote a path, so the same redactions apply.
+    """
+    if not text:
+        return ""
+    for rx in _DIAG_DROP:
+        text = rx.sub("<redacted>", text)
+    return " ".join(ef.sanitize_text(text).split())[:DIAGNOSTIC_MAX_CHARS]
+
+
+def _repeats_a_phrase(text, source, window=5):
+    """True when `text` repeats any run of `window` consecutive words of `source`.
+
+    Whole-line replacement is not enough: the child chooses its own standard
+    error, so it can quote a FRAGMENT of a prompt line, or rewrap one, and a
+    line-for-line substitution will not see it. Comparing word runs catches the
+    fragment too, and a five-word run is far longer than anything a provider
+    error sentence and our prompt would share by chance.
+    """
+    src = source.lower().split()
+    if len(src) < window:
+        return False
+    shingles = {tuple(src[i:i + window]) for i in range(len(src) - window + 1)}
+    words = text.lower().split()
+    for i in range(len(words) - window + 1):
+        if tuple(words[i:i + window]) in shingles:
+            return True
+    return False
+
+
+def sanitize_diagnostic(text, prompt_bytes=b""):
+    """Scrub a child's stderr down to something safe to record."""
+    if not text:
+        return ""
+    # Anything that appeared in the prompt is dropped outright: the prompt is
+    # never echoed back into the mailbox, not even in fragments.
+    for line in set(prompt_bytes.decode("utf-8", "replace").splitlines()):
+        line = line.strip()
+        if len(line) >= 12:
+            text = text.replace(line, "<prompt>")
+    for rx in _DIAG_DROP:
+        text = rx.sub("<redacted>", text)
+    text = ef.sanitize_text(text)
+    # ONLY a recognized structured error sentence is kept. Free-form child output
+    # is never recorded: it is the one place a prompt fragment, a canary, or an
+    # unmodelled secret could ride along, and the caller has a fixed category
+    # sentence to fall back on. Silence is the safe default here.
+    match = re.search(r'"message"\s*:\s*"([^"]{1,400})', text)
+    if not match:
+        return ""
+    message = " ".join(match.group(1).split())
+    # Whole-line replacement above cannot see a fragment the child rewrapped or
+    # excerpted, so the extracted sentence is checked against the prompt as word
+    # runs. Any overlap and the whole thing is dropped: the caller has a fixed
+    # category sentence, and silence is the safe default.
+    if _repeats_a_phrase(message, prompt_bytes.decode("utf-8", "replace")):
+        return ""
+    return message[:DIAGNOSTIC_MAX_CHARS]
+
+
+def _record_child_failure(args, root, request, box_revision, category,
+                          exit_code, diagnostic, checks):
+    """Terminate the request through the relay after any post-spawn failure.
+
+    Every path that reaches here has already spent the attempt: the child ran.
+    Recording a terminal is what stops the request sitting pending forever and
+    what keeps the spent attempt visible. It permits no retry -- a further
+    attempt needs a NEW request.
+    """
+    argv = ["record-rejection", "--format", "json", "--mailbox", root,
+            "--request-id", request["message_id"],
+            "--failure-category", category,
+            "--exit-code", str(int(exit_code)),
+            # A fixed, category-derived sentence whenever no structured provider
+            # message could be extracted. Never free-form child output.
+            "--rejection-reason",
+            diagnostic or ("the child failed after starting; category %s, exit %s"
+                           % (category, exit_code)),
+            "--recorded-by", "codex_review_runner",
+            "--expect-mailbox-revision", str(box_revision)]
+    if args.relay_policy:
+        argv += ["--policy", args.relay_policy]
+    real = sys.stdout
+    sys.stdout = _CapturedStdout()
+    try:
+        rc = cr.main(argv)
+    finally:
+        sys.stdout = real
+    checks.append(_chk("X10", "failure terminal",
+                       "pass" if rc == cr.EXIT_OK else "fail",
+                       "%s recorded through the relay (exit %d); the request is "
+                       "terminal and no retry is permitted" % (category, rc)))
+    return rc
+
+
+class _CapturingStderr:
+    """Keep a nested tool's error text so it can be sanitized into a terminal.
+
+    The relay writes its refusal to stderr. That sentence is the honest reason a
+    response was rejected, so it is captured, sanitized, and recorded -- never
+    echoed raw and never allowed to carry a machine path.
+    """
+
+    def __init__(self):
+        self._chunks = []
+        self.buffer = self
+
+    def write(self, data):
+        if isinstance(data, bytes):
+            data = data.decode("utf-8", "replace")
+        self._chunks.append(data)
+        return len(data)
+
+    def flush(self):
+        return None
+
+    def text(self):
+        return "".join(self._chunks)
+
+
 class _CapturedStdout:
     """Silence a nested tool's report so this tool emits exactly one document.
 
@@ -983,8 +1175,13 @@ def build_argv(executable, repo, schema_path, response_path, policy):
     return argv
 
 
-def invoke_once(argv, prompt_bytes, env, policy):
-    """Start Codex exactly once. The attempt is consumed the moment this runs."""
+def invoke_once(argv, prompt_bytes, env, policy, attempt=None):
+    """Start Codex exactly once. The attempt is consumed the moment this runs.
+
+    `attempt` is a caller-owned dict. Its "spawned" key is set the instant the
+    child exists, and never before: a process that could not be started spends
+    nothing, while everything after that point does, whatever happens next.
+    """
     limits = policy["limits"]
     started = time.monotonic()
     try:
@@ -993,6 +1190,8 @@ def invoke_once(argv, prompt_bytes, env, policy):
                                 shell=False, env=env)
     except OSError:
         raise sg.StoppedError("the codex process could not be started")
+    if attempt is not None:
+        attempt["spawned"] = True
     timed_out = False
     try:
         out, err = proc.communicate(input=prompt_bytes,
@@ -1014,6 +1213,11 @@ def invoke_once(argv, prompt_bytes, env, policy):
         "stderr_bytes": len(err or b""),
         "stdout_truncated": len(out or b"") > cap,
         "stderr_truncated": len(err or b"") > cap,
+        # Kept ONLY so a failure can be diagnosed. Never printed, never archived,
+        # and never recorded raw: `sanitize_diagnostic` scrubs it to a short
+        # excerpt before anything reaches the mailbox. stdout is not kept at all;
+        # the answer itself belongs only in the private response file.
+        "stderr": (err or b"")[:cap],
     }
 
 
@@ -1129,6 +1333,41 @@ def main(argv=None):
     checks, notes = [], []
     exit_code = EXIT_OK
     response_path = None
+
+    # Everything needed to terminate a spent attempt, from wherever it fails.
+    # "spawned" is set by invoke_once; "recorded" keeps the terminal unique.
+    attempt = {"spawned": False, "recorded": False, "root": None,
+               "request": None, "exit_code": -1}
+
+    def _terminate_attempt(category, diagnostic):
+        """Record exactly one terminal for a spent attempt, however it failed.
+
+        The child ran, so the opportunity is gone. Leaving the request pending
+        would hide that and would block the mailbox on a review that can never
+        happen. This is reached from the explicit post-spawn branches AND from
+        every outer handler, so no exception can slip past it.
+        """
+        if not attempt["spawned"] or attempt["recorded"]:
+            return
+        if not attempt["root"] or not attempt["request"]:
+            return
+        attempt["recorded"] = True
+        try:
+            revision = cr.read_mailbox(
+                cr.mailbox_paths(attempt["root"])[1])["revision"]
+        except Exception:
+            checks.append(_chk("X10", "failure terminal", "fail",
+                               "the mailbox could not be read, so a spent "
+                               "attempt could not be terminated"))
+            return
+        try:
+            _record_child_failure(args, attempt["root"], attempt["request"],
+                                  revision, category, attempt["exit_code"],
+                                  diagnostic, checks)
+        except Exception:
+            checks.append(_chk("X10", "failure terminal", "fail",
+                               "the terminal for a spent attempt could not be "
+                               "recorded"))
 
     try:
         checks.append(_chk("P1", "runner policy", "pass",
@@ -1260,11 +1499,13 @@ def main(argv=None):
                                "-o <private temp> %s"
                                % (policy["fixed_flags"]["model"], PROMPT_ARGUMENT)))
 
+            attempt["root"], attempt["request"] = root, request
+
             # ---- the single invocation; the attempt is spent from here on ----
             checks.append(_chk("X5", "attempt", "warning",
                                "the review opportunity for (%s, %s) is now consumed"
                                % (request["phase"], request["head"])))
-            result = invoke_once(argv_used, prompt, env, policy)
+            result = invoke_once(argv_used, prompt, env, policy, attempt)
             checks.append(_chk("X6", "invocation", "pass" if not result["timed_out"]
                                and result["returncode"] == 0 else "stopped",
                                "exit %s, %s, duration %s, stdout %d byte(s), "
@@ -1274,19 +1515,29 @@ def main(argv=None):
                                   "timed out" if result["timed_out"] else "returned",
                                   _duration_bucket(result["duration_seconds"]),
                                   result["stdout_bytes"], result["stderr_bytes"])))
+            attempt["exit_code"] = result["returncode"] \
+                if result["returncode"] is not None else -1
+            diag = sanitize_diagnostic(
+                (result.get("stderr") or b"").decode("utf-8", "replace"), prompt)
+
             if result["timed_out"]:
+                attempt["exit_code"] = -1
+                _terminate_attempt("timeout", diag)
                 raise sg.StoppedError("codex timed out; the attempt is consumed and "
-                                      "cannot be retried without a new approved "
-                                      "phase")
+                                      "cannot be retried without a new request")
             if result["returncode"] != 0:
+                _terminate_attempt("nonzero_exit", diag)
                 raise sg.StoppedError("codex exited non-zero; the attempt is "
                                       "consumed and cannot be retried without a "
-                                      "new approved phase")
+                                      "new request")
             if not os.path.isfile(response_path):
+                _terminate_attempt("missing_output", diag)
                 raise sg.StoppedError("codex wrote no response file; the attempt is "
                                       "consumed")
             size = os.path.getsize(response_path)
             if size > policy["limits"]["max_response_bytes"]:
+                _terminate_attempt("oversized_output",
+                                   "the response exceeded the size limit")
                 raise ef.SafetyLimitError("the response exceeds the maximum size")
             raw = open(response_path, "rb").read()
             checks.append(_chk("X7", "response", "pass",
@@ -1317,17 +1568,31 @@ def main(argv=None):
                 ingest_argv += ["--policy", args.relay_policy]
             if args.verdict_schema:
                 ingest_argv += ["--verdict-schema", args.verdict_schema]
-            real_stdout = sys.stdout
+            real_stdout, real_stderr = sys.stdout, sys.stderr
             sys.stdout = _CapturedStdout()
+            captured = _CapturingStderr()
+            sys.stderr = captured
             try:
                 rc = cr.main(ingest_argv)
             finally:
-                sys.stdout = real_stdout
+                sys.stdout, sys.stderr = real_stdout, real_stderr
             checks.append(_chk("X9", "ingest", "pass" if rc == cr.EXIT_OK else "fail",
                                "codex_relay ingest-response exit %d" % rc))
             if rc != cr.EXIT_OK:
+                # The child DID run and DID answer; the answer was refused and
+                # never recorded. Leaving the request pending would block the
+                # mailbox and hide that the one attempt is spent, so a terminal
+                # is appended stating both. It permits no retry: a further
+                # attempt needs a new request.
+                # The relay's own refusal names the offending field, and it is
+                # OUR text rather than the child's, so it is kept.
+                reason = sanitize_relay_message(captured.text()) \
+                    or ("the response failed relay validation (exit %d)" % rc)
+                attempt["exit_code"] = rc
+                _terminate_attempt("validation_rejected", reason)
                 raise sg.StoppedError("the response failed relay validation and was "
-                                      "not recorded; the attempt is consumed")
+                                      "not recorded; the attempt is consumed and a "
+                                      "terminal was appended")
             final = cr.read_mailbox(mailbox_path)
             verdict = (final["messages"][-1].get("response") or {}).get("verdict")
             checks.append(_chk("R1", "verdict", "warning",
@@ -1340,20 +1605,39 @@ def main(argv=None):
                      "Pedro's named approval. A live review remains unauthorized.")
 
     except ef.SafetyLimitError as exc:
+        _terminate_attempt("internal_error", sanitize_own_message(str(exc)))
         checks.append(_chk("Z0", "safety limit", "stopped", ef.sanitize_text(str(exc))))
         checks.extend(contract_checks())
         exit_code = EXIT_LIMIT
     except ef.ValidationError as exc:
+        _terminate_attempt("internal_error", sanitize_own_message(str(exc)))
         _err("codex_review_runner: invalid input: %s\n" % ef.sanitize_text(str(exc)))
         _remove_own(response_path)
         return EXIT_INVALID
     except (RunnerError, sg.StoppedError) as exc:
+        # Reached by the revalidation stops -- repository moved, worktree became
+        # dirty, registry changed, mailbox changed -- none of which had a
+        # terminal before. The explicit branches already recorded theirs, and
+        # the recorder is idempotent, so this adds nothing for those.
+        _terminate_attempt("state_changed", sanitize_own_message(str(exc)))
         checks.append(_chk("Z0", "stopped", "stopped", ef.sanitize_text(str(exc))))
         checks.extend(contract_checks())
         exit_code = EXIT_STOPPED
     except OSError:
+        _terminate_attempt("internal_error",
+                           "a filesystem or process operation failed")
         checks.append(_chk("Z1", "stopped", "stopped",
                            "a filesystem or process operation failed"))
+        checks.extend(contract_checks())
+        exit_code = EXIT_STOPPED
+    except Exception:
+        # Nothing unexpected may escape while an attempt is unaccounted for.
+        # The reason is deliberately fixed: an arbitrary exception message is
+        # the last place a path or a secret could ride out.
+        _terminate_attempt("internal_error",
+                           "an unexpected error occurred after the child started")
+        checks.append(_chk("Z2", "stopped", "stopped",
+                           "an unexpected error occurred; the run was abandoned"))
         checks.extend(contract_checks())
         exit_code = EXIT_STOPPED
     finally:

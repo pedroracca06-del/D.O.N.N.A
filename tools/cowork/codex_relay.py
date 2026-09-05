@@ -77,6 +77,7 @@ EXIT_LIMIT = 3
 EXIT_STOPPED = 4
 
 OPERATIONS = ("validate-policy", "validate-request", "validate-response",
+              "cancel-request", "record-rejection",
               "submit", "ingest-response", "inspect", "verify-chain")
 
 # A verb that would imply doing something rather than carrying a message. Refused
@@ -127,6 +128,47 @@ RESPONSE_FIELDS = (
     "registry_expected_commit", "request_message_id", "response",
 )
 
+# A request that can never execute again -- its bound registry revision has been
+# overtaken, say -- would otherwise sit pending forever and block the mailbox for
+# every future review. This TERMINAL message retires exactly one such request by
+# APPENDING to the chain. It deletes nothing, rewrites nothing, and is emphatically
+# not a model response: it carries no verdict, consumes no review attempt, and
+# approves nothing. It records why the request went stale rather than hiding it.
+CANCELLATION_TYPE = "request_cancelled"
+CANCELLATION_FIELDS = (
+    "schema_version", "message_id", "sequence", "previous_message_sha256",
+    "created_at", "sender", "recipient", "message_type", "cancelled_request_id",
+    "cancelled_sequence", "phase", "head", "registry_revision", "reason",
+    "cancelled_by",
+)
+
+# The other way a request finishes without a verdict: the child DID run and DID
+# answer, but the answer failed validation and was never recorded. Leaving that
+# request pending would block the mailbox and hide the fact that the one attempt
+# was spent. This terminal states both plainly. It is not a verdict and not an
+# approval, and it never permits a retry -- a new attempt needs a NEW request.
+REJECTION_TYPE = "response_rejected"
+REJECTION_FIELDS = (
+    "schema_version", "message_id", "sequence", "previous_message_sha256",
+    "created_at", "sender", "recipient", "message_type", "cancelled_request_id",
+    "cancelled_sequence", "phase", "head", "registry_revision",
+    "failure_category", "exit_code", "rejection_reason", "attempt_consumed",
+    "recorded_by",
+)
+
+# Every way a run can end after the child starts. All of them spend the attempt
+# and all of them must terminate the request, or the mailbox silently blocks.
+FAILURE_CATEGORIES = (
+    "timeout",              # the child exceeded the runtime limit
+    "nonzero_exit",         # the child returned a failure status
+    "missing_output",       # the child wrote no response file
+    "oversized_output",     # the response exceeded the size limit
+    "malformed_output",     # the response was not usable JSON
+    "validation_rejected",  # the response was refused by the relay validator
+    "state_changed",        # the repository, registry or mailbox moved mid-run
+    "internal_error",       # anything else that went wrong after the child ran
+)
+
 VERDICT_FIELDS = ("schema_version", "request_message_id", "phase", "head",
                   "verdict", "summary", "findings", "non_authorization")
 FINDING_FIELDS = ("finding_id", "severity", "category", "message", "evidence")
@@ -164,6 +206,95 @@ _EXECUTABLE_RE = re.compile(
     r"invoke-expression|iex|start-process|importlib|__import__|os\.system|"
     r"subprocess)\b|(?<![.\w*])sh\s+-c\b|<script|javascript:|"
     r"^[A-Z_]{3,}=|\bset-content\b|\bout-file\b)")
+
+# A code audit has to be able to SAY `subprocess`, `intelligence/gateway.py`, or
+# `ProviderError` without that counting as smuggling. The generic rule above
+# cannot distinguish naming a symbol from invoking one, so typed audit fields get
+# this narrower rule instead: a bare identifier is data, an INVOCATION is not.
+# Everything genuinely executable is still refused -- shells, chaining, scripts,
+# encoded payloads, tool invocations, and imperative "run this" instructions.
+# An INVOCATION needs an argument. A tool name followed by a flag, a URL, a
+# path, a quoted string, a variable, a redirect, a number or an executable file
+# name is a command; the same name followed by ordinary English is a mention.
+_AUDIT_ARGUMENT = (
+    r"(?:-{1,2}\w|/[A-Za-z]\b|[A-Za-z][A-Za-z0-9+.-]*://|[.~/\\]|"
+    r"[A-Za-z]:[\\/]|['\"]|\$\w|%\w+%|>|\d|"
+    r"[\w.-]+\.(?:exe|ps1|sh|bat|cmd|py|js)\b)"
+)
+
+# A command name, for the cases where one tool is used to launch another.
+_AUDIT_COMMAND = (
+    r"(?:rm|del|cat|echo|ls|dir|cp|mv|bash|sh|zsh|python|node|npm|npx|pip|"
+    r"git|kill|dd|mkfs|chmod|chown|curl|wget|nc|netcat|whoami|id)"
+)
+
+_AUDIT_EXECUTABLE_RULES = (
+    ("command substitution", re.compile(r"\$\(|`[^`\n]{1,80}`")),
+    # A semicolon is shell chaining only when a COMMAND follows it. An audit
+    # writes ordinary English -- "a policy may lower any of these; it can never
+    # raise one" -- and a bare word after the semicolon refuses that prose
+    # while catching nothing the command-anchored form misses.
+    ("command chaining", re.compile(
+        r"&&|\|\||;\s*(?:rm|del|curl|wget|git|python|node|bash|sh|zsh|pwsh|"
+        r"powershell|cmd|npm|npx|pip|chmod|chown|sudo|nc|mv|cp|cat|echo|eval|"
+        r"exec|kill|dd|mkfs)\b")),
+    ("pipe into interpreter",
+     re.compile(r"(?i)\|\s*(?:bash|sh|zsh|python|node|pwsh|powershell)\b")),
+    # Naming a shell is how an audit says a shell is NOT used. Only an
+    # invocation is refused.
+    ("shell or tool invocation", re.compile(
+        r"(?i)(?<![.\w])(?:sudo|curl|wget|nc|netcat|chmod|chown|start-process|"
+        r"cmd\.exe|powershell|pwsh)\s+(?:" + _AUDIT_ARGUMENT + r"|"
+        + _AUDIT_COMMAND + r"\b)")),
+    ("expression invocation",
+     re.compile(r"(?i)(?<![.\w])(?:iex|invoke-expression)\s*[('\"]")),
+    ("interpreter with flags",
+     re.compile(r"(?i)(?<![.\w])(?:sh|bash|zsh|python|node)\s+-\w")),
+    ("markup or scheme payload",
+     re.compile(r"(?i)<script|javascript:|data:text/html")),
+    # A NAMED symbol is data; an INVOCATION is not. `subprocess` passes,
+    # `subprocess.run(` does not.
+    ("code invocation", re.compile(
+        r"(?:os\.system|subprocess\.(?:run|Popen|call|check_output)|eval|exec|"
+        r"__import__|importlib\.import_module|compile)\s*\(")),
+    ("imperative instruction", re.compile(
+        r"(?i)\b(?:run|execute|apply|paste)\s+(?:the\s+|these\s+|this\s+)?"
+        r"(?:following|commands?|scripts?|patch|diff|snippet)\b")),
+    ("patch or diff payload",
+     re.compile(r"(?m)^\s*(?:diff --git|@@ -|\+\+\+ b/|--- a/)")),
+    ("environment assignment", re.compile(r"(?m)^\s*[A-Z_]{3,}=")),
+    ("file write cmdlet", re.compile(
+        r"(?i)(?<![.\w])(?:set-content|add-content|out-file)\s+(?:"
+        + _AUDIT_ARGUMENT + r"|" + _AUDIT_COMMAND + r"\b)")),
+    ("encoded blob", re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")),
+)
+
+
+def audit_executable_reason(text):
+    """Name of the first rule a typed audit value violates, or None."""
+    for name, rx in _AUDIT_EXECUTABLE_RULES:
+        if rx.search(text):
+            return name
+    return None
+
+# The typed, inert fields a code audit may use. Anything outside this set inside
+# an audit block is rejected, so the shape cannot be used to smuggle new keys.
+AUDIT_FINDING_FIELDS = (
+    "finding_id", "severity", "category", "repository_path", "line_start",
+    "line_end", "symbol", "observed_behavior", "technical_risk",
+    "evidence_description", "recommended_correction", "test_gap",
+    "acceptance_criteria",
+)
+AUDIT_BLOCK_FIELDS = ("schema_version", "architecture_summary", "findings")
+AUDIT_SCHEMA_VERSION = 1
+# Fields that may carry inert code references; the rest stay under the generic
+# rule. `symbol` and `repository_path` are additionally shape-checked.
+AUDIT_CODE_FIELDS = frozenset({
+    "repository_path", "symbol", "observed_behavior", "technical_risk",
+    "evidence_description", "recommended_correction", "test_gap",
+    "acceptance_criteria", "architecture_summary",
+})
+_SYMBOL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 
 # A key that would smuggle an action into a document that is supposed to be data.
 # Deliberately absent: `path` and `allow`. They are legitimate structural names
@@ -417,11 +548,33 @@ def validate_verdict_schema(schema):
         raise PolicyError("the verdict schema must describe an object")
     if schema.get("additionalProperties") is not False:
         raise PolicyError("the verdict schema must set additionalProperties false")
-    if sorted(schema.get("required", [])) != sorted(VERDICT_FIELDS):
-        raise PolicyError("the verdict schema must require exactly the verdict fields")
+    if sorted(schema.get("required", [])) not in (
+            sorted(VERDICT_FIELDS), sorted(tuple(VERDICT_FIELDS) + ("audit",))):
+        raise PolicyError("the verdict schema must require exactly the verdict "
+                          "fields, plus the audit block when it is defined")
     props = schema.get("properties")
-    if not isinstance(props, dict) or set(props) != set(VERDICT_FIELDS):
-        raise PolicyError("the verdict schema must define exactly the verdict fields")
+    # `audit` is the one optional property: required stays exactly the verdict
+    # fields, so a verdict without an audit block is still conforming, while a
+    # typed audit verdict is no longer non-conforming.
+    if not isinstance(props, dict)             or set(props) not in (set(VERDICT_FIELDS),
+                                  set(VERDICT_FIELDS) | {"audit"}):
+        raise PolicyError("the verdict schema must define exactly the verdict "
+                          "fields, plus at most the optional audit block")
+    audit = props.get("audit")
+    if audit is not None:
+        if audit.get("additionalProperties") is not False:
+            raise PolicyError("the audit block must set additionalProperties false")
+        if sorted(audit.get("required", [])) != sorted(AUDIT_BLOCK_FIELDS):
+            raise PolicyError("the audit block must require exactly its fields")
+        entry = audit.get("properties", {}).get("findings", {}).get("items", {})
+        if entry.get("additionalProperties") is not False:
+            raise PolicyError("an audit finding must set additionalProperties false")
+        if sorted(entry.get("required", [])) != sorted(AUDIT_FINDING_FIELDS):
+            raise PolicyError("an audit finding must require exactly its fields")
+        for key in sorted(set(audit.get("properties", {}))
+                          | set(entry.get("properties", {}))):
+            if _COMMAND_KEY_RE.match(key):
+                raise PolicyError("the audit block defines an action-bearing field")
     if props["verdict"].get("enum") != list(ENUMS_FIXED["response_verdict"]):
         raise PolicyError("the verdict schema enum is fixed")
     if props["non_authorization"].get("const") != NON_AUTHORIZATION_SENTENCE:
@@ -445,7 +598,7 @@ def _limits(policy):
     return policy["limits"]
 
 
-def _walk(node, limits, depth=0, key=None):
+def _walk(node, limits, depth=0, key=None, prose=False):
     """Depth, size, and content scan applied to every envelope, uniformly."""
     if depth > limits["max_depth"]:
         raise ef.SafetyLimitError("the document nests deeper than the maximum depth")
@@ -461,13 +614,13 @@ def _walk(node, limits, depth=0, key=None):
             if _COMMAND_KEY_RE.match(k):
                 _bad("a command-, action-, or authorization-bearing field is not "
                      "permitted anywhere in an envelope")
-            _walk(k, limits, depth + 1)
-            _walk(v, limits, depth + 1, key=k)
+            _walk(k, limits, depth + 1, prose=prose)
+            _walk(v, limits, depth + 1, key=k, prose=prose)
     elif isinstance(node, list):
         if len(node) > limits["max_paths"]:
             raise ef.SafetyLimitError("a list exceeds the maximum element count")
         for v in node:
-            _walk(v, limits, depth + 1, key=key)
+            _walk(v, limits, depth + 1, key=key, prose=prose)
     elif isinstance(node, str):
         if len(node) > limits["max_string_chars"]:
             raise ef.SafetyLimitError("a string exceeds the maximum length")
@@ -477,7 +630,16 @@ def _walk(node, limits, depth=0, key=None):
         if _MACHINE_PATH_RE.search(node):
             _bad("a machine-specific path or username is not permitted in an "
                  "envelope; use the logical repository and worktree identity")
-        if _EXECUTABLE_RE.search(node):
+        # Prose about code has to be able to NAME a shell in order to report
+        # that the shell is not used. In prose mode the same calibrated rules
+        # the audit block uses apply: an INVOCATION is refused, a mention is
+        # not. Everything genuinely runnable is still refused either way.
+        if prose:
+            reason = audit_executable_reason(node)
+            if reason:
+                _bad("%s was found in a field that may only carry inert data"
+                     % reason)
+        elif _EXECUTABLE_RE.search(node):
             _bad("an executable construct or command was found in a field that "
                  "may only carry inert data")
         # The fixed non-authorization sentence names the very acts it forbids
@@ -646,6 +808,114 @@ def validate_evidence(evidence, policy):
 # Request envelope
 # --------------------------------------------------------------------------
 
+def is_cancellation(msg):
+    """True for a terminal cancellation message, whatever else it carries."""
+    return isinstance(msg, dict) and msg.get("message_type") == CANCELLATION_TYPE
+
+
+def is_rejection(msg):
+    """True for a terminal rejection: a response was produced and refused."""
+    return isinstance(msg, dict) and msg.get("message_type") == REJECTION_TYPE
+
+
+def is_terminal(msg):
+    """Either terminal kind. Both retire exactly one request, append-only."""
+    return is_cancellation(msg) or is_rejection(msg)
+
+
+def is_review_request(msg):
+    """True for an actual Claude review request, never for a terminal."""
+    return (isinstance(msg, dict) and msg.get("sender") == "claude"
+            and not is_terminal(msg))
+
+
+def cancelled_request_ids(mailbox_doc):
+    """Every request id retired by a terminal already in the chain.
+
+    Named for the first terminal kind it covered; it now covers both, because
+    anything downstream only needs to know a request is finished, not how.
+    """
+    return {m.get("cancelled_request_id") for m in mailbox_doc["messages"]
+            if is_terminal(m)}
+
+
+def validate_cancellation(doc, policy):
+    """Field-by-field check of a terminal cancellation envelope."""
+    limits = _limits(policy)
+    _require(doc, CANCELLATION_FIELDS, "cancellation envelope")
+    _walk(doc, limits)
+
+    if doc["schema_version"] != SCHEMA_VERSION:
+        _bad("unsupported cancellation schema_version")
+    _str_field(doc, "message_id", _UUID_RE, "cancellation")
+    _str_field(doc, "cancelled_request_id", _UUID_RE, "cancellation")
+    _str_field(doc, "previous_message_sha256", _SHA256_RE, "cancellation")
+    _str_field(doc, "created_at", _TIMESTAMP_RE, "cancellation")
+    _str_field(doc, "phase", _PHASE_RE, "cancellation")
+    _str_field(doc, "head", _OID_RE, "cancellation")
+    for name in ("sequence", "cancelled_sequence"):
+        if not isinstance(doc[name], int) or isinstance(doc[name], bool)                 or doc[name] < 1:
+            _bad("cancellation %s must be a positive integer" % name)
+    if not isinstance(doc["registry_revision"], int)             or isinstance(doc["registry_revision"], bool)             or doc["registry_revision"] < 0:
+        _bad("cancellation registry_revision must be a non-negative integer")
+    if doc["sender"] != "claude":
+        _bad("a cancellation envelope must be sent by claude")
+    if doc["recipient"] != "codex":
+        _bad("a cancellation envelope must be addressed to codex")
+    if doc["message_type"] != CANCELLATION_TYPE:
+        _bad("message_type must be %r" % CANCELLATION_TYPE)
+    for name in ("reason", "cancelled_by"):
+        if not isinstance(doc[name], str) or not doc[name].strip():
+            _bad("cancellation %s must be a non-empty string" % name)
+    if len(canonical_bytes(doc)) > limits["max_envelope_bytes"]:
+        raise ef.SafetyLimitError("the cancellation envelope exceeds the maximum size")
+
+
+def validate_rejection(doc, policy):
+    """Field-by-field check of a terminal response-rejection envelope."""
+    limits = _limits(policy)
+    _require(doc, REJECTION_FIELDS, "rejection envelope")
+    _walk(doc, limits)
+
+    if doc["schema_version"] != SCHEMA_VERSION:
+        _bad("unsupported rejection schema_version")
+    _str_field(doc, "message_id", _UUID_RE, "rejection")
+    _str_field(doc, "cancelled_request_id", _UUID_RE, "rejection")
+    _str_field(doc, "previous_message_sha256", _SHA256_RE, "rejection")
+    _str_field(doc, "created_at", _TIMESTAMP_RE, "rejection")
+    _str_field(doc, "phase", _PHASE_RE, "rejection")
+    _str_field(doc, "head", _OID_RE, "rejection")
+    for name in ("sequence", "cancelled_sequence"):
+        if not isinstance(doc[name], int) or isinstance(doc[name], bool) \
+                or doc[name] < 1:
+            _bad("rejection %s must be a positive integer" % name)
+    if not isinstance(doc["registry_revision"], int) \
+            or isinstance(doc["registry_revision"], bool) \
+            or doc["registry_revision"] < 0:
+        _bad("rejection registry_revision must be a non-negative integer")
+    if doc["sender"] != "claude":
+        _bad("a rejection envelope must be sent by claude")
+    if doc["recipient"] != "codex":
+        _bad("a rejection envelope must be addressed to codex")
+    if doc["message_type"] != REJECTION_TYPE:
+        _bad("message_type must be %r" % REJECTION_TYPE)
+    if doc["failure_category"] not in FAILURE_CATEGORIES:
+        _bad("failure_category must be one of: %s" % ", ".join(FAILURE_CATEGORIES))
+    if not isinstance(doc["exit_code"], int) or isinstance(doc["exit_code"], bool):
+        _bad("rejection exit_code must be an integer")
+    # The attempt is always spent: the child ran to produce the refused answer.
+    # Recording anything else would misstate what happened.
+    if doc["attempt_consumed"] is not True:
+        _bad("a rejection always records attempt_consumed true; the child ran")
+    for name in ("rejection_reason", "recorded_by"):
+        if not isinstance(doc[name], str) or not doc[name].strip():
+            _bad("rejection %s must be a non-empty string" % name)
+    if len(canonical_bytes(doc)) > limits["max_envelope_bytes"]:
+        raise ef.SafetyLimitError("the rejection envelope exceeds the maximum size")
+    return doc
+    return doc
+
+
 def validate_request(doc, policy):
     limits = _limits(policy)
     _require(doc, REQUEST_FIELDS, "request envelope")
@@ -692,11 +962,79 @@ def validate_request(doc, policy):
     return doc
 
 
+def validate_audit(block, policy):
+    """Typed, inert code-audit block. Names of things are data; running is not.
+
+    Every value here is still scanned for credentials and machine paths. What
+    differs from the generic rule is only the executable test: a code audit must
+    be able to say `subprocess`, `intelligence/gateway.py`, or `ProviderError`
+    without that counting as smuggling, while shells, chaining, scripts, patches,
+    encoded payloads, tool invocations, and "run this" instructions stay refused.
+    """
+    limits = _limits(policy)
+    _require(block, AUDIT_BLOCK_FIELDS, "audit block")
+    if block["schema_version"] != AUDIT_SCHEMA_VERSION:
+        _bad("unsupported audit schema_version")
+
+    def _inert(value, where):
+        if not isinstance(value, str) or not value.strip():
+            _bad("audit %s must be a non-empty string" % where)
+        if len(value) > 4096:
+            raise ef.SafetyLimitError("audit %s exceeds the maximum length" % where)
+        if _CREDENTIAL_RE.search(value):
+            _bad("a credential-shaped value was found in audit %s" % where)
+        if _MACHINE_PATH_RE.search(value):
+            _bad("a machine-specific path or username is not permitted in "
+                 "audit %s" % where)
+        reason = audit_executable_reason(value)
+        if reason:
+            _bad("audit %s carries %s; an audit describes code, it never ships "
+                 "something to run" % (where, reason))
+
+    _inert(block["architecture_summary"], "architecture_summary")
+    findings = block["findings"]
+    if not isinstance(findings, list):
+        _bad("audit findings must be a list")
+    if len(findings) > limits["max_findings"]:
+        raise ef.SafetyLimitError("audit findings exceeds the maximum count")
+    seen = set()
+    for f in findings:
+        _require(f, AUDIT_FINDING_FIELDS, "audit finding")
+        _str_field(f, "finding_id", _PHASE_RE, "audit finding")
+        if f["finding_id"] in seen:
+            _bad("a duplicate audit finding_id was supplied")
+        seen.add(f["finding_id"])
+        if f["severity"] not in ENUMS_FIXED["finding_severity"]:
+            _bad("audit finding severity is not one of the fixed severities")
+        _str_field(f, "category", _CATEGORY_RE, "audit finding")
+        _rel_path(f["repository_path"], "audit repository_path", limits)
+        if not _SYMBOL_RE.match(str(f["symbol"])):
+            _bad("audit symbol must be a plain identifier or dotted name")
+        for k in ("line_start", "line_end"):
+            if not isinstance(f[k], int) or isinstance(f[k], bool) or f[k] < 0:
+                _bad("audit %s must be a non-negative integer" % k)
+        if f["line_end"] < f["line_start"]:
+            _bad("audit line_end must not precede line_start")
+        for k in ("observed_behavior", "technical_risk", "evidence_description",
+                  "recommended_correction", "test_gap", "acceptance_criteria"):
+            _inert(f[k], k)
+    return block
+
+
 def validate_verdict(doc, policy, schema):
     """Check a Codex final response field by field against the shipped schema."""
     limits = _limits(policy)
-    _require(doc, VERDICT_FIELDS, "verdict document")
-    _walk(doc, limits)
+    # Strict structured output cannot omit a property, so "no audit" arrives as
+    # an explicit null rather than a missing key. Both mean the same thing here.
+    audit = doc.get("audit")
+    fields = VERDICT_FIELDS + (("audit",) if "audit" in doc else ())
+    _require(doc, fields, "verdict document")
+    # The audit block carries typed inert code references and is validated by its
+    # own stricter-shaped rules; everything else stays under the generic scan.
+    _walk({k: v for k, v in doc.items() if k != "audit"}, limits,
+          prose=True)
+    if audit is not None:
+        validate_audit(audit, policy)
 
     if doc["schema_version"] != SCHEMA_VERSION:
         _bad("unsupported verdict schema_version")
@@ -869,6 +1207,11 @@ def verify_chain(mailbox):
     expected_seq = 1
     seen_ids = set()
     seen_reviews = set()
+    seen_cancelled = set()
+    # Only ids of actual review requests. A cancellation must name one of THESE,
+    # never a response or another cancellation, so `seen_ids` is deliberately not
+    # reused here: it holds every message id and would accept the wrong target.
+    seen_request_ids = set()
     for n, msg in enumerate(mailbox["messages"], 1):
         if not isinstance(msg, dict):
             problems.append((n, "message %d is not an object" % n))
@@ -882,7 +1225,17 @@ def verify_chain(mailbox):
         if mid in seen_ids:
             problems.append((n, "message %d repeats a message_id" % n))
         seen_ids.add(mid)
-        if msg.get("sender") == "claude":
+        if is_terminal(msg):
+            target = msg.get("cancelled_request_id")
+            if target not in seen_request_ids:
+                problems.append((n, "message %d terminates something that is not "
+                                    "an earlier review request" % n))
+            if target in seen_cancelled:
+                problems.append((n, "message %d terminates an already-terminated "
+                                    "request" % n))
+            seen_cancelled.add(target)
+        elif msg.get("sender") == "claude":
+            seen_request_ids.add(mid)
             key = (msg.get("phase"), msg.get("head"))
             if key in seen_reviews:
                 problems.append((n, "message %d replays a (phase, head) review" % n))
@@ -1041,6 +1394,24 @@ def build_parser():
     parser.add_argument("--registry", default=None,
                         help="machine-local session registry, read-only")
     parser.add_argument("--session-id", default=None)
+    parser.add_argument("--request-id", default=None,
+                        help="cancel-request: the pending request to retire")
+    parser.add_argument("--reason", default=None,
+                        help="cancel-request: why the request became unusable")
+    parser.add_argument("--failure-category", default=None,
+                        help="record-rejection: which post-spawn failure occurred")
+    parser.add_argument("--exit-code", type=int, default=None,
+                        help="record-rejection: the child's exit status")
+    parser.add_argument("--rejection-reason", default=None,
+                        help="record-rejection: sanitized reason the response "
+                             "was refused")
+    parser.add_argument("--recorded-by", default=None,
+                        help="record-rejection: the actor recording the terminal")
+    parser.add_argument("--cancelled-by", default=None,
+                        help="cancel-request: the person authorizing the retirement")
+    parser.add_argument("--expect-mailbox-revision", type=int, default=None,
+                        help="cancel-request: refuse unless the mailbox is still "
+                             "at this revision (compare-and-swap guard)")
     return parser
 
 
@@ -1283,13 +1654,198 @@ def main(argv=None):
                 _require(message, RESPONSE_FIELDS, "response envelope")
                 _record(args, policy, message, checks)
 
+        elif op == "cancel-request":
+            for name, value in (("--request-id", args.request_id),
+                                ("--reason", args.reason),
+                                ("--cancelled-by", args.cancelled_by)):
+                if not value:
+                    _bad("cancel-request requires %s" % name)
+
+            current = read_mailbox(_require_mailbox(args)[1])
+            problems = verify_chain(current)
+            if problems:
+                raise sg.StoppedError("the mailbox chain is broken: %s"
+                                      % problems[0][1])
+            checks.append(_chk("X1", "chain", "pass",
+                               "%d message(s) verified before cancelling"
+                               % len(current["messages"])))
+
+            # Compare-and-swap: a racing writer must fail closed, not overwrite.
+            if args.expect_mailbox_revision is not None and                     current["revision"] != args.expect_mailbox_revision:
+                raise sg.StoppedError("the mailbox is at revision %d, not the "
+                                      "expected %d; refusing rather than racing"
+                                      % (current["revision"],
+                                         args.expect_mailbox_revision))
+            checks.append(_chk("X2", "revision guard", "pass",
+                               "mailbox revision %d" % current["revision"]))
+
+            target = None
+            for msg in current["messages"]:
+                if msg.get("message_id") == args.request_id:
+                    target = msg
+                    break
+            if target is None:
+                _bad("no recorded message has that id")
+            if not is_review_request(target):
+                _bad("that id does not name a Claude review request")
+            for msg in current["messages"]:
+                if msg.get("sender") == "codex" and                         msg.get("request_message_id") == args.request_id:
+                    _bad("a response for that request is already recorded; a "
+                         "completed exchange is never cancelled")
+            if args.request_id in cancelled_request_ids(current):
+                _bad("that request is already cancelled")
+
+            answered = {m.get("request_message_id") for m in current["messages"]
+                        if m.get("sender") == "codex"}
+            retired = cancelled_request_ids(current)
+            pending = [m for m in current["messages"] if is_review_request(m)
+                       and m.get("message_id") not in answered
+                       and m.get("message_id") not in retired]
+            if len(pending) != 1:
+                raise sg.StoppedError(
+                    "the mailbox holds %d pending request(s); cancellation "
+                    "requires exactly one so no ambiguity is left behind"
+                    % len(pending))
+            if pending[0]["message_id"] != args.request_id:
+                _bad("the supplied request id is not the pending request")
+            checks.append(_chk("X3", "target", "pass",
+                               "request %s, sequence %s, phase %s, bound to "
+                               "registry revision %s"
+                               % (target["message_id"], target["sequence"],
+                                  target["phase"], target["registry_revision"])))
+
+            message = {
+                "schema_version": SCHEMA_VERSION,
+                "message_id": _new_message_id(),
+                "sequence": len(current["messages"]) + 1,
+                "previous_message_sha256": chain_hash(current["messages"]),
+                "created_at": datetime.now(timezone.utc)
+                                      .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "sender": "claude",
+                "recipient": "codex",
+                "message_type": CANCELLATION_TYPE,
+                "cancelled_request_id": target["message_id"],
+                "cancelled_sequence": target["sequence"],
+                "phase": target["phase"],
+                "head": target["head"],
+                "registry_revision": target["registry_revision"],
+                "reason": args.reason,
+                "cancelled_by": args.cancelled_by,
+            }
+            validate_cancellation(message, policy)
+            checks.append(_chk("X4", "cancellation", "warning",
+                               "terminal only: no verdict, no review attempt "
+                               "consumed, and nothing approved"))
+            _record(args, policy, message, checks)
+
+        elif op == "record-rejection":
+            for name, value in (("--request-id", args.request_id),
+                                ("--rejection-reason", args.rejection_reason),
+                                ("--recorded-by", args.recorded_by),
+                                ("--failure-category", args.failure_category)):
+                if not value:
+                    _bad("record-rejection requires %s" % name)
+            if args.exit_code is None:
+                _bad("record-rejection requires --exit-code")
+            if args.failure_category not in FAILURE_CATEGORIES:
+                _bad("--failure-category must be one of: %s"
+                     % ", ".join(FAILURE_CATEGORIES))
+
+            current = read_mailbox(_require_mailbox(args)[1])
+            problems = verify_chain(current)
+            if problems:
+                raise sg.StoppedError("the mailbox chain is broken: %s"
+                                      % problems[0][1])
+            checks.append(_chk("X1", "chain", "pass",
+                               "%d message(s) verified before recording"
+                               % len(current["messages"])))
+
+            if args.expect_mailbox_revision is not None and \
+                    current["revision"] != args.expect_mailbox_revision:
+                raise sg.StoppedError("the mailbox is at revision %d, not the "
+                                      "expected %d; refusing rather than racing"
+                                      % (current["revision"],
+                                         args.expect_mailbox_revision))
+            checks.append(_chk("X2", "revision guard", "pass",
+                               "mailbox revision %d" % current["revision"]))
+
+            target = None
+            for msg in current["messages"]:
+                if msg.get("message_id") == args.request_id:
+                    target = msg
+                    break
+            if target is None:
+                _bad("no recorded message has that id")
+            if not is_review_request(target):
+                _bad("that id does not name a Claude review request")
+            for msg in current["messages"]:
+                if msg.get("sender") == "codex" and \
+                        msg.get("request_message_id") == args.request_id:
+                    _bad("a response for that request is already recorded")
+            if args.request_id in cancelled_request_ids(current):
+                _bad("that request is already terminated")
+
+            answered = {m.get("request_message_id") for m in current["messages"]
+                        if m.get("sender") == "codex"}
+            retired = cancelled_request_ids(current)
+            pending = [m for m in current["messages"] if is_review_request(m)
+                       and m.get("message_id") not in answered
+                       and m.get("message_id") not in retired]
+            if len(pending) != 1:
+                raise sg.StoppedError(
+                    "the mailbox holds %d pending request(s); recording a "
+                    "rejection requires exactly one so no ambiguity is left"
+                    % len(pending))
+            if pending[0]["message_id"] != args.request_id:
+                _bad("the supplied request id is not the pending request")
+            checks.append(_chk("X3", "target", "pass",
+                               "request %s, sequence %s, phase %s"
+                               % (target["message_id"], target["sequence"],
+                                  target["phase"])))
+
+            message = {
+                "schema_version": SCHEMA_VERSION,
+                "message_id": _new_message_id(),
+                "sequence": len(current["messages"]) + 1,
+                "previous_message_sha256": chain_hash(current["messages"]),
+                "created_at": datetime.now(timezone.utc)
+                                      .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "sender": "claude",
+                "recipient": "codex",
+                "message_type": REJECTION_TYPE,
+                "cancelled_request_id": target["message_id"],
+                "cancelled_sequence": target["sequence"],
+                "phase": target["phase"],
+                "head": target["head"],
+                "registry_revision": target["registry_revision"],
+                "failure_category": args.failure_category,
+                "exit_code": args.exit_code,
+                "rejection_reason": args.rejection_reason,
+                "attempt_consumed": True,
+                "recorded_by": args.recorded_by,
+            }
+            validate_rejection(message, policy)
+            checks.append(_chk("X4", "rejection", "warning",
+                               "the child ran and answered; the answer failed "
+                               "validation and was never recorded, so the one "
+                               "attempt is spent and a retry needs a NEW request"))
+            _record(args, policy, message, checks)
+
         elif op == "inspect":
             current = read_mailbox(_require_mailbox(args)[1])
             checks.append(_chk("I1", "mailbox", "pass",
                                "revision %d, %d message(s)"
                                % (current["revision"], len(current["messages"]))))
             for n, msg in enumerate(current["messages"], 1):
-                if msg.get("sender") == "claude":
+                if is_rejection(msg):
+                    detail = ("REJECTED response for request %s, phase %s"
+                              % (msg.get("cancelled_request_id"),
+                                 msg.get("phase")))
+                elif is_cancellation(msg):
+                    detail = ("CANCELLED request %s, phase %s"
+                              % (msg.get("cancelled_request_id"),
+                                 msg.get("phase")))
+                elif msg.get("sender") == "claude":
                     detail = "request, phase %s, change class %s" \
                              % (msg.get("phase"), msg.get("change_class"))
                 else:

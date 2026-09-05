@@ -52,10 +52,16 @@ verdict schema *and* against the recorded request, and only then records a
 **relay-authored** response envelope through the locked atomic update. Codex's
 bytes are nested inside as data; they never become the envelope.
 
-### Operations — exactly seven, no aliases
+### Operations — exactly nine, no aliases
 
-`validate-policy` · `validate-request` · `validate-response` · `submit` ·
-`ingest-response` · `inspect` · `verify-chain`
+`validate-policy` · `validate-request` · `validate-response` ·
+`cancel-request` · `record-rejection` · `submit` · `ingest-response` ·
+`inspect` · `verify-chain`
+
+`cancel-request` retires a request that can never run. `record-rejection`
+terminates one whose attempt was already spent: the child started, so the
+attempt is gone, and the request must not sit pending. Both are terminal, both
+are append-only, and neither permits a retry of the request it closes.
 
 Twenty-five action words (`run`, `exec`, `review`, `retry`, `approve`,
 `authorize`, `apply`, `edit`, `stage`, `commit`, `push`, `merge`, `deploy`,
@@ -134,6 +140,24 @@ that looks like an action (`command`, `args`, `shell`, `env`, `approve`,
 `authorize`, `enable`, `trade`, `order`, `kill_switch`, …) is refused anywhere in
 an envelope.
 
+**A named symbol is data; an invocation is not.** A verdict and its audit block
+exist to describe code, so they are scanned in *prose mode*: a review has to be
+able to write `powershell`, `curl`, `subprocess` or `Invoke-Expression` in order
+to report that the runner does not use them, and to use a semicolon in an
+English sentence. Prose mode swaps exactly one rule — the executable scan — for
+a calibrated set that refuses an invocation (a tool name followed by a flag, a
+URL, a path, a quoted string, a variable, a redirect, a number, or another
+command name) while allowing a mention. Requests keep the stricter free-form
+rule, because Claude authors requests. Every other scan is identical in both
+modes: credentials, machine paths, prohibited intent, field names, depth, and
+length.
+
+The calibration is a regression test, not a judgement call: twenty sentences an
+honest audit would write must all validate, and thirty-one pieces of genuinely
+runnable content must all be refused. Two live reviews were refused by the
+earlier rules for naming a shell, and each refusal consumed an attempt that
+cannot be retried — which is why the corpora ship with the code.
+
 ---
 
 ## PASS is not approval
@@ -148,6 +172,47 @@ Every verdict must carry this exact sentence, or it is rejected:
 Work classified **AAM** or **AM** in the
 [Approval Matrix](APPROVAL_MATRIX.md) still requires Pedro's named approval,
 every time. A verdict never substitutes for it, and the relay never acts on one.
+
+---
+
+## Retiring a request that can never run
+
+A request pins the registry revision it was bound to, and registry revisions only
+ever increase. If any session lifecycle change lands between `submit` and
+`review-once`, that request can never satisfy its own preconditions again — and
+because `find_pending_request` requires exactly one pending request, it would
+block **every** future review.
+
+`cancel-request` retires exactly one such request by **appending** a terminal
+`request_cancelled` message. It is append-only in the strictest sense: nothing is
+deleted, rewritten, truncated, moved, or silently archived, and every prior
+message and archive entry stays byte-identical.
+
+The terminal records what it retired and why: the request id, its sequence, its
+phase, its bound head, its bound registry revision, the reason, and who
+authorized it. The reason is preserved rather than concealed, so the mailbox
+still explains how the request went stale.
+
+It is **not a model response.** It carries no verdict, consumes no review
+attempt, and approves nothing — `sender` is `claude`, never `codex`, and no
+Codex result is fabricated.
+
+It refuses: an unknown id · a message that is not a review request · a request
+that already has a response · one already cancelled · an id that is not *the*
+pending request · any state with more or fewer than one pending request · a
+broken chain · and, with `--expect-mailbox-revision`, any revision race. Every
+refusal leaves the mailbox bytes unchanged. The existing lock, atomic replace,
+archive, and residue guarantees are untouched.
+
+`find_pending_request` and the runner's preconditions treat a valid cancellation
+as terminal for exactly that request, and for no other.
+
+Chain verification enforces the same shape independently of the command, because
+it is what validates a mailbox read off disk: a `request_cancelled` message must
+name an **earlier review request**. Naming a response, another cancellation, or
+an unknown id fails verification, as does cancelling the same request twice. The
+command already refused all of these; the check exists so a tampered or
+hand-edited mailbox is caught too.
 
 ---
 
@@ -444,6 +509,32 @@ phase**. Because the relay caps one review per `(phase, head)`, a second run fin
 nothing pending and stops.
 
 A stop *before* the spawn (a failed precondition) does **not** consume the attempt.
+`invoke_once` sets the spawned flag the instant the child exists and never
+before, so a process that could not be started spends nothing and records
+nothing.
+
+**A spent attempt is always terminated.** Every path reachable after the child
+starts routes through one recorder, which writes exactly one `response_rejected`
+under a compare-and-swap mailbox revision guard and then lets the error
+propagate. That includes the paths that are not explicit branches: a mailbox or
+response-file read failure, and the four revalidation stops — the repository
+moved, the worktree became dirty, the registry changed, the mailbox changed. A
+catch-all handler covers anything unforeseen, so no exception escapes while an
+attempt is unaccounted for. Without this, a spent attempt left the request
+pending forever and blocked the mailbox on a review that could never happen.
+
+Failure categories: `timeout`, `nonzero_exit`, `missing_output`,
+`oversized_output`, `malformed_output`, `validation_rejected`, `state_changed`,
+`internal_error`. The recorder is idempotent, so the outer handlers never add a
+second terminal to a request an explicit branch already closed.
+
+**The diagnostic never carries the prompt back.** Only a recognized structured
+provider message is kept, and it is dropped entirely if it repeats any run of
+five consecutive words from the prompt — a whole-line substitution cannot see a
+fragment the child rewrapped or excerpted, and the child chooses its own
+standard error. When nothing survives, the caller records its fixed category
+sentence instead. Raw streams are never printed, never archived, and never
+recorded.
 
 ---
 
