@@ -1687,10 +1687,13 @@ def test_ingest_goes_through_the_relay_not_a_direct_write():
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "cr":
                 calls.add(node.func.attr)
     assert "main" in calls
+    # `is_review_request` and `cancelled_request_ids` are pure read helpers used
+    # to decide what is still pending; neither writes anything.
     assert calls <= {"main", "load_policy", "load_verdict_schema",
                      "validate_policy", "validate_verdict_schema",
                      "mailbox_paths", "read_mailbox", "observe_repository",
-                     "verify_chain", "evidence_digest_of"}, calls
+                     "verify_chain", "evidence_digest_of",
+                     "is_review_request", "cancelled_request_ids"}, calls
     src = RUNNER.read_text(encoding="utf-8")
     assert "relay.json" not in src.replace("`relay.json`", "")
 

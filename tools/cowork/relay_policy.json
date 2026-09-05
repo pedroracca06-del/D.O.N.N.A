@@ -54,6 +54,7 @@
     "validate-policy",
     "validate-request",
     "validate-response",
+    "cancel-request",
     "submit",
     "ingest-response",
     "inspect",

@@ -420,10 +420,11 @@ def test_schema_that_softens_non_authorization_is_refused(tmp_path):
 
 # --------------------------------------------------------- operation surface
 
-def test_operations_are_exactly_seven():
+def test_operations_are_exactly_eight():
+    """`cancel-request` is the eighth and last; it appends, it never removes."""
     assert cr.OPERATIONS == ("validate-policy", "validate-request",
-                             "validate-response", "submit", "ingest-response",
-                             "inspect", "verify-chain")
+                             "validate-response", "cancel-request", "submit",
+                             "ingest-response", "inspect", "verify-chain")
 
 
 @pytest.mark.parametrize("verb", [
@@ -1577,3 +1578,269 @@ def test_real_mailbox_path_is_never_constructed_by_the_tool():
     text = RELAY.read_text(encoding="utf-8")
     assert "nova-relay" not in text
     assert "expanduser" not in _identifiers(RELAY)
+
+
+# ----------------------------------------------- append-only request cancellation
+#
+# A request whose bound registry revision has been overtaken can never execute
+# again, and would otherwise sit pending forever and block the mailbox for every
+# future review. `cancel-request` retires exactly one such request by APPENDING a
+# terminal message. It is not a verdict, it consumes no review attempt, and it
+# approves nothing.
+
+REASON = "Bound registry revision was overtaken; execution is permanently impossible."
+ACTOR = "Pedro"
+
+
+def cancel(mailbox, request_id, reason=REASON, actor=ACTOR, expect=None):
+    extra = ["--mailbox", str(mailbox), "--request-id", str(request_id),
+             "--reason", reason, "--cancelled-by", actor]
+    if expect is not None:
+        extra += ["--expect-mailbox-revision", str(expect)]
+    return run("cancel-request", extra=extra)
+
+
+def submit_one(tmp_path, repo, registry, mailbox, name="req", **over):
+    req = request_doc(repo, **over)
+    rp = write_json(tmp_path / (name + ".json"), req)
+    rc, out, err = run("submit", extra=["--input", str(rp), "--mailbox",
+                                        str(mailbox)] + bound(repo, registry))
+    assert rc == OK, err + out
+    return req
+
+
+def mailbox_state(mailbox):
+    return json.loads((Path(mailbox) / "relay.json").read_text(encoding="utf-8"))
+
+
+def next_link(mailbox):
+    """(sequence, previous_hash) that continues the mailbox as it stands now."""
+    box = mailbox_state(mailbox)
+    return len(box["messages"]) + 1, cr.chain_hash(box["messages"])
+
+
+def archive_snapshot(mailbox):
+    d = Path(mailbox) / "archive"
+    return {p.name: p.read_bytes() for p in sorted(d.iterdir())} if d.exists() else {}
+
+
+def test_cancel_retires_one_pending_request(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    before = mailbox_state(mailbox)
+    before_archive = archive_snapshot(mailbox)
+
+    rc, out, err = cancel(mailbox, req["message_id"])
+    assert rc == OK, err + out
+    ids = check_ids(out)
+    assert ids["M1"] == "1 -> 2"
+
+    after = mailbox_state(mailbox)
+    assert len(after["messages"]) == 2
+    # every prior message is byte-identical
+    assert after["messages"][0] == before["messages"][0]
+    # and every archive entry written before is untouched
+    for name, blob in before_archive.items():
+        assert (Path(mailbox) / "archive" / name).read_bytes() == blob
+
+    term = after["messages"][1]
+    assert term["message_type"] == "request_cancelled"
+    assert term["cancelled_request_id"] == req["message_id"]
+    assert term["cancelled_sequence"] == req["sequence"]
+    assert term["phase"] == req["phase"]
+    assert term["head"] == req["head"]
+    assert term["registry_revision"] == req["registry_revision"]
+    assert term["reason"] == REASON
+    assert term["cancelled_by"] == ACTOR
+    # a cancellation is emphatically not a verdict
+    assert "response" not in term
+    assert "verdict" not in json.dumps(term).lower()
+
+
+def test_chain_stays_verified_after_cancellation(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    assert cancel(mailbox, req["message_id"])[0] == OK
+    rc, out, err = run("verify-chain", extra=["--mailbox", str(mailbox)])
+    assert rc == OK, err + out
+    assert "2 message(s) verified" in check_ids(out)["H1"]
+
+
+def test_no_request_is_pending_after_cancellation(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    assert cancel(mailbox, req["message_id"])[0] == OK
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "cowork"))
+    import codex_review_runner as rr           # noqa: E402
+    sys.path.pop(0)
+    box = mailbox_state(mailbox)
+    with pytest.raises(Exception) as exc:
+        rr.find_pending_request(box)
+    assert "no pending review request" in str(exc.value)
+
+
+def test_a_cancelled_request_cannot_be_cancelled_twice(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    assert cancel(mailbox, req["message_id"])[0] == OK
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, _out, err = cancel(mailbox, req["message_id"])
+    assert rc == INVALID
+    assert "already cancelled" in err or "no pending" in err
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+
+
+def test_a_completed_request_is_never_cancelled(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    vp = write_json(tmp_path / "v.json", verdict_doc(req))
+    assert run("ingest-response", extra=["--response", str(vp), "--mailbox",
+                                         str(mailbox), "--repo", str(repo)])[0] == OK
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, _out, err = cancel(mailbox, req["message_id"])
+    assert rc != OK
+    assert "already recorded" in err or "pending" in err
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+
+
+def test_unknown_request_id_is_refused(demo, tmp_path):
+    repo, registry, mailbox = demo
+    submit_one(tmp_path, repo, registry, mailbox)
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, _out, err = cancel(mailbox, str(uuid.uuid4()))
+    assert rc == INVALID and "no recorded message has that id" in err
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+
+
+def test_cancelling_a_response_message_is_refused(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    vp = write_json(tmp_path / "v.json", verdict_doc(req))
+    assert run("ingest-response", extra=["--response", str(vp), "--mailbox",
+                                         str(mailbox), "--repo", str(repo)])[0] == OK
+    response_id = mailbox_state(mailbox)["messages"][1]["message_id"]
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, _out, err = cancel(mailbox, response_id)
+    assert rc == INVALID and "does not name a Claude review request" in err
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+
+
+def test_mismatched_request_id_is_refused(demo, tmp_path):
+    """The supplied id must be THE pending one, not merely a recorded one."""
+    repo, registry, mailbox = demo
+    first = submit_one(tmp_path, repo, registry, mailbox, name="a")
+    vp = write_json(tmp_path / "v.json", verdict_doc(first))
+    assert run("ingest-response", extra=["--response", str(vp), "--mailbox",
+                                         str(mailbox), "--repo", str(repo)])[0] == OK
+    seq, prev = next_link(mailbox)
+    submit_one(tmp_path, repo, registry, mailbox, name="b", phase="3Z-2",
+               sequence=seq, previous=prev)
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, out, err = cancel(mailbox, first["message_id"])
+    assert rc != OK
+    assert ("already recorded" in (out + err)
+            or "not the pending request" in (out + err))
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+
+
+def test_stale_expected_revision_fails_closed(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, out, err = cancel(mailbox, req["message_id"], expect=999)
+    assert rc == STOPPED
+    assert "refusing rather than racing" in (out + err)
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+    # the correct revision still works
+    rc, out, err = cancel(mailbox, req["message_id"],
+                          expect=mailbox_state(mailbox)["revision"])
+    assert rc == OK, err + out
+
+
+def test_a_broken_chain_refuses_cancellation(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    box = mailbox_state(mailbox)
+    box["messages"][0]["sequence"] = 99                      # corrupt in place
+    (Path(mailbox) / "relay.json").write_text(json.dumps(box), encoding="utf-8")
+    before = (Path(mailbox) / "relay.json").read_bytes()
+    rc, out, err = cancel(mailbox, req["message_id"])
+    assert rc == STOPPED and "chain is broken" in (out + err)
+    assert (Path(mailbox) / "relay.json").read_bytes() == before
+
+
+def test_cancellation_requires_every_argument(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    base = ["--mailbox", str(mailbox), "--request-id", req["message_id"],
+            "--reason", REASON, "--cancelled-by", ACTOR]
+    for drop in ("--request-id", "--reason", "--cancelled-by"):
+        i = base.index(drop)
+        trimmed = base[:i] + base[i + 2:]
+        rc, _out, err = run("cancel-request", extra=trimmed)
+        assert rc == INVALID and drop in err, drop
+
+
+def test_cancellation_preserves_the_reason(demo, tmp_path):
+    """The reason is recorded verbatim rather than concealed."""
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    reason = "Registry advanced from 39 to 40 before execution could start."
+    assert cancel(mailbox, req["message_id"], reason=reason)[0] == OK
+    term = mailbox_state(mailbox)["messages"][-1]
+    assert term["reason"] == reason
+
+
+def test_a_later_request_completes_normally_after_cancellation(demo, tmp_path):
+    """The channel is usable again: submit, respond, verify."""
+    repo, registry, mailbox = demo
+    first = submit_one(tmp_path, repo, registry, mailbox, name="a")
+    assert cancel(mailbox, first["message_id"])[0] == OK
+
+    seq, prev = next_link(mailbox)
+    second = request_doc(repo, phase="3Z-NEXT", sequence=seq, previous=prev)
+    rp = write_json(tmp_path / "b.json", second)
+    rc, out, err = run("submit", extra=["--input", str(rp), "--mailbox",
+                                        str(mailbox)] + bound(repo, registry))
+    assert rc == OK, err + out
+    vp = write_json(tmp_path / "v2.json", verdict_doc(second))
+    rc, out, err = run("ingest-response", extra=["--response", str(vp),
+                                                 "--mailbox", str(mailbox),
+                                                 "--repo", str(repo)])
+    assert rc == OK, err + out
+    rc, out, _err = run("verify-chain", extra=["--mailbox", str(mailbox)])
+    assert rc == OK
+    assert "4 message(s) verified" in check_ids(out)["H1"]
+
+
+def test_cancellation_touches_no_registry_or_repository_state(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    reg_before = Path(registry).read_bytes()
+    head_before = git(repo, "rev-parse", "HEAD")
+    status_before = git(repo, "status", "--porcelain=v1")
+    assert cancel(mailbox, req["message_id"])[0] == OK
+    assert Path(registry).read_bytes() == reg_before
+    assert git(repo, "rev-parse", "HEAD") == head_before
+    assert git(repo, "status", "--porcelain=v1") == status_before
+
+
+def test_cancellation_leaves_no_lock_or_temp_residue(demo, tmp_path):
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    assert cancel(mailbox, req["message_id"])[0] == OK
+    leftovers = [p.name for p in Path(mailbox).rglob("*")
+                 if p.name.endswith((".lock", ".tmp"))]
+    assert leftovers == [], leftovers
+
+
+def test_cancellation_is_not_a_model_attempt(demo, tmp_path):
+    """No verdict, no response envelope, and no review attempt is consumed."""
+    repo, registry, mailbox = demo
+    req = submit_one(tmp_path, repo, registry, mailbox)
+    assert cancel(mailbox, req["message_id"])[0] == OK
+    box = mailbox_state(mailbox)
+    assert not any(m.get("sender") == "codex" for m in box["messages"])
+    assert not any("response" in m for m in box["messages"])
+    term = box["messages"][-1]
+    assert set(term) == set(cr.CANCELLATION_FIELDS)

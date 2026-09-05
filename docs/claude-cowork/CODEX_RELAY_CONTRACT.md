@@ -52,10 +52,10 @@ verdict schema *and* against the recorded request, and only then records a
 **relay-authored** response envelope through the locked atomic update. Codex's
 bytes are nested inside as data; they never become the envelope.
 
-### Operations — exactly seven, no aliases
+### Operations — exactly eight, no aliases
 
-`validate-policy` · `validate-request` · `validate-response` · `submit` ·
-`ingest-response` · `inspect` · `verify-chain`
+`validate-policy` · `validate-request` · `validate-response` ·
+`cancel-request` · `submit` · `ingest-response` · `inspect` · `verify-chain`
 
 Twenty-five action words (`run`, `exec`, `review`, `retry`, `approve`,
 `authorize`, `apply`, `edit`, `stage`, `commit`, `push`, `merge`, `deploy`,
@@ -148,6 +148,40 @@ Every verdict must carry this exact sentence, or it is rejected:
 Work classified **AAM** or **AM** in the
 [Approval Matrix](APPROVAL_MATRIX.md) still requires Pedro's named approval,
 every time. A verdict never substitutes for it, and the relay never acts on one.
+
+---
+
+## Retiring a request that can never run
+
+A request pins the registry revision it was bound to, and registry revisions only
+ever increase. If any session lifecycle change lands between `submit` and
+`review-once`, that request can never satisfy its own preconditions again — and
+because `find_pending_request` requires exactly one pending request, it would
+block **every** future review.
+
+`cancel-request` retires exactly one such request by **appending** a terminal
+`request_cancelled` message. It is append-only in the strictest sense: nothing is
+deleted, rewritten, truncated, moved, or silently archived, and every prior
+message and archive entry stays byte-identical.
+
+The terminal records what it retired and why: the request id, its sequence, its
+phase, its bound head, its bound registry revision, the reason, and who
+authorized it. The reason is preserved rather than concealed, so the mailbox
+still explains how the request went stale.
+
+It is **not a model response.** It carries no verdict, consumes no review
+attempt, and approves nothing — `sender` is `claude`, never `codex`, and no
+Codex result is fabricated.
+
+It refuses: an unknown id · a message that is not a review request · a request
+that already has a response · one already cancelled · an id that is not *the*
+pending request · any state with more or fewer than one pending request · a
+broken chain · and, with `--expect-mailbox-revision`, any revision race. Every
+refusal leaves the mailbox bytes unchanged. The existing lock, atomic replace,
+archive, and residue guarantees are untouched.
+
+`find_pending_request` and the runner's preconditions treat a valid cancellation
+as terminal for exactly that request, and for no other.
 
 ---
 

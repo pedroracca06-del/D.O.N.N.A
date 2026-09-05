@@ -77,6 +77,7 @@ EXIT_LIMIT = 3
 EXIT_STOPPED = 4
 
 OPERATIONS = ("validate-policy", "validate-request", "validate-response",
+              "cancel-request",
               "submit", "ingest-response", "inspect", "verify-chain")
 
 # A verb that would imply doing something rather than carrying a message. Refused
@@ -125,6 +126,20 @@ RESPONSE_FIELDS = (
     "created_at", "sender", "recipient", "phase", "repository_identity",
     "worktree_identity", "branch", "head", "registry_revision",
     "registry_expected_commit", "request_message_id", "response",
+)
+
+# A request that can never execute again -- its bound registry revision has been
+# overtaken, say -- would otherwise sit pending forever and block the mailbox for
+# every future review. This TERMINAL message retires exactly one such request by
+# APPENDING to the chain. It deletes nothing, rewrites nothing, and is emphatically
+# not a model response: it carries no verdict, consumes no review attempt, and
+# approves nothing. It records why the request went stale rather than hiding it.
+CANCELLATION_TYPE = "request_cancelled"
+CANCELLATION_FIELDS = (
+    "schema_version", "message_id", "sequence", "previous_message_sha256",
+    "created_at", "sender", "recipient", "message_type", "cancelled_request_id",
+    "cancelled_sequence", "phase", "head", "registry_revision", "reason",
+    "cancelled_by",
 )
 
 VERDICT_FIELDS = ("schema_version", "request_message_id", "phase", "head",
@@ -646,6 +661,56 @@ def validate_evidence(evidence, policy):
 # Request envelope
 # --------------------------------------------------------------------------
 
+def is_cancellation(msg):
+    """True for a terminal cancellation message, whatever else it carries."""
+    return isinstance(msg, dict) and msg.get("message_type") == CANCELLATION_TYPE
+
+
+def is_review_request(msg):
+    """True for an actual Claude review request, never for a cancellation."""
+    return (isinstance(msg, dict) and msg.get("sender") == "claude"
+            and not is_cancellation(msg))
+
+
+def cancelled_request_ids(mailbox_doc):
+    """Every request id retired by a cancellation already in the chain."""
+    return {m.get("cancelled_request_id") for m in mailbox_doc["messages"]
+            if is_cancellation(m)}
+
+
+def validate_cancellation(doc, policy):
+    """Field-by-field check of a terminal cancellation envelope."""
+    limits = _limits(policy)
+    _require(doc, CANCELLATION_FIELDS, "cancellation envelope")
+    _walk(doc, limits)
+
+    if doc["schema_version"] != SCHEMA_VERSION:
+        _bad("unsupported cancellation schema_version")
+    _str_field(doc, "message_id", _UUID_RE, "cancellation")
+    _str_field(doc, "cancelled_request_id", _UUID_RE, "cancellation")
+    _str_field(doc, "previous_message_sha256", _SHA256_RE, "cancellation")
+    _str_field(doc, "created_at", _TIMESTAMP_RE, "cancellation")
+    _str_field(doc, "phase", _PHASE_RE, "cancellation")
+    _str_field(doc, "head", _OID_RE, "cancellation")
+    for name in ("sequence", "cancelled_sequence"):
+        if not isinstance(doc[name], int) or isinstance(doc[name], bool)                 or doc[name] < 1:
+            _bad("cancellation %s must be a positive integer" % name)
+    if not isinstance(doc["registry_revision"], int)             or isinstance(doc["registry_revision"], bool)             or doc["registry_revision"] < 0:
+        _bad("cancellation registry_revision must be a non-negative integer")
+    if doc["sender"] != "claude":
+        _bad("a cancellation envelope must be sent by claude")
+    if doc["recipient"] != "codex":
+        _bad("a cancellation envelope must be addressed to codex")
+    if doc["message_type"] != CANCELLATION_TYPE:
+        _bad("message_type must be %r" % CANCELLATION_TYPE)
+    for name in ("reason", "cancelled_by"):
+        if not isinstance(doc[name], str) or not doc[name].strip():
+            _bad("cancellation %s must be a non-empty string" % name)
+    if len(canonical_bytes(doc)) > limits["max_envelope_bytes"]:
+        raise ef.SafetyLimitError("the cancellation envelope exceeds the maximum size")
+    return doc
+
+
 def validate_request(doc, policy):
     limits = _limits(policy)
     _require(doc, REQUEST_FIELDS, "request envelope")
@@ -869,6 +934,7 @@ def verify_chain(mailbox):
     expected_seq = 1
     seen_ids = set()
     seen_reviews = set()
+    seen_cancelled = set()
     for n, msg in enumerate(mailbox["messages"], 1):
         if not isinstance(msg, dict):
             problems.append((n, "message %d is not an object" % n))
@@ -882,7 +948,16 @@ def verify_chain(mailbox):
         if mid in seen_ids:
             problems.append((n, "message %d repeats a message_id" % n))
         seen_ids.add(mid)
-        if msg.get("sender") == "claude":
+        if is_cancellation(msg):
+            target = msg.get("cancelled_request_id")
+            if target not in seen_ids:
+                problems.append((n, "message %d cancels a request that does not "
+                                    "appear earlier in the chain" % n))
+            if target in seen_cancelled:
+                problems.append((n, "message %d cancels an already-cancelled "
+                                    "request" % n))
+            seen_cancelled.add(target)
+        elif msg.get("sender") == "claude":
             key = (msg.get("phase"), msg.get("head"))
             if key in seen_reviews:
                 problems.append((n, "message %d replays a (phase, head) review" % n))
@@ -1041,6 +1116,15 @@ def build_parser():
     parser.add_argument("--registry", default=None,
                         help="machine-local session registry, read-only")
     parser.add_argument("--session-id", default=None)
+    parser.add_argument("--request-id", default=None,
+                        help="cancel-request: the pending request to retire")
+    parser.add_argument("--reason", default=None,
+                        help="cancel-request: why the request became unusable")
+    parser.add_argument("--cancelled-by", default=None,
+                        help="cancel-request: the person authorizing the retirement")
+    parser.add_argument("--expect-mailbox-revision", type=int, default=None,
+                        help="cancel-request: refuse unless the mailbox is still "
+                             "at this revision (compare-and-swap guard)")
     return parser
 
 
@@ -1283,13 +1367,101 @@ def main(argv=None):
                 _require(message, RESPONSE_FIELDS, "response envelope")
                 _record(args, policy, message, checks)
 
+        elif op == "cancel-request":
+            for name, value in (("--request-id", args.request_id),
+                                ("--reason", args.reason),
+                                ("--cancelled-by", args.cancelled_by)):
+                if not value:
+                    _bad("cancel-request requires %s" % name)
+
+            current = read_mailbox(_require_mailbox(args)[1])
+            problems = verify_chain(current)
+            if problems:
+                raise sg.StoppedError("the mailbox chain is broken: %s"
+                                      % problems[0][1])
+            checks.append(_chk("X1", "chain", "pass",
+                               "%d message(s) verified before cancelling"
+                               % len(current["messages"])))
+
+            # Compare-and-swap: a racing writer must fail closed, not overwrite.
+            if args.expect_mailbox_revision is not None and                     current["revision"] != args.expect_mailbox_revision:
+                raise sg.StoppedError("the mailbox is at revision %d, not the "
+                                      "expected %d; refusing rather than racing"
+                                      % (current["revision"],
+                                         args.expect_mailbox_revision))
+            checks.append(_chk("X2", "revision guard", "pass",
+                               "mailbox revision %d" % current["revision"]))
+
+            target = None
+            for msg in current["messages"]:
+                if msg.get("message_id") == args.request_id:
+                    target = msg
+                    break
+            if target is None:
+                _bad("no recorded message has that id")
+            if not is_review_request(target):
+                _bad("that id does not name a Claude review request")
+            for msg in current["messages"]:
+                if msg.get("sender") == "codex" and                         msg.get("request_message_id") == args.request_id:
+                    _bad("a response for that request is already recorded; a "
+                         "completed exchange is never cancelled")
+            if args.request_id in cancelled_request_ids(current):
+                _bad("that request is already cancelled")
+
+            answered = {m.get("request_message_id") for m in current["messages"]
+                        if m.get("sender") == "codex"}
+            retired = cancelled_request_ids(current)
+            pending = [m for m in current["messages"] if is_review_request(m)
+                       and m.get("message_id") not in answered
+                       and m.get("message_id") not in retired]
+            if len(pending) != 1:
+                raise sg.StoppedError(
+                    "the mailbox holds %d pending request(s); cancellation "
+                    "requires exactly one so no ambiguity is left behind"
+                    % len(pending))
+            if pending[0]["message_id"] != args.request_id:
+                _bad("the supplied request id is not the pending request")
+            checks.append(_chk("X3", "target", "pass",
+                               "request %s, sequence %s, phase %s, bound to "
+                               "registry revision %s"
+                               % (target["message_id"], target["sequence"],
+                                  target["phase"], target["registry_revision"])))
+
+            message = {
+                "schema_version": SCHEMA_VERSION,
+                "message_id": _new_message_id(),
+                "sequence": len(current["messages"]) + 1,
+                "previous_message_sha256": chain_hash(current["messages"]),
+                "created_at": datetime.now(timezone.utc)
+                                      .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "sender": "claude",
+                "recipient": "codex",
+                "message_type": CANCELLATION_TYPE,
+                "cancelled_request_id": target["message_id"],
+                "cancelled_sequence": target["sequence"],
+                "phase": target["phase"],
+                "head": target["head"],
+                "registry_revision": target["registry_revision"],
+                "reason": args.reason,
+                "cancelled_by": args.cancelled_by,
+            }
+            validate_cancellation(message, policy)
+            checks.append(_chk("X4", "cancellation", "warning",
+                               "terminal only: no verdict, no review attempt "
+                               "consumed, and nothing approved"))
+            _record(args, policy, message, checks)
+
         elif op == "inspect":
             current = read_mailbox(_require_mailbox(args)[1])
             checks.append(_chk("I1", "mailbox", "pass",
                                "revision %d, %d message(s)"
                                % (current["revision"], len(current["messages"]))))
             for n, msg in enumerate(current["messages"], 1):
-                if msg.get("sender") == "claude":
+                if is_cancellation(msg):
+                    detail = ("CANCELLED request %s, phase %s"
+                              % (msg.get("cancelled_request_id"),
+                                 msg.get("phase")))
+                elif msg.get("sender") == "claude":
                     detail = "request, phase %s, change class %s" \
                              % (msg.get("phase"), msg.get("change_class"))
                 else:

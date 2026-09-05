@@ -777,11 +777,14 @@ def _chk(cid, label, status, evidence):
 
 
 def find_pending_request(mailbox_doc):
-    """Exactly one Claude request with no recorded Codex response."""
+    """Exactly one Claude request with no recorded response and no cancellation."""
+    # A cancellation is also sent by Claude, so it is excluded twice over: it is
+    # never itself a pending request, and the request it names is terminal.
     claude_messages = [m for m in mailbox_doc["messages"]
-                       if m.get("sender") == "claude"]
+                       if cr.is_review_request(m)]
     answered = {m.get("request_message_id") for m in mailbox_doc["messages"]
                 if m.get("sender") == "codex"}
+    answered |= cr.cancelled_request_ids(mailbox_doc)
     pending = [m for m in claude_messages
                if m.get("message_id") not in answered]
     if not pending:
