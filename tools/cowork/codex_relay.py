@@ -211,23 +211,43 @@ _EXECUTABLE_RE = re.compile(
 # this narrower rule instead: a bare identifier is data, an INVOCATION is not.
 # Everything genuinely executable is still refused -- shells, chaining, scripts,
 # encoded payloads, tool invocations, and imperative "run this" instructions.
+# An INVOCATION needs an argument. A tool name followed by a flag, a URL, a
+# path, a quoted string, a variable, a redirect, a number or an executable file
+# name is a command; the same name followed by ordinary English is a mention.
+_AUDIT_ARGUMENT = (
+    r"(?:-{1,2}\w|/[A-Za-z]\b|[A-Za-z][A-Za-z0-9+.-]*://|[.~/\\]|"
+    r"[A-Za-z]:[\\/]|['\"]|\$\w|%\w+%|>|\d|"
+    r"[\w.-]+\.(?:exe|ps1|sh|bat|cmd|py|js)\b)"
+)
+
+# A command name, for the cases where one tool is used to launch another.
+_AUDIT_COMMAND = (
+    r"(?:rm|del|cat|echo|ls|dir|cp|mv|bash|sh|zsh|python|node|npm|npx|pip|"
+    r"git|kill|dd|mkfs|chmod|chown|curl|wget|nc|netcat|whoami|id)"
+)
+
 _AUDIT_EXECUTABLE_RULES = (
-    ("command substitution", re.compile(r"\$\(")),
+    ("command substitution", re.compile(r"\$\(|`[^`\n]{1,80}`")),
     # A semicolon is shell chaining only when a COMMAND follows it. An audit
-    # writes ordinary English -- "a policy may lower any of these; it can
-    # never raise one" -- and a bare word after the semicolon refuses that
-    # prose while catching nothing the command-anchored form misses.
+    # writes ordinary English -- "a policy may lower any of these; it can never
+    # raise one" -- and a bare word after the semicolon refuses that prose
+    # while catching nothing the command-anchored form misses.
     ("command chaining", re.compile(
         r"&&|\|\||;\s*(?:rm|del|curl|wget|git|python|node|bash|sh|zsh|pwsh|"
         r"powershell|cmd|npm|npx|pip|chmod|chown|sudo|nc|mv|cp|cat|echo|eval|"
         r"exec|kill|dd|mkfs)\b")),
     ("pipe into interpreter",
      re.compile(r"(?i)\|\s*(?:bash|sh|zsh|python|node|pwsh|powershell)\b")),
+    # Naming a shell is how an audit says a shell is NOT used. Only an
+    # invocation is refused.
     ("shell or tool invocation", re.compile(
-        r"(?i)(?<![.\w])(sudo|curl|wget|nc|netcat|chmod|chown|iex|"
-        r"invoke-expression|start-process|cmd\.exe|powershell|pwsh)\b")),
+        r"(?i)(?<![.\w])(?:sudo|curl|wget|nc|netcat|chmod|chown|start-process|"
+        r"cmd\.exe|powershell|pwsh)\s+(?:" + _AUDIT_ARGUMENT + r"|"
+        + _AUDIT_COMMAND + r"\b)")),
+    ("expression invocation",
+     re.compile(r"(?i)(?<![.\w])(?:iex|invoke-expression)\s*[('\"]")),
     ("interpreter with flags",
-     re.compile(r"(?i)(?<![.\w])(?:sh|bash|python|node)\s+-\w")),
+     re.compile(r"(?i)(?<![.\w])(?:sh|bash|zsh|python|node)\s+-\w")),
     ("markup or scheme payload",
      re.compile(r"(?i)<script|javascript:|data:text/html")),
     # A NAMED symbol is data; an INVOCATION is not. `subprocess` passes,
