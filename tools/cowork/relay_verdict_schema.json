@@ -12,7 +12,8 @@
     "verdict",
     "summary",
     "findings",
-    "non_authorization"
+    "non_authorization",
+    "audit"
   ],
   "properties": {
     "schema_version": {
@@ -109,8 +110,11 @@
       "const": "This verdict grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution."
     },
     "audit": {
-      "type": "object",
-      "description": "Optional typed code-audit block. Every field is inert data: it names files, symbols, configuration keys and error types, and never carries a command, script, patch, encoded payload, or instruction to execute anything. Present only when the task asked for a code audit.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Typed code-audit block, or null when the task was not a code audit. Every field is inert data: it names files, symbols, configuration keys and error types, and never carries a command, script, patch, encoded payload, or instruction to execute anything.",
       "additionalProperties": false,
       "required": [
         "schema_version",

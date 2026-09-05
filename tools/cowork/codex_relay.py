@@ -503,8 +503,10 @@ def validate_verdict_schema(schema):
         raise PolicyError("the verdict schema must describe an object")
     if schema.get("additionalProperties") is not False:
         raise PolicyError("the verdict schema must set additionalProperties false")
-    if sorted(schema.get("required", [])) != sorted(VERDICT_FIELDS):
-        raise PolicyError("the verdict schema must require exactly the verdict fields")
+    if sorted(schema.get("required", [])) not in (
+            sorted(VERDICT_FIELDS), sorted(tuple(VERDICT_FIELDS) + ("audit",))):
+        raise PolicyError("the verdict schema must require exactly the verdict "
+                          "fields, plus the audit block when it is defined")
     props = schema.get("properties")
     # `audit` is the one optional property: required stays exactly the verdict
     # fields, so a verdict without an audit block is still conforming, while a
@@ -964,8 +966,10 @@ def validate_audit(block, policy):
 def validate_verdict(doc, policy, schema):
     """Check a Codex final response field by field against the shipped schema."""
     limits = _limits(policy)
+    # Strict structured output cannot omit a property, so "no audit" arrives as
+    # an explicit null rather than a missing key. Both mean the same thing here.
     audit = doc.get("audit")
-    fields = VERDICT_FIELDS + (("audit",) if audit is not None else ())
+    fields = VERDICT_FIELDS + (("audit",) if "audit" in doc else ())
     _require(doc, fields, "verdict document")
     # The audit block carries typed inert code references and is validated by its
     # own stricter-shaped rules; everything else stays under the generic scan.

@@ -2146,7 +2146,10 @@ def test_the_shipped_schema_admits_the_typed_audit_block():
     schema, _ = cr.load_verdict_schema(None)
     cr.validate_verdict_schema(schema)
     assert "audit" in schema["properties"], "the schema must admit an audit block"
-    assert "audit" not in schema["required"], "the audit block stays optional"
+    # Strict structured output forbids an omitted property, so "optional" is
+    # expressed as required-but-nullable. A non-audit verdict sends null.
+    assert "audit" in schema["required"]
+    assert schema["properties"]["audit"]["type"] == ["object", "null"]
     block = schema["properties"]["audit"]
     assert block["additionalProperties"] is False
     assert sorted(block["required"]) == sorted(cr.AUDIT_BLOCK_FIELDS)
@@ -2161,7 +2164,14 @@ def test_a_schema_that_forbids_the_audit_block_is_still_accepted(tmp_path):
     schema, _ = cr.load_verdict_schema(None)
     trimmed = _json.loads(_json.dumps(schema))
     trimmed["properties"].pop("audit")
+    trimmed["required"] = [f for f in trimmed["required"] if f != "audit"]
     cr.validate_verdict_schema(trimmed)
+
+
+def test_a_null_audit_means_no_audit():
+    """Strict structured output sends null, not an omitted key."""
+    pol, schema = _policy_and_schema()
+    cr.validate_verdict(_verdict_with(audit=None), pol, schema)
 
 
 def test_a_schema_with_an_extra_property_is_refused(tmp_path):
