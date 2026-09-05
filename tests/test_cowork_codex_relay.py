@@ -2368,3 +2368,79 @@ def test_every_audit_rule_still_names_itself():
                      "expression invocation", "code invocation",
                      "encoded blob"):
         assert expected in names, expected
+
+
+# ------------------------------------- a verdict is prose, and is scanned as prose
+#
+# The audit block was not the only place a truthful reviewer was refused. A
+# verdict's summary and its findings describe what the reviewed code does, so
+# they need the same vocabulary. Requests keep the stricter free-form rule.
+
+def _loaded_policy():
+    return json.loads(POLICY.read_text(encoding="utf-8"))
+
+
+def _loaded_schema():
+    return json.loads(VERDICT_SCHEMA.read_text(encoding="utf-8"))
+
+
+def _prose_verdict(summary=None, message=None, evidence=None):
+    doc = {
+        "schema_version": 1,
+        "request_message_id": "4d248f9a-408c-42e1-b64f-2395eaba3117",
+        "phase": "PROSE-CHECK",
+        "head": "a" * 40,
+        "verdict": "PASS",
+        "summary": summary or "The reviewed code behaves as documented.",
+        "findings": [{
+            "finding_id": "F-001",
+            "severity": "informational",
+            "category": "observability",
+            "message": message or "A minor note about the diagnostic path.",
+            "evidence": evidence or "tools/cowork/codex_review_runner.py",
+        }],
+        "non_authorization": cr.NON_AUTHORIZATION_SENTENCE,
+        "audit": None,
+    }
+    return doc
+
+
+@pytest.mark.parametrize("prose", AUDIT_INERT_PROSE)
+def test_a_verdict_summary_may_name_a_shell(prose):
+    cr.validate_verdict(_prose_verdict(summary=prose), _loaded_policy(),
+                        _loaded_schema())
+
+
+@pytest.mark.parametrize("prose", AUDIT_INERT_PROSE)
+def test_a_finding_may_name_a_shell(prose):
+    cr.validate_verdict(_prose_verdict(message=prose), _loaded_policy(),
+                        _loaded_schema())
+
+
+@pytest.mark.parametrize("payload", AUDIT_RUNNABLE_CONTENT)
+def test_a_verdict_still_refuses_runnable_content(payload):
+    with pytest.raises(Exception):
+        # Joined with a newline, not a prefix: several rules are line-anchored
+        # on purpose, and a prefix would defeat them without proving anything.
+        cr.validate_verdict(_prose_verdict(summary="ok.\n" + payload),
+                            _loaded_policy(), _loaded_schema())
+
+
+def test_a_verdict_still_refuses_credentials_and_machine_paths():
+    """Prose mode swaps ONE rule; every other scan still applies."""
+    for bad in ("api_key = sk-ant-api03-AAAAAAAAAAAAAAAAAAAA",
+                "the file lives at " + chr(67) + ":" + chr(92) + "Users"
+                + chr(92) + "someone"):
+        with pytest.raises(Exception):
+            cr.validate_verdict(_prose_verdict(summary=bad), _loaded_policy(),
+                                _loaded_schema())
+
+
+def test_the_narrow_set_did_not_lose_the_free_form_guards():
+    """Two rules moved across with the switch, so nothing is weaker."""
+    assert cr.audit_executable_reason("PATH=/evil/bin") == "environment assignment"
+    assert cr.audit_executable_reason("Set-Content -Path x -Value y") \
+        == "file write cmdlet"
+    assert cr.audit_executable_reason("Out-File ./x") == "file write cmdlet"
+    # ...but naming them in prose is still fine.
+    assert cr.audit_executable_reason("Set-Content is never called here") is None

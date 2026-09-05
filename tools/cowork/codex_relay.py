@@ -260,6 +260,10 @@ _AUDIT_EXECUTABLE_RULES = (
         r"(?:following|commands?|scripts?|patch|diff|snippet)\b")),
     ("patch or diff payload",
      re.compile(r"(?m)^\s*(?:diff --git|@@ -|\+\+\+ b/|--- a/)")),
+    ("environment assignment", re.compile(r"(?m)^\s*[A-Z_]{3,}=")),
+    ("file write cmdlet", re.compile(
+        r"(?i)(?<![.\w])(?:set-content|add-content|out-file)\s+(?:"
+        + _AUDIT_ARGUMENT + r"|" + _AUDIT_COMMAND + r"\b)")),
     ("encoded blob", re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")),
 )
 
@@ -592,7 +596,7 @@ def _limits(policy):
     return policy["limits"]
 
 
-def _walk(node, limits, depth=0, key=None):
+def _walk(node, limits, depth=0, key=None, prose=False):
     """Depth, size, and content scan applied to every envelope, uniformly."""
     if depth > limits["max_depth"]:
         raise ef.SafetyLimitError("the document nests deeper than the maximum depth")
@@ -608,13 +612,13 @@ def _walk(node, limits, depth=0, key=None):
             if _COMMAND_KEY_RE.match(k):
                 _bad("a command-, action-, or authorization-bearing field is not "
                      "permitted anywhere in an envelope")
-            _walk(k, limits, depth + 1)
-            _walk(v, limits, depth + 1, key=k)
+            _walk(k, limits, depth + 1, prose=prose)
+            _walk(v, limits, depth + 1, key=k, prose=prose)
     elif isinstance(node, list):
         if len(node) > limits["max_paths"]:
             raise ef.SafetyLimitError("a list exceeds the maximum element count")
         for v in node:
-            _walk(v, limits, depth + 1, key=key)
+            _walk(v, limits, depth + 1, key=key, prose=prose)
     elif isinstance(node, str):
         if len(node) > limits["max_string_chars"]:
             raise ef.SafetyLimitError("a string exceeds the maximum length")
@@ -624,7 +628,16 @@ def _walk(node, limits, depth=0, key=None):
         if _MACHINE_PATH_RE.search(node):
             _bad("a machine-specific path or username is not permitted in an "
                  "envelope; use the logical repository and worktree identity")
-        if _EXECUTABLE_RE.search(node):
+        # Prose about code has to be able to NAME a shell in order to report
+        # that the shell is not used. In prose mode the same calibrated rules
+        # the audit block uses apply: an INVOCATION is refused, a mention is
+        # not. Everything genuinely runnable is still refused either way.
+        if prose:
+            reason = audit_executable_reason(node)
+            if reason:
+                _bad("%s was found in a field that may only carry inert data"
+                     % reason)
+        elif _EXECUTABLE_RE.search(node):
             _bad("an executable construct or command was found in a field that "
                  "may only carry inert data")
         # The fixed non-authorization sentence names the very acts it forbids
@@ -1016,7 +1029,8 @@ def validate_verdict(doc, policy, schema):
     _require(doc, fields, "verdict document")
     # The audit block carries typed inert code references and is validated by its
     # own stricter-shaped rules; everything else stays under the generic scan.
-    _walk({k: v for k, v in doc.items() if k != "audit"}, limits)
+    _walk({k: v for k, v in doc.items() if k != "audit"}, limits,
+          prose=True)
     if audit is not None:
         validate_audit(audit, policy)
 
