@@ -183,6 +183,13 @@ archive, and residue guarantees are untouched.
 `find_pending_request` and the runner's preconditions treat a valid cancellation
 as terminal for exactly that request, and for no other.
 
+Chain verification enforces the same shape independently of the command, because
+it is what validates a mailbox read off disk: a `request_cancelled` message must
+name an **earlier review request**. Naming a response, another cancellation, or
+an unknown id fails verification, as does cancelling the same request twice. The
+command already refused all of these; the check exists so a tampered or
+hand-edited mailbox is caught too.
+
 ---
 
 ## One review per phase, no automatic retry

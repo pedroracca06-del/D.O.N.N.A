@@ -935,6 +935,10 @@ def verify_chain(mailbox):
     seen_ids = set()
     seen_reviews = set()
     seen_cancelled = set()
+    # Only ids of actual review requests. A cancellation must name one of THESE,
+    # never a response or another cancellation, so `seen_ids` is deliberately not
+    # reused here: it holds every message id and would accept the wrong target.
+    seen_request_ids = set()
     for n, msg in enumerate(mailbox["messages"], 1):
         if not isinstance(msg, dict):
             problems.append((n, "message %d is not an object" % n))
@@ -950,14 +954,15 @@ def verify_chain(mailbox):
         seen_ids.add(mid)
         if is_cancellation(msg):
             target = msg.get("cancelled_request_id")
-            if target not in seen_ids:
-                problems.append((n, "message %d cancels a request that does not "
-                                    "appear earlier in the chain" % n))
+            if target not in seen_request_ids:
+                problems.append((n, "message %d cancels something that is not an "
+                                    "earlier review request" % n))
             if target in seen_cancelled:
                 problems.append((n, "message %d cancels an already-cancelled "
                                     "request" % n))
             seen_cancelled.add(target)
         elif msg.get("sender") == "claude":
+            seen_request_ids.add(mid)
             key = (msg.get("phase"), msg.get("head"))
             if key in seen_reviews:
                 problems.append((n, "message %d replays a (phase, head) review" % n))

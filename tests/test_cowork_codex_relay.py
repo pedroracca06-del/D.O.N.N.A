@@ -1844,3 +1844,93 @@ def test_cancellation_is_not_a_model_attempt(demo, tmp_path):
     assert not any("response" in m for m in box["messages"])
     term = box["messages"][-1]
     assert set(term) == set(cr.CANCELLATION_FIELDS)
+
+
+# --------------------------------- CANCEL-001: a cancellation must name a REQUEST
+#
+# Found by an independent Codex review of the cancellation feature. `verify_chain`
+# originally checked the target against every seen message id, so a cancellation
+# naming an earlier RESPONSE verified clean. The `cancel-request` command itself
+# always refused that, but the on-disk integrity check -- the thing that must
+# catch a tampered or hand-edited mailbox -- did not.
+
+def _synthetic_exchange():
+    req = {"schema_version": 1, "message_id": str(uuid.uuid4()), "sequence": 1,
+           "previous_message_sha256": "0" * 64,
+           "created_at": "2026-09-05T00:00:00Z", "sender": "claude",
+           "recipient": "codex", "phase": "P1", "head": "a" * 40}
+    resp = {"schema_version": 1, "message_id": str(uuid.uuid4()), "sequence": 2,
+            "previous_message_sha256": cr.sha256_of(req),
+            "created_at": "2026-09-05T00:00:01Z", "sender": "codex",
+            "recipient": "claude", "request_message_id": req["message_id"]}
+    return req, resp
+
+
+def _synthetic_cancellation(target, sequence, previous):
+    return {"schema_version": 1, "message_id": str(uuid.uuid4()),
+            "sequence": sequence, "previous_message_sha256": previous,
+            "created_at": "2026-09-05T00:00:02Z", "sender": "claude",
+            "recipient": "codex", "message_type": "request_cancelled",
+            "cancelled_request_id": target, "cancelled_sequence": 1,
+            "phase": "P1", "head": "a" * 40, "registry_revision": 1,
+            "reason": "bound revision overtaken", "cancelled_by": "Pedro"}
+
+
+def test_chain_rejects_a_cancellation_naming_a_response():
+    req, resp = _synthetic_exchange()
+    canc = _synthetic_cancellation(resp["message_id"], 3, cr.chain_hash([req, resp]))
+    box = {"schema_version": 1, "revision": 3, "messages": [req, resp, canc]}
+    problems = cr.verify_chain(box)
+    assert problems, "a cancellation naming a response must not verify"
+    assert "not an earlier review request" in problems[0][1]
+
+
+def test_chain_rejects_a_cancellation_naming_another_cancellation():
+    req, _resp = _synthetic_exchange()
+    first = _synthetic_cancellation(req["message_id"], 2, cr.sha256_of(req))
+    second = _synthetic_cancellation(first["message_id"], 3,
+                                     cr.chain_hash([req, first]))
+    box = {"schema_version": 1, "revision": 3, "messages": [req, first, second]}
+    problems = cr.verify_chain(box)
+    assert problems
+    assert "not an earlier review request" in problems[0][1]
+
+
+def test_chain_rejects_a_cancellation_naming_an_unknown_id():
+    req, _resp = _synthetic_exchange()
+    canc = _synthetic_cancellation(str(uuid.uuid4()), 2, cr.sha256_of(req))
+    box = {"schema_version": 1, "revision": 2, "messages": [req, canc]}
+    problems = cr.verify_chain(box)
+    assert problems
+    assert "not an earlier review request" in problems[0][1]
+
+
+def test_chain_accepts_a_cancellation_naming_its_request():
+    """Positive control: the legitimate shape still verifies."""
+    req, _resp = _synthetic_exchange()
+    canc = _synthetic_cancellation(req["message_id"], 2, cr.sha256_of(req))
+    box = {"schema_version": 1, "revision": 2, "messages": [req, canc]}
+    assert cr.verify_chain(box) == []
+
+
+def test_chain_still_rejects_a_double_cancellation():
+    req, _resp = _synthetic_exchange()
+    first = _synthetic_cancellation(req["message_id"], 2, cr.sha256_of(req))
+    second = _synthetic_cancellation(req["message_id"], 3,
+                                     cr.chain_hash([req, first]))
+    box = {"schema_version": 1, "revision": 3, "messages": [req, first, second]}
+    problems = cr.verify_chain(box)
+    assert any("already-cancelled" in p[1] for p in problems), problems
+
+
+def test_the_real_mailbox_cancellation_targets_a_request():
+    """The live mailbox's own terminal names a genuine request, not a response."""
+    mailbox = Path.home() / ".claude" / "nova-relay" / "relay.json"
+    if not mailbox.is_file():
+        return
+    box = json.loads(mailbox.read_text(encoding="utf-8"))
+    assert cr.verify_chain(box) == []
+    requests = {m["message_id"] for m in box["messages"] if cr.is_review_request(m)}
+    for m in box["messages"]:
+        if cr.is_cancellation(m):
+            assert m["cancelled_request_id"] in requests, m["message_id"]
