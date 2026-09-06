@@ -520,6 +520,11 @@ class ProtectionFailed(Exception):
     """Protection could not be established. The run must not start."""
 
 
+# Empty files created by a destination open that then failed validation. They
+# are recorded rather than unlinked: see the cleanup note in `_open_contained`.
+_ORPHANED_ON_FAILURE = []
+
+
 def protect_paths(repo, policy, assigned, strict=True):
     """Mark everything outside the assignment read-only, over the REAL worktree.
 
@@ -803,15 +808,47 @@ def _makedirs_contained(parent, repo, assigned, policy):
         _refuse_protected(step, policy)
 
 
-def _same_object(path, identity):
-    """True when `path` still names the object we opened."""
-    if identity is None:
-        return False
+def _read_contained(src, staging):
+    """Read a staged file through a handle proven to live inside staging.
+
+    Opening the source by pathname is the same class of mistake as writing by
+    pathname: the model owns the staging tree, so it can replace a staged file
+    with a link between validation and the read and have the runner read
+    something else -- then write that content into an assigned file.
+    """
+    _refuse_reparse_ancestors(os.path.dirname(src), staging)
+    if os.path.lexists(src):
+        try:
+            info = os.stat(src, follow_symlinks=False)
+        except OSError:
+            raise ProtectionFailed("a staged source could not be inspected")
+        if os.path.islink(src) or rr.is_reparse_point(info):
+            raise ProtectionFailed(
+                "a staged source is a link or reparse point; refusing to read "
+                "through it")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) \
+        | getattr(os, "O_NOINHERIT", 0)
+    fd = os.open(src, flags)
     try:
-        info = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    return (info.st_dev, info.st_ino) == identity
+        final = _final_path_of_handle(fd)
+        root = _norm(_long_path(os.path.abspath(staging)))
+        if not rr._within(final, root):
+            raise ProtectionFailed(
+                "a staged source resolves outside the staging workspace")
+        links = _handle_link_count(fd)
+        if links is None or links > 1:
+            raise ProtectionFailed(
+                "a staged source has more than one name, or its link count "
+                "could not be established; refusing to read through it")
+        chunks = []
+        while True:
+            block = os.read(fd, 1 << 20)
+            if not block:
+                break
+            chunks.append(block)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def _open_contained(dst, repo, assigned=None, policy=None):
@@ -840,12 +877,7 @@ def _open_contained(dst, repo, assigned=None, policy=None):
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0) \
         | getattr(os, "O_NOINHERIT", 0)
     fd = os.open(dst, flags, 0o600)
-    identity = None
     try:
-        # Remember WHICH object this is, so cleanup can never remove a
-        # different one that the pathname later refers to.
-        stat_info = os.fstat(fd)
-        identity = (stat_info.st_dev, stat_info.st_ino)
         final = _final_path_of_handle(fd)
         if not rr._within(final, _norm(repo)):
             raise ProtectionFailed(
@@ -877,13 +909,14 @@ def _open_contained(dst, repo, assigned=None, policy=None):
             _refuse_protected(settled, policy)
     except Exception:
         os.close(fd)
-        # Only remove what we created, and only if the name STILL refers to
-        # that same object. A redirected pathname must never be unlinked.
-        if created and _same_object(dst, identity):
-            try:
-                os.unlink(dst)
-            except OSError:
-                pass
+        # Deliberately NOT removed. Comparing device and inode after the handle
+        # is closed still leaves a window where those identifiers could be
+        # reused by a replacement object, and unlinking the wrong object is
+        # worse than leaving an empty file behind. An empty file we created is
+        # inert, appears in the coordinator's diff, and is reverted there if it
+        # is out of scope -- at a point when no model is running.
+        if created:
+            _ORPHANED_ON_FAILURE.append(dst)
         raise
     return fd
 
@@ -918,7 +951,7 @@ def apply_staged(base, repo, assigned, policy):
                     "the destination canonicalises outside the assignment: %s"
                     % canonical)
             _refuse_protected(canonical, policy)
-            payload = open(src, "rb").read()
+            payload = _read_contained(src, base)
             fd = _open_contained(dst, repo, assigned, policy)
             try:
                 os.ftruncate(fd, 0)

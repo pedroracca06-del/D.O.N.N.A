@@ -1281,26 +1281,21 @@ def test_contained_makedirs_refuses_a_path_outside_the_worktree(tmp_path, policy
 
 # ------------------------------------------------------------------ F-002
 
-def test_object_identity_distinguishes_a_reused_name(tmp_path):
-    target = tmp_path / "x.py"
-    target.write_text("a\n", encoding="utf-8")
-    info = os.stat(target)
-    identity = (info.st_dev, info.st_ino)
-    assert ir._same_object(str(target), identity) is True
-    target.unlink()
-    target.write_text("b\n", encoding="utf-8")
-    assert ir._same_object(str(target), identity) is False, \
-        "a different object behind the same name was treated as the same one"
+def test_a_failed_open_never_unlinks_anything():
+    """Stronger than an identity check: the failure path has no unlink at all.
 
-
-def test_object_identity_is_false_for_a_missing_path(tmp_path):
-    assert ir._same_object(str(tmp_path / "nope"), (1, 2)) is False
-    assert ir._same_object(str(tmp_path), None) is False
-
-
-def test_cleanup_is_identity_checked_not_name_based():
-    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
-    assert "_same_object(dst" in source
+    Comparing device and inode after closing the handle still leaves a window
+    in which those identifiers could be reused, and unlinking the wrong object
+    is worse than leaving an empty file. The empty file is inert, shows up in
+    the coordinator's diff, and is reverted there when no model is running.
+    """
+    body = RUNNER.read_text(encoding="utf-8")
+    open_body = body[body.index("def _open_contained("):]
+    open_body = open_body[:open_body.index("\ndef ", 1)]
+    assert "os.unlink" not in open_body, \
+        "the failure path must not unlink by name"
+    assert "_ORPHANED_ON_FAILURE" in open_body
+    source = " ".join(body.split())
     assert "_makedirs_contained" in source
     # build_staging may use makedirs -- it builds OUR staging tree. The apply
     # path writes into the real worktree and must not.
