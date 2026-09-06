@@ -1304,3 +1304,112 @@ def test_a_failed_open_never_unlinks_anything():
     apply_body = apply_body[:apply_body.index("\ndef ", 1)]
     assert "os.makedirs" not in apply_body, \
         "path-based makedirs must not survive in the apply path"
+
+
+# ======================================== IMPL-RUNNER-REVIEW-09 findings
+#
+# orphan-created-destination (high) refusing to unlink on failure meant a
+#   failed out-of-scope or protected write could leave an empty file at a bad
+#   path. Scope and protection are now decided on the INTENDED path BEFORE
+#   anything is created, so an orphan can only ever be in-scope and
+#   non-protected. Creation uses O_EXCL inside a parent already proven safe.
+# partial-write (medium) a single os.write can be short, so a large payload
+#   could be copied incompletely while the apply reported success.
+
+
+@pytest.mark.parametrize("rel,assigned", [
+    ("services/execution.py", ["services/**"]),
+    ("core/state_engine.py", ["core/**"]),
+    ("other.py", ["intelligence/**"]),
+    ("tools/cowork/codex_review_runner.py", ["tools/**"]),
+])
+def test_nothing_is_created_at_a_protected_or_out_of_scope_path(
+        tmp_path, policy, rel, assigned):
+    repo = tmp_path / "w"
+    dst = repo / rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(ir.ProtectionFailed):
+        ir._open_contained(str(dst), str(repo), assigned, policy)
+    assert not dst.exists(), "an empty file was created at a refused path"
+
+
+def test_an_in_scope_destination_is_still_created(tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "new.py"
+    fd = ir._open_contained(str(dst), str(repo), ["intelligence/**"], policy)
+    os.close(fd)
+    assert dst.exists()
+
+
+def test_a_new_destination_is_created_exclusively():
+    """O_EXCL, so a name appearing in the meantime is refused, not followed."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "os.O_CREAT | os.O_EXCL" in source
+
+
+def test_an_orphan_left_behind_can_only_be_in_scope(tmp_path, policy,
+                                                    monkeypatch):
+    """Validation fails after creation; what remains is in-scope and empty."""
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "new.py"
+    monkeypatch.setattr(ir, "_handle_link_count", lambda _fd: None)
+    with pytest.raises(ir.ProtectionFailed):
+        ir._open_contained(str(dst), str(repo), ["intelligence/**"], policy)
+    if dst.exists():
+        assert dst.stat().st_size == 0
+        assert ir.in_scope("intelligence/new.py", ["intelligence/**"])
+
+
+# ------------------------------------------------------------- partial write
+
+def test_every_byte_of_a_large_payload_is_written(tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "big.bin"
+    payload = b"x" * (5 * 1024 * 1024)
+    fd = ir._open_contained(str(dst), str(repo), ["intelligence/**"], policy)
+    try:
+        assert ir._write_all(fd, payload) == len(payload)
+    finally:
+        os.close(fd)
+    assert dst.stat().st_size == len(payload)
+
+
+def test_a_short_write_is_detected(monkeypatch, tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "x.bin"
+    fd = ir._open_contained(str(dst), str(repo), ["intelligence/**"], policy)
+    try:
+        monkeypatch.setattr(os, "write", lambda _fd, _buf: 0)
+        with pytest.raises(ir.ProtectionFailed):
+            ir._write_all(fd, b"abc")
+    finally:
+        os.close(fd)
+
+
+def test_the_apply_path_writes_every_byte_and_checks_the_size():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "_write_all(fd, payload)" in source
+    assert "the applied file is" in source
+    body = RUNNER.read_text(encoding="utf-8")
+    apply_body = body[body.index("def apply_staged("):]
+    apply_body = apply_body[:apply_body.index("\ndef ", 1)]
+    assert "os.write(" not in apply_body, \
+        "the apply path must use the complete-write helper"
+
+
+def test_a_large_file_survives_a_full_apply(escape_bench, policy):
+    """End to end, not just the helper."""
+    repo, _outside = escape_bench
+    payload = b"y" * (3 * 1024 * 1024)
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "victim.txt").write_bytes(payload)
+        applied = ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert applied == ["intelligence/victim.txt"]
+        assert (repo / "intelligence" / "victim.txt").read_bytes() == payload
+    finally:
+        ir.discard_staging(staging)

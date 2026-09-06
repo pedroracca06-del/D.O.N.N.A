@@ -808,6 +808,21 @@ def _makedirs_contained(parent, repo, assigned, policy):
         _refuse_protected(step, policy)
 
 
+def _write_all(fd, payload):
+    """Write every byte. A single os.write may be short on a large payload."""
+    written = 0
+    while written < len(payload):
+        sent = os.write(fd, payload[written:])
+        if sent <= 0:
+            raise ProtectionFailed("the destination stopped accepting data; "
+                                   "the copy is incomplete")
+        written += sent
+    if written != len(payload):
+        raise ProtectionFailed("the destination received %d of %d byte(s)"
+                               % (written, len(payload)))
+    return written
+
+
 def _read_contained(src, staging):
     """Read a staged file through a handle proven to live inside staging.
 
@@ -873,9 +888,31 @@ def _open_contained(dst, repo, assigned=None, policy=None):
         if os.path.islink(dst) or rr.is_reparse_point(info):
             raise ProtectionFailed("the destination is a link or reparse "
                                    "point; refusing to write through it")
+    # Decide scope and protection on the INTENDED path before anything is
+    # created. If validation later fails, the empty file left behind can then
+    # only ever be an in-scope, non-protected one -- never a protected or
+    # out-of-assignment path. Creation itself happens only inside a parent that
+    # `_makedirs_contained` has already proven.
+    if assigned is not None or policy is not None:
+        intended = os.path.relpath(_norm(os.path.abspath(dst)),
+                                   _norm(os.path.abspath(repo)))
+        intended = intended.replace(os.sep, "/")
+        if intended.startswith(".."):
+            raise ProtectionFailed("the destination is outside the worktree")
+        _reject_short_names(intended)
+        if assigned is not None and not in_scope(intended, assigned):
+            raise ProtectionFailed(
+                "the destination is outside the assignment: %s" % intended)
+        if policy is not None:
+            _refuse_protected(intended, policy)
+
     created = not os.path.lexists(dst)
-    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0) \
+    flags = os.O_WRONLY | getattr(os, "O_BINARY", 0) \
         | getattr(os, "O_NOINHERIT", 0)
+    if created:
+        # O_EXCL, so a name that appears in the meantime is refused rather than
+        # followed. Nothing existing is ever opened through this branch.
+        flags |= os.O_CREAT | os.O_EXCL
     fd = os.open(dst, flags, 0o600)
     try:
         final = _final_path_of_handle(fd)
@@ -916,6 +953,11 @@ def _open_contained(dst, repo, assigned=None, policy=None):
         # inert, appears in the coordinator's diff, and is reverted there if it
         # is out of scope -- at a point when no model is running.
         if created:
+            # Left in place on purpose: see the note above. It is empty, it is
+            # inside the assignment, it is not a protected path, it shows up in
+            # the coordinator's diff, and it is reverted there when no model is
+            # running. Unlinking by name after the handle is closed could remove
+            # a different object.
             _ORPHANED_ON_FAILURE.append(dst)
         raise
     return fd
@@ -955,9 +997,17 @@ def apply_staged(base, repo, assigned, policy):
             fd = _open_contained(dst, repo, assigned, policy)
             try:
                 os.ftruncate(fd, 0)
-                os.write(fd, payload)
+                _write_all(fd, payload)
             finally:
                 os.close(fd)
+            try:
+                landed = os.path.getsize(dst)
+            except OSError:
+                raise ProtectionFailed("the applied file could not be measured")
+            if landed != len(payload):
+                raise ProtectionFailed(
+                    "the applied file is %d byte(s), expected %d"
+                    % (landed, len(payload)))
             applied.append(rel)
     return applied
 
