@@ -271,6 +271,54 @@ deletes an entry, and it has no prune operation. It cannot stop another program.
 
 ---
 
+## Two runners, one boundary
+
+There are two components that may start a model, and they are separate on
+purpose.
+
+`codex_review_runner.py` runs `-s read-only`. It is unchanged by the addition
+of the second one, and several tests assert that: the reviewer does not import
+the implementer, the two do not share a policy file, and the reviewer's fixed
+sandbox flag is still `read-only`.
+
+`codex_implementation_runner.py` runs `-s workspace-write` rooted at one
+assigned worktree, and only for a task recorded in the implementation ledger.
+Its containment is layered, and only the first two layers are containment:
+
+| Layer | Kind | What it does |
+|---|---|---|
+| L1 | operating system | `workspace-write` sandbox rooted at the assigned worktree. Credentials, the session registry, the relay mailbox, the other worktrees, and the real git directory are all outside it. |
+| L2 | operating system | Every path in the worktree that is not assigned is made read-only for the run, and restored afterwards. |
+| L3 | coordinator | The diff is confined to the assigned paths; anything outside is reverted and the task is recorded as out of scope. |
+
+**L3 is a bound, not containment**, and the policy validator refuses a policy
+that describes L1 or L2 as anything other than an operating-system control.
+
+The property L1 leans on is verified before each run rather than assumed: a
+linked worktree's `.git` is a pointer *file* whose target lives outside the
+worktree, so the child cannot reach objects, refs, the index, hooks, or config.
+The runner refuses to start if the git directory turns out to be inside the
+worktree.
+
+The model never commits and never pushes. A human-directed coordinator runs the
+tests, reviews the diff, and commits. A test asserts the runner builds no
+`git commit`, `git push`, `git merge`, `git reset` or `git update-ref`
+invocation anywhere.
+
+### The implementation ledger
+
+Implementation tasks live in their own append-only, hash-chained ledger, not in
+the review mailbox: they are different message types with different lifecycles,
+and the reviewed relay is a protected component this tool does not reshape.
+
+A task id appears at most twice — once as the assignment, once as its outcome.
+A task that already has an outcome is never pending again, which is what makes
+recovery safe: re-running after a crash finds nothing to do rather than doing
+the work twice. Every spent attempt records exactly one outcome, from one of a
+fixed set of categories, and a task never gets a second one.
+
+---
+
 ## The one-shot runner
 
 `tools/cowork/codex_review_runner.py`, with the pure-data
