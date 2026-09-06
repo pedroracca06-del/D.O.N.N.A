@@ -2736,3 +2736,54 @@ def test_our_own_messages_are_scrubbed_but_kept():
         "failed at " + chr(67) + ":" + chr(92) + "Users" + chr(92) + "someone")
     assert "someone" not in scrubbed
     assert len(scrubbed) <= rr.DIAGNOSTIC_MAX_CHARS
+
+
+# --------------------------------------- the sandbox needs the user's identity
+#
+# openai/codex#41135: a launcher that strips USERNAME makes the Windows sandbox
+# setup helper write setup_marker.json with an ACL excluding the invoking user.
+# The next run cannot read the marker, re-runs setup, and fails with
+# `orchestrator_helper_incomplete` -- forever, because the marker is rewritten
+# in place and a rewrite preserves the original DACL. Upstream closed it
+# not-planned: the launcher was at fault, not Codex. This runner IS such a
+# launcher, so these are the tests that keep it correct.
+
+@pytest.mark.parametrize("name", ["USERNAME", "USERDOMAIN"])
+def test_the_child_receives_the_identity_the_sandbox_needs(name, monkeypatch):
+    monkeypatch.setenv(name, "probe-value")
+    env = rr.child_environment(json.loads(RUNNER_POLICY.read_text(encoding="utf-8")))
+    assert name in env, (
+        "%s is stripped; the sandbox setup helper cannot resolve the invoking "
+        "user's SID and will write an unreadable setup marker" % name)
+
+
+@pytest.mark.parametrize("name", ["USERNAME", "USERDOMAIN"])
+def test_the_shipped_policy_allows_the_identity_variables(name):
+    policy = json.loads(RUNNER_POLICY.read_text(encoding="utf-8"))
+    assert name in policy["environment_allowlist"]
+    assert name in rr.ENVIRONMENT_ALLOWLIST
+
+
+def test_identity_variables_did_not_widen_the_allowlist_generally():
+    """Exactly two names were added, and nothing else."""
+    assert set(rr.ENVIRONMENT_ALLOWLIST) == {
+        "APPDATA", "CODEX_HOME", "HOME", "LOCALAPPDATA", "PATH", "SystemRoot",
+        "TEMP", "TMP", "TMPDIR", "USERDOMAIN", "USERNAME", "USERPROFILE"}
+
+
+def test_every_planted_secret_is_still_excluded(monkeypatch):
+    """Adding identity must not have weakened the exclusion of secrets."""
+    for key, value in ENV_CANARIES.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("USERNAME", "probe-value")
+    env = rr.child_environment(json.loads(RUNNER_POLICY.read_text(encoding="utf-8")))
+    for key, value in ENV_CANARIES.items():
+        assert key not in env, key
+        assert value not in env.values(), key
+
+
+def test_the_reason_is_recorded_next_to_the_allowlist():
+    """A future minimisation pass must be able to see why these are here."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "resolves the invoking user's SID" in source
+    assert "41135" in source

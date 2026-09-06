@@ -23,7 +23,11 @@
     "stronger_model_requires_new_approved_phase": true,
     "live_review_authorized": false
   },
-  "operations": ["validate-policy", "inspect", "review-once"],
+  "operations": [
+    "validate-policy",
+    "inspect",
+    "review-once"
+  ],
   "forbidden_operation_words": [
     "apply",
     "approve",
@@ -51,7 +55,10 @@
     "watch"
   ],
   "codex_cli": {
-    "accepted_basenames": ["codex", "codex.exe"],
+    "accepted_basenames": [
+      "codex",
+      "codex.exe"
+    ],
     "accepted_version_output": "codex-cli 0.153.3",
     "subcommand": "exec",
     "prompt_delivery": "stdin",
@@ -130,7 +137,11 @@
     "--skip-git-repo-check",
     "--thread-source"
   ],
-  "forbidden_subcommands": ["fork", "resume", "review"],
+  "forbidden_subcommands": [
+    "fork",
+    "resume",
+    "review"
+  ],
   "environment_allowlist": [
     "APPDATA",
     "CODEX_HOME",
@@ -141,6 +152,8 @@
     "TEMP",
     "TMP",
     "TMPDIR",
+    "USERDOMAIN",
+    "USERNAME",
     "USERPROFILE"
   ],
   "environment_note": "Only these names are forwarded, and only when already present in the parent. CODEX_HOME is included because `--ignore-user-config` still resolves authentication through CODEX_HOME. No API key, broker credential, Anthropic variable, trading flag, or unlisted parent variable is ever passed to the child, and no value is ever printed.",
@@ -151,7 +164,12 @@
     "max_captured_stream_bytes": 65536,
     "max_runtime_seconds": 900
   },
-  "expected_verdicts": ["PASS", "REVISE", "STOP", "ESCALATE"],
+  "expected_verdicts": [
+    "PASS",
+    "REVISE",
+    "STOP",
+    "ESCALATE"
+  ],
   "non_authorization_sentence": "This verdict grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution.",
   "reviewer_session": {
     "required_status": "active",
