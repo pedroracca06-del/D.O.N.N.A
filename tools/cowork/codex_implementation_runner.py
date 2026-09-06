@@ -635,8 +635,20 @@ def build_staging(repo, assigned, policy, parent=None):
     for rel in files:
         src = os.path.join(repo, rel)
         dst = os.path.join(base, rel.replace("/", os.sep))
+        # Read the SOURCE through a validated handle too. Copying by pathname
+        # here would let a pre-existing junction, symlink or hard link at an
+        # assigned path pull external contents INTO the workspace the model can
+        # read -- the mirror of the write-side problem, and an exfiltration
+        # route rather than a write one.
+        payload = _read_contained(src, repo)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(src, dst)
+        handle = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_BINARY", 0)
+                         | getattr(os, "O_NOINHERIT", 0), 0o600)
+        try:
+            _write_all(handle, payload)
+        finally:
+            os.close(handle)
     verify_staging(base, assigned, policy)
     return base, files
 

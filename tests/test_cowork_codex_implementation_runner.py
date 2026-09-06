@@ -1413,3 +1413,77 @@ def test_a_large_file_survives_a_full_apply(escape_bench, policy):
         assert (repo / "intelligence" / "victim.txt").read_bytes() == payload
     finally:
         ir.discard_staging(staging)
+
+
+# ======================================== IMPL-RUNNER-REVIEW-10 findings
+#
+# F-001 (critical) build_staging copied assigned source paths with copy2,
+#   before validating them. A pre-existing junction, symlink or hard link at an
+#   assigned tracked path pulled EXTERNAL contents into the staging workspace
+#   the model reads -- the mirror of the write-side problem, and an
+#   exfiltration route rather than a write one.
+# F-002 (high) the all-clear could not be stated while that route existed.
+
+
+@pytest.fixture
+def secret_bench(tmp_path):
+    """A repo plus a secret outside it, for exfiltration attempts."""
+    repo = tmp_path / "work"
+    repo.mkdir()
+    secret = tmp_path / "SECRET"
+    secret.mkdir()
+    (secret / "creds.txt").write_text("SUPER SECRET\n", encoding="utf-8")
+    (secret / "a.py").write_text("SECRET VIA JUNCTION\n", encoding="utf-8")
+    _git(repo.parent, "init", "-q", str(repo))
+    _git(repo, "config", "user.email", "t@example.invalid")
+    _git(repo, "config", "user.name", "t")
+    (repo / "intelligence").mkdir()
+    (repo / "intelligence" / "a.py").write_text("V=1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+    return repo, secret
+
+
+def test_a_hard_linked_source_cannot_be_staged(secret_bench, policy):
+    repo, secret = secret_bench
+    (repo / "intelligence" / "a.py").unlink()
+    if not _hardlink(repo / "intelligence" / "a.py", secret / "creds.txt"):
+        pytest.skip("this platform cannot create a hard link")
+    with pytest.raises(ir.ProtectionFailed):
+        ir.build_staging(str(repo), ["intelligence/**"], policy)
+
+
+def test_a_junctioned_source_directory_cannot_be_staged(secret_bench, policy):
+    repo, secret = secret_bench
+    shutil.rmtree(repo / "intelligence")
+    if not _junction(repo / "intelligence", secret):
+        pytest.skip("this platform cannot create a directory junction")
+    with pytest.raises(ir.ProtectionFailed):
+        ir.build_staging(str(repo), ["intelligence/**"], policy)
+
+
+def test_ordinary_staging_is_unaffected(secret_bench, policy):
+    repo, _secret = secret_bench
+    staging, files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        assert files == ["intelligence/a.py"]
+        assert (pathlib.Path(staging) / "intelligence" / "a.py").read_text(
+            encoding="utf-8") == "V=1\n"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_staging_never_copies_by_pathname():
+    """copy2 follows what it is given; staging must read through a handle."""
+    source = RUNNER.read_text(encoding="utf-8")
+    assert "shutil.copy2" not in source, \
+        "a pathname copy can pull external content into the model's workspace"
+    body = source[source.index("def build_staging("):]
+    body = body[:body.index("\ndef ", 1)]
+    assert "_read_contained(src, repo)" in body
+
+
+def test_both_directions_use_the_same_containment_helper():
+    """Reading INTO staging and writing OUT of it share one discipline."""
+    source = RUNNER.read_text(encoding="utf-8")
+    assert source.count("_read_contained(") >= 2
