@@ -330,6 +330,30 @@ tests, reviews the diff, and commits. A test asserts the runner builds no
 `git commit`, `git push`, `git merge`, `git reset` or `git update-ref`
 invocation anywhere.
 
+### Writes go through a handle, not a path
+
+Checking a destination path and then copying to it is a race. A Windows
+directory **junction** needs no privilege to create and `os.path.islink`
+reports it as `False`, so a junction planted on an assigned directory
+redirected the copy-back outside the worktree entirely -- measured, with the
+staged content landing in a file outside the repository.
+
+Every apply-back now: refuses any ancestor that is a link or reparse point
+(by file *attribute*, since `islink` lies about junctions); opens the
+destination **without truncating**; asks Windows what that open handle
+actually refers to via `GetFinalPathNameByHandleW`; and only then truncates
+and writes. The check is on the handle being written through, so a path
+swapped after validation cannot redirect it.
+
+The claim is written with `MoveFileEx(..., MOVEFILE_WRITE_THROUGH)` rather
+than a plain rename: atomic is not the same as durable, and a claim the
+machine forgets is a second attempt spent on work that already ran.
+
+The ledger lock is broken only when its owner is **definitively gone** and the
+lock is stale. A live owner keeps its lock however long it holds it, and an
+owner that cannot be identified -- an empty, malformed or unreadable lock, or
+a pid we are not permitted to query -- is treated as live.
+
 ### The implementation ledger
 
 Implementation tasks live in their own append-only, hash-chained ledger, not in

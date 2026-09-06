@@ -283,6 +283,53 @@ def find_pending_task(ledger_doc):
     return pending[0]
 
 
+def _durable_replace(tmp, path):
+    """Replace `path` with `tmp` so the result survives a crash.
+
+    `os.replace` is atomic but not necessarily durable: the rename can still be
+    sitting in the cache. Windows exposes MOVEFILE_WRITE_THROUGH for exactly
+    this, which is what a claim needs -- a claim the machine forgets is a
+    second attempt spent on work that already ran.
+    """
+    if os.name != "nt":
+        os.replace(tmp, path)
+        fd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        return
+    import ctypes
+    MOVEFILE_REPLACE_EXISTING = 0x1
+    MOVEFILE_WRITE_THROUGH = 0x8
+    ok = ctypes.windll.kernel32.MoveFileExW(
+        ctypes.c_wchar_p(tmp), ctypes.c_wchar_p(path),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+    if not ok:
+        raise ProtectionFailed("the ledger could not be durably replaced")
+
+
+def _atomic_durable_write(path, payload):
+    """Same-directory temp file, flushed and fsynced, then a durable replace."""
+    directory = os.path.dirname(path) or "."
+    tmp = os.path.join(directory, ".%s.%d.tmp"
+                       % (os.path.basename(path), os.getpid()))
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _durable_replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
 def _append_entry(root, doc, entry):
     """Chain one entry onto the ledger and write it atomically."""
     entries = doc["entries"]
@@ -293,8 +340,8 @@ def _append_entry(root, doc, entry):
     entries.append(entry)
     doc["revision"] = doc.get("revision", 0) + 1
     os.makedirs(os.path.abspath(root), exist_ok=True)
-    cr._atomic_write(ledger_path(root),
-                     json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
+    _atomic_durable_write(ledger_path(root),
+                          json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
     return entry
 
 
@@ -547,12 +594,108 @@ def verify_staging(base, assigned, policy):
     return present
 
 
+def _final_path_of_handle(fd):
+    """Ask Windows what this OPEN HANDLE actually refers to.
+
+    Checking a path and then writing to it is a race: the path can become a
+    junction between the two. Resolving the handle we are about to write
+    through closes that window, because the answer describes the object we
+    already hold, not a name someone can still redirect.
+    """
+    if os.name != "nt":
+        return os.path.realpath("/proc/self/fd/%d" % fd)
+    import ctypes
+    import msvcrt
+    handle = msvcrt.get_osfhandle(fd)
+    buf = ctypes.create_unicode_buffer(32768)
+    n = ctypes.windll.kernel32.GetFinalPathNameByHandleW(
+        ctypes.c_void_p(handle), buf, 32768, 0)
+    if n == 0 or n >= 32768:
+        raise ProtectionFailed("the destination handle could not be resolved")
+    final = buf.value
+    for prefix in ("\\\\?\\UNC\\", "\\\\?\\"):
+        if final.startswith(prefix):
+            final = final[len(prefix):]
+            break
+    return final
+
+
+def _refuse_reparse_ancestors(path, repo):
+    """No directory between the worktree root and the target may be a link.
+
+    A Windows directory JUNCTION needs no privilege to create and
+    `os.path.islink` reports it as False, so the attribute is checked directly
+    rather than trusting islink.
+    """
+    root = _norm(repo)
+    current = _norm(path)
+    seen = set()
+    while True:
+        if current in seen:
+            break
+        seen.add(current)
+        if os.path.exists(current):
+            try:
+                info = os.stat(current, follow_symlinks=False)
+            except OSError:
+                raise ProtectionFailed("a destination ancestor could not be "
+                                       "inspected")
+            if os.path.islink(current) or rr.is_reparse_point(info):
+                raise ProtectionFailed(
+                    "a destination ancestor is a link or reparse point; "
+                    "refusing to write through it")
+        if current == root:
+            break
+        parent = _norm(os.path.dirname(current))
+        if parent == current:
+            raise ProtectionFailed("the destination escapes the worktree")
+        current = parent
+
+
+def _open_contained(dst, repo):
+    """Open a destination for writing only if it really lives in the worktree.
+
+    Deliberately opened WITHOUT truncation: truncating first and validating
+    afterwards would already have destroyed a redirected target.
+    """
+    parent = os.path.dirname(dst)
+    _refuse_reparse_ancestors(parent, repo)
+    if os.path.lexists(dst):
+        try:
+            info = os.stat(dst, follow_symlinks=False)
+        except OSError:
+            raise ProtectionFailed("the destination could not be inspected")
+        if os.path.islink(dst) or rr.is_reparse_point(info):
+            raise ProtectionFailed("the destination is a link or reparse "
+                                   "point; refusing to write through it")
+    created = not os.path.lexists(dst)
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0) \
+        | getattr(os, "O_NOINHERIT", 0)
+    fd = os.open(dst, flags, 0o600)
+    try:
+        final = _final_path_of_handle(fd)
+        if not rr._within(final, _norm(repo)):
+            raise ProtectionFailed(
+                "the destination resolves outside the worktree; refusing")
+    except Exception:
+        os.close(fd)
+        if created:
+            try:
+                os.unlink(dst)
+            except OSError:
+                pass
+        raise
+    return fd
+
+
 def apply_staged(base, repo, assigned, policy):
     """Copy the staged result back, for assigned paths only.
 
-    Anything the run created outside the assignment inside staging has already
-    been refused by `verify_staging`; this re-checks rather than trusting it,
-    because this is the step that touches the real worktree.
+    Every write goes through a handle that has been proven to resolve inside
+    the worktree, so a junction planted between validation and the copy cannot
+    redirect it. That mattered: a directory junction -- which needs no
+    privilege on Windows and which `os.path.islink` reports as False -- was
+    measured redirecting this copy outside the repository.
     """
     verify_staging(base, assigned, policy)
     applied = []
@@ -563,8 +706,16 @@ def apply_staged(base, repo, assigned, policy):
             if not in_scope(rel, assigned):
                 raise ProtectionFailed("refusing to apply %s" % rel)
             dst = os.path.join(repo, rel.replace("/", os.sep))
+            _refuse_reparse_ancestors(os.path.dirname(dst), repo)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
+            _refuse_reparse_ancestors(os.path.dirname(dst), repo)
+            payload = open(src, "rb").read()
+            fd = _open_contained(dst, repo)
+            try:
+                os.ftruncate(fd, 0)
+                os.write(fd, payload)
+            finally:
+                os.close(fd)
             applied.append(rel)
     return applied
 
@@ -776,33 +927,92 @@ class LedgerBusy(Exception):
     """Another runner holds the ledger. Two children must never race."""
 
 
+def _process_is_live(pid):
+    """True if that pid is running, False if definitely gone, None if unknown.
+
+    None matters as much as the other two: an unknown owner must be treated as
+    live, never as abandoned.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return None
+    import ctypes
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # 87 ERROR_INVALID_PARAMETER means no such process; anything else
+        # (notably 5 ERROR_ACCESS_DENIED) means it exists but we cannot ask.
+        return False if ctypes.get_last_error() == 87 or \
+            kernel32.GetLastError() == 87 else None
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return None
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 class _LedgerLock:
     """Exclusive create, so two runners cannot claim the same task.
 
-    O_EXCL is atomic on Windows and POSIX alike. A lock older than an hour is
-    treated as abandoned and broken, which is safe because a claim is durable:
-    breaking the lock cannot cause a re-run, only a refusal.
+    O_EXCL is atomic on Windows and POSIX alike.
+
+    A lock is broken ONLY when its owner is definitively gone AND it is older
+    than the staleness threshold. A live owner keeps its lock however long it
+    holds it, and an owner we cannot identify -- an unreadable, empty or
+    malformed lock, or a pid we are not allowed to query -- is treated as live.
+    Stealing a lock from a running owner would let two runners mutate the
+    ledger at once, which is the invariant this exists to protect.
     """
 
     def __init__(self, root):
         self.path = ledger_path(root) + LEDGER_LOCK_SUFFIX
         self.fd = None
 
+    def _owner_pid(self):
+        try:
+            raw = open(self.path, "rb").read(64).decode("ascii", "replace")
+        except OSError:
+            return None
+        raw = raw.strip()
+        if not raw.isdigit():
+            return None
+        return int(raw)
+
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         try:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
+            pid = self._owner_pid()
+            live = _process_is_live(pid)
+            if live is not False:
+                raise LedgerBusy(
+                    "another runner holds the implementation ledger lock "
+                    "(owner %s)" % ("unknown" if live is None else "running"))
             try:
                 age = time.time() - os.path.getmtime(self.path)
             except OSError:
-                age = 0
+                raise LedgerBusy("the ledger lock could not be inspected")
             if age < LOCK_STALE_SECONDS:
-                raise LedgerBusy("another runner holds the implementation "
-                                 "ledger lock")
+                raise LedgerBusy("the ledger lock's owner has exited but the "
+                                 "lock is not yet stale; refusing to take it")
             os.unlink(self.path)
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(self.fd, str(os.getpid()).encode("ascii"))
+        os.fsync(self.fd)
         return self
 
     def __exit__(self, *_exc):
@@ -1050,9 +1260,11 @@ def main(argv=None):
         checks.append(_chk("P1", "policy", "pass", policy["policy_name"]))
         checks.append(_chk("P2", "containment", "informational",
                            "L1 operating-system sandbox rooted at the assigned "
-                           "worktree; L2 read-only attribute on protected "
-                           "paths; L3 coordinator scope check. L3 alone is not "
-                           "containment."))
+                           "worktree; L2 a staging workspace holding ONLY the "
+                           "assigned paths, so a protected path is absent "
+                           "rather than read-only; L3 coordinator scope check "
+                           "on a handle proven to resolve inside the worktree. "
+                           "L3 alone is not containment."))
 
         if args.operation == "validate-policy":
             checks.append(_chk("P3", "reviewer", "pass",

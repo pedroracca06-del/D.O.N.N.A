@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import stat
 import subprocess
 import sys
@@ -744,3 +745,206 @@ def test_the_ledger_refuses_an_outcome_that_precedes_its_claim(policy, repo,
 def test_the_policy_records_the_claim_contract(policy):
     assert policy["contract"]["attempt_claimed_before_spawn"] is True
     assert policy["contract"]["concurrent_runs"] is False
+
+
+# ======================================== IMPL-RUNNER-REVIEW-02 findings
+#
+# IMPL-001 (critical) apply_staged followed the destination. A Windows
+#   directory JUNCTION needs no privilege, and os.path.islink reports it as
+#   False, so a junction on an assigned directory redirected the copy-back
+#   outside the worktree. Measured: "PWNED BY THE RUN" landed outside the repo.
+# IMPL-002 (high) the claim was not durable -- atomic, but the rename could sit
+#   in the cache.
+# IMPL-003 (high) a lock older than the threshold was taken unconditionally,
+#   even from a live owner.
+# IMPL-004 (medium) the emitted containment check still described L2 as a
+#   read-only attribute.
+
+import shutil
+import subprocess as _sp
+import time as _time
+
+
+def _junction(link, target):
+    """Create a Windows directory junction. Needs no privilege, unlike symlink."""
+    out = _sp.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                  capture_output=True, text=True)
+    return out.returncode == 0
+
+
+@pytest.fixture
+def escape_bench(tmp_path, policy):
+    """A repo whose assigned directory can be swapped for a junction."""
+    repo = tmp_path / "work"
+    repo.mkdir()
+    outside = tmp_path / "OUTSIDE"
+    outside.mkdir()
+    (outside / "victim.txt").write_text("ORIGINAL\n", encoding="utf-8")
+    _git(repo.parent, "init", "-q", str(repo))
+    _git(repo, "config", "user.email", "t@example.invalid")
+    _git(repo, "config", "user.name", "t")
+    (repo / "intelligence").mkdir()
+    (repo / "intelligence" / "victim.txt").write_text("V=1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+    return repo, outside
+
+
+# ------------------------------------------------------------------ IMPL-001
+
+def test_a_junction_on_the_assigned_directory_cannot_redirect_the_write(
+        escape_bench, policy):
+    repo, outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "victim.txt").write_text(
+            "PWNED\n", encoding="utf-8")
+        shutil.rmtree(repo / "intelligence")
+        if not _junction(repo / "intelligence", outside):
+            pytest.skip("this platform cannot create a directory junction")
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert (outside / "victim.txt").read_text(encoding="utf-8") == "ORIGINAL\n", \
+            "the write escaped the worktree"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_a_junction_planted_after_validation_cannot_redirect_the_write(
+        escape_bench, policy, monkeypatch):
+    """The TOCTOU case: validate, then swap the path, then copy."""
+    repo, outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "victim.txt").write_text(
+            "PWNED\n", encoding="utf-8")
+        real_verify = ir.verify_staging
+
+        def racing_verify(base, assigned, pol):
+            out = real_verify(base, assigned, pol)
+            shutil.rmtree(repo / "intelligence")
+            _junction(repo / "intelligence", outside)
+            return out
+
+        monkeypatch.setattr(ir, "verify_staging", racing_verify)
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert (outside / "victim.txt").read_text(encoding="utf-8") == "ORIGINAL\n", \
+            "a path swapped after validation redirected the write"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_an_ordinary_apply_still_works(escape_bench, policy):
+    """Containment must not have cost the feature."""
+    repo, _outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "victim.txt").write_text(
+            "V=2\n", encoding="utf-8")
+        applied = ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert applied == ["intelligence/victim.txt"]
+        assert (repo / "intelligence" / "victim.txt").read_text(encoding="utf-8") \
+            == "V=2\n"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_destination_handle_is_resolved_not_just_the_path():
+    """The check is on the handle written through, which is what closes the race."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "_final_path_of_handle" in source
+    assert "GetFinalPathNameByHandleW" in source
+    # build_staging may use copy2 -- it writes INTO staging, which is ours.
+    # apply_staged writes into the real worktree, and must not.
+    body = RUNNER.read_text(encoding="utf-8")
+    apply_body = body[body.index("def apply_staged("):]
+    apply_body = apply_body[:apply_body.index("\ndef ", 1)]
+    assert "shutil.copy2" not in apply_body, \
+        "copy2 follows the destination; the contained write must be used"
+    assert "_open_contained" in apply_body
+
+
+def test_reparse_ancestors_are_refused_by_attribute_not_islink():
+    """os.path.islink reports False for a junction, so the attribute is checked."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "rr.is_reparse_point" in source
+
+
+# ------------------------------------------------------------------ IMPL-002
+
+def test_the_claim_is_written_with_a_durable_replace():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "_atomic_durable_write" in source
+    assert "MOVEFILE_WRITE_THROUGH" in source
+
+
+def test_a_durable_write_actually_lands(tmp_path):
+    target = tmp_path / "ledger.json"
+    ir._atomic_durable_write(str(target), b'{"ok": true}')
+    assert target.read_bytes() == b'{"ok": true}'
+    ir._atomic_durable_write(str(target), b'{"ok": false}')
+    assert target.read_bytes() == b'{"ok": false}'
+    assert not list(tmp_path.glob(".*tmp")), "a temp file was left behind"
+
+
+# ------------------------------------------------------------------ IMPL-003
+
+def test_process_liveness_distinguishes_unknown_from_dead():
+    assert ir._process_is_live(os.getpid()) is True
+    assert ir._process_is_live(999999) is False
+    assert ir._process_is_live(None) is None
+    assert ir._process_is_live(-1) is None
+
+
+def _plant_lock(ledger, body, stale):
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="ascii") as handle:
+        handle.write(body)
+    if stale:
+        old = _time.time() - (ir.LOCK_STALE_SECONDS + 60)
+        os.utime(path, (old, old))
+    return path
+
+
+def test_a_live_owner_never_loses_its_lock(ledger):
+    """Even an ancient lock stays with a running owner."""
+    _plant_lock(ledger, str(os.getpid()), stale=True)
+    with pytest.raises(ir.LedgerBusy):
+        with ir._LedgerLock(str(ledger)):
+            pass
+
+
+@pytest.mark.parametrize("body", ["", "   ", "not-a-pid", "0", "-5"])
+def test_an_unidentifiable_owner_is_treated_as_live(ledger, body):
+    """Uncertain ownership must never be read as abandoned."""
+    _plant_lock(ledger, body, stale=True)
+    with pytest.raises(ir.LedgerBusy):
+        with ir._LedgerLock(str(ledger)):
+            pass
+
+
+def test_a_dead_owner_is_not_enough_on_its_own(ledger):
+    """Dead AND stale is required, not dead alone."""
+    _plant_lock(ledger, "999999", stale=False)
+    with pytest.raises(ir.LedgerBusy):
+        with ir._LedgerLock(str(ledger)):
+            pass
+
+
+def test_a_dead_and_stale_lock_is_reclaimed(ledger):
+    _plant_lock(ledger, "999999", stale=True)
+    with ir._LedgerLock(str(ledger)):
+        pass
+
+
+# ------------------------------------------------------------------ IMPL-004
+
+def test_the_emitted_containment_check_describes_staging_not_an_attribute():
+    code, doc = _run(["validate-policy", "--format", "json",
+                      "--policy", str(POLICY)])
+    assert code == OK
+    p2 = [c for c in doc["checks"] if c["id"] == "P2"][0]
+    assert "staging workspace" in p2["evidence"]
+    assert "read-only attribute on protected paths" not in p2["evidence"]
