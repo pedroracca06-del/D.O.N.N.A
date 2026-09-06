@@ -1059,3 +1059,78 @@ def test_no_stale_sidecar_is_left_behind(ledger):
     with ir._LedgerLock(str(ledger)):
         pass
     assert [p for p in os.listdir(str(ledger)) if ".stale." in p] == []
+
+
+# ======================================== IMPL-RUNNER-REVIEW-04 finding
+#
+# F-001 (high) Windows accepts 8.3 aliases such as EXECUT~1.PY as another name
+# for a longer file. Scope and protected-path checks are lexical, so an alias
+# could satisfy them and still resolve to a different file. Separately, the
+# protected-path guard compared assignments for EQUALITY, so `tools/cowork/**`
+# covered a protected file without being equal to one.
+
+@pytest.mark.parametrize("rel", [
+    "intelligence/EXECUT~1.PY",
+    "TOOLS~1/cowork/x.py",
+    "a/b/LONGNA~2.txt",
+])
+def test_a_short_name_alias_is_refused(rel):
+    with pytest.raises(ir.ProtectionFailed):
+        ir._reject_short_names(rel)
+
+
+@pytest.mark.parametrize("rel", [
+    "intelligence/ok.py",
+    "intelligence/sub/name-with-dashes.py",
+    "a/b/tilde~in~name.py",          # a tilde alone is not an alias
+])
+def test_an_ordinary_path_is_not_mistaken_for_an_alias(rel):
+    ir._reject_short_names(rel)
+
+
+def test_staging_refuses_a_short_name_entry(escape_bench, policy):
+    repo, _outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        alias = pathlib.Path(staging) / "intelligence" / "EXECUT~1.PY"
+        alias.write_text("x\n", encoding="utf-8")
+        with pytest.raises(ir.ProtectionFailed):
+            ir.verify_staging(staging, ["intelligence/**"], policy)
+    finally:
+        ir.discard_staging(staging)
+
+
+@pytest.mark.parametrize("assigned", [
+    "tools/cowork/**",
+    "services/**",
+    "core/**",
+    "indicators/**",
+    ".claude/**",
+])
+def test_an_assignment_that_covers_a_protected_path_is_refused(repo, policy,
+                                                               assigned):
+    """Equality was never enough: a glob can cover a protected file."""
+    with pytest.raises(Exception):
+        ir.validate_task(_task(repo, assigned=[assigned]), policy)
+
+
+def test_a_genuinely_bounded_assignment_is_still_accepted(repo, policy):
+    ir.validate_task(_task(repo, assigned=["intelligence/**"]), policy)
+
+
+def test_an_assignment_using_a_short_name_is_refused(repo, policy):
+    with pytest.raises(Exception):
+        ir.validate_task(_task(repo, assigned=["TOOLS~1/**"]), policy)
+
+
+def test_scope_is_decided_on_the_canonical_destination():
+    """Not on whatever name staging happened to use."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "_canonical_relative" in source
+    assert "GetLongPathNameW" in source
+    assert "canonicalises outside the assignment" in source
+
+
+def test_the_protected_check_is_shared_and_pattern_aware():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "_refuse_protected" in source

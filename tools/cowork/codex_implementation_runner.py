@@ -47,6 +47,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -250,6 +251,14 @@ def validate_task(doc, policy):
             _bad("an assigned path may not traverse upwards")
         if item in protected:
             _bad("an always-protected path may never be assigned: %s" % item)
+        _reject_short_names(item)
+        # Equality is not enough: `tools/cowork/**` covers a protected file
+        # without being equal to one.
+        for guarded in protected:
+            clean = guarded.replace("\\", "/")
+            if in_scope(clean, [item]):
+                _bad("that assignment covers the always-protected path %s"
+                     % clean)
 
     for key in ("instruction", "acceptance"):
         if not isinstance(doc[key], str) or not doc[key].strip():
@@ -448,6 +457,60 @@ def _fnmatch(name, pattern):
     return fnmatch.fnmatch(name, pattern)
 
 
+# An 8.3 alias: a component like EXECUT~1.PY that Windows accepts as another
+# name for a longer one. Scope and protected-path checks are lexical, so an
+# alias could pass them and still resolve to a different file.
+_SHORT_NAME = re.compile(r"~\d")
+
+
+def _reject_short_names(rel):
+    """Refuse a path whose components could be 8.3 aliases."""
+    for part in rel.replace("\\", "/").split("/"):
+        if _SHORT_NAME.search(part):
+            raise ProtectionFailed(
+                "a path component looks like a Windows short name alias, "
+                "which is not accepted where scope is decided by name: %s"
+                % part)
+
+
+def _long_path(path):
+    """The canonical long form of `path`, or the input when unavailable."""
+    if os.name != "nt":
+        return path
+    import ctypes
+    buf = ctypes.create_unicode_buffer(32768)
+    n = ctypes.windll.kernel32.GetLongPathNameW(
+        ctypes.c_wchar_p(path), buf, 32768)
+    if n == 0 or n >= 32768:
+        return path
+    return buf.value
+
+
+def _canonical_relative(repo, dst):
+    """Where `dst` really sits under `repo`, expressed with long names.
+
+    Comparing the short form would let an alias satisfy a lexical check while
+    naming a different file, so the comparison is made after canonicalising.
+    """
+    long_repo = _norm(_long_path(os.path.abspath(repo)))
+    long_dst = _norm(_long_path(os.path.abspath(dst)))
+    if not rr._within(long_dst, long_repo):
+        raise ProtectionFailed("the destination canonicalises outside the "
+                               "worktree")
+    rel = os.path.relpath(long_dst, long_repo).replace(os.sep, "/")
+    _reject_short_names(rel)
+    return rel
+
+
+def _refuse_protected(rel, policy):
+    """Refuse a repository-relative path that any protected pattern covers."""
+    for pattern in policy["containment"]["always_protected_paths"]:
+        clean = pattern.replace("\\", "/")
+        if rel == clean or _fnmatch(rel, clean) \
+                or rel.startswith(clean.rstrip("/*") + "/"):
+            raise ProtectionFailed("that path is always protected: %s" % rel)
+
+
 def _norm(path):
     """One spelling for a path, so a restore map key always matches."""
     return os.path.normcase(os.path.abspath(path))
@@ -582,13 +645,11 @@ def verify_staging(base, assigned, policy):
             rel = os.path.relpath(os.path.join(root_dir, name), base)
             rel = rel.replace(os.sep, "/")
             present.append(rel)
+            _reject_short_names(rel)
             if not in_scope(rel, assigned):
                 raise ProtectionFailed(
                     "staging holds a path outside the assignment: %s" % rel)
-            for pattern in protected:
-                if rel == pattern or _fnmatch(rel, pattern):
-                    raise ProtectionFailed(
-                        "staging holds an always-protected path: %s" % rel)
+            _refuse_protected(rel, policy)
     if not present:
         raise ProtectionFailed("the staging workspace is empty")
     return present
@@ -758,10 +819,19 @@ def apply_staged(base, repo, assigned, policy):
             rel = os.path.relpath(src, base).replace(os.sep, "/")
             if not in_scope(rel, assigned):
                 raise ProtectionFailed("refusing to apply %s" % rel)
+            _reject_short_names(rel)
             dst = os.path.join(repo, rel.replace("/", os.sep))
             _refuse_reparse_ancestors(os.path.dirname(dst), repo)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             _refuse_reparse_ancestors(os.path.dirname(dst), repo)
+            # Decide scope on where the destination REALLY is, after
+            # canonicalising, not on the name staging happened to use.
+            canonical = _canonical_relative(repo, dst)
+            if not in_scope(canonical, assigned):
+                raise ProtectionFailed(
+                    "the destination canonicalises outside the assignment: %s"
+                    % canonical)
+            _refuse_protected(canonical, policy)
             payload = open(src, "rb").read()
             fd = _open_contained(dst, repo)
             try:
