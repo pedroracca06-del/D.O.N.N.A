@@ -47,8 +47,10 @@ operating system rather than by this document:
   directory all live outside it. A linked worktree's `.git` is a pointer *file*
   whose target is elsewhere, so **git metadata is unreachable**: no commit, no
   staging, no ref change, no hook, no history rewrite.
-- Everything in the worktree that is not an assigned path is made read-only for
-  the run.
+- You do not see the worktree. You get a staging workspace containing the
+  assigned paths and **nothing else**, so a protected file is absent rather than
+  read-only: there is nothing to write, replace, delete, or chmod. The
+  coordinator copies your result back, for assigned paths only.
 - The coordinator diffs the result afterwards and reverts anything outside the
   assignment. That last check is a *bound*, not the containment; the sandbox is
   the containment.

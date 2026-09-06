@@ -288,11 +288,36 @@ Its containment is layered, and only the first two layers are containment:
 | Layer | Kind | What it does |
 |---|---|---|
 | L1 | operating system | `workspace-write` sandbox rooted at the assigned worktree. Credentials, the session registry, the relay mailbox, the other worktrees, and the real git directory are all outside it. |
-| L2 | operating system | Every path in the worktree that is not assigned is made read-only for the run, and restored afterwards. |
+| L2 | operating system | The child runs in a STAGING workspace holding the assigned paths and nothing else, so a protected path is ABSENT rather than read-only. |
 | L3 | coordinator | The diff is confined to the assigned paths; anything outside is reverted and the task is recorded as out of scope. |
 
 **L3 is a bound, not containment**, and the policy validator refuses a policy
 that describes L1 or L2 as anything other than an operating-system control.
+
+An earlier version used the read-only file attribute for L2. That was wrong, and
+measurably so: against it, clear-attribute-then-write, delete and replace were
+all ALLOWED. A same-user process simply clears the attribute, and a Windows DACL
+is no better because the owner keeps implicit `WRITE_DAC`. Absence is the only
+thing on this machine that actually denies the write, so the child now works in
+a staging copy of just the assigned paths and the coordinator applies the result
+back. The attribute pass survives only as defence in depth over the real
+worktree, and it now **fails closed**: a path it cannot stat or cannot mark
+read-only refuses the run rather than proceeding under protection that does not
+exist.
+
+### The attempt is claimed before the child starts
+
+Attempt state used to live in memory until an outcome was recorded, so a crash
+in the window between spawn and the outcome left the task looking untouched — a
+restart would spend a second attempt on it, and two runners could claim the same
+task at once. Both were reproduced.
+
+A claim is now written to the ledger, durably and under an exclusive lock,
+**before** the child exists. A claimed task is never pending again. Recovery
+reports it and refuses; a person closes it out with `settle-claim`, which
+records `abandoned_after_crash`. An outcome whose task was never claimed is
+refused outright, because that would mean an attempt was spent without ever
+being announced.
 
 The property L1 leans on is verified before each run rather than assumed: a
 linked worktree's `.git` is a pointer *file* whose target lives outside the

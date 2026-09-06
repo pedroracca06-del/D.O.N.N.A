@@ -11,13 +11,16 @@
     "model_reaches_git_metadata": false,
     "coordinator_commits": true,
     "independent_review_required": true,
-    "read_only_reviewer_preserved": true
+    "read_only_reviewer_preserved": true,
+    "attempt_claimed_before_spawn": true,
+    "concurrent_runs": false
   },
   "operations": [
     "validate-policy",
     "inspect",
     "submit-task",
-    "implement-once"
+    "implement-once",
+    "settle-claim"
   ],
   "fixed_flags": {
     "sandbox": "workspace-write",
@@ -61,13 +64,15 @@
       {
         "id": "L2",
         "kind": "operating-system",
-        "mechanism": "read-only file attribute applied to protected in-repo paths for the duration of the run, restored afterwards",
+        "mechanism": "the child runs in a staging workspace holding the assigned paths and nothing else, so a protected path is absent rather than merely read-only",
         "protects": [
+          "every path in the worktree that the task was not assigned",
           "the retired trading and execution subsystem",
           "the guard hook and its settings",
-          "the coordination tooling itself unless explicitly assigned",
+          "the coordination tooling itself",
           "the worktree's .git pointer file"
-        ]
+        ],
+        "note": "A read-only file attribute is NOT a boundary: a same-user process clears it, and a Windows DACL is no better because the owner keeps implicit WRITE_DAC. The attribute pass survives only as defence in depth over the real worktree, and it fails closed."
       },
       {
         "id": "L3",
@@ -110,7 +115,9 @@
     "unit": "attempt",
     "spent_on": "child process start",
     "record": "every spent attempt records exactly one terminal outcome",
-    "duplicate_execution": "a task with a recorded outcome is never re-run"
+    "duplicate_execution": "a task with a recorded outcome is never re-run",
+    "claim": "an attempt is claimed durably in the ledger BEFORE the child starts, under an exclusive lock",
+    "recovery": "a claimed but unsettled task is never re-run automatically; a person settles it with settle-claim"
   },
   "non_authorization_sentence": "This implementation grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution."
 }

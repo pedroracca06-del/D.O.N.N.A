@@ -17,15 +17,25 @@ What makes the writes safe is the operating system, in this order:
       real git directory. The model cannot rewrite history, install a hook,
       move a ref, or stage anything.
 
-  L2  Protected in-repo paths are made read-only for the duration of the run
-      and restored afterwards. These are inside the sandbox root, so L1 cannot
-      speak for them; a filesystem attribute can.
+  L2  The child does not run in the worktree. It runs in a STAGING workspace
+      built to contain the assigned paths and NOTHING else. A protected file
+      cannot be written, replaced, deleted, or have its permissions changed,
+      because it is not present -- and L1 denies reaching outside the root to
+      find the original. Assigned-path protection is therefore enforced by
+      absence plus the sandbox root, not by a file attribute.
 
-  L3  The coordinator diffs the result and refuses to commit anything outside
-      the assigned task paths, reverting it instead.
+      An earlier version used the read-only attribute for this. It was not a
+      boundary: a same-user process clears the attribute and proceeds, and a
+      Windows DACL is no better because the owner keeps implicit WRITE_DAC.
+      That is why staging exists. The attribute pass survives only as defence
+      in depth over the real worktree while the result is applied back, and it
+      now fails closed instead of skipping what it cannot protect.
+
+  L3  The coordinator applies only assigned paths back, diffs the worktree, and
+      reverts anything outside the assignment.
 
 L3 alone would not be containment, and is not treated as such. It bounds task
-paths inside a tree the operating system has already contained.
+paths after the operating system has already contained the run.
 
 The model never commits, never pushes, and never sees git metadata. The
 coordinator validates and commits. A verdict, a diff, and a task outcome are
@@ -37,9 +47,11 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -62,7 +74,8 @@ EXIT_INVALID = 2
 EXIT_LIMIT = 3
 EXIT_STOPPED = 4
 
-OPERATIONS = ("validate-policy", "inspect", "submit-task", "implement-once")
+OPERATIONS = ("validate-policy", "inspect", "submit-task",
+              "implement-once", "settle-claim")
 
 # The same refusal surface as the reviewer: an action word is not an operation.
 FORBIDDEN_VERBS = rr.FORBIDDEN_VERBS
@@ -85,6 +98,8 @@ TASK_FIELDS = (
     "assigned_paths", "instruction", "acceptance", "assigned_by",
 )
 
+CLAIM_TYPE = "implementation_attempt_claim"
+
 OUTCOME_TYPE = "implementation_outcome"
 OUTCOME_CATEGORIES = (
     "completed",             # the child edited within scope and tests were run
@@ -98,6 +113,9 @@ OUTCOME_CATEGORIES = (
     "protected_path_touched",
     "state_changed",
     "internal_error",
+    # Only a human settles this one, through `settle-claim`. It exists so a
+    # crashed run can be closed out honestly instead of being re-run.
+    "abandoned_after_crash",
 )
 
 
@@ -153,6 +171,8 @@ def validate_policy(policy):
                       ("model_reaches_git_metadata", False),
                       ("coordinator_commits", True), ("retry", False),
                       ("attempt_consumed_on_spawn", True),
+                      ("attempt_claimed_before_spawn", True),
+                      ("concurrent_runs", False),
                       ("read_only_reviewer_preserved", True)):
         if contract.get(key) is not want:
             problems.append("contract.%s must be %r" % (key, want))
@@ -193,6 +213,10 @@ def is_task(msg):
 
 def is_outcome(msg):
     return isinstance(msg, dict) and msg.get("message_type") == OUTCOME_TYPE
+
+
+def is_claim(msg):
+    return isinstance(msg, dict) and msg.get("message_type") == CLAIM_TYPE
 
 
 def validate_task(doc, policy):
@@ -242,10 +266,15 @@ def find_pending_task(ledger_doc):
     makes recovery safe: re-running the runner after a crash finds nothing to
     do rather than doing the same work twice.
     """
-    settled = {e.get("task_id") for e in ledger_doc.get("entries", [])
-               if is_outcome(e)}
+    stale = unsettled_claims(ledger_doc)
+    if stale:
+        raise sg.StoppedError(
+            "task %s has a claimed but unsettled attempt; its attempt was "
+            "already spent. It is NOT re-run automatically -- settle it with "
+            "settle-claim before assigning more work" % stale[0])
+    done = settled_task_ids(ledger_doc) | claimed_task_ids(ledger_doc)
     pending = [e for e in ledger_doc.get("entries", [])
-               if is_task(e) and e.get("task_id") not in settled]
+               if is_task(e) and e.get("task_id") not in done]
     if not pending:
         raise sg.StoppedError("the ledger holds no pending implementation task")
     if len(pending) > 1:
@@ -254,47 +283,85 @@ def find_pending_task(ledger_doc):
     return pending[0]
 
 
-def record_task(root, task_id, phase, repo_obs, registry_revision,
-                assigned_paths, instruction, acceptance, policy,
-                assigned_by="claude"):
-    """Append one task. The coordinator assigns; the model never self-assigns."""
-    doc = read_ledger(root)
-    problems = verify_ledger(doc)
-    if problems:
-        raise sg.StoppedError("the implementation ledger does not verify: %s"
-                              % problems[0][1])
-    if task_id in {e.get("task_id") for e in doc["entries"]}:
-        _bad("that task id is already recorded; a task runs at most once")
-
+def _append_entry(root, doc, entry):
+    """Chain one entry onto the ledger and write it atomically."""
     entries = doc["entries"]
-    previous = (hashlib.sha256(cr.canonical_bytes(entries[-1])).hexdigest()
-                if entries else "0" * 64)
-    entry = {
-        "schema_version": SCHEMA_VERSION,
-        "entry_id": str(uuid.uuid4()),
-        "sequence": len(entries) + 1,
-        "previous_sha256": previous,
-        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "message_type": TASK_TYPE,
-        "task_id": task_id,
-        "phase": phase,
-        "repository_identity": "nova",
-        "worktree_identity": repo_obs["identity"],
-        "branch": repo_obs["branch"],
-        "head": repo_obs["head"],
-        "registry_revision": registry_revision,
-        "assigned_paths": list(assigned_paths),
-        "instruction": instruction,
-        "acceptance": acceptance,
-        "assigned_by": assigned_by,
-    }
-    validate_task(entry, policy)
+    entry["sequence"] = len(entries) + 1
+    entry["previous_sha256"] = (
+        hashlib.sha256(cr.canonical_bytes(entries[-1])).hexdigest()
+        if entries else "0" * 64)
     entries.append(entry)
     doc["revision"] = doc.get("revision", 0) + 1
     os.makedirs(os.path.abspath(root), exist_ok=True)
     cr._atomic_write(ledger_path(root),
                      json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
     return entry
+
+
+def claim_attempt(root, task, claimed_by="codex_implementation_runner"):
+    """Record, durably and BEFORE the child starts, that an attempt is being spent.
+
+    This is the correction for the crash window. Previously the attempt existed
+    only in memory until an outcome was written, so a crash in between left the
+    task looking untouched and a restart would spend a second attempt on it.
+    """
+    with _LedgerLock(root):
+        doc = read_ledger(root)
+        problems = verify_ledger(doc)
+        if problems:
+            raise sg.StoppedError("the implementation ledger does not verify: "
+                                  "%s" % problems[0][1])
+        if task["task_id"] in claimed_task_ids(doc):
+            raise sg.StoppedError("that task's attempt is already claimed")
+        return _append_entry(root, doc, {
+            "schema_version": SCHEMA_VERSION,
+            "entry_id": str(uuid.uuid4()),
+            "created_at": datetime.now(timezone.utc)
+                                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "message_type": CLAIM_TYPE,
+            "task_id": task["task_id"],
+            "phase": task["phase"],
+            "head": task["head"],
+            "claimed_by": claimed_by,
+            "pid": os.getpid(),
+        })
+
+
+def record_task(root, task_id, phase, repo_obs, registry_revision,
+                assigned_paths, instruction, acceptance, policy,
+                assigned_by="claude"):
+    """Append one task. The coordinator assigns; the model never self-assigns."""
+    with _LedgerLock(root):
+        doc = read_ledger(root)
+        problems = verify_ledger(doc)
+        if problems:
+            raise sg.StoppedError("the implementation ledger does not verify: %s"
+                                  % problems[0][1])
+        if task_id in {e.get("task_id") for e in doc["entries"]}:
+            _bad("that task id is already recorded; a task runs at most once")
+
+        entry = {
+            "schema_version": SCHEMA_VERSION,
+            "entry_id": str(uuid.uuid4()),
+            "sequence": len(doc["entries"]) + 1,
+            "previous_sha256": "0" * 64,        # _append_entry sets both
+            "created_at": datetime.now(timezone.utc)
+                                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "message_type": TASK_TYPE,
+            "task_id": task_id,
+            "phase": phase,
+            "repository_identity": "nova",
+            "worktree_identity": repo_obs["identity"],
+            "branch": repo_obs["branch"],
+            "head": repo_obs["head"],
+            "registry_revision": registry_revision,
+            "assigned_paths": list(assigned_paths),
+            "instruction": instruction,
+            "acceptance": acceptance,
+            "assigned_by": assigned_by,
+        }
+        validate_task(entry, policy)
+        return _append_entry(root, doc, entry)
 
 
 # --------------------------------------------------------------------------
@@ -339,28 +406,45 @@ def _norm(path):
     return os.path.normcase(os.path.abspath(path))
 
 
-def protect_paths(repo, policy, assigned):
-    """Make everything outside the assignment read-only. Returns a restore map.
+class ProtectionFailed(Exception):
+    """Protection could not be established. The run must not start."""
 
-    This is a filesystem control, not a request. The child runs as the same
-    user, so this is a guard rail rather than a privilege boundary -- which is
-    exactly why it is layer TWO, behind the sandbox, and why the coordinator
-    still verifies the result afterwards.
+
+def protect_paths(repo, policy, assigned, strict=True):
+    """Mark everything outside the assignment read-only, over the REAL worktree.
+
+    This is defence in depth, NOT a boundary, and the difference matters: a
+    same-user process can clear the attribute, so this stops an accident and
+    not an attacker. The boundary is the staging workspace plus the sandbox
+    root -- see `build_staging`.
+
+    What changed after review: it no longer swallows a failure. If a file
+    cannot be stat-ed or cannot be made read-only, protection for that file was
+    NOT established, and with `strict` the whole run is refused rather than
+    proceeding under a protection that does not exist.
     """
     restore = {}
+    unprotected = []
     for raw in _iter_protected(repo, policy, assigned):
         path = _norm(raw)
         if path in restore:
             continue
         try:
             mode = os.stat(path).st_mode
-        except OSError:
+        except OSError as exc:
+            unprotected.append((path, "cannot stat: %s" % exc.__class__.__name__))
             continue
-        restore[path] = mode
         try:
             os.chmod(path, mode & ~stat.S_IWRITE)
-        except OSError:
-            restore.pop(path, None)
+        except OSError as exc:
+            unprotected.append((path, "cannot chmod: %s" % exc.__class__.__name__))
+            continue
+        restore[path] = mode
+    if unprotected and strict:
+        restore_paths(restore)
+        raise ProtectionFailed(
+            "protection could not be established for %d path(s); refusing to "
+            "run rather than proceeding unprotected" % len(unprotected))
     return restore
 
 
@@ -392,6 +476,101 @@ def protected_paths_touched(repo, restore):
         if full in protected:
             touched.append(rel)
     return touched
+
+
+# --------------------------------------------------------------------------
+# L2 -- the staging workspace, which is what actually denies the write
+# --------------------------------------------------------------------------
+
+STAGING_DIRNAME = "impl-staging"
+
+
+def _assigned_files(repo, assigned):
+    """Every tracked file the assignment covers, repository-relative."""
+    listing = subprocess.run(["git", "-C", repo, "ls-files"],
+                             capture_output=True, text=True)
+    if listing.returncode != 0:
+        raise ProtectionFailed("the assigned worktree could not be listed")
+    out = []
+    for rel in listing.stdout.splitlines():
+        rel = rel.strip().replace("\\", "/")
+        if rel and in_scope(rel, assigned):
+            out.append(rel)
+    return out
+
+
+def build_staging(repo, assigned, policy, parent=None):
+    """Create a workspace holding the assigned paths and nothing else.
+
+    This is the enforceable part. A protected file is not merely read-only in
+    here, it is ABSENT, so there is nothing to write, replace, delete, or
+    chmod; and the sandbox root denies reaching out to the original. Failure to
+    build it correctly refuses the run -- an empty or partial staging directory
+    is never treated as "nothing to protect".
+    """
+    files = _assigned_files(repo, assigned)
+    if not files:
+        raise ProtectionFailed("the assignment matches no tracked file; "
+                               "refusing to stage an empty workspace")
+    base = tempfile.mkdtemp(prefix=STAGING_DIRNAME + "-", dir=parent)
+    try:
+        os.chmod(base, 0o700)
+    except OSError:
+        pass
+    for rel in files:
+        src = os.path.join(repo, rel)
+        dst = os.path.join(base, rel.replace("/", os.sep))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+    verify_staging(base, assigned, policy)
+    return base, files
+
+
+def verify_staging(base, assigned, policy):
+    """Nothing outside the assignment may exist in the staging workspace."""
+    protected = set(policy["containment"]["always_protected_paths"])
+    present = []
+    for root_dir, _dirs, names in os.walk(base):
+        for name in names:
+            rel = os.path.relpath(os.path.join(root_dir, name), base)
+            rel = rel.replace(os.sep, "/")
+            present.append(rel)
+            if not in_scope(rel, assigned):
+                raise ProtectionFailed(
+                    "staging holds a path outside the assignment: %s" % rel)
+            for pattern in protected:
+                if rel == pattern or _fnmatch(rel, pattern):
+                    raise ProtectionFailed(
+                        "staging holds an always-protected path: %s" % rel)
+    if not present:
+        raise ProtectionFailed("the staging workspace is empty")
+    return present
+
+
+def apply_staged(base, repo, assigned, policy):
+    """Copy the staged result back, for assigned paths only.
+
+    Anything the run created outside the assignment inside staging has already
+    been refused by `verify_staging`; this re-checks rather than trusting it,
+    because this is the step that touches the real worktree.
+    """
+    verify_staging(base, assigned, policy)
+    applied = []
+    for root_dir, _dirs, names in os.walk(base):
+        for name in names:
+            src = os.path.join(root_dir, name)
+            rel = os.path.relpath(src, base).replace(os.sep, "/")
+            if not in_scope(rel, assigned):
+                raise ProtectionFailed("refusing to apply %s" % rel)
+            dst = os.path.join(repo, rel.replace("/", os.sep))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+            applied.append(rel)
+    return applied
+
+
+def discard_staging(base):
+    shutil.rmtree(base, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
@@ -589,6 +768,52 @@ def check_preconditions(task, repo_obs, registry, coordinator_id, worker_id,
 # --------------------------------------------------------------------------
 
 LEDGER_FILENAME = "implementation-ledger.json"
+LEDGER_LOCK_SUFFIX = ".lock"
+LOCK_STALE_SECONDS = 3600
+
+
+class LedgerBusy(Exception):
+    """Another runner holds the ledger. Two children must never race."""
+
+
+class _LedgerLock:
+    """Exclusive create, so two runners cannot claim the same task.
+
+    O_EXCL is atomic on Windows and POSIX alike. A lock older than an hour is
+    treated as abandoned and broken, which is safe because a claim is durable:
+    breaking the lock cannot cause a re-run, only a refusal.
+    """
+
+    def __init__(self, root):
+        self.path = ledger_path(root) + LEDGER_LOCK_SUFFIX
+        self.fd = None
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        try:
+            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                age = time.time() - os.path.getmtime(self.path)
+            except OSError:
+                age = 0
+            if age < LOCK_STALE_SECONDS:
+                raise LedgerBusy("another runner holds the implementation "
+                                 "ledger lock")
+            os.unlink(self.path)
+            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(self.fd, str(os.getpid()).encode("ascii"))
+        return self
+
+    def __exit__(self, *_exc):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+        return False
 MAX_LEDGER_BYTES = 4 * 1024 * 1024
 
 
@@ -624,6 +849,7 @@ def verify_ledger(doc):
     # A task id legitimately appears TWICE: once as the assignment, once as its
     # outcome. What must never repeat is either of those on its own.
     assigned = set()
+    claimed = set()
     settled = set()
     previous = "0" * 64
     for index, entry in enumerate(doc.get("entries", []), start=1):
@@ -637,6 +863,14 @@ def verify_ledger(doc):
                 problems.append((index, "task %s is assigned more than once"
                                  % task_id))
             assigned.add(task_id)
+        elif is_claim(entry):
+            if task_id in claimed:
+                problems.append((index, "task %s is claimed more than once"
+                                 % task_id))
+            if task_id not in assigned:
+                problems.append((index, "entry %d claims a task that was never "
+                                        "assigned" % index))
+            claimed.add(task_id)
         elif is_outcome(entry):
             if task_id in settled:
                 problems.append((index, "task %s is settled more than once"
@@ -644,6 +878,9 @@ def verify_ledger(doc):
             if task_id not in assigned:
                 problems.append((index, "entry %d settles a task that was "
                                         "never assigned" % index))
+            if task_id not in claimed:
+                problems.append((index, "entry %d settles a task whose attempt "
+                                        "was never claimed" % index))
             settled.add(task_id)
         else:
             problems.append((index, "entry %d has an unknown message type"
@@ -658,6 +895,21 @@ def settled_task_ids(doc):
             if is_outcome(entry)}
 
 
+def claimed_task_ids(doc):
+    return {entry.get("task_id") for entry in doc.get("entries", [])
+            if is_claim(entry)}
+
+
+def unsettled_claims(doc):
+    """Attempts that were spent but never settled -- a crash, almost always.
+
+    These are never re-run automatically. They are reported so a person can
+    decide, because the attempt is already gone and repeating it would spend a
+    second one on work that may well have happened.
+    """
+    return sorted(claimed_task_ids(doc) - settled_task_ids(doc))
+
+
 def record_outcome(root, task, category, exit_code, detail, changed,
                    max_changed=64):
     """Append exactly one outcome for a task.
@@ -668,40 +920,40 @@ def record_outcome(root, task, category, exit_code, detail, changed,
     """
     if category not in OUTCOME_CATEGORIES:
         _bad("unknown outcome category %r" % category)
-    doc = read_ledger(root)
-    problems = verify_ledger(doc)
-    if problems:
-        raise sg.StoppedError("the implementation ledger does not verify: %s"
-                              % problems[0][1])
-    if task["task_id"] in settled_task_ids(doc):
-        return "already-recorded"
+    with _LedgerLock(root):
+        doc = read_ledger(root)
+        problems = verify_ledger(doc)
+        if problems:
+            raise sg.StoppedError("the implementation ledger does not verify: %s"
+                                  % problems[0][1])
+        if task["task_id"] in settled_task_ids(doc):
+            return "already-recorded"
+        if task["task_id"] not in claimed_task_ids(doc):
+            # An outcome without a claim would mean the attempt was spent
+            # without ever being announced, which is the failure this design
+            # exists to prevent.
+            raise sg.StoppedError("that task's attempt was never claimed; "
+                                  "refusing to settle an unannounced attempt")
 
-    entries = doc["entries"]
-    previous = (hashlib.sha256(cr.canonical_bytes(entries[-1])).hexdigest()
-                if entries else "0" * 64)
-    entry = {
-        "schema_version": SCHEMA_VERSION,
-        "entry_id": str(uuid.uuid4()),
-        "sequence": len(entries) + 1,
-        "previous_sha256": previous,
-        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "message_type": OUTCOME_TYPE,
-        "task_id": task["task_id"],
-        "phase": task["phase"],
-        "head": task["head"],
-        "outcome": category,
-        "exit_code": int(exit_code),
-        "detail": (detail or "")[:2000],
-        "changed_paths": sorted(changed)[:max_changed],
-        "attempt_consumed": True,
-        "recorded_by": "codex_implementation_runner",
-    }
-    entries.append(entry)
-    doc["revision"] = doc.get("revision", 0) + 1
-    os.makedirs(os.path.abspath(root), exist_ok=True)
-    cr._atomic_write(ledger_path(root),
-                     json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
-    return "recorded"
+        _append_entry(root, doc, {
+            "schema_version": SCHEMA_VERSION,
+            "entry_id": str(uuid.uuid4()),
+            "sequence": len(doc["entries"]) + 1,
+            "previous_sha256": "0" * 64,        # _append_entry sets both
+            "created_at": datetime.now(timezone.utc)
+                                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "message_type": OUTCOME_TYPE,
+            "task_id": task["task_id"],
+            "phase": task["phase"],
+            "head": task["head"],
+            "outcome": category,
+            "exit_code": int(exit_code),
+            "detail": (detail or "")[:2000],
+            "changed_paths": sorted(changed)[:max_changed],
+            "attempt_consumed": True,
+            "recorded_by": "codex_implementation_runner",
+        })
+        return "recorded"
 
 
 # --------------------------------------------------------------------------
@@ -734,6 +986,10 @@ def build_parser():
                              "task may modify; repeat for more")
     parser.add_argument("--instruction", help="submit-task: what to do")
     parser.add_argument("--acceptance", help="submit-task: how it is judged")
+    parser.add_argument("--settle-task-id",
+                        help="settle-claim: the crashed task to close out")
+    parser.add_argument("--settle-reason",
+                        help="settle-claim: why, in one sentence")
     return parser
 
 
@@ -769,6 +1025,7 @@ def main(argv=None):
     attempt = {"spawned": False, "recorded": False, "task": None,
                "root": None, "exit_code": -1}
     restore = {}
+    staging = None
 
     def _terminate(category, detail, changed=()):
         if not attempt["spawned"] or attempt["recorded"]:
@@ -841,6 +1098,39 @@ def main(argv=None):
                 _emit(doc, args.format)
                 return EXIT_OK
 
+            if args.operation == "settle-claim":
+                # A person closes out a crashed attempt. This is deliberately
+                # NOT automatic: the attempt was already spent, and re-running
+                # it would spend a second one on work that may have happened.
+                stale = unsettled_claims(ledger)
+                if not stale:
+                    checks.append(_chk("W1", "settle-claim", "informational",
+                                       "no claimed attempt is unsettled"))
+                else:
+                    if not args.settle_task_id:
+                        _bad("settle-claim requires --settle-task-id; "
+                             "unsettled: %s" % ", ".join(stale))
+                    if args.settle_task_id not in stale:
+                        _bad("that task has no unsettled claim")
+                    if not args.settle_reason:
+                        _bad("settle-claim requires --settle-reason")
+                    target = next(e for e in ledger["entries"]
+                                  if is_task(e)
+                                  and e["task_id"] == args.settle_task_id)
+                    record_outcome(root, target, "abandoned_after_crash", -1,
+                                   rr.sanitize_own_message(args.settle_reason),
+                                   [])
+                    checks.append(_chk("W1", "settle-claim", "pass",
+                                       "task %s closed out as abandoned; it is "
+                                       "not re-run" % args.settle_task_id))
+                checks.append(_chk("K1", "authority", "warning",
+                                   policy["non_authorization_sentence"]))
+                doc = {"schema_version": SCHEMA_VERSION,
+                       "phase": "codex implementation runner",
+                       "overall_status": "passed", "checks": checks}
+                _emit(doc, args.format)
+                return EXIT_OK
+
             task = find_pending_task(ledger)
             validate_task(task, policy)
             attempt["task"], attempt["root"] = task, root
@@ -868,26 +1158,47 @@ def main(argv=None):
                 checks.append(_chk("W4", "inspect", "informational",
                                    "no child was started"))
             else:
+                # L2: the child runs in a workspace holding the assigned paths
+                # and nothing else. A protected file is ABSENT, so it cannot be
+                # written, replaced, deleted, or chmod-ed, and L1 denies
+                # reaching outside the root to find the original. Failure to
+                # build it refuses the run.
+                staging, staged_files = build_staging(
+                    args.repo, task["assigned_paths"], policy)
+                checks.append(_chk("W5", "staging workspace", "pass",
+                                   "%d assigned file(s) staged; every other "
+                                   "path is absent, not merely read-only"
+                                   % len(staged_files)))
+
+                # Defence in depth over the REAL worktree, and fail-closed.
+                # Not a boundary: a same-user process can clear an attribute.
                 restore = protect_paths(args.repo, policy,
                                         task["assigned_paths"])
-                checks.append(_chk("W5", "protected paths", "pass",
-                                   "%d file(s) made read-only for the run"
+                checks.append(_chk("W5b", "worktree defence in depth", "pass",
+                                   "%d file(s) read-only in the real worktree "
+                                   "(defence in depth, not the boundary)"
                                    % len(restore)))
 
                 response_path = rr.make_response_path(root)
                 prompt = build_prompt(task, policy)
-                argv_used = build_argv(executable, repo_obs["repo"],
+                argv_used = build_argv(executable, staging,
                                        response_path, policy)
                 checks.append(_chk("W6", "argument array", "informational",
-                                   "codex exec -C <worktree> -s workspace-write "
+                                   "codex exec -C <staging> -s workspace-write "
                                    "-c windows.sandbox=\"elevated\" "
                                    "-c approval_policy=\"never\" -m %s "
                                    "--ephemeral --ignore-user-config "
                                    "-o <private temp> -"
                                    % policy["fixed_flags"]["model"]))
 
-                checks.append(_chk("W7", "attempt", "warning",
-                                   "the attempt for task %s is now consumed"
+                # DURABLE, and before the child exists. A crash after this
+                # point leaves a claim on disk, so recovery reports a spent
+                # attempt instead of quietly spending a second one.
+                claim_attempt(root, task)
+                checks.append(_chk("W7", "attempt claimed", "warning",
+                                   "the attempt for task %s is claimed on disk "
+                                   "and is now consumed; a crash from here on "
+                                   "will NOT be re-run automatically"
                                    % task["task_id"]))
                 result = rr.invoke_once(argv_used, prompt, env,
                                         {"limits": {
@@ -925,6 +1236,20 @@ def main(argv=None):
                     raise sg.StoppedError("codex exited non-zero; the attempt "
                                           "is consumed")
 
+                # Anything the run produced lives in staging. verify_staging
+                # refuses a path outside the assignment before a single byte
+                # reaches the real worktree.
+                try:
+                    applied = apply_staged(staging, args.repo,
+                                           task["assigned_paths"], policy)
+                except ProtectionFailed as exc:
+                    _terminate("out_of_scope", rr.sanitize_own_message(str(exc)))
+                    raise sg.StoppedError("the run produced a path outside its "
+                                          "assignment; nothing was applied")
+                checks.append(_chk("W9b", "applied", "pass",
+                                   "%d assigned file(s) copied back"
+                                   % len(applied)))
+
                 stray = out_of_scope_changes(args.repo, task["assigned_paths"])
                 if stray:
                     revert_paths(args.repo, stray)
@@ -958,6 +1283,17 @@ def main(argv=None):
         checks.append(_chk("Z0", "safety limit", "stopped",
                            ef.sanitize_text(str(exc))))
         exit_code = EXIT_LIMIT
+    except ProtectionFailed as exc:
+        # Protection could not be established. If the child never started this
+        # spends nothing; if it did, _terminate records the spent attempt.
+        _terminate("internal_error", rr.sanitize_own_message(str(exc)))
+        checks.append(_chk("Z3", "protection", "stopped",
+                           ef.sanitize_text(str(exc))))
+        exit_code = EXIT_STOPPED
+    except LedgerBusy as exc:
+        checks.append(_chk("Z4", "ledger busy", "stopped",
+                           ef.sanitize_text(str(exc))))
+        exit_code = EXIT_STOPPED
     except (ImplementationError, ef.ValidationError) as exc:
         _terminate("internal_error", rr.sanitize_own_message(str(exc)))
         sys.stderr.write("codex_implementation_runner: invalid input: %s\n"
@@ -982,6 +1318,8 @@ def main(argv=None):
     finally:
         if restore:
             restore_paths(restore)
+        if staging:
+            discard_staging(staging)
         rr._remove_own(response_path)
 
     doc = {"schema_version": SCHEMA_VERSION,

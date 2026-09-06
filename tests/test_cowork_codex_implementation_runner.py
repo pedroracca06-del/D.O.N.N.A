@@ -341,9 +341,12 @@ def test_two_entries_chain_to_each_other(policy, repo, ledger):
     ir.record_task(str(ledger), "T-1", "DEMO-1", obs, 1, ["intelligence/**"],
                    "a", "b", policy)
     task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
     ir.record_outcome(str(ledger), task, "completed", 0, "done", ["intelligence/x"])
     doc = ir.read_ledger(str(ledger))
-    assert len(doc["entries"]) == 2
+    # task, claim, outcome -- the claim is what closed the crash window.
+    assert [e["message_type"] for e in doc["entries"]] == [
+        ir.TASK_TYPE, ir.CLAIM_TYPE, ir.OUTCOME_TYPE]
     assert ir.verify_ledger(doc) == []
 
 
@@ -377,6 +380,7 @@ def test_a_task_gets_exactly_one_outcome(policy, repo, ledger):
     ir.record_task(str(ledger), "T-1", "DEMO-1", obs, 1, ["intelligence/**"],
                    "a", "b", policy)
     task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
     assert ir.record_outcome(str(ledger), task, "completed", 0, "x", []) == "recorded"
     assert ir.record_outcome(str(ledger), task, "nonzero_exit", 1, "y", []) \
         == "already-recorded"
@@ -390,6 +394,7 @@ def test_a_settled_task_is_never_pending_again(policy, repo, ledger):
     ir.record_task(str(ledger), "T-1", "DEMO-1", obs, 1, ["intelligence/**"],
                    "a", "b", policy)
     task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
     ir.record_outcome(str(ledger), task, "completed", 0, "x", [])
     with pytest.raises(Exception):
         ir.find_pending_task(ir.read_ledger(str(ledger)))
@@ -410,6 +415,7 @@ def test_every_outcome_category_is_accepted(policy, repo, ledger):
         ir.record_task(str(ledger), "T-%d" % n, "DEMO-1", obs, 1,
                        ["intelligence/**"], "a", "b", policy)
         task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+        ir.claim_attempt(str(ledger), task)
         assert ir.record_outcome(str(ledger), task, category, 0, "x", []) \
             == "recorded"
     assert ir.verify_ledger(ir.read_ledger(str(ledger))) == []
@@ -497,3 +503,244 @@ def test_every_git_call_the_runner_makes_is_an_inspection_or_a_revert():
         verbs = [w for w in words[1:] if not w.startswith("-") and w != "git"]
         # The first non-flag token after the repo path is the subcommand.
         assert any(v in allowed for v in verbs) or not verbs, words
+
+
+# ================================================================= corrections
+#
+# Two findings against commit 24f5661, each reproduced before being fixed.
+#
+# 1. protect_paths silently skipped stat/chmod failures, and the read-only
+#    attribute it relied on was not a boundary at all. Measured on the old
+#    code: clear-attribute-then-write ALLOWED, delete ALLOWED, replace ALLOWED,
+#    and with chmod always failing protect_paths returned 0 entries and did not
+#    raise.
+#
+# 2. Attempt state lived in memory until an outcome was recorded, so a crash
+#    between spawn and record_outcome left the task pending and a restart would
+#    spend a second attempt. Two runners could also claim the same task.
+
+
+# ------------------------------------------- 1. the staging workspace is the boundary
+
+def test_the_child_workspace_holds_only_the_assigned_paths(policy, repo):
+    staging, files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        present = set()
+        for root_dir, _dirs, names in os.walk(staging):
+            for name in names:
+                present.add(os.path.relpath(os.path.join(root_dir, name),
+                                            staging).replace(os.sep, "/"))
+        assert present == {"intelligence/target.py"}
+        assert files == ["intelligence/target.py"]
+    finally:
+        ir.discard_staging(staging)
+
+
+@pytest.mark.parametrize("protected", [
+    "services/execution.py", "other.py", ".git",
+])
+def test_a_protected_path_is_absent_not_merely_read_only(policy, repo, protected):
+    """Absent beats read-only: there is nothing to write, replace, delete or chmod."""
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        assert not os.path.exists(os.path.join(staging, protected))
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_a_write_outside_the_assignment_is_never_applied_back(policy, repo):
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        os.makedirs(os.path.join(staging, "services"), exist_ok=True)
+        with open(os.path.join(staging, "services", "execution.py"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("PWNED\n")
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert (repo / "services" / "execution.py").read_text(encoding="utf-8") \
+            == "BROKER = 1\n"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_a_deletion_outside_the_assignment_cannot_reach_the_worktree(policy, repo):
+    """Deleting inside staging cannot delete the real file: it was never there."""
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        assert not os.path.exists(os.path.join(staging, "services",
+                                               "execution.py"))
+        ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert (repo / "services" / "execution.py").is_file()
+        assert (repo / "other.py").is_file()
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_an_edit_inside_the_assignment_is_applied(policy, repo):
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        target = os.path.join(staging, "intelligence", "target.py")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("VALUE = 2\n")
+        applied = ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert applied == ["intelligence/target.py"]
+        assert (repo / "intelligence" / "target.py").read_text(encoding="utf-8") \
+            == "VALUE = 2\n"
+    finally:
+        ir.discard_staging(staging)
+
+
+# ------------------------------------------------------------- 1b. fail closed
+
+def test_protection_that_cannot_be_established_refuses_the_run(policy, repo):
+    """The old code returned an empty map and carried on."""
+    import unittest.mock as mock
+    with mock.patch("os.chmod", side_effect=PermissionError("denied")):
+        with pytest.raises(ir.ProtectionFailed):
+            ir.protect_paths(str(repo), policy, ["intelligence/**"])
+
+
+def test_an_unstat_able_path_also_refuses_the_run(policy, repo):
+    import unittest.mock as mock
+    real_stat = os.stat
+
+    def flaky(path, *a, **kw):
+        if str(path).endswith("execution.py"):
+            raise PermissionError("denied")
+        return real_stat(path, *a, **kw)
+
+    with mock.patch("os.stat", side_effect=flaky):
+        with pytest.raises(ir.ProtectionFailed):
+            ir.protect_paths(str(repo), policy, ["intelligence/**"])
+
+
+def test_an_empty_assignment_never_stages_an_empty_workspace(policy, repo):
+    with pytest.raises(ir.ProtectionFailed):
+        ir.build_staging(str(repo), ["nothing/matches/**"], policy)
+
+
+def test_staging_refuses_to_hold_a_protected_path(policy, repo, tmp_path):
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        os.makedirs(os.path.join(staging, "services"), exist_ok=True)
+        with open(os.path.join(staging, "services", "execution.py"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("x\n")
+        with pytest.raises(ir.ProtectionFailed):
+            ir.verify_staging(staging, ["intelligence/**"], policy)
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_docstring_no_longer_claims_the_attribute_is_a_boundary():
+    """The code says what it is. Normalised, because the prose wraps."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "not a boundary" in source
+    assert "defence in depth" in source
+    assert "WRITE_DAC" in source, "the reason a DACL is not a boundary either"
+
+
+# ------------------------------------------ 2. durable claim, lock, recovery
+
+def test_an_attempt_is_claimed_before_the_child_would_start(policy, repo, ledger):
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
+    doc = ir.read_ledger(str(ledger))
+    assert [e["message_type"] for e in doc["entries"]] == [
+        ir.TASK_TYPE, ir.CLAIM_TYPE]
+    assert ir.verify_ledger(doc) == []
+
+
+def test_a_crash_after_the_claim_never_re_runs_the_task(policy, repo, ledger):
+    """The crash window. The old code left the task pending and would re-run it."""
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-crash", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)          # ... then the process dies
+    doc = ir.read_ledger(str(ledger))
+    assert ir.unsettled_claims(doc) == ["T-crash"]
+    with pytest.raises(Exception) as excinfo:
+        ir.find_pending_task(doc)
+    assert "not re-run automatically" in str(excinfo.value).lower() \
+        or "NOT re-run" in str(excinfo.value)
+
+
+def test_a_second_runner_cannot_claim_while_one_holds_the_lock(policy, repo,
+                                                               ledger):
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    holder = ir._LedgerLock(str(ledger))
+    holder.__enter__()
+    try:
+        with pytest.raises(ir.LedgerBusy):
+            ir.claim_attempt(str(ledger), task)
+    finally:
+        holder.__exit__()
+
+
+def test_the_lock_is_released_so_the_next_runner_proceeds(policy, repo, ledger):
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
+    assert not os.path.exists(ir.ledger_path(str(ledger))
+                              + ir.LEDGER_LOCK_SUFFIX)
+
+
+def test_the_same_attempt_is_never_claimed_twice(policy, repo, ledger):
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
+    with pytest.raises(Exception):
+        ir.claim_attempt(str(ledger), task)
+
+
+def test_an_outcome_without_a_claim_is_refused(policy, repo, ledger):
+    """An unannounced attempt is exactly what the claim exists to prevent."""
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    with pytest.raises(Exception):
+        ir.record_outcome(str(ledger), task, "completed", 0, "x", [])
+
+
+def test_a_settled_crash_is_still_never_pending_again(policy, repo, ledger):
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
+    ir.record_outcome(str(ledger), task, "abandoned_after_crash", -1,
+                      "crashed", [])
+    doc = ir.read_ledger(str(ledger))
+    assert ir.unsettled_claims(doc) == []
+    assert ir.verify_ledger(doc) == []
+    with pytest.raises(Exception):
+        ir.find_pending_task(doc)
+
+
+def test_the_ledger_refuses_an_outcome_that_precedes_its_claim(policy, repo,
+                                                              ledger):
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-1", "DEMO", obs, 1, ["intelligence/**"],
+                   "a", "b", policy)
+    doc = ir.read_ledger(str(ledger))
+    forged = dict(doc["entries"][0], message_type=ir.OUTCOME_TYPE,
+                  sequence=2, previous_sha256="0" * 64)
+    problems = ir.verify_ledger({"entries": doc["entries"] + [forged]})
+    assert problems, "an outcome with no claim before it was accepted"
+
+
+def test_the_policy_records_the_claim_contract(policy):
+    assert policy["contract"]["attempt_claimed_before_spawn"] is True
+    assert policy["contract"]["concurrent_runs"] is False
