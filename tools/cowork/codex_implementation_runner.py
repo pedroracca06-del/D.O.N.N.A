@@ -620,6 +620,46 @@ def _final_path_of_handle(fd):
     return final
 
 
+def _handle_link_count(fd):
+    """How many names this open file has. More than one is a hard link.
+
+    A hard link inside the worktree resolves to an in-worktree NAME while
+    sharing its contents with a file elsewhere, so resolving the handle's path
+    is not enough on its own -- the write would still reach the other name.
+    """
+    if os.name != "nt":
+        try:
+            return os.fstat(fd).st_nlink
+        except OSError:
+            return None
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class _FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                    ("dwHighDateTime", wintypes.DWORD)]
+
+    class _INFO(ctypes.Structure):
+        _fields_ = [("dwFileAttributes", wintypes.DWORD),
+                    ("ftCreationTime", _FILETIME),
+                    ("ftLastAccessTime", _FILETIME),
+                    ("ftLastWriteTime", _FILETIME),
+                    ("dwVolumeSerialNumber", wintypes.DWORD),
+                    ("nFileSizeHigh", wintypes.DWORD),
+                    ("nFileSizeLow", wintypes.DWORD),
+                    ("nNumberOfLinks", wintypes.DWORD),
+                    ("nFileIndexHigh", wintypes.DWORD),
+                    ("nFileIndexLow", wintypes.DWORD)]
+
+    info = _INFO()
+    handle = msvcrt.get_osfhandle(fd)
+    if not ctypes.windll.kernel32.GetFileInformationByHandle(
+            ctypes.c_void_p(handle), ctypes.byref(info)):
+        return None
+    return int(info.nNumberOfLinks)
+
+
 def _refuse_reparse_ancestors(path, repo):
     """No directory between the worktree root and the target may be a link.
 
@@ -677,6 +717,19 @@ def _open_contained(dst, repo):
         if not rr._within(final, _norm(repo)):
             raise ProtectionFailed(
                 "the destination resolves outside the worktree; refusing")
+        # A resolved name inside the worktree is still not enough: a HARD LINK
+        # has an in-worktree name and shares its contents with another name
+        # that may be anywhere. Refuse anything with more than one name, and
+        # refuse when the count cannot be established.
+        links = _handle_link_count(fd)
+        if links is None:
+            raise ProtectionFailed(
+                "the destination's link count could not be established; "
+                "refusing rather than writing through an unknown name")
+        if links > 1:
+            raise ProtectionFailed(
+                "the destination has more than one name (hard link); "
+                "refusing to write through it")
     except Exception:
         os.close(fd)
         if created:
@@ -927,41 +980,91 @@ class LedgerBusy(Exception):
     """Another runner holds the ledger. Two children must never race."""
 
 
-def _process_is_live(pid):
-    """True if that pid is running, False if definitely gone, None if unknown.
+def _process_started_at(pid):
+    """The process's creation time, or None if it cannot be read.
 
-    None matters as much as the other two: an unknown owner must be treated as
-    live, never as abandoned.
+    A pid on its own is not an identity: pids are recycled, so a live process
+    can inherit the pid of the owner that died. pid PLUS creation time is an
+    identity, and that is what makes stale-lock recovery safe.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if os.name != "nt":
+        try:
+            with open("/proc/%d/stat" % pid, "rb") as handle:
+                return handle.read().rsplit(b")", 1)[1].split()[19].decode()
+        except Exception:
+            return None
+    import ctypes
+    from ctypes import wintypes
+
+    class _FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                    ("dwHighDateTime", wintypes.DWORD)]
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        creation, exit_t, kernel_t, user_t = (_FILETIME(), _FILETIME(),
+                                              _FILETIME(), _FILETIME())
+        if not kernel32.GetProcessTimes(
+                ctypes.c_void_p(handle), ctypes.byref(creation),
+                ctypes.byref(exit_t), ctypes.byref(kernel_t),
+                ctypes.byref(user_t)):
+            return None
+        return "%d-%d" % (creation.dwHighDateTime, creation.dwLowDateTime)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _process_is_live(pid, started_at=None):
+    """True if running, False if definitely gone, None if unknown.
+
+    None matters as much as the other two: an unknown owner is treated as live,
+    never as abandoned. When `started_at` is supplied it must also match, so a
+    RECYCLED pid reads as gone rather than as the original owner still running.
     """
     if not isinstance(pid, int) or pid <= 0:
         return None
     if os.name != "nt":
         try:
             os.kill(pid, 0)
-            return True
+            live = True
         except ProcessLookupError:
             return False
         except PermissionError:
-            return True
+            live = True
         except OSError:
             return None
-    import ctypes
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        # 87 ERROR_INVALID_PARAMETER means no such process; anything else
-        # (notably 5 ERROR_ACCESS_DENIED) means it exists but we cannot ask.
-        return False if ctypes.get_last_error() == 87 or \
-            kernel32.GetLastError() == 87 else None
-    try:
-        code = ctypes.c_ulong()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return None
-        return code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
+    else:
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+                                      False, pid)
+        if not handle:
+            # 87 ERROR_INVALID_PARAMETER means no such process; anything else
+            # (notably 5 ERROR_ACCESS_DENIED) means it exists but we cannot ask.
+            return False if kernel32.GetLastError() == 87 else None
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return None
+            live = code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+        if not live:
+            return False
+    if started_at is None:
+        return live
+    now = _process_started_at(pid)
+    if now is None:
+        return None                      # cannot confirm identity -> unknown
+    return now == started_at
 
 
 class _LedgerLock:
@@ -981,23 +1084,29 @@ class _LedgerLock:
         self.path = ledger_path(root) + LEDGER_LOCK_SUFFIX
         self.fd = None
 
-    def _owner_pid(self):
+    def _owner(self):
+        """(pid, started_at) from the lock, or (None, None) if unreadable."""
         try:
-            raw = open(self.path, "rb").read(64).decode("ascii", "replace")
+            raw = open(self.path, "rb").read(128).decode("ascii", "replace")
         except OSError:
-            return None
-        raw = raw.strip()
-        if not raw.isdigit():
-            return None
-        return int(raw)
+            return None, None
+        parts = raw.strip().split()
+        if not parts or not parts[0].isdigit():
+            return None, None
+        pid = int(parts[0])
+        return pid, (parts[1] if len(parts) > 1 else None)
+
+    def _stamp(self):
+        started = _process_started_at(os.getpid())
+        return "%d %s" % (os.getpid(), started or "-")
 
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         try:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            pid = self._owner_pid()
-            live = _process_is_live(pid)
+            pid, started = self._owner()
+            live = _process_is_live(pid, started)
             if live is not False:
                 raise LedgerBusy(
                     "another runner holds the implementation ledger lock "
@@ -1009,9 +1118,28 @@ class _LedgerLock:
             if age < LOCK_STALE_SECONDS:
                 raise LedgerBusy("the ledger lock's owner has exited but the "
                                  "lock is not yet stale; refusing to take it")
-            os.unlink(self.path)
-            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(self.fd, str(os.getpid()).encode("ascii"))
+            # Move the stale lock aside rather than deleting it in place, then
+            # take the name with O_EXCL. If another runner reclaimed it first,
+            # either the move or the create fails and we back off -- the two
+            # steps never leave the name unowned in a way a racer can exploit.
+            aside = "%s.stale.%d" % (self.path, os.getpid())
+            try:
+                os.replace(self.path, aside)
+            except OSError:
+                raise LedgerBusy("another runner reclaimed the ledger lock "
+                                 "first")
+            try:
+                self.fd = os.open(self.path,
+                                  os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                raise LedgerBusy("another runner reclaimed the ledger lock "
+                                 "first")
+            finally:
+                try:
+                    os.unlink(aside)
+                except OSError:
+                    pass
+        os.write(self.fd, self._stamp().encode("ascii"))
         os.fsync(self.fd)
         return self
 

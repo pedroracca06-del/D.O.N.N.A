@@ -948,3 +948,114 @@ def test_the_emitted_containment_check_describes_staging_not_an_attribute():
     p2 = [c for c in doc["checks"] if c["id"] == "P2"][0]
     assert "staging workspace" in p2["evidence"]
     assert "read-only attribute on protected paths" not in p2["evidence"]
+
+
+# ======================================== IMPL-RUNNER-REVIEW-03 findings
+#
+# F-001 (critical) a HARD LINK inside the worktree resolves to an in-worktree
+#   name while sharing its contents with a file anywhere else, so resolving the
+#   handle's path was not sufficient. `mklink /H` needs no privilege.
+# F-002 (high) a pid alone is not an identity: pids are recycled, so a live
+#   process can inherit a dead owner's pid.
+
+
+def _hardlink(link, target):
+    out = _sp.run(["cmd", "/c", "mklink", "/H", str(link), str(target)],
+                  capture_output=True, text=True)
+    return out.returncode == 0
+
+
+def test_a_hard_link_destination_cannot_reach_outside_the_worktree(
+        escape_bench, policy):
+    repo, outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "victim.txt").write_text(
+            "PWNED\n", encoding="utf-8")
+        (repo / "intelligence" / "victim.txt").unlink()
+        if not _hardlink(repo / "intelligence" / "victim.txt",
+                         outside / "victim.txt"):
+            pytest.skip("this platform cannot create a hard link")
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert (outside / "victim.txt").read_text(encoding="utf-8") \
+            == "ORIGINAL\n", \
+            "a hard link let the write reach outside the worktree"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_an_unknown_link_count_refuses_rather_than_writing(tmp_path, monkeypatch):
+    """Uncertainty about the destination's names is not resolved by writing."""
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "x.py"
+    dst.write_text("a\n", encoding="utf-8")
+    monkeypatch.setattr(ir, "_handle_link_count", lambda _fd: None)
+    with pytest.raises(ir.ProtectionFailed):
+        ir._open_contained(str(dst), str(repo))
+
+
+def test_a_single_named_file_is_still_writable(tmp_path):
+    """Containment must not have cost the ordinary case."""
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "x.py"
+    dst.write_text("a\n", encoding="utf-8")
+    fd = ir._open_contained(str(dst), str(repo))
+    try:
+        assert ir._handle_link_count(fd) == 1
+    finally:
+        os.close(fd)
+
+
+# ------------------------------------------------------------------ F-002
+
+def test_a_recycled_pid_is_not_mistaken_for_the_original_owner():
+    me = os.getpid()
+    started = ir._process_started_at(me)
+    assert started, "the platform must expose a process creation stamp"
+    assert ir._process_is_live(me, started) is True
+    assert ir._process_is_live(me, "0-0") is False, \
+        "a pid with a different creation time is a DIFFERENT process"
+
+
+def test_a_lock_written_by_this_runner_carries_pid_and_start(ledger):
+    with ir._LedgerLock(str(ledger)):
+        raw = open(ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX,
+                   encoding="ascii").read().split()
+    assert raw[0] == str(os.getpid())
+    assert len(raw) == 2 and raw[1] != "-"
+
+
+def test_a_live_owner_with_a_matching_stamp_keeps_its_lock(ledger):
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="ascii") as handle:
+        handle.write("%d %s" % (os.getpid(),
+                                ir._process_started_at(os.getpid())))
+    old = _time.time() - (ir.LOCK_STALE_SECONDS + 60)
+    os.utime(path, (old, old))
+    with pytest.raises(ir.LedgerBusy):
+        with ir._LedgerLock(str(ledger)):
+            pass
+
+
+def test_reclaim_moves_the_stale_lock_aside_rather_than_unlinking_in_place():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "os.replace(self.path, aside)" in source, (
+        "the stale lock must be moved aside, not unlinked in place")
+    # The message is wrapped across source lines, so match a fragment.
+    assert "another runner reclaimed the ledger lock" in source
+
+
+def test_no_stale_sidecar_is_left_behind(ledger):
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="ascii") as handle:
+        handle.write("999999 0-0")
+    old = _time.time() - (ir.LOCK_STALE_SECONDS + 60)
+    os.utime(path, (old, old))
+    with ir._LedgerLock(str(ledger)):
+        pass
+    assert [p for p in os.listdir(str(ledger)) if ".stale." in p] == []
