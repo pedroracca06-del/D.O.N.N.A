@@ -753,6 +753,67 @@ def _refuse_reparse_ancestors(path, repo):
         current = parent
 
 
+def _makedirs_contained(parent, repo, assigned, policy):
+    """Create the destination's directories one component at a time.
+
+    `os.makedirs` takes a whole path and follows whatever it finds, so an
+    ancestor replaced with a junction makes it create directories at the
+    redirected target -- before any handle exists to check. Each component is
+    therefore created and then immediately validated, so a redirected ancestor
+    is caught before anything descends into it.
+    """
+    repo_long = _norm(_long_path(os.path.abspath(repo)))
+    rel = os.path.relpath(_norm(os.path.abspath(parent)), _norm(os.path.abspath(repo)))
+    if rel in (".", ""):
+        return
+    if rel.startswith(".."):
+        raise ProtectionFailed("the destination directory is outside the "
+                               "worktree")
+    current = os.path.abspath(repo)
+    for part in rel.replace("/", os.sep).split(os.sep):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            raise ProtectionFailed("the destination directory traverses "
+                                   "upwards")
+        current = os.path.join(current, part)
+        if not os.path.lexists(current):
+            try:
+                os.mkdir(current)
+            except FileExistsError:
+                pass
+            except OSError:
+                raise ProtectionFailed("a destination directory could not be "
+                                       "created")
+        try:
+            info = os.stat(current, follow_symlinks=False)
+        except OSError:
+            raise ProtectionFailed("a destination directory could not be "
+                                   "inspected")
+        if os.path.islink(current) or rr.is_reparse_point(info):
+            raise ProtectionFailed(
+                "a destination directory is a link or reparse point; "
+                "refusing to create or descend through it")
+        settled = _norm(_long_path(current))
+        if not rr._within(settled, repo_long) and settled != repo_long:
+            raise ProtectionFailed(
+                "a destination directory resolves outside the worktree")
+        step = os.path.relpath(settled, repo_long).replace(os.sep, "/")
+        _reject_short_names(step)
+        _refuse_protected(step, policy)
+
+
+def _same_object(path, identity):
+    """True when `path` still names the object we opened."""
+    if identity is None:
+        return False
+    try:
+        info = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return (info.st_dev, info.st_ino) == identity
+
+
 def _open_contained(dst, repo, assigned=None, policy=None):
     """Open a destination for writing only if the HANDLE passes every check.
 
@@ -779,7 +840,12 @@ def _open_contained(dst, repo, assigned=None, policy=None):
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0) \
         | getattr(os, "O_NOINHERIT", 0)
     fd = os.open(dst, flags, 0o600)
+    identity = None
     try:
+        # Remember WHICH object this is, so cleanup can never remove a
+        # different one that the pathname later refers to.
+        stat_info = os.fstat(fd)
+        identity = (stat_info.st_dev, stat_info.st_ino)
         final = _final_path_of_handle(fd)
         if not rr._within(final, _norm(repo)):
             raise ProtectionFailed(
@@ -811,7 +877,9 @@ def _open_contained(dst, repo, assigned=None, policy=None):
             _refuse_protected(settled, policy)
     except Exception:
         os.close(fd)
-        if created:
+        # Only remove what we created, and only if the name STILL refers to
+        # that same object. A redirected pathname must never be unlinked.
+        if created and _same_object(dst, identity):
             try:
                 os.unlink(dst)
             except OSError:
@@ -840,7 +908,7 @@ def apply_staged(base, repo, assigned, policy):
             _reject_short_names(rel)
             dst = os.path.join(repo, rel.replace("/", os.sep))
             _refuse_reparse_ancestors(os.path.dirname(dst), repo)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            _makedirs_contained(os.path.dirname(dst), repo, assigned, policy)
             _refuse_reparse_ancestors(os.path.dirname(dst), repo)
             # Decide scope on where the destination REALLY is, after
             # canonicalising, not on the name staging happened to use.

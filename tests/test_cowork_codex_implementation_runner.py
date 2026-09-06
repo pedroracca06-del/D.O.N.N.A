@@ -1221,3 +1221,91 @@ def test_every_check_is_bound_to_the_handle():
     source = " ".join(RUNNER.read_text(encoding="utf-8").split())
     assert "the opened destination is outside the assignment" in source
     assert "_open_contained(dst, repo, assigned, policy)" in source
+
+
+# ======================================== IMPL-RUNNER-REVIEW-06 findings
+#
+# F-001 (high) directory creation was still path-based and happened BEFORE any
+#   handle existed, so `os.makedirs` would follow an ancestor replaced with a
+#   junction and create directories at the redirected target.
+# F-002 (medium) failure cleanup unlinked by pathname, so a redirected name
+#   could have caused a different object to be removed.
+
+
+def test_directories_are_never_created_through_a_redirected_ancestor(
+        escape_bench, policy, monkeypatch):
+    """Proven with the ancestor checks disabled, so only the new guard remains."""
+    repo, outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        nested = pathlib.Path(staging) / "intelligence" / "deep" / "b.py"
+        nested.parent.mkdir(parents=True, exist_ok=True)
+        nested.write_text("PWNED\n", encoding="utf-8")
+        shutil.rmtree(repo / "intelligence")
+        if not _junction(repo / "intelligence", outside):
+            pytest.skip("this platform cannot create a directory junction")
+        monkeypatch.setattr(ir, "_refuse_reparse_ancestors", lambda *a, **k: None)
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert list(outside.iterdir()) == [outside / "victim.txt"], \
+            "a directory was created outside the worktree"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_contained_makedirs_creates_an_ordinary_nested_path(tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    target = repo / "intelligence" / "a" / "b"
+    ir._makedirs_contained(str(target), str(repo), ["intelligence/**"], policy)
+    assert target.is_dir()
+
+
+def test_contained_makedirs_refuses_a_protected_directory(tmp_path, policy):
+    repo = tmp_path / "w"
+    repo.mkdir()
+    # `.claude/**` is protected as a pattern, so the directory under it is too.
+    # (`services/execution.py` is protected as a FILE, not the whole directory.)
+    with pytest.raises(ir.ProtectionFailed):
+        ir._makedirs_contained(str(repo / ".claude" / "hooks"), str(repo),
+                               [".claude/**"], policy)
+
+
+def test_contained_makedirs_refuses_a_path_outside_the_worktree(tmp_path, policy):
+    repo = tmp_path / "w"
+    repo.mkdir()
+    outside = tmp_path / "elsewhere"
+    with pytest.raises(ir.ProtectionFailed):
+        ir._makedirs_contained(str(outside), str(repo), ["**"], policy)
+
+
+# ------------------------------------------------------------------ F-002
+
+def test_object_identity_distinguishes_a_reused_name(tmp_path):
+    target = tmp_path / "x.py"
+    target.write_text("a\n", encoding="utf-8")
+    info = os.stat(target)
+    identity = (info.st_dev, info.st_ino)
+    assert ir._same_object(str(target), identity) is True
+    target.unlink()
+    target.write_text("b\n", encoding="utf-8")
+    assert ir._same_object(str(target), identity) is False, \
+        "a different object behind the same name was treated as the same one"
+
+
+def test_object_identity_is_false_for_a_missing_path(tmp_path):
+    assert ir._same_object(str(tmp_path / "nope"), (1, 2)) is False
+    assert ir._same_object(str(tmp_path), None) is False
+
+
+def test_cleanup_is_identity_checked_not_name_based():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "_same_object(dst" in source
+    assert "_makedirs_contained" in source
+    # build_staging may use makedirs -- it builds OUR staging tree. The apply
+    # path writes into the real worktree and must not.
+    body = RUNNER.read_text(encoding="utf-8")
+    apply_body = body[body.index("def apply_staged("):]
+    apply_body = apply_body[:apply_body.index("\ndef ", 1)]
+    assert "os.makedirs" not in apply_body, \
+        "path-based makedirs must not survive in the apply path"
