@@ -1134,3 +1134,90 @@ def test_scope_is_decided_on_the_canonical_destination():
 def test_the_protected_check_is_shared_and_pattern_aware():
     source = " ".join(RUNNER.read_text(encoding="utf-8").split())
     assert "_refuse_protected" in source
+
+
+# ======================================== IMPL-RUNNER-REVIEW-05 finding
+#
+# F-005 (high) the final handle was checked only for worktree containment, not
+# for assignment scope or protected status. An ancestor replaced between the
+# canonical check and the open could redirect the write to a different
+# IN-WORKTREE path -- including a protected one -- while the earlier checks
+# still read as satisfied. Scope and protected status are now decided on the
+# handle's own resolved name.
+
+
+@pytest.fixture
+def protected_bench(tmp_path):
+    """A repo with an assigned directory and a protected one beside it."""
+    repo = tmp_path / "work"
+    repo.mkdir()
+    _git(repo.parent, "init", "-q", str(repo))
+    _git(repo, "config", "user.email", "t@example.invalid")
+    _git(repo, "config", "user.name", "t")
+    (repo / "intelligence").mkdir()
+    (repo / "intelligence" / "execution.py").write_text("V=1\n", encoding="utf-8")
+    (repo / "services").mkdir()
+    (repo / "services" / "execution.py").write_text("BROKER=1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+    return repo
+
+
+def test_a_redirect_to_an_in_worktree_protected_path_is_refused(
+        protected_bench, policy, monkeypatch):
+    """The handle-bound check, proven with the ancestor checks disabled.
+
+    Worktree containment alone would accept this: the redirected destination is
+    still inside the repository. Only a check bound to the handle's own name
+    catches it.
+    """
+    repo = protected_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "execution.py").write_text(
+            "PWNED\n", encoding="utf-8")
+        monkeypatch.setattr(ir, "_refuse_reparse_ancestors",
+                            lambda *a, **k: None)
+        shutil.rmtree(repo / "intelligence")
+        if not _junction(repo / "intelligence", repo / "services"):
+            pytest.skip("this platform cannot create a directory junction")
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert (repo / "services" / "execution.py").read_text(
+            encoding="utf-8") == "BROKER=1\n", \
+            "a protected in-worktree file was overwritten"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_open_refuses_a_destination_outside_the_assignment(tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "other").mkdir(parents=True)
+    dst = repo / "other" / "x.py"
+    dst.write_text("a\n", encoding="utf-8")
+    with pytest.raises(ir.ProtectionFailed):
+        ir._open_contained(str(dst), str(repo), ["intelligence/**"], policy)
+
+
+def test_the_open_refuses_a_protected_destination(tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "services").mkdir(parents=True)
+    dst = repo / "services" / "execution.py"
+    dst.write_text("a\n", encoding="utf-8")
+    with pytest.raises(ir.ProtectionFailed):
+        ir._open_contained(str(dst), str(repo), ["services/**"], policy)
+
+
+def test_the_open_still_accepts_an_assigned_destination(tmp_path, policy):
+    repo = tmp_path / "w"
+    (repo / "intelligence").mkdir(parents=True)
+    dst = repo / "intelligence" / "x.py"
+    dst.write_text("a\n", encoding="utf-8")
+    fd = ir._open_contained(str(dst), str(repo), ["intelligence/**"], policy)
+    os.close(fd)
+
+
+def test_every_check_is_bound_to_the_handle():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "the opened destination is outside the assignment" in source
+    assert "_open_contained(dst, repo, assigned, policy)" in source

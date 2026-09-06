@@ -753,8 +753,14 @@ def _refuse_reparse_ancestors(path, repo):
         current = parent
 
 
-def _open_contained(dst, repo):
-    """Open a destination for writing only if it really lives in the worktree.
+def _open_contained(dst, repo, assigned=None, policy=None):
+    """Open a destination for writing only if the HANDLE passes every check.
+
+    Containment, assignment scope and protected-path status are all decided on
+    the handle's own resolved name. Deciding them on a path beforehand leaves a
+    window: an ancestor replaced between the check and the open redirects the
+    write to a different in-worktree path -- possibly a protected one -- while
+    the earlier checks still read as satisfied.
 
     Deliberately opened WITHOUT truncation: truncating first and validating
     afterwards would already have destroyed a redirected target.
@@ -791,6 +797,18 @@ def _open_contained(dst, repo):
             raise ProtectionFailed(
                 "the destination has more than one name (hard link); "
                 "refusing to write through it")
+        # Scope and protected status are decided HERE, on the handle's own
+        # resolved name, so an ancestor swapped after any earlier check cannot
+        # redirect the write to another in-worktree path.
+        settled = os.path.relpath(final, _norm(_long_path(os.path.abspath(repo))))
+        settled = settled.replace(os.sep, "/")
+        _reject_short_names(settled)
+        if assigned is not None and not in_scope(settled, assigned):
+            raise ProtectionFailed(
+                "the opened destination is outside the assignment: %s"
+                % settled)
+        if policy is not None:
+            _refuse_protected(settled, policy)
     except Exception:
         os.close(fd)
         if created:
@@ -833,7 +851,7 @@ def apply_staged(base, repo, assigned, policy):
                     % canonical)
             _refuse_protected(canonical, policy)
             payload = open(src, "rb").read()
-            fd = _open_contained(dst, repo)
+            fd = _open_contained(dst, repo, assigned, policy)
             try:
                 os.ftruncate(fd, 0)
                 os.write(fd, payload)
