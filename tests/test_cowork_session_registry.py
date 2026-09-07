@@ -1372,3 +1372,97 @@ def test_the_handoff_adds_no_override_flag():
     for banned in ("--force", "--override", "--approve", "--approved-by",
                    "--ignore-collision", "--no-collision"):
         assert banned not in src, banned
+
+
+# ------------------------------------------- a paused session holding nothing
+#
+# The existing carve-out lets a READ-ONLY proposal register beside a paused
+# writer -- the review handoff. The mirror was missing and deadlocked the
+# bounded implementation demo: a paused COORDINATOR that declares no write
+# scope still counted as holding the worktree, so no implementer could ever
+# register beside it. A session holding nothing writable cannot conflict over a
+# worktree or a branch.
+
+
+def _record(session_id, worktree, branch, write, status="active", **over):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    doc = {
+        "session_id": session_id,
+        "worktree_identity": worktree,
+        "canonical_worktree_path": "C:/w/" + worktree,
+        "branch": branch,
+        "task": "t",
+        "read_scope": ["**"],
+        "write_scope": list(write),
+        "protected_scope": [],
+        "started_at": now,
+        "heartbeat_at": now,
+        "status": status,
+        "owner": "owner",
+        "expected_commit": "a" * 40,
+    }
+    doc.update(over)
+    return doc
+
+
+def _collide(proposal, others):
+    from datetime import datetime, timezone
+    import session_registry as sr
+    registry = {"schema_version": 1, "revision": 1, "sessions": list(others)}
+    return sr.find_collisions(proposal, registry,
+                              datetime.now(timezone.utc),
+                              sr.DEFAULT_STALE_SECONDS)
+
+
+def test_a_paused_session_with_no_write_scope_does_not_block_a_writer():
+    coordinator = _record("coord", "wt", "br", [], status="paused")
+    worker = _record("worker", "wt", "br", ["intelligence/cache.py"])
+    kinds = [c[0] for c in _collide(worker, [coordinator])]
+    assert "same-worktree-with-write" not in kinds
+    assert "same-branch-different-worktree" not in kinds
+
+
+def test_an_active_session_with_no_write_scope_still_blocks_a_writer():
+    """Only PAUSED counts as dormant. An active session is still working."""
+    coordinator = _record("coord", "wt", "br", [], status="active")
+    worker = _record("worker", "wt", "br", ["intelligence/cache.py"])
+    kinds = [c[0] for c in _collide(worker, [coordinator])]
+    assert "same-worktree-with-write" in kinds
+
+
+def test_a_paused_session_that_holds_a_write_scope_still_blocks():
+    """A writer never coexists with a writer, paused or otherwise."""
+    other = _record("other", "wt", "br", ["intelligence/**"], status="paused")
+    worker = _record("worker", "wt", "br", ["intelligence/cache.py"])
+    kinds = [c[0] for c in _collide(worker, [other])]
+    assert "same-worktree-with-write" in kinds
+
+
+def test_the_original_review_handoff_still_works():
+    """The carve-out this mirrors must be untouched."""
+    writer = _record("writer", "wt", "br", ["intelligence/**"], status="paused")
+    reviewer = _record("reviewer", "wt", "br", [])
+    kinds = [c[0] for c in _collide(reviewer, [writer])]
+    assert "same-worktree-with-write" not in kinds
+
+
+def test_protected_and_identity_checks_are_not_discounted():
+    """Only the write-derived collisions are affected by either carve-out."""
+    coordinator = _record("coord", "wt", "br", [], status="paused",
+                          expected_commit="b" * 40)
+    worker = _record("worker", "wt", "br", ["intelligence/cache.py"])
+    kinds = [c[0] for c in _collide(worker, [coordinator])]
+    assert "expected-commit-mismatch" in kinds
+
+
+def test_a_stale_paused_holder_is_not_discounted():
+    """Dormancy needs a live heartbeat, not just the paused label."""
+    from datetime import datetime, timedelta, timezone
+    old = (datetime.now(timezone.utc) - timedelta(days=2)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+    coordinator = _record("coord", "wt", "br", [], status="paused",
+                          heartbeat_at=old)
+    worker = _record("worker", "wt", "br", ["intelligence/cache.py"])
+    kinds = [c[0] for c in _collide(worker, [coordinator])]
+    assert "same-worktree-with-write" in kinds

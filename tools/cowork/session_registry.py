@@ -446,11 +446,27 @@ def find_collisions(proposal, registry, observed_at, stale_seconds,
         dormant_writer = (other["status"] == "paused" and state == "live"
                           and not p_write)
 
-        if same_worktree and either_writes and not dormant_writer:
+        # ---- the mirror case: a paused session that holds nothing ---------
+        #
+        # The rule above lets a read-only proposal sit beside a paused writer.
+        # The reverse is just as sound and was missing: a session that has
+        # paused AND declares NO write scope is holding nothing writable, so it
+        # cannot conflict with a writer over a worktree or a branch. That is
+        # exactly a coordinator waiting while a bounded implementer works.
+        #
+        # Equally narrow. It does nothing when the other session is active or
+        # closing, when it is stale or ambiguous, or when it actually holds a
+        # write scope of its own.
+        dormant_holder = (other["status"] == "paused" and state == "live"
+                          and not other["write_scope"])
+
+        if (same_worktree and either_writes and not dormant_writer
+                and not dormant_holder):
             out.append(("same-worktree-with-write", other["session_id"],
                         "another %s session holds this worktree" % state, severity))
         if (other["branch"] == proposal["branch"] and not same_worktree
-                and either_writes and not dormant_writer):
+                and either_writes and not dormant_writer
+                and not dormant_holder):
             out.append(("same-branch-different-worktree", other["session_id"],
                         "branch is held by a %s session in another worktree" % state,
                         severity))
