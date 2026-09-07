@@ -1587,3 +1587,18 @@ def test_lock_release_verifies_the_stamp_before_unlinking():
     body = body[:body.index("\n\n", 1)]
     assert "self._stamp()" in body
     assert "held.strip() != stamp" in body
+
+
+def test_the_reviewer_policy_tuple_is_unpacked():
+    """rr.load_policy returns (policy, sha256). Passing the tuple straight to
+    resolve_codex raised TypeError and aborted the run after preconditions --
+    caught by the catch-all, which correctly spent no attempt."""
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "rr.resolve_codex(rr.load_policy())" not in source
+    assert "reviewer_policy, _reviewer_policy_hash = rr.load_policy()" in source
+
+
+def test_the_reviewer_policy_actually_resolves_an_executable():
+    policy, digest = rr.load_policy()
+    assert isinstance(policy, dict) and isinstance(digest, str)
+    assert isinstance(rr.child_environment(policy), dict)

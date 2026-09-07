@@ -1749,8 +1749,10 @@ def main(argv=None):
                                "worktree, sessions, and git-metadata isolation "
                                "all verified"))
 
-            executable = rr.resolve_codex(rr.load_policy())
-            env = rr.child_environment(rr.load_policy())
+            # rr.load_policy returns (policy, sha256), not the policy alone.
+            reviewer_policy, _reviewer_policy_hash = rr.load_policy()
+            executable = rr.resolve_codex(reviewer_policy)
+            env = rr.child_environment(reviewer_policy)
             checks.append(_chk("W3", "child environment", "pass",
                                "%d allowlisted name(s); values never recorded"
                                % len(env)))
