@@ -1814,3 +1814,23 @@ def test_retire_task_refuses_a_missing_reason(tmp_path, repo, policy,
                    "do", "done", policy)
     with pytest.raises(Exception):
         ir.retire_task(str(ledger), "T-x", None)
+
+
+@pytest.mark.parametrize("reason", [None, "", "   ", 7, []])
+def test_the_verifier_refuses_a_retirement_without_a_reason(repo, ledger,
+                                                            policy, reason):
+    """The verifier judges entries this runner did not write, so it enforces
+    the requirement too -- not just the CLI and the function."""
+    _seed_task(repo, ledger, policy, "T-stale")
+    doc = ir.read_ledger(str(ledger))
+    forged = dict(doc["entries"][0], message_type=ir.RETIREMENT_TYPE,
+                  attempt_consumed=False, reason=reason,
+                  sequence=len(doc["entries"]) + 1, previous_sha256="0" * 64)
+    problems = ir.verify_ledger({"entries": doc["entries"] + [forged]})
+    assert any("without a reason" in p[1] for p in problems), problems
+
+
+def test_a_genuine_retirement_still_verifies(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    assert ir.verify_ledger(ir.read_ledger(str(ledger))) == []

@@ -1569,6 +1569,13 @@ def verify_ledger(doc):
             if entry.get("attempt_consumed") is not False:
                 problems.append((index, "a retirement must not claim an "
                                         "attempt was consumed"))
+            # Enforced here as well as at the call site, because the verifier
+            # is what judges an entry appended by something other than this
+            # runner. A retirement that does not say why is not evidence.
+            reason = entry.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                problems.append((index, "entry %d retires a task without a "
+                                        "reason" % index))
             retired.add(task_id)
         elif is_claim(entry):
             if task_id in retired:
