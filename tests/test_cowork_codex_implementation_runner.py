@@ -527,10 +527,16 @@ def test_the_child_workspace_holds_only_the_assigned_paths(policy, repo):
     staging, files = ir.build_staging(str(repo), ["intelligence/**"], policy)
     try:
         present = set()
-        for root_dir, _dirs, names in os.walk(staging):
+        for root_dir, dirs, names in os.walk(staging):
+            # The staging repository's own metadata is ours, not the model's
+            # output, and is deliberately present so codex will start.
+            dirs[:] = [d for d in dirs if d != ".git"]
             for name in names:
-                present.add(os.path.relpath(os.path.join(root_dir, name),
-                                            staging).replace(os.sep, "/"))
+                rel = os.path.relpath(os.path.join(root_dir, name),
+                                      staging).replace(os.sep, "/")
+                if rel.split("/")[0] == ".git":
+                    continue
+                present.add(rel)
         assert present == {"intelligence/target.py"}
         assert files == ["intelligence/target.py"]
     finally:
@@ -538,13 +544,35 @@ def test_the_child_workspace_holds_only_the_assigned_paths(policy, repo):
 
 
 @pytest.mark.parametrize("protected", [
-    "services/execution.py", "other.py", ".git",
+    "services/execution.py", "other.py",
 ])
 def test_a_protected_path_is_absent_not_merely_read_only(policy, repo, protected):
     """Absent beats read-only: there is nothing to write, replace, delete or chmod."""
     staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
     try:
         assert not os.path.exists(os.path.join(staging, protected))
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_repository_git_directory_is_never_the_one_in_staging(policy, repo):
+    """`.git` IS present in staging now -- but it is a throwaway of our own.
+
+    What the contract protects is the REPOSITORY's metadata. That is a
+    different directory, it is outside the sandbox root, and the staging
+    repository has no remote through which it could be reached.
+    """
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        staging_git = os.path.realpath(os.path.join(staging, ".git"))
+        repo_git = os.path.realpath(subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True).stdout.strip())
+        assert staging_git != repo_git
+        assert not rr._within(repo_git, ir._norm(staging))
+        remotes = subprocess.run(["git", "-C", staging, "remote"],
+                                 capture_output=True, text=True).stdout.strip()
+        assert remotes == ""
     finally:
         ir.discard_staging(staging)
 
@@ -1602,3 +1630,51 @@ def test_the_reviewer_policy_actually_resolves_an_executable():
     policy, digest = rr.load_policy()
     assert isinstance(policy, dict) and isinstance(digest, str)
     assert isinstance(rr.child_environment(policy), dict)
+
+
+# ------------------------------------------- the staging workspace is trusted
+#
+# Measured at no model cost: `codex exec` in a bare directory refuses with
+# "Not inside a trusted directory and --skip-git-repo-check was not
+# specified." That flag disables a safety check and stays forbidden, so the
+# staging workspace gets its own throwaway repository instead.
+
+def test_staging_is_a_git_repository_with_no_remotes(repo, policy):
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        assert os.path.isdir(os.path.join(staging, ".git"))
+        out = subprocess.run(["git", "-C", staging, "remote"],
+                             capture_output=True, text=True)
+        assert out.stdout.strip() == "", "the staging repository has a remote"
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_staging_repository_is_ignored_by_verification_and_apply(repo, policy):
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        present = ir.verify_staging(staging, ["intelligence/**"], policy)
+        assert all(not p.startswith(".git") for p in present), present
+        applied = ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+        assert all(not p.startswith(".git") for p in applied), applied
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_real_git_directory_is_still_outside_the_staging_root(repo, policy):
+    """The contract is about the REPOSITORY's metadata, which stays away."""
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        common = subprocess.run(["git", "-C", str(repo), "rev-parse",
+                                 "--git-common-dir"],
+                                capture_output=True, text=True).stdout.strip()
+        assert not rr._within(os.path.abspath(common), ir._norm(staging))
+    finally:
+        ir.discard_staging(staging)
+
+
+def test_the_skip_git_repo_check_flag_is_still_forbidden(policy):
+    assert "--skip-git-repo-check" in ir.FORBIDDEN_FLAGS
+    assert "--skip-git-repo-check" in policy["forbidden_flags"]
+    argv = ir.build_argv("codex.exe", "C:/staging", "C:/tmp/o.json", policy)
+    assert "--skip-git-repo-check" not in argv

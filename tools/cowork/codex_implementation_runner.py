@@ -649,18 +649,48 @@ def build_staging(repo, assigned, policy, parent=None):
             _write_all(handle, payload)
         finally:
             os.close(handle)
+    _make_trusted(base)
     verify_staging(base, assigned, policy)
     return base, files
+
+
+STAGING_GIT_DIRNAME = ".git"
+
+
+def _make_trusted(base):
+    """Give the staging workspace its own throwaway git repository.
+
+    `codex exec` refuses to run in a directory that is not a git repository
+    unless `--skip-git-repo-check` is passed, and that flag disables a safety
+    check and stays forbidden. A private repository inside the workspace is the
+    honest alternative: it has no remotes, is never pushed, is never read back,
+    and dies with the workspace. The real repository's metadata is outside the
+    sandbox root and remains unreachable.
+    """
+    for argv in (["git", "-C", base, "init", "-q"],
+                 ["git", "-C", base, "config", "user.email",
+                  "staging@invalid"],
+                 ["git", "-C", base, "config", "user.name", "staging"]):
+        result = subprocess.run(argv, capture_output=True)
+        if result.returncode != 0:
+            raise ProtectionFailed("the staging workspace could not be made a "
+                                   "trusted directory")
 
 
 def verify_staging(base, assigned, policy):
     """Nothing outside the assignment may exist in the staging workspace."""
     protected = set(policy["containment"]["always_protected_paths"])
     present = []
-    for root_dir, _dirs, names in os.walk(base):
+    for root_dir, dirs, names in os.walk(base):
+        # The staging repository's own metadata is ours, not the model's
+        # output. It is never verified against the assignment and never
+        # applied; it is discarded with the workspace.
+        dirs[:] = [d for d in dirs if d != STAGING_GIT_DIRNAME]
         for name in names:
             rel = os.path.relpath(os.path.join(root_dir, name), base)
             rel = rel.replace(os.sep, "/")
+            if rel.split("/")[0] == STAGING_GIT_DIRNAME:
+                continue
             present.append(rel)
             _reject_short_names(rel)
             if not in_scope(rel, assigned):
@@ -986,10 +1016,13 @@ def apply_staged(base, repo, assigned, policy):
     """
     verify_staging(base, assigned, policy)
     applied = []
-    for root_dir, _dirs, names in os.walk(base):
+    for root_dir, dirs, names in os.walk(base):
+        dirs[:] = [d for d in dirs if d != STAGING_GIT_DIRNAME]
         for name in names:
             src = os.path.join(root_dir, name)
             rel = os.path.relpath(src, base).replace(os.sep, "/")
+            if rel.split("/")[0] == STAGING_GIT_DIRNAME:
+                continue
             if not in_scope(rel, assigned):
                 raise ProtectionFailed("refusing to apply %s" % rel)
             _reject_short_names(rel)
