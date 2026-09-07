@@ -296,6 +296,73 @@ def test_rollover_at_midnight_america_new_york(budget_file, monkeypatch):
     assert state2.request_count == 1  # still today's (NY) accumulated state
 
 
+def test_stale_settle_does_not_charge_new_day(budget_file, monkeypatch):
+    late = datetime(2026, 7, 21, 23, 59, 0, tzinfo=NY_TZ)
+    monkeypatch.setattr(budget, '_now_ny', lambda: late)
+    reservation = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+
+    early_next_day = datetime(2026, 7, 22, 0, 1, 0, tzinfo=NY_TZ)
+    monkeypatch.setattr(budget, '_now_ny', lambda: early_next_day)
+    real_cost = budget.settle(
+        reservation,
+        attempts=[budget.AttemptOutcome(had_usage=True, input_tokens=5, output_tokens=5)],
+        model='claude-haiku-4-5-20251001',
+    )
+
+    assert real_cost > 0
+    state = budget._read_state(budget_file)
+    assert state.date == '2026-07-22'
+    assert state.request_count == 0
+    assert state.accrued_cost == pytest.approx(0.0)
+    assert state.reserved_count == 0
+    assert state.reserved_cost == pytest.approx(0.0)
+
+
+def test_stale_settle_leaves_new_day_reservation_untouched(budget_file, monkeypatch):
+    late = datetime(2026, 7, 21, 23, 59, 0, tzinfo=NY_TZ)
+    monkeypatch.setattr(budget, '_now_ny', lambda: late)
+    stale = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+
+    early_next_day = datetime(2026, 7, 22, 0, 1, 0, tzinfo=NY_TZ)
+    monkeypatch.setattr(budget, '_now_ny', lambda: early_next_day)
+    current = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+    budget.settle(stale, attempts=[budget.AttemptOutcome(had_usage=False)], model='claude-haiku-4-5-20251001')
+
+    state = json.loads(_read_raw(budget_file))
+    assert state['reserved_count'] == current.attempts_reserved
+    assert state['reserved_cost'] == pytest.approx(current.cost_reserved)
+    assert state['request_count'] == 0
+    assert state['accrued_cost'] == pytest.approx(0.0)
+
+
+def test_stale_release_leaves_new_day_untouched(budget_file, monkeypatch):
+    late = datetime(2026, 7, 21, 23, 59, 0, tzinfo=NY_TZ)
+    monkeypatch.setattr(budget, '_now_ny', lambda: late)
+    stale = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+
+    early_next_day = datetime(2026, 7, 22, 0, 1, 0, tzinfo=NY_TZ)
+    monkeypatch.setattr(budget, '_now_ny', lambda: early_next_day)
+    current = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+    budget.release_reservation(stale)
+
+    state = json.loads(_read_raw(budget_file))
+    assert state['reserved_count'] == current.attempts_reserved
+    assert state['reserved_cost'] == pytest.approx(current.cost_reserved)
+
+
+def test_same_day_settle_and_release_behave_as_before(budget_file):
+    settled = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+    budget.settle(settled, attempts=[budget.AttemptOutcome(had_usage=True, input_tokens=1, output_tokens=1)], model='claude-haiku-4-5-20251001')
+    released = budget.reserve(estimated_input_tokens=10, max_output_tokens=10, model='claude-haiku-4-5-20251001')
+    budget.release_reservation(released)
+
+    state = json.loads(_read_raw(budget_file))
+    assert state['reserved_count'] == 0
+    assert state['reserved_cost'] == pytest.approx(0.0)
+    assert state['request_count'] == 1
+    assert state['accrued_cost'] > 0
+
+
 # ── Concurrent-request atomicity ────────────────────────────────────────────
 def test_concurrent_reservations_never_both_exceed_the_limit(budget_file, monkeypatch):
     # Only room for exactly one 2-attempt reservation.

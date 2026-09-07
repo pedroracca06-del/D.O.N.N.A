@@ -203,6 +203,8 @@ def release_reservation(reservation: Reservation, path: Optional[Path] = None) -
     path = path or BUDGET_FILE
     with _locked():
         state = _read_state(path)
+        if reservation.date != state.date:
+            return
         state.reserved_count = max(0, state.reserved_count - reservation.attempts_reserved)
         state.reserved_cost = max(0.0, state.reserved_cost - reservation.cost_reserved)
         _write_state(path, state)
@@ -228,6 +230,8 @@ def settle(reservation: Reservation, *, attempts: list[AttemptOutcome], model: s
 
     with _locked():
         state = _read_state(path)
+        if reservation.date != state.date:
+            return total_cost
         state.reserved_count = max(0, state.reserved_count - reservation.attempts_reserved)
         state.reserved_cost = max(0.0, state.reserved_cost - reservation.cost_reserved)
         state.request_count += len(attempts)
