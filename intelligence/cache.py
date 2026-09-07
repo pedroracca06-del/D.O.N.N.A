@@ -14,6 +14,8 @@ from typing import Optional
 
 from core.config import cache_get, cache_set
 
+CACHE_KEY_VERSION = 1
+
 
 @dataclass(frozen=True)
 class CachedResponse:
@@ -31,10 +33,11 @@ def build_cache_key(feature: str, input_data: dict, provider: str = '', model: s
     feature and input alone means changing NOVA_AI_MODEL keeps serving text the
     previous model wrote, under the new model's name -- so the identity of the
     producer belongs in the key.
+    The version invalidates older entries when the key format changes.
     """
     normalized = json.dumps(input_data, sort_keys=True, default=str)
     digest = hashlib.sha256(normalized.encode('utf-8')).hexdigest()
-    return f'intelligence:{feature}:{provider}:{model}:{digest}'
+    return f'intelligence:{CACHE_KEY_VERSION}:{feature}:{provider}:{model}:{digest}'
 
 
 def get_cached_response(feature: str, input_data: dict, provider: str = '', model: str = '') -> Optional[CachedResponse]:
