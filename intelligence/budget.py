@@ -204,6 +204,10 @@ def release_reservation(reservation: Reservation, path: Optional[Path] = None) -
     with _locked():
         state = _read_state(path)
         if reservation.date != state.date:
+            # The NY day this reservation was taken on has rolled over, so its
+            # ledger is already superseded and there is nothing left to
+            # release. Subtracting from the CURRENT day would silently release
+            # somebody else's live reservation instead.
             return
         state.reserved_count = max(0, state.reserved_count - reservation.attempts_reserved)
         state.reserved_cost = max(0.0, state.reserved_cost - reservation.cost_reserved)
@@ -231,6 +235,13 @@ def settle(reservation: Reservation, *, attempts: list[AttemptOutcome], model: s
     with _locked():
         state = _read_state(path)
         if reservation.date != state.date:
+            # Same rollover case as release_reservation, plus the charge: this
+            # call was authorised against the PREVIOUS day's ceiling, which
+            # already absorbed it at the worst case (per_attempt_cost *
+            # _MAX_ATTEMPTS_PER_RESERVATION, never less than what settles
+            # here). Charging today's ceiling would bill a day that never
+            # authorised the call. The real cost is still returned, so the
+            # caller records it either way.
             return total_cost
         state.reserved_count = max(0, state.reserved_count - reservation.attempts_reserved)
         state.reserved_cost = max(0.0, state.reserved_cost - reservation.cost_reserved)
