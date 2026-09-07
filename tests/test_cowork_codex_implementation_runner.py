@@ -1487,3 +1487,103 @@ def test_both_directions_use_the_same_containment_helper():
     """Reading INTO staging and writing OUT of it share one discipline."""
     source = RUNNER.read_text(encoding="utf-8")
     assert source.count("_read_contained(") >= 2
+
+
+# ======================================== IMPL-RUNNER-REVIEW-11 findings
+#
+# F-001 (high) the applied file was measured by pathname after its validated
+#   handle was closed, so a replacement could make the check describe a
+#   different object.
+# F-002 (high) the ledger lock was unlinked by pathname after the descriptor
+#   was closed, without proving the name still referred to our own lock.
+
+
+def test_the_applied_size_is_measured_through_the_handle():
+    source = " ".join(RUNNER.read_text(encoding="utf-8").split())
+    assert "landed = os.fstat(fd).st_size" in source
+    assert "os.path.getsize(dst)" not in source, \
+        "measuring by pathname can describe a different object"
+
+
+def test_a_truncated_apply_is_still_detected(escape_bench, policy, monkeypatch):
+    """The check must survive being moved onto the handle."""
+    repo, _outside = escape_bench
+    staging, _files = ir.build_staging(str(repo), ["intelligence/**"], policy)
+    try:
+        (pathlib.Path(staging) / "intelligence" / "victim.txt").write_bytes(b"z" * 4096)
+        real_write_all = ir._write_all
+
+        def short_write(fd, payload):
+            return real_write_all(fd, payload[:10])
+
+        monkeypatch.setattr(ir, "_write_all", short_write)
+        with pytest.raises(ir.ProtectionFailed):
+            ir.apply_staged(staging, str(repo), ["intelligence/**"], policy)
+    finally:
+        ir.discard_staging(staging)
+
+
+# ------------------------------------------------------------------ F-002
+
+def test_a_released_lock_is_removed_normally(ledger):
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    with ir._LedgerLock(str(ledger)):
+        assert os.path.exists(path)
+    assert not os.path.exists(path)
+
+
+def test_a_lock_bearing_someone_elses_stamp_is_not_removed(ledger):
+    """Releasing must not unlink a lock that is no longer ours."""
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    holder = ir._LedgerLock(str(ledger))
+    holder.__enter__()
+    with open(path, "w", encoding="ascii") as handle:
+        handle.write("999999 0-0")
+    holder.__exit__()
+    assert os.path.exists(path), \
+        "another runner's lock was removed by our release"
+    os.unlink(path)
+
+
+def test_a_held_lock_cannot_be_removed_by_anyone_else(ledger):
+    """Windows refuses to unlink a file another process holds open.
+
+    That is a property worth pinning: while a runner holds the lock, no other
+    process can delete it out from under them.
+    """
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    holder = ir._LedgerLock(str(ledger))
+    holder.__enter__()
+    try:
+        if os.name == "nt":
+            with pytest.raises(OSError):
+                os.unlink(path)
+    finally:
+        holder.__exit__()
+
+
+def test_release_tolerates_an_unreadable_lock(ledger, monkeypatch):
+    """A release that cannot confirm ownership leaves the lock alone."""
+    holder = ir._LedgerLock(str(ledger))
+    holder.__enter__()
+    real_open = open
+
+    def failing_open(path, *a, **k):
+        if str(path).endswith(ir.LEDGER_LOCK_SUFFIX):
+            raise OSError("unreadable")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", failing_open)
+    holder.__exit__()          # must not raise
+    monkeypatch.undo()
+    path = ir.ledger_path(str(ledger)) + ir.LEDGER_LOCK_SUFFIX
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+def test_lock_release_verifies_the_stamp_before_unlinking():
+    source = RUNNER.read_text(encoding="utf-8")
+    body = source[source.index("    def __exit__(self, *_exc):"):]
+    body = body[:body.index("\n\n", 1)]
+    assert "self._stamp()" in body
+    assert "held.strip() != stamp" in body

@@ -1010,12 +1010,12 @@ def apply_staged(base, repo, assigned, policy):
             try:
                 os.ftruncate(fd, 0)
                 _write_all(fd, payload)
+                # Measured through the handle we just wrote, not by pathname
+                # afterwards: a name can be replaced between the write and the
+                # check, and then the check describes a different object.
+                landed = os.fstat(fd).st_size
             finally:
                 os.close(fd)
-            try:
-                landed = os.path.getsize(dst)
-            except OSError:
-                raise ProtectionFailed("the applied file could not be measured")
             if landed != len(payload):
                 raise ProtectionFailed(
                     "the applied file is %d byte(s), expected %d"
@@ -1395,9 +1395,19 @@ class _LedgerLock:
         return self
 
     def __exit__(self, *_exc):
+        stamp = self._stamp()
         if self.fd is not None:
             os.close(self.fd)
             self.fd = None
+        # Only remove the lock if the name still holds OUR stamp. Unlinking by
+        # pathname alone could remove another runner's lock, or a redirected
+        # target, if the name were replaced while we held it.
+        try:
+            held = open(self.path, "rb").read(128).decode("ascii", "replace")
+        except OSError:
+            return False
+        if held.strip() != stamp:
+            return False
         try:
             os.unlink(self.path)
         except OSError:
