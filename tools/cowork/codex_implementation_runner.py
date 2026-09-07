@@ -76,7 +76,7 @@ EXIT_LIMIT = 3
 EXIT_STOPPED = 4
 
 OPERATIONS = ("validate-policy", "inspect", "submit-task",
-              "implement-once", "settle-claim")
+              "implement-once", "settle-claim", "retire-task")
 
 # The same refusal surface as the reviewer: an action word is not an operation.
 FORBIDDEN_VERBS = rr.FORBIDDEN_VERBS
@@ -100,6 +100,11 @@ TASK_FIELDS = (
 )
 
 CLAIM_TYPE = "implementation_attempt_claim"
+
+# A task that can never run, closed out WITHOUT spending an attempt. Kept
+# separate from an outcome on purpose: an outcome asserts that an attempt was
+# consumed, and for an unclaimed task that would be false.
+RETIREMENT_TYPE = "implementation_task_retirement"
 
 OUTCOME_TYPE = "implementation_outcome"
 OUTCOME_CATEGORIES = (
@@ -220,6 +225,10 @@ def is_claim(msg):
     return isinstance(msg, dict) and msg.get("message_type") == CLAIM_TYPE
 
 
+def is_retirement(msg):
+    return isinstance(msg, dict) and msg.get("message_type") == RETIREMENT_TYPE
+
+
 def validate_task(doc, policy):
     """A task is data: it names paths and describes work, and nothing else."""
     limits = {"max_envelope_bytes": policy["limits"]["max_task_bytes"],
@@ -281,7 +290,8 @@ def find_pending_task(ledger_doc):
             "task %s has a claimed but unsettled attempt; its attempt was "
             "already spent. It is NOT re-run automatically -- settle it with "
             "settle-claim before assigning more work" % stale[0])
-    done = settled_task_ids(ledger_doc) | claimed_task_ids(ledger_doc)
+    done = (settled_task_ids(ledger_doc) | claimed_task_ids(ledger_doc)
+            | retired_task_ids(ledger_doc))
     pending = [e for e in ledger_doc.get("entries", [])
                if is_task(e) and e.get("task_id") not in done]
     if not pending:
@@ -380,6 +390,55 @@ def claim_attempt(root, task, claimed_by="codex_implementation_runner"):
             "head": task["head"],
             "claimed_by": claimed_by,
             "pid": os.getpid(),
+        })
+
+
+def retire_task(root, task_id, reason, retired_by="claude"):
+    """Close out an UNCLAIMED task that can never run.
+
+    Refuses a task whose attempt was claimed -- that one is settled, not
+    retired -- and refuses to retire the same task twice. Appends; removes
+    nothing.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        # A retirement record that does not say why is not evidence of
+        # anything. The CLI checks this too; so does the function, because a
+        # caller can reach it directly.
+        _bad("retiring a task requires a reason")
+    with _LedgerLock(root):
+        doc = read_ledger(root)
+        problems = verify_ledger(doc)
+        if problems:
+            raise sg.StoppedError("the implementation ledger does not verify: "
+                                  "%s" % problems[0][1])
+        target = None
+        for entry in doc["entries"]:
+            if is_task(entry) and entry["task_id"] == task_id:
+                target = entry
+                break
+        if target is None:
+            _bad("no task with that id is recorded")
+        if task_id in claimed_task_ids(doc):
+            _bad("that task's attempt was claimed; settle it with settle-claim "
+                 "rather than retiring it")
+        if task_id in retired_task_ids(doc):
+            _bad("that task is already retired")
+        if task_id in settled_task_ids(doc):
+            _bad("that task already has an outcome")
+        return _append_entry(root, doc, {
+            "schema_version": SCHEMA_VERSION,
+            "entry_id": str(uuid.uuid4()),
+            "sequence": len(doc["entries"]) + 1,
+            "previous_sha256": "0" * 64,        # _append_entry sets both
+            "created_at": datetime.now(timezone.utc)
+                                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "message_type": RETIREMENT_TYPE,
+            "task_id": task_id,
+            "phase": target["phase"],
+            "head": target["head"],
+            "reason": rr.sanitize_own_message(reason)[:2000],
+            "attempt_consumed": False,
+            "retired_by": retired_by,
         })
 
 
@@ -1483,6 +1542,7 @@ def verify_ledger(doc):
     assigned = set()
     claimed = set()
     settled = set()
+    retired = set()
     previous = "0" * 64
     for index, entry in enumerate(doc.get("entries", []), start=1):
         if entry.get("sequence") != index:
@@ -1495,7 +1555,25 @@ def verify_ledger(doc):
                 problems.append((index, "task %s is assigned more than once"
                                  % task_id))
             assigned.add(task_id)
+        elif is_retirement(entry):
+            if task_id in retired:
+                problems.append((index, "task %s is retired more than once"
+                                 % task_id))
+            if task_id not in assigned:
+                problems.append((index, "entry %d retires a task that was "
+                                        "never assigned" % index))
+            if task_id in claimed:
+                problems.append((index, "entry %d retires a task whose attempt "
+                                        "was already claimed; a spent attempt "
+                                        "is settled, not retired" % index))
+            if entry.get("attempt_consumed") is not False:
+                problems.append((index, "a retirement must not claim an "
+                                        "attempt was consumed"))
+            retired.add(task_id)
         elif is_claim(entry):
+            if task_id in retired:
+                problems.append((index, "entry %d claims a retired task"
+                                 % index))
             if task_id in claimed:
                 problems.append((index, "task %s is claimed more than once"
                                  % task_id))
@@ -1504,6 +1582,9 @@ def verify_ledger(doc):
                                         "assigned" % index))
             claimed.add(task_id)
         elif is_outcome(entry):
+            if task_id in retired:
+                problems.append((index, "entry %d settles a retired task"
+                                 % index))
             if task_id in settled:
                 problems.append((index, "task %s is settled more than once"
                                  % task_id))
@@ -1530,6 +1611,11 @@ def settled_task_ids(doc):
 def claimed_task_ids(doc):
     return {entry.get("task_id") for entry in doc.get("entries", [])
             if is_claim(entry)}
+
+
+def retired_task_ids(doc):
+    return {entry.get("task_id") for entry in doc.get("entries", [])
+            if is_retirement(entry)}
 
 
 def unsettled_claims(doc):
@@ -1622,6 +1708,10 @@ def build_parser():
                         help="settle-claim: the crashed task to close out")
     parser.add_argument("--settle-reason",
                         help="settle-claim: why, in one sentence")
+    parser.add_argument("--retire-task-id",
+                        help="retire-task: the unclaimed task to close out")
+    parser.add_argument("--retire-reason",
+                        help="retire-task: why it can never run")
     return parser
 
 
@@ -1724,6 +1814,28 @@ def main(argv=None):
                                    "%s, sequence %d, %d assigned path(s)"
                                    % (entry["task_id"], entry["sequence"],
                                       len(entry["assigned_paths"]))))
+                checks.append(_chk("K1", "authority", "warning",
+                                   policy["non_authorization_sentence"]))
+                doc = {"schema_version": SCHEMA_VERSION,
+                       "phase": "codex implementation runner",
+                       "overall_status": "passed", "checks": checks}
+                _emit(doc, args.format)
+                return EXIT_OK
+
+            if args.operation == "retire-task":
+                # A task bound to a head or registry revision that has since
+                # moved can never run. Retiring it clears the queue without
+                # pretending an attempt was spent on it.
+                if not args.retire_task_id:
+                    _bad("retire-task requires --retire-task-id")
+                if not args.retire_reason:
+                    _bad("retire-task requires --retire-reason")
+                entry = retire_task(root, args.retire_task_id,
+                                    args.retire_reason)
+                checks.append(_chk("W1", "retire-task", "pass",
+                                   "task %s retired at sequence %d; no attempt "
+                                   "was spent and it can never run"
+                                   % (entry["task_id"], entry["sequence"])))
                 checks.append(_chk("K1", "authority", "warning",
                                    policy["non_authorization_sentence"]))
                 doc = {"schema_version": SCHEMA_VERSION,

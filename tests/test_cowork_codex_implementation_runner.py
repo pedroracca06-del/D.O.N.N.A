@@ -1678,3 +1678,139 @@ def test_the_skip_git_repo_check_flag_is_still_forbidden(policy):
     assert "--skip-git-repo-check" in policy["forbidden_flags"]
     argv = ir.build_argv("codex.exe", "C:/staging", "C:/tmp/o.json", policy)
     assert "--skip-git-repo-check" not in argv
+
+
+# ============================================================== retire-task
+#
+# Found by running the demo, not by review. A task is bound to a head and a
+# registry revision; if either moves before it runs, the runner correctly
+# refuses it -- and then it sat pending forever, blocking every later task,
+# with no way to clear it. settle-claim was not the answer: that is for a task
+# whose attempt was SPENT, and recording an outcome for an unclaimed task would
+# be a lie about the accounting.
+
+
+def _seed_task(repo, ledger, policy, task_id):
+    obs = cr.observe_repository(str(repo))
+    return ir.record_task(str(ledger), task_id, "P", obs, 1,
+                          ["intelligence/**"], "do", "done", policy)
+
+
+def test_an_unclaimed_task_can_be_retired(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    entry = ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    assert entry["message_type"] == ir.RETIREMENT_TYPE
+    assert entry["attempt_consumed"] is False, \
+        "retiring must never claim an attempt was spent"
+
+
+def test_a_retired_task_is_never_pending_again(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    with pytest.raises(Exception):
+        ir.find_pending_task(ir.read_ledger(str(ledger)))
+
+
+def test_retiring_preserves_the_whole_history(repo, ledger, policy):
+    """Append-only: the task entry stays exactly where it was."""
+    _seed_task(repo, ledger, policy, "T-stale")
+    before = ir.read_ledger(str(ledger))["entries"][0]
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    doc = ir.read_ledger(str(ledger))
+    assert doc["entries"][0] == before
+    assert [e["message_type"] for e in doc["entries"]] == [
+        ir.TASK_TYPE, ir.RETIREMENT_TYPE]
+    assert ir.verify_ledger(doc) == []
+
+
+def test_a_claimed_task_cannot_be_retired(repo, ledger, policy):
+    """A spent attempt is settled, never retired -- that is the accounting."""
+    _seed_task(repo, ledger, policy, "T-claimed")
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
+    with pytest.raises(Exception):
+        ir.retire_task(str(ledger), "T-claimed", "trying to dodge accounting")
+
+
+def test_a_task_with_an_outcome_cannot_be_retired(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-done")
+    task = ir.find_pending_task(ir.read_ledger(str(ledger)))
+    ir.claim_attempt(str(ledger), task)
+    ir.record_outcome(str(ledger), task, "completed", 0, "x", [])
+    with pytest.raises(Exception):
+        ir.retire_task(str(ledger), "T-done", "too late")
+
+
+def test_the_same_task_cannot_be_retired_twice(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    with pytest.raises(Exception):
+        ir.retire_task(str(ledger), "T-stale", "again")
+
+
+def test_retiring_an_unknown_task_is_refused(ledger):
+    with pytest.raises(Exception):
+        ir.retire_task(str(ledger), "T-nope", "no such task")
+
+
+def test_the_verifier_refuses_a_claim_on_a_retired_task(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    doc = ir.read_ledger(str(ledger))
+    forged = dict(doc["entries"][0], message_type=ir.CLAIM_TYPE,
+                  sequence=len(doc["entries"]) + 1, previous_sha256="0" * 64)
+    assert ir.verify_ledger({"entries": doc["entries"] + [forged]}) != []
+
+
+def test_the_verifier_refuses_an_outcome_on_a_retired_task(repo, ledger, policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    doc = ir.read_ledger(str(ledger))
+    forged = dict(doc["entries"][0], message_type=ir.OUTCOME_TYPE,
+                  sequence=len(doc["entries"]) + 1, previous_sha256="0" * 64)
+    assert ir.verify_ledger({"entries": doc["entries"] + [forged]}) != []
+
+
+def test_the_verifier_refuses_a_retirement_claiming_an_attempt(repo, ledger,
+                                                              policy):
+    _seed_task(repo, ledger, policy, "T-stale")
+    doc = ir.read_ledger(str(ledger))
+    forged = dict(doc["entries"][0], message_type=ir.RETIREMENT_TYPE,
+                  attempt_consumed=True,
+                  sequence=len(doc["entries"]) + 1, previous_sha256="0" * 64)
+    problems = ir.verify_ledger({"entries": doc["entries"] + [forged]})
+    assert any("attempt was consumed" in p[1] for p in problems), problems
+
+
+def test_a_later_task_runs_once_the_stale_one_is_retired(repo, ledger, policy):
+    """The point of the operation: the queue is usable again."""
+    _seed_task(repo, ledger, policy, "T-stale")
+    ir.retire_task(str(ledger), "T-stale", "the bound head moved")
+    _seed_task(repo, ledger, policy, "T-next")
+    assert ir.find_pending_task(ir.read_ledger(str(ledger)))["task_id"] == "T-next"
+
+
+def test_retire_task_is_a_declared_operation(policy):
+    assert "retire-task" in ir.OPERATIONS
+    assert "retire-task" in policy["operations"]
+
+
+def test_retire_task_without_an_id_or_reason_never_succeeds():
+    """It refuses; the exact code depends on which check fails first."""
+    code, _doc = _run(["retire-task", "--format", "json",
+                       "--policy", str(POLICY), "--repo", str(REPO_ROOT),
+                       "--registry", "no-such-registry",
+                       "--ledger", "no-such-ledger"])
+    assert code != OK
+
+
+def test_retire_task_refuses_a_missing_reason(tmp_path, repo, policy,
+                                              monkeypatch):
+    """Reaching the argument check itself, with real inputs."""
+    ledger = tmp_path / "led"
+    ledger.mkdir()
+    obs = cr.observe_repository(str(repo))
+    ir.record_task(str(ledger), "T-x", "P", obs, 1, ["intelligence/**"],
+                   "do", "done", policy)
+    with pytest.raises(Exception):
+        ir.retire_task(str(ledger), "T-x", None)

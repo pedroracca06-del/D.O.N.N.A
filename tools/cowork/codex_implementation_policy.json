@@ -20,7 +20,8 @@
     "inspect",
     "submit-task",
     "implement-once",
-    "settle-claim"
+    "settle-claim",
+    "retire-task"
   ],
   "fixed_flags": {
     "sandbox": "workspace-write",
@@ -117,7 +118,8 @@
     "record": "every spent attempt records exactly one terminal outcome",
     "duplicate_execution": "a task with a recorded outcome is never re-run",
     "claim": "an attempt is claimed durably in the ledger BEFORE the child starts, under an exclusive lock",
-    "recovery": "a claimed but unsettled task is never re-run automatically; a person settles it with settle-claim"
+    "recovery": "a claimed but unsettled task is never re-run automatically; a person settles it with settle-claim",
+    "retirement": "a task that can never run -- its head or registry revision moved -- is retired without spending an attempt; a task whose attempt was claimed is settled instead"
   },
   "non_authorization_sentence": "This implementation grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution."
 }

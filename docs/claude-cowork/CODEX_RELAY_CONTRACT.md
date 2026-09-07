@@ -360,7 +360,17 @@ Implementation tasks live in their own append-only, hash-chained ledger, not in
 the review mailbox: they are different message types with different lifecycles,
 and the reviewed relay is a protected component this tool does not reshape.
 
-A task id appears at most twice — once as the assignment, once as its outcome.
+A task that can never run — its bound head or registry revision moved before it
+was executed — is **retired**, not settled. Retirement is its own entry type
+with `attempt_consumed: false`, because an outcome asserts an attempt was spent
+and for an unclaimed task that would be false. A task whose attempt WAS claimed
+is settled with `settle-claim` instead, and the verifier refuses a retirement
+over a claimed task, a claim or an outcome over a retired one, and any
+retirement that claims an attempt was consumed. Nothing is removed: the ledger
+stays append-only and the whole history remains readable.
+
+A task id appears at most twice — once as the assignment, once as its outcome
+or its retirement.
 A task that already has an outcome is never pending again, which is what makes
 recovery safe: re-running after a crash finds nothing to do rather than doing
 the work twice. Every spent attempt records exactly one outcome, from one of a
