@@ -3124,7 +3124,10 @@ function _jnRenderDashboard(rows, allTrades, accounts) {
       '<button class="jn-chip' + (_jnMode === 'PAPER' ? ' active' : '') + '" data-jdash="mode" data-value="PAPER" type="button">Paper · ' + bookCounts.PAPER + '</button>' +
       '<span class="jn-dash-sep"></span><span class="jn-dash-label">Account</span>' + accountOptions + '</div>' +
       '<div class="jn-dash-controls"><span class="jn-dash-label">Period</span>' +
-      Object.keys(_JN_PERIODS).map(k => '<button class="jn-chip' + (_jnPeriod === k ? ' active' : '') + '" data-jdash="period" data-value="' + k + '" type="button">' + _JN_PERIODS[k] + '</button>').join('') + '</div>';
+      Object.keys(_JN_PERIODS).map(k => '<button class="jn-chip' + (_jnPeriod === k ? ' active' : '') + '" data-jdash="period" data-value="' + k + '" type="button">' + _JN_PERIODS[k] + '</button>').join('') + '</div>' +
+      '<div class="jn-reset-wrap"><button class="jn-reset-trades" type="button" onclick="resetJournalTrades()"' +
+      ((_journalData && _journalData.trades || []).length ? '' : ' disabled') + '>Reset all trades</button>' +
+      '<span class="jn-reset-status" id="jnResetStatus" role="status" aria-live="polite"></span></div>';
     if (controls.dataset.bound !== '1') {
       controls.dataset.bound = '1';
       controls.addEventListener('click', e => {
@@ -4013,6 +4016,33 @@ async function deleteTrade(index) {
     const data = await res.json();
     if (data.status === 'ok') refreshJournal();
   } catch(e) { console.error(e); }
+}
+
+async function resetJournalTrades() {
+  const total = (_journalData && Array.isArray(_journalData.trades)) ? _journalData.trades.length : 0;
+  if (!total) return;
+  const warning = 'Permanently delete all ' + total + ' trade record' + (total === 1 ? '' : 's') +
+    '? This clears live, paper, every account, and all-time P&L history. This cannot be undone.';
+  if (!confirm(warning)) return;
+  if (prompt('Final confirmation: type RESET to delete every trade.') !== 'RESET') {
+    const status = document.getElementById('jnResetStatus');
+    if (status) { status.textContent = 'Reset cancelled — confirmation did not match.'; status.className = 'jn-reset-status down'; }
+    return;
+  }
+  const status = document.getElementById('jnResetStatus');
+  if (status) { status.textContent = 'Clearing trade history…'; status.className = 'jn-reset-status'; }
+  try {
+    const res = await fetch('/journal/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({confirmation:'RESET_ALL_TRADES'})});
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') throw new Error(data.detail || 'Trade history could not be reset.');
+    _jnSelectedKey = null;
+    _jnAccount = 'all';
+    await refreshJournal();
+    const refreshed = document.getElementById('jnResetStatus');
+    if (refreshed) { refreshed.textContent = data.removed + ' trade record' + (data.removed === 1 ? '' : 's') + ' removed.'; refreshed.className = 'jn-reset-status'; }
+  } catch (e) {
+    if (status) { status.textContent = e.message || 'Trade history could not be reset.'; status.className = 'jn-reset-status down'; }
+  }
 }
 
 document.getElementById('jSubmitBtn').addEventListener('click', async () => {

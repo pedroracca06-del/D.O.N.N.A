@@ -816,7 +816,7 @@ _ACTIVE_FETCH_TARGETS = (
     '/state-engine', '/major-indexes', '/futures-macro-pulse', '/btc-vix',
     '/trending-movers', '/calendar', '/dashboard-data', '/check-env', '/system-health',
     '/assistant/chat', '/journal/trade-detail', '/journal/analyze', '/market-summary',
-    '/journal/data', '/journal/signals', '/journal/delete', '/journal/add',
+    '/journal/data', '/journal/signals', '/journal/delete', '/journal/reset', '/journal/add',
     '/journal/screenshot/upload',
     '/journal/workspace', '/journal/workspace/',
     '/journal/workspace/screenshot/upload',

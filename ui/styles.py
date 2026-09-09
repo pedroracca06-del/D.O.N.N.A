@@ -1716,6 +1716,7 @@ body.donna-first-load { animation: donnaFadeIn .3s ease-out both; }
 .jn-work-view{display:none}.jn-work-view.active{display:block}
 .jn-dashboard-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:14px 0}
 .jn-dash-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.jn-reset-wrap{display:flex;align-items:center;gap:9px;margin-left:auto}.jn-reset-trades{min-height:36px;padding:8px 11px;border:1px solid rgba(255,107,107,.55);border-radius:3px;background:rgba(255,107,107,.07);color:var(--red-text);font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.45px;text-transform:uppercase;cursor:pointer}.jn-reset-trades:hover{background:rgba(255,107,107,.14);border-color:var(--red)}.jn-reset-trades:focus-visible{outline:2px solid var(--red);outline-offset:2px}.jn-reset-trades:disabled{opacity:.42;cursor:not-allowed}.jn-reset-status{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)}.jn-reset-status.down{color:var(--red-text)}
 .jn-dash-label{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-right:2px}
 .jn-dash-sep{width:1px;height:24px;background:var(--line);margin:0 5px}
 .jn-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(360px,.95fr);gap:14px;margin-top:14px;align-items:stretch}

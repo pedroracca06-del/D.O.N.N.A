@@ -3569,3 +3569,19 @@ async def journal_delete(request: Request):
     save_journal(trades)
     stats = compute_journal_stats(trades)
     return {'status': 'ok', 'stats': stats}
+
+
+@app.post('/journal/reset')
+async def journal_reset(request: Request):
+    """Permanently clear every stored trade after explicit confirmation."""
+    body = await request.json()
+    if not isinstance(body, dict) or body.get('confirmation') != 'RESET_ALL_TRADES':
+        raise HTTPException(status_code=400, detail='Exact reset confirmation is required')
+    unknown = set(body) - {'confirmation'}
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'Unknown reset field: {sorted(unknown)[0]}')
+
+    trades = load_journal()
+    removed = len(trades)
+    save_journal([])
+    return {'status': 'ok', 'removed': removed, 'stats': compute_journal_stats([])}
