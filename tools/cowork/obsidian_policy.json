@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "policy_name": "nova-obsidian-minimum",
-  "description": "Fixed, reviewable data policy for controlled Obsidian synchronization planning. Git is the authority for approved specifications and promoted knowledge. Obsidian is a non-executing knowledge and working-note surface and can never modify strategy, risk, broker, execution, kill-switch, guard, permission, deployment, or runtime state. This file is data only: no executable construct, no disable switch, no vault path, no username, no secret, no URL, and no machine-specific path.",
+  "policy_name": "nova-obsidian-authority-v2",
+  "description": "Fixed, reviewable authority-aware data policy for controlled Obsidian synchronization planning. Git is authoritative for current, research, historical, evidence, and project knowledge; Obsidian is a non-executing working-note surface. The planner is read-only and grants no execution, risk, broker, deployment, or runtime authority.",
   "authority_model": {
     "git": "authoritative for approved specifications and promoted knowledge",
     "obsidian": "non-executing knowledge and working-note surface",
@@ -11,35 +11,55 @@
     "deletion": false,
     "every_write_requires_named_approval": true
   },
-  "allowed_file_types": [".md"],
+  "allowed_file_types": [
+    ".md"
+  ],
   "export_classes": {
-    "approved_doc": {
-      "status": "approved-doc",
+    "current_prime": {
+      "status": "current",
+      "authority": "git",
+      "requires_explicit_selection": false,
+      "source_roots": [
+        "nova_knowledge_core/CURRENT/**"
+      ],
+      "vault_namespace": "NOVA/10_CURRENT"
+    },
+    "project_doc": {
+      "status": "project",
       "authority": "git",
       "requires_explicit_selection": false,
       "source_roots": [
         "docs/claude-cowork/**"
       ],
-      "vault_namespace": "NOVA/Docs"
+      "vault_namespace": "NOVA/50_PROJECTS"
     },
-    "approved_spec": {
-      "status": "approved-spec",
-      "authority": "git",
-      "requires_explicit_selection": false,
-      "source_roots": [
-        "nova_knowledge_core/RULES/**"
-      ],
-      "vault_namespace": "NOVA/Specs"
-    },
-    "observation": {
-      "status": "observation",
+    "research": {
+      "status": "research",
       "authority": "git",
       "requires_explicit_selection": true,
       "source_roots": [
         "nova_knowledge_core/OTE_INTELLIGENCE/**",
+        "nova_knowledge_core/ORB_RP/**"
+      ],
+      "vault_namespace": "NOVA/20_RESEARCH"
+    },
+    "historical": {
+      "status": "historical",
+      "authority": "git",
+      "requires_explicit_selection": true,
+      "source_roots": [
         "nova_knowledge_core/PROS_EVAN_INVESTING/**"
       ],
-      "vault_namespace": "NOVA/Observations"
+      "vault_namespace": "NOVA/30_HISTORY"
+    },
+    "evidence": {
+      "status": "evidence",
+      "authority": "git",
+      "requires_explicit_selection": true,
+      "source_roots": [
+        "nova_knowledge_core/EVIDENCE/**"
+      ],
+      "vault_namespace": "NOVA/40_EVIDENCE"
     }
   },
   "import_classes": {
@@ -47,7 +67,7 @@
       "status": "working-note",
       "authority": "obsidian",
       "vault_namespaces": [
-        "NOVA/Working"
+        "NOVA/90_INBOX"
       ],
       "candidate_destination_root": "nova_knowledge_core/CANDIDATES"
     }
@@ -56,6 +76,7 @@
     "nova_knowledge_core/CANDIDATES"
   ],
   "prohibited_import_destination_roots": [
+    "nova_knowledge_core/CURRENT",
     "nova_knowledge_core/RULES",
     "docs/claude-cowork",
     "services",
@@ -228,7 +249,10 @@
   "optional_provenance_fields": [
     "nova_title",
     "nova_last_sync_hash",
-    "nova_approval"
+    "nova_approval",
+    "nova_effective_date",
+    "nova_supersedes",
+    "nova_review_needed"
   ],
   "stable_id": {
     "algorithm": "sha256-prefix",
@@ -239,9 +263,11 @@
     "automatic_rename_detection": false
   },
   "valid_classifications": [
-    "approved-spec",
-    "approved-doc",
-    "observation",
+    "current",
+    "research",
+    "historical",
+    "evidence",
+    "project",
     "working-note"
   ],
   "valid_authorities": [
