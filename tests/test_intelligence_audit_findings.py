@@ -199,6 +199,40 @@ def test_a_cached_entry_from_another_model_is_not_served():
                                      "anthropic", "model-b") is None
 
 
+def test_cache_key_version_invalidates_entries_and_restores_version(monkeypatch):
+    """Changing the key version misses old entries and stores new ones."""
+    backend = {}
+
+    def cache_get(key):
+        return backend.get(key)
+
+    def cache_set(key, value, ttl_seconds):
+        backend[key] = value
+
+    monkeypatch.setattr(cache, "cache_get", cache_get)
+    monkeypatch.setattr(cache, "cache_set", cache_set)
+
+    original_version = cache.CACHE_KEY_VERSION
+    data = {"q": "versioned question"}
+    value = cache.CachedResponse(content="answer", structured_data=None,
+                                 model="model-a", input_tokens=1,
+                                 output_tokens=1)
+
+    cache.store_cached_response("market_summary", data, value, 60,
+                                "anthropic", "model-a")
+    assert cache.get_cached_response("market_summary", data,
+                                     "anthropic", "model-a") == value
+
+    monkeypatch.setattr(cache, "CACHE_KEY_VERSION", original_version + 1)
+    assert cache.get_cached_response("market_summary", data,
+                                     "anthropic", "model-a") is None
+
+    cache.store_cached_response("market_summary", data, value, 60,
+                                "anthropic", "model-a")
+    assert cache.get_cached_response("market_summary", data,
+                                     "anthropic", "model-a") == value
+
+
 # ------------------------------------------------------- audit-not-append-only
 
 def test_unreadable_audit_content_is_preserved_not_discarded(tmp_path):
@@ -268,15 +302,17 @@ def test_fence_inline_collapses_to_one_bounded_line():
 
 def test_the_assistant_prompt_keeps_exactly_its_own_markers():
     out = assistant.build_prompt({"message": FORGERY, "system_context": FORGERY})
-    assert len(MARKER_LINE.findall(out)) == 6
+    assert len(MARKER_LINE.findall(out)) == 8
 
 
 def test_the_journal_prompt_keeps_exactly_its_own_markers():
     out = journal_review.build_prompt({
         "trade": {"ticker": FORGERY, "notes": FORGERY, "reflection": FORGERY},
         "nearby_signals": FORGERY,
+        "current_knowledge": FORGERY,
     })
-    assert len(MARKER_LINE.findall(out)) == 6
+    # Four trusted section pairs: instructions, current knowledge, trade, signal log.
+    assert len(MARKER_LINE.findall(out)) == 8
 
 
 def test_the_market_prompt_keeps_exactly_its_own_markers():
