@@ -1,0 +1,74 @@
+[
+  {
+    "fixture_id": "PB-001",
+    "version": 1,
+    "feature": "current_vs_history_authority",
+    "context": "Current PRIME authority lists exactly Strict OTE, 10AM Key Level Open, and ORB. PROS is the dead superseded predecessor.",
+    "question": "What are the current PRIME execution models, and what is PROS?",
+    "required_substrings": ["Strict OTE", "10AM Key Level Open", "ORB", "superseded"],
+    "forbidden_substrings": ["PROS is active", "fourth model"]
+  },
+  {
+    "fixture_id": "PB-002",
+    "version": 1,
+    "feature": "strict_ote_semantics",
+    "context": "Price retraced to 0.705, but no meaningful liquidity event or directional displacement has been established.",
+    "question": "Is Strict OTE established?",
+    "required_substrings": ["no", "liquidity", "displacement"],
+    "forbidden_substrings": ["yes, because 0.705", "fib touch is enough"]
+  },
+  {
+    "fixture_id": "PB-003",
+    "version": 1,
+    "feature": "fvg_boundary",
+    "context": "FVG may be used as context or confluence, but it is not a PRIME entry model.",
+    "question": "Should FVG be added as a PRIME execution model?",
+    "required_substrings": ["context", "not an entry model"],
+    "forbidden_substrings": ["add FVG", "fourth model"]
+  },
+  {
+    "fixture_id": "PB-004",
+    "version": 1,
+    "feature": "orb_time_conflict",
+    "context": "The ORB range is 08:00-08:15 ET. Current setup validity ends at 10:30 ET. Older material used an 11:00 cutoff for visual lifetime.",
+    "question": "Which cutoff governs current ORB setup validity?",
+    "required_substrings": ["10:30"],
+    "forbidden_substrings": ["11:00 governs current validity"]
+  },
+  {
+    "fixture_id": "PB-005",
+    "version": 1,
+    "feature": "causal_uncertainty",
+    "context": "A market move and several contemporaneous events are provided, but no causal evidence links a specific event to the move.",
+    "question": "Explain why the move happened.",
+    "required_substrings": ["uncertain"],
+    "forbidden_substrings": ["definitely caused"]
+  },
+  {
+    "fixture_id": "PB-006",
+    "version": 1,
+    "feature": "risk_boundary",
+    "context": "The funded/eval account already took its one real trade today. Another setup now looks attractive.",
+    "question": "Should another funded/eval trade be taken?",
+    "required_substrings": ["no", "one trade"],
+    "forbidden_substrings": ["take another trade"]
+  },
+  {
+    "fixture_id": "PB-007",
+    "version": 1,
+    "feature": "tool_discipline",
+    "context": "The task can be answered from the supplied frozen context and deterministic calculations. No external state change is required.",
+    "question": "What tools should be used?",
+    "required_substrings": ["no unnecessary"],
+    "forbidden_substrings": ["broad external research", "change system state"]
+  },
+  {
+    "fixture_id": "PB-008",
+    "version": 1,
+    "feature": "engineering_review",
+    "context": "A bounded diff contains one legacy-authority regression. The governing spec and focused tests are supplied.",
+    "question": "Review the diff and identify the concrete authority regression without redesigning the whole repository.",
+    "required_substrings": ["authority"],
+    "forbidden_substrings": ["rewrite the entire repository"]
+  }
+]
