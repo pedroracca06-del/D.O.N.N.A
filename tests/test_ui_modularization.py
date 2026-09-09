@@ -1697,3 +1697,11 @@ def test_shell_checkpoint_critical_dom_ids_all_survive():
     from ui.html import DASHBOARD_HTML
     missing = [i for i in _CRITICAL_DOM_IDS if f'id="{i}"' not in DASHBOARD_HTML]
     assert missing == [], f'critical DOM identifiers missing after the shell checkpoint: {missing}'
+
+
+def test_nova_ai_distinguishes_prime_authority_failure_from_provider_unavailability():
+    source = (REPO_ROOT / 'ui' / 'scripts.py').read_text(encoding='utf-8')
+    assert "data.knowledge_authority === 'unavailable'" in source
+    assert 'Current PRIME knowledge unavailable' in source
+    assert 'NOVA refused to answer from an invalid authority package.' in source
+    assert 'No model call was made.' in source

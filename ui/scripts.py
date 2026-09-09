@@ -1880,6 +1880,19 @@ const NI_SOURCES = [
   ['Session memory',         '/session-memory']
 ];
 
+const NI_CONTEXT_NAMES = {
+  session_risk:     'Session & risk posture',
+  market_reality:   'Market reality',
+  market_structure: 'Market structure',
+  liquidity:        'Liquidity',
+  participation:    'Participation',
+  cross_market:     'Cross-market',
+  synthesis:        'Synthesis',
+  session_memory:   'Session memory',
+  working_memory:   'Working memory',
+  current_prime_knowledge: 'Current PRIME knowledge'
+};
+
 function niEl(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -2069,15 +2082,36 @@ function niAppendPending() {
   return a;
 }
 
-// The grounding strip states AVAILABILITY, never use. See ui/pages/nova_ai.py
-// for why the distinction is not cosmetic.
-function niGroundStrip() {
+// Per-answer grounding distinguishes request-context inclusion from claim-level citation.
+function niGroundStrip(contextSources) {
   const g = niEl('div', 'ni-ground');
-  g.appendChild(niEl('div', 'ni-ground-k', 'Context available when asked'));
+  const supplied = Array.isArray(contextSources)
+    ? contextSources.filter(k => typeof k === 'string' && NI_CONTEXT_NAMES[k])
+    : [];
   const chips = niEl('div', 'ni-chips');
+
+  if (supplied.length) {
+    g.appendChild(niEl('div', 'ni-ground-k', 'Context included in this request'));
+    supplied.forEach(key => {
+      const state = _niSourceState.find(s => s.name === NI_CONTEXT_NAMES[key]);
+      const cls = state ? state.cls : 'on';
+      const c = niEl('span', 'ni-chip ' + cls, NI_CONTEXT_NAMES[key]);
+      chips.appendChild(c);
+    });
+    g.appendChild(chips);
+    const note = niEl('div', 'ni-ground-note');
+    note.appendChild(document.createTextNode(
+      'These source classes were present in the generated request context. '));
+    note.appendChild(niEl('b', null,
+      'This proves context inclusion, not claim-level attribution or citation.'));
+    g.appendChild(note);
+    return g;
+  }
+
+  g.appendChild(niEl('div', 'ni-ground-k', 'Context available when asked'));
   (_niSourceState.length ? _niSourceState : []).forEach(s => {
     const c = niEl('span', 'ni-chip ' + s.cls);
-    c.appendChild(document.createTextNode(s.name + (s.cls === 'off' ? '' : ' · ' + s.label)));
+    c.appendChild(document.createTextNode(s.name + (s.cls === 'off' ? '' : ' - ' + s.label)));
     chips.appendChild(c);
   });
   if (!_niSourceState.length) chips.appendChild(niEl('span', 'ni-chip off', 'not read'));
@@ -2085,10 +2119,6 @@ function niGroundStrip() {
 
   const down  = _niSourceState.filter(s => !s.ok).length;
   const stale = _niSourceState.filter(s => s.cls === 'stale').length;
-
-  // The availability-is-not-use sentence is unconditional. It was previously
-  // on the healthy branch only, which meant the page dropped its most
-  // important caveat in exactly the degraded case where it matters most.
   if (down || stale) {
     const warn = niEl('div', 'ni-ground-note');
     warn.appendChild(niEl('b', null,
@@ -2096,20 +2126,17 @@ function niGroundStrip() {
       (down && stale ? ', and ' : '') +
       (stale ? stale + ' ' + (stale > 1 ? 'are' : 'is') + ' stale' : '') + '. '));
     warn.appendChild(document.createTextNode(
-      'NOVA is not told which were missing or old, so treat any claim resting on them as unsupported.'));
+      'Treat claims resting on unavailable or stale context with caution.'));
     g.appendChild(warn);
   }
-
   const note = niEl('div', 'ni-ground-note');
   note.appendChild(document.createTextNode(
-    'Availability and age are read from each source\u2019s own route. '));
-  note.appendChild(niEl('b', null,
-    'Whether NOVA incorporated each one is not reported by the chat route \u2014 availability is proven, use is not.'));
+    'No per-request inclusion metadata was returned, so this fallback shows availability only.'));
   g.appendChild(note);
   return g;
 }
 
-function niFillAnswer(card, reply) {
+function niFillAnswer(card, reply, contextSources, knowledgeSources, knowledgeProvenance) {
   card.textContent = '';
   const head = niEl('div', 'ni-a-head');
   head.appendChild(niEl('span', 'ni-a-who', 'NOVA'));
@@ -2120,12 +2147,24 @@ function niFillAnswer(card, reply) {
   body.appendChild(niEl('p', null, String(reply)));
   card.appendChild(body);
 
-  card.appendChild(niGroundStrip());
+  card.appendChild(niGroundStrip(contextSources));
+
+  if (Array.isArray(knowledgeSources) && knowledgeSources.length) {
+    const prov = niEl('div', 'ni-ground-note');
+    prov.appendChild(niEl('b', null, 'Current knowledge files: '));
+    const bySource = new Map((Array.isArray(knowledgeProvenance) ? knowledgeProvenance : []).map(p => [p.source, p.sha256]));
+    prov.appendChild(document.createTextNode(knowledgeSources.map(s => {
+      const name = String(s).split('/').pop();
+      const hash = bySource.get(s);
+      return hash ? name + ' @ ' + String(hash).slice(0, 8) : name;
+    }).join(', ')));
+    card.appendChild(prov);
+  }
 
   const note = niEl('div', 'ni-a-note');
   note.appendChild(niEl('span', 'ni-kind na', 'No citations'));
   note.appendChild(niEl('span', null,
-    'The intelligence layer returns no source references. Nothing above links to a document.'));
+    'The intelligence layer returns no claim-level source references. The context strip shows request inclusion only.'));
   card.appendChild(note);
   niScroll();
 }
@@ -2199,9 +2238,13 @@ async function sendChat(overrideMsg) {
     const reply   = data && typeof data.reply === 'string' ? data.reply.trim() : '';
 
     if (outcome === 'ok' && reply) {
-      niFillAnswer(card, reply);
+      niFillAnswer(card, reply, data.context_sources, data.knowledge_sources, data.knowledge_provenance);
       // Only a real answer may have changed working memory.
       niRefreshMemory();
+    } else if (outcome === 'unavailable' && data && data.knowledge_authority === 'unavailable') {
+      niFillNotice(card, 'warn', 'Current PRIME knowledge unavailable',
+        'NOVA refused to answer from an invalid authority package.',
+        reply || 'Current PRIME knowledge failed integrity validation. No model call was made.');
     } else if (outcome === 'unavailable') {
       niFillNotice(card, 'warn', 'AI unavailable',
         'NOVA did not answer.',
