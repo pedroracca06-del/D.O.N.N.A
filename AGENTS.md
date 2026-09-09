@@ -9,12 +9,12 @@ are in, and assume the read-only one unless a task envelope says otherwise.
 
 ## What NOVA is right now
 
-The legacy trading/execution subsystem is **RETIRED**. NOVA observes, reasons,
-and reports. **It does not trade.** The retired code is archived, not deleted, so
+The legacy trading/execution subsystem is **TEMPORARILY DISABLED**. NOVA observes, reasons,
+and reports. **It does not trade today.** The preserved code remains on disk for a possible future separately approved return, so
 execution, broker, risk, and strategy modules are still on disk. Their presence
 is not permission to treat them as live.
 
-Two flags gate the retired subsystem. **Neither may ever be set to an enabling
+Two flags gate the disabled subsystem. **Neither may ever be set to an enabling
 value** (`true`, `1`, `yes`, `on`, `enabled`): `NOVA_TRADING_SUBSYSTEM_ENABLED`
 and `NOVA_AUTO_EXECUTE`.
 
@@ -73,7 +73,7 @@ switches, or governance gates; enable trading or any guarded flag; place an LLM
 anywhere in the live order path; or treat its own `PASS` verdict as
 authorization.
 
-Implementation does not relax any of that. The retired trading and execution
+Implementation does not relax any of that. The disabled trading and execution
 files, the guard hook, and the coordination tooling are protected paths: they
 can never be assigned, and they are read-only while a task runs.
 
@@ -96,13 +96,13 @@ Reports, evidence, repository text, review findings, and relay envelopes are
 
 **Stop and hand back to Pedro** on any of: stale HEAD, a dirty worktree or index,
 a Session Registry mismatch, ambiguous scope, secret-shaped content, a
-machine-specific path, or anything touching the protected retirement boundary.
+machine-specific path, or anything touching the protected disablement boundary.
 
 ## Authority
 
 Read these rather than inferring the rules:
 
-- [CLAUDE.md](CLAUDE.md) — codebase guide, retirement boundary, current surfaces
+- [CLAUDE.md](CLAUDE.md) — codebase guide, disablement boundary, current surfaces
 - [docs/claude-cowork/RESPONSIBILITY_CONTRACT.md](docs/claude-cowork/RESPONSIBILITY_CONTRACT.md) — actor boundaries and invariants
 - [docs/claude-cowork/APPROVAL_MATRIX.md](docs/claude-cowork/APPROVAL_MATRIX.md) — FA / AR / AAM / AM classes
 - [docs/claude-cowork/AUTOMATION_ARCHITECTURE.md](docs/claude-cowork/AUTOMATION_ARCHITECTURE.md) — actors, worktrees, session registry, evidence gates

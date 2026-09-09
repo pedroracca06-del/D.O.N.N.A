@@ -2,7 +2,7 @@
 
 **AI-native market intelligence and execution infrastructure for futures trading.**
 
-NOVA is a production trading system that reads live TradingView charts via Chrome DevTools Protocol, evaluates MES and MNQ futures setups through a deterministic rule engine, grades signals using Claude (Anthropic), and delivers structured alerts to Discord with chart screenshots — all running on a real-time 60–90 second evaluation cycle.
+NOVA is an AI-native market-intelligence and decision-support platform for NQ/MNQ futures. Its active surfaces focus on read-only analysis, market context, journal review, and the NOVA Intelligence assistant. Historical trading/execution infrastructure remains preserved but temporarily disabled and requires separate explicit approval before any future return.
 
 Built for: **backend engineering** · **AI systems** · **fintech infrastructure**
 
@@ -11,13 +11,13 @@ Built for: **backend engineering** · **AI systems** · **fintech infrastructure
 ## What It Does
 
 - **Live chart intelligence** — connects to TradingView Desktop via a custom Node.js MCP server over Chrome DevTools Protocol, reading indicator tables, OHLCV, price levels, and labels directly from the DOM
-- **Deterministic signal evaluation** — evaluates PROS continuation setups, Opening Range Breakout structure, Initial Balance draw alignment, and macro invalidation — no AI calls until a genuine signal is detected
-- **AI grading pipeline** — calls Claude only when the deterministic engine flags a setup; grades A–D with structured narration, macro context, and execution parameters
+- **PRIME-aware intelligence** - current context is evaluated against PRIME and its three active execution models: Strict OTE, 10AM Key Level Open, and ORB; PROS is superseded historical lineage only
+- **AI intelligence pipeline** - Assistant, Journal Review, and Market Summary run through the centralized Intelligence gateway with bounded prompts, cache, budget, audit, and provenance-aware context
 - **Discord delivery** — rich embeds with chart screenshots, routed by alert type to dedicated channels with anti-spam governance (cooldowns, daily caps, grade filters)
 - **Macro intelligence** — monitors economic calendar, VIX, and breaking news via Finnhub, FMP, and Grok; fires risk-tier alerts to Discord's macro channel
-- **Execution pipeline** — processes TradingView webhooks through a multi-gate risk engine, routes paper/live orders to Alpaca via REST
+- **Preserved execution infrastructure** - historical broker/risk/webhook code remains on disk for a future separately approved return, but it is not currently authorized or active
 - **Trade journal** — full operational intelligence journal with NOVA AI per-trade review, behavioral tracking, reasoning timeline, screenshot replay, and performance analytics
-- **Dashboard** — FastAPI-served HTML dashboard with live market data, session state, risk engine, journal, and bot controls
+- **Dashboard** - FastAPI-served NOVA interface with Overview, Markets, Journal, NOVA Intelligence, and Settings; intelligence answers expose supplied context and Git knowledge provenance without claiming citation
 
 ---
 
@@ -52,7 +52,7 @@ services/execution.py             Multi-gate risk engine → Alpaca broker
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.11, FastAPI, uvicorn |
-| AI | Anthropic Claude (claude-sonnet-4-6, claude-haiku-4-5) |
+| AI | Provider-abstracted NOVA Intelligence gateway; current runtime adapter: Anthropic Claude |
 | Chart integration | Node.js, Chrome DevTools Protocol, custom MCP server |
 | Broker | Alpaca REST API |
 | Market data | Finnhub, yfinance, FMP, xAI Grok |
@@ -101,10 +101,10 @@ D.O.N.N.A/
 │   └── src/                        # CDP connection, chart read/write, screenshot
 │
 ├── nova_knowledge_core/            # Strategy rules and methodology
-│   ├── PROS_EVAN_INVESTING/        # PROS continuation strategy rules
-│   ├── ORB_RP/                     # Opening Range Breakout rules
-│   ├── INVALIDATION_RULES/         # Position invalidation logic
-│   └── RULES/nova_strategy_core.json
+?   ??? PROS_EVAN_INVESTING/        # Superseded historical PROS lineage
+?   ??? ORB_RP/                     # Historical/research ORB material
+?   ??? CURRENT/PRIME/              # Git-authoritative current PRIME doctrine
+?   ??? CANDIDATES/                 # Non-authoritative promotion candidates
 │
 ├── nova_ui_vision/                 # UI design philosophy and mockups
 ├── indicators/                     # Pine Script — NOVA EXECUTION V1
@@ -150,7 +150,7 @@ python monitor.py
 
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude — setup grading, journal analysis, assistant |
+| `ANTHROPIC_API_KEY` | Current Anthropic runtime adapter for NOVA Intelligence features |
 | `DISCORD_BOT_TOKEN` | Discord bot for alert delivery |
 | `DISCORD_CHANNEL_LIVE` | Fallback alert channel ID |
 | `DISCORD_CHANNEL_EXECUTION` | Execution-ready alerts |
