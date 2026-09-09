@@ -2089,16 +2089,31 @@ function niGroundStrip(contextSources) {
     ? contextSources.filter(k => typeof k === 'string' && NI_CONTEXT_NAMES[k])
     : [];
   const chips = niEl('div', 'ni-chips');
+  const down  = _niSourceState.filter(s => !s.ok).length;
+  const stale = _niSourceState.filter(s => s.cls === 'stale').length;
+
+  const appendSourceWarning = () => {
+    if (!down && !stale) return;
+    const warn = niEl('div', 'ni-ground-note');
+    warn.appendChild(niEl('b', null,
+      (down ? down + ' source' + (down > 1 ? 's' : '') + ' did not answer' : '') +
+      (down && stale ? ', and ' : '') +
+      (stale ? stale + ' ' + (stale > 1 ? 'are' : 'is') + ' stale' : '') + '. '));
+    warn.appendChild(document.createTextNode(
+      'Treat claims resting on unavailable or stale context with caution.'));
+    g.appendChild(warn);
+  };
 
   if (supplied.length) {
     g.appendChild(niEl('div', 'ni-ground-k', 'Context included in this request'));
     supplied.forEach(key => {
       const state = _niSourceState.find(s => s.name === NI_CONTEXT_NAMES[key]);
-      const cls = state ? state.cls : 'on';
-      const c = niEl('span', 'ni-chip ' + cls, NI_CONTEXT_NAMES[key]);
-      chips.appendChild(c);
+      const cls = state ? state.cls : 'unknown';
+      const label = NI_CONTEXT_NAMES[key] + (state ? '' : ' - status unknown');
+      chips.appendChild(niEl('span', 'ni-chip ' + cls, label));
     });
     g.appendChild(chips);
+    appendSourceWarning();
     const note = niEl('div', 'ni-ground-note');
     note.appendChild(document.createTextNode(
       'These source classes were present in the generated request context. '));
@@ -2109,26 +2124,14 @@ function niGroundStrip(contextSources) {
   }
 
   g.appendChild(niEl('div', 'ni-ground-k', 'Context available when asked'));
-  (_niSourceState.length ? _niSourceState : []).forEach(s => {
+  _niSourceState.forEach(s => {
     const c = niEl('span', 'ni-chip ' + s.cls);
     c.appendChild(document.createTextNode(s.name + (s.cls === 'off' ? '' : ' - ' + s.label)));
     chips.appendChild(c);
   });
   if (!_niSourceState.length) chips.appendChild(niEl('span', 'ni-chip off', 'not read'));
   g.appendChild(chips);
-
-  const down  = _niSourceState.filter(s => !s.ok).length;
-  const stale = _niSourceState.filter(s => s.cls === 'stale').length;
-  if (down || stale) {
-    const warn = niEl('div', 'ni-ground-note');
-    warn.appendChild(niEl('b', null,
-      (down ? down + ' source' + (down > 1 ? 's' : '') + ' did not answer' : '') +
-      (down && stale ? ', and ' : '') +
-      (stale ? stale + ' ' + (stale > 1 ? 'are' : 'is') + ' stale' : '') + '. '));
-    warn.appendChild(document.createTextNode(
-      'Treat claims resting on unavailable or stale context with caution.'));
-    g.appendChild(warn);
-  }
+  appendSourceWarning();
   const note = niEl('div', 'ni-ground-note');
   note.appendChild(document.createTextNode(
     'No per-request inclusion metadata was returned, so this fallback shows availability only.'));

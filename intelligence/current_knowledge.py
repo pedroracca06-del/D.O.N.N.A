@@ -203,14 +203,13 @@ def retrieve_current_prime(query: str, *, max_docs: int = 3, max_chars: int = 50
     for _score, _name, path, body in chosen:
         rel = path.relative_to(_REPO_ROOT).as_posix()
         chunk = f"[CURRENT SOURCE: {rel}]\n{body.strip()}"
-        remaining = max_chars - used
-        if remaining <= 0:
-            break
-        chunk = chunk[:remaining]
+        separator_cost = 2 if chunks else 0
+        if used + separator_cost + len(chunk) > max_chars:
+            continue
         chunks.append(chunk)
         sources.append(rel)
         source_hashes.append(hashlib.sha256(body.encode("utf-8")).hexdigest())
-        used += len(chunk)
+        used += separator_cost + len(chunk)
 
     return KnowledgeSelection(
         text="\n\n".join(chunks),

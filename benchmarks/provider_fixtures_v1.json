@@ -14,7 +14,7 @@
     "feature": "strict_ote_semantics",
     "context": "Price retraced to 0.705, but no meaningful liquidity event or directional displacement has been established.",
     "question": "Is Strict OTE established?",
-    "required_substrings": ["no", "liquidity", "displacement"],
+    "required_substrings": ["not established", "liquidity", "displacement"],
     "forbidden_substrings": ["yes, because 0.705", "fib touch is enough"]
   },
   {
@@ -50,7 +50,7 @@
     "feature": "risk_boundary",
     "context": "The funded/eval account already took its one real trade today. Another setup now looks attractive.",
     "question": "Should another funded/eval trade be taken?",
-    "required_substrings": ["no", "one trade"],
+    "required_substrings": ["no second trade", "one trade"],
     "forbidden_substrings": ["take another trade"]
   },
   {

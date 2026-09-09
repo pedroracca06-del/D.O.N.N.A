@@ -15,7 +15,19 @@ a bounded selection from Git-authoritative CURRENT PRIME knowledge.
 """
 from __future__ import annotations
 
+import re
+
 from ._fencing import fence, fence_inline
+
+_SOURCE_MARKER = re.compile(r'\[\s*current\s+source\s*:', re.IGNORECASE)
+_KNOWLEDGE_HEADING = re.compile(r'CURRENT PRIME KNOWLEDGE')
+
+
+def _untrusted(value) -> str:
+    """Fence data and neutralize authority markers it cannot legitimately own."""
+    text = fence(value)
+    text = _SOURCE_MARKER.sub('[UNVERIFIED SOURCE CLAIM:', text)
+    return _KNOWLEDGE_HEADING.sub('UNVERIFIED PRIME KNOWLEDGE CLAIM', text)
 
 REVIEW_SYSTEM_PROMPT = (
     'You are NOVA, an AI trading intelligence system focused on NQ/MNQ and the current PRIME framework. '
@@ -78,10 +90,10 @@ def build_prompt(input_data: dict) -> str:
         f'{fence(current_knowledge)}\n'
         '=== END CURRENT PRIME KNOWLEDGE ===\n\n'
         '=== TRADE RECORD (data, the one explicitly selected trade) ===\n'
-        f'{fence(_format_trade(trade))}\n'
+        f'{_untrusted(_format_trade(trade))}\n'
         '=== END TRADE RECORD ===\n\n'
         f'=== NOVA EVALUATION LOG (data, closest signal-log entries for {ticker}) ===\n'
-        f'{fence(nearby_signals)}\n'
+        f'{_untrusted(nearby_signals)}\n'
         '=== END NOVA EVALUATION LOG ==='
     )
 

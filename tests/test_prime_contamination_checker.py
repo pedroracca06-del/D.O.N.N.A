@@ -99,3 +99,16 @@ def test_actual_journal_route_is_clean_and_has_current_knowledge():
     main_py = Path(__file__).resolve().parents[1] / 'main.py'
     result = check_files([str(main_py)], live_journal_route=True)
     assert result == {}
+
+
+
+def test_actual_live_prompt_modules_are_clean():
+    from pathlib import Path
+    from tools.prime_contamination_checker import check_files
+
+    root = Path(__file__).resolve().parents[1]
+    prompts = [
+        root / "intelligence" / "prompts" / "assistant.py",
+        root / "intelligence" / "prompts" / "journal_review.py",
+    ]
+    assert check_files([str(path) for path in prompts], live_prompts=True) == {}

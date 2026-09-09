@@ -337,6 +337,16 @@ def test_a2_counters_references_and_url_placeholders_are_not_secrets(tmp_path):
     assert ids(out)["A2.1"] == "pass"
 
 
+def test_a2_lowercase_unquoted_password_value_still_fails(tmp_path):
+    repo = make_repo(tmp_path)
+    assignment = "pass" + "word = SuperSecret123\n"
+    (repo / "bad.txt").write_text(assignment, encoding="utf-8")
+    git(repo, "add", "--", "bad.txt")
+    rc, out, _ = run(repo, manifest_for(repo, ["bad.txt"]))
+    assert rc == 1
+    assert ids(out)["A2.1"] == "fail"
+
+
 def test_a2_literal_url_query_secret_still_fails(tmp_path):
     repo = make_repo(tmp_path)
     query_name = "to" + "ken="

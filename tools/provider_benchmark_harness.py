@@ -34,6 +34,9 @@ class BenchmarkFixture:
             raise ValueError("required_substrings contains duplicates")
         if len(set(x.casefold() for x in self.forbidden_substrings)) != len(self.forbidden_substrings):
             raise ValueError("forbidden_substrings contains duplicates")
+        invariants = (*self.required_substrings, *self.forbidden_substrings)
+        if any(len(value.strip()) < 3 for value in invariants):
+            raise ValueError("benchmark invariants must contain at least 3 characters")
         overlap = {x.casefold() for x in self.required_substrings} & {x.casefold() for x in self.forbidden_substrings}
         if overlap:
             raise ValueError("an invariant cannot be both required and forbidden")

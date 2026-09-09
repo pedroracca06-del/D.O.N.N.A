@@ -140,3 +140,23 @@ def test_loader_rejects_duplicate_identity(tmp_path):
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate fixture identity"):
         load_fixtures(path)
+
+
+def test_fixture_validation_rejects_non_discriminating_short_invariants():
+    import pytest
+    weak = BenchmarkFixture(
+        fixture_id="PB-010", version=1, feature="risk", context="ctx", question="q",
+        required_substrings=("no",),
+    )
+    with pytest.raises(ValueError, match="at least 3 characters"):
+        fixture_hash(weak)
+
+
+def test_frozen_pack_uses_discriminating_negative_phrases():
+    from pathlib import Path
+    from tools.provider_benchmark_harness import load_fixtures
+
+    path = Path(__file__).resolve().parents[1] / "benchmarks" / "provider_fixtures_v1.json"
+    fixtures = {fixture.fixture_id: fixture for fixture in load_fixtures(path)}
+    assert "not established" in fixtures["PB-002"].required_substrings
+    assert "no second trade" in fixtures["PB-006"].required_substrings

@@ -39,3 +39,17 @@ def test_retrieval_reports_content_hashes_for_exact_sources():
         body = (ck._REPO_ROOT / source).read_text(encoding="utf-8")
         assert digest == hashlib.sha256(body.encode("utf-8")).hexdigest()
         assert len(digest) == 64
+
+
+def test_retrieval_never_emits_or_hashes_a_partial_document():
+    from intelligence import current_knowledge as ck
+
+    query = "current PRIME models"
+    first = retrieve_current_prime(query, max_docs=1)
+    source = first.sources[0]
+    body = (ck._REPO_ROOT / source).read_text(encoding="utf-8")
+    complete_chunk = f"[CURRENT SOURCE: {source}]\n{body.strip()}"
+    result = retrieve_current_prime(query, max_docs=2, max_chars=len(complete_chunk) + 10)
+    assert result.sources == (source,)
+    assert result.text == complete_chunk
+    assert len(result.source_hashes) == 1

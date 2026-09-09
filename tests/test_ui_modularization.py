@@ -1705,3 +1705,12 @@ def test_nova_ai_distinguishes_prime_authority_failure_from_provider_unavailabil
     assert 'Current PRIME knowledge unavailable' in source
     assert 'NOVA refused to answer from an invalid authority package.' in source
     assert 'No model call was made.' in source
+
+
+def test_nova_ai_grounding_keeps_degraded_warnings_and_unknown_state_visible():
+    source = (REPO_ROOT / 'ui' / 'scripts.py').read_text(encoding='utf-8')
+    ground = source[source.index('function niGroundStrip'):source.index('function niFillAnswer')]
+    assert ground.index('appendSourceWarning();') < ground.index('return g;')
+    assert "state ? state.cls : 'unknown'" in ground
+    assert "status unknown" in ground
+    assert 'Treat claims resting on unavailable or stale context with caution.' in ground

@@ -108,8 +108,9 @@ _SECRET_KEY_RE = re.compile(
     r"cookie|authorization|bearer|private[_-]?key|access[_-]?key|"
     r"refresh[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]*\s*[:=]\s*(?P<value>\S+)")
 _SAFE_ASSIGNED_VALUE_RE = re.compile(
-    r"^(?:\d+(?:\.\d+)?|[A-Za-z_][A-Za-z0-9_.]*(?:\(.*\))?|"
-    r"[{$%][^\s]*|\(|\([A-Za-z_,]*\)|None|True|False)[,;)]?$", re.IGNORECASE)
+    r"^(?:\d+(?:\.\d+)?|[A-Z_][A-Z0-9_]*|"
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+|"
+    r"[{$%][^\s]*|\(|\([A-Za-z_,]*\)|None|True|False|null|true|false)[,;)]?$")
 
 
 def _has_secret_assignment(line):
