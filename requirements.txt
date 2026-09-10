@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 anthropic
+httpx
 openai
 requests
 python-dotenv
