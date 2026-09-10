@@ -57,6 +57,12 @@ def validate_current_prime_package(root: Path | None = None) -> tuple[str, ...]:
     if missing:
         raise CurrentKnowledgeIntegrityError(f"missing current authority documents: {', '.join(missing)}")
 
+    unexpected = sorted(docs.keys() - required)
+    if unexpected:
+        raise CurrentKnowledgeIntegrityError(
+            f"unexpected current authority documents: {', '.join(unexpected)}"
+        )
+
     problems: list[str] = []
     for name, body in docs.items():
         if "Status: CURRENT" not in body:

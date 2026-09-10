@@ -45,7 +45,7 @@ _NO_KNOWLEDGE = '(no current PRIME doctrine was retrieved for this request)'
 # The two shapes the instructions give authority to. Untrusted text may
 # mention doctrine; it may not wear doctrine's badge.
 _SOURCE_MARKER = re.compile(r'\[\s*current\s+source\s*:', re.IGNORECASE)
-_KNOWLEDGE_HEADING = re.compile(r'CURRENT PRIME KNOWLEDGE')
+_KNOWLEDGE_HEADING = re.compile(r'CURRENT PRIME KNOWLEDGE', re.IGNORECASE)
 
 
 def _untrusted(value) -> str:

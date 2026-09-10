@@ -20,7 +20,7 @@ import re
 from ._fencing import fence, fence_inline
 
 _SOURCE_MARKER = re.compile(r'\[\s*current\s+source\s*:', re.IGNORECASE)
-_KNOWLEDGE_HEADING = re.compile(r'CURRENT PRIME KNOWLEDGE')
+_KNOWLEDGE_HEADING = re.compile(r'CURRENT PRIME KNOWLEDGE', re.IGNORECASE)
 
 
 def _untrusted(value) -> str:
