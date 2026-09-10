@@ -10,7 +10,7 @@ services:
       - key: NOVA_INGEST_SECRET
         sync: false   # Set value in Render dashboard → Environment → do not commit secret here
       - key: NOVA_AUTO_EXECUTE
-        value: "true"
+        value: "false"
     disk:
       name: donna-data
       mountPath: /data
