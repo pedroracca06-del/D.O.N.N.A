@@ -1,35 +1,40 @@
 #!/usr/bin/env python
 """
-nova_guard_hook.py -- DISABLED CANDIDATE (Phase 2F). Not installed, not active.
+nova_guard_hook.py -- NOVA retirement guard for Claude Code PreToolUse operations.
 
 PreToolUse hook protecting NOVA's retired trading subsystem from accidental
 modification or re-enablement.
 
+Rewritten from the ee91955 baseline to fix the Phase 2I findings. The core change
+is structural: instead of running mutation regexes against the whole command
+string, the command is split into subcommands, `cd`-style directory changes are
+tracked across them, and each subcommand is examined for the *destination* it
+would write to. A protected path that appears only as a read source, a copy
+source, or quoted documentation text is no longer a block.
+
 Contract (Claude Code 2.1.239, per official hooks documentation):
-  stdin  : JSON object with session_id, cwd, hook_event_name, tool_name,
-           tool_input, permission_mode, ...
+  stdin  : JSON with session_id, cwd, hook_event_name, tool_name, tool_input, ...
   stdout : {"hookSpecificOutput": {"hookEventName": "PreToolUse",
-            "permissionDecision": "allow"|"deny"|"ask",
-            "permissionDecisionReason": "..."}}
+            "permissionDecision": "deny", "permissionDecisionReason": "..."}}
   exit 0 : stdout JSON carries the decision; no output = no decision
-  exit 2 : blocks whether or not JSON is printed. Claude Code STILL reads valid
-           JSON on stdout, and the blocking message is the JSON reason when the
-           JSON makes a blocking decision, otherwise the stderr text.
+  exit 2 : blocks regardless of JSON; Claude Code still reads valid stdout JSON,
+           and the blocking message is the JSON reason when present, else stderr.
 
-The deny path therefore prints the JSON decision, writes the same short reason
-to stderr as a fallback, and exits 2. Both channels are supported, so the block
-holds even if the JSON ever fails schema validation.
+PROTECTION TIERS
+  Tier 1 -- retirement implementation files. No modification by any tool or shell
+            command. Reads, greps, diffs, tests, and copy-*from* are allowed.
+  Tier 2 -- main.py and monitor.py. Actively developed, so ordinary edits are
+            allowed. Blocked only when the edit touches kill-switch text, when the
+            whole file would be replaced (Write), or when a shell command would
+            mutate the file (a shell command cannot say which lines it changes).
 
-PRIVACY: this hook never emits command text, file contents, environment values,
-or credentials. Block messages name only a protected relative path, a short
+PRIVACY: never emits command text, file contents, environment values, or
+credentials. Block messages name only a protected relative path, a short
 construct label, or a guarded flag name.
 
-SCOPE: the project root comes from CLAUDE_PROJECT_DIR (set by Claude Code for
-all hook processes) or, failing that, from walking up the hook's cwd. A root
-only counts when it carries the NOVA marker directory, so the hook is inert in
-unrelated projects even if installed at user scope. Any missing or malformed
-project context fails OPEN (no decision), so a schema or environment problem
-can never lock every tool call.
+SCOPE: project root from CLAUDE_PROJECT_DIR, else by walking up the hook's cwd.
+A root counts only if it carries the NOVA marker directory, so the hook is inert
+in unrelated projects. Missing or malformed context fails OPEN.
 
 Standard library only. Windows-compatible.
 """
@@ -45,10 +50,10 @@ import sys
 # Configuration
 # --------------------------------------------------------------------------
 
-# Directory that identifies the NOVA repository. Without it, the hook is inert.
 MARKER_DIR = "nova_knowledge_core"
 
-PROTECTED_RELATIVE = (
+# Tier 1: no modification, by any means.
+TIER1_PROTECTED = (
     "services/execution.py",
     "services/execution_bridge.py",
     "services/execution_request.py",
@@ -57,7 +62,21 @@ PROTECTED_RELATIVE = (
     "tests/conftest.py",
 )
 
+# Tier 2: kill-switch protection only; ordinary development is allowed.
+TIER2_KILLSWITCH = (
+    "main.py",
+    "monitor.py",
+)
+
 GUARDED_FLAGS = ("NOVA_TRADING_SUBSYSTEM_ENABLED", "NOVA_AUTO_EXECUTE")
+
+# Text whose presence in an Edit's old_string/new_string means the edit is
+# touching retirement-guard logic in a Tier 2 file.
+GUARD_EXPRESSIONS = GUARDED_FLAGS + (
+    "TRADING_SUBSYSTEM_DISABLED",
+    "trading_subsystem_enabled",
+    "_EXECUTION_AVAILABLE",
+)
 
 TRUTHY = ("true", "1", "yes", "on", "enabled", "enable")
 
@@ -66,19 +85,19 @@ SHELL_TOOLS = ("Bash", "PowerShell")
 
 MAX_WALK_UP = 40
 
+_QUOTES = "\"'`"
+
 # --------------------------------------------------------------------------
 # Path normalisation
 # --------------------------------------------------------------------------
 
 _DRIVE_POSIX = re.compile(r"^/([A-Za-z])/")
-_QUOTES = "\"'`"
 
 
 def _to_posix(path: str) -> str:
     """Normalise slash direction, quotes, and Git-Bash drive syntax."""
     p = path.strip().strip(_QUOTES).strip()
     p = p.replace("\\", "/")
-    # /c/Users/... (Git Bash / MSYS) -> c:/Users/...
     m = _DRIVE_POSIX.match(p)
     if m and p[1:3] != ":/":
         p = m.group(1) + ":/" + p[3:]
@@ -100,7 +119,7 @@ def canonical(path: str, base: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Project-root resolution (no hard-coded repository path)
+# Project-root resolution
 # --------------------------------------------------------------------------
 
 def _has_marker(root: str) -> bool:
@@ -111,7 +130,6 @@ def _has_marker(root: str) -> bool:
 
 
 def _env_root():
-    """CLAUDE_PROJECT_DIR, if it is present, absolute, and a real directory."""
     raw = os.environ.get("CLAUDE_PROJECT_DIR") or ""
     if not isinstance(raw, str):
         return None
@@ -120,18 +138,17 @@ def _env_root():
         return None
     p = _to_posix(raw)
     if not _is_absolute(p):
-        return None                      # malformed: relative or junk
+        return None
     p = posixpath.normpath(p).lower()
     try:
         if not os.path.isdir(p):
-            return None                  # malformed: points nowhere
+            return None
     except OSError:
         return None
     return p
 
 
 def _walk_up_root(cwd: str):
-    """Nearest ancestor of cwd carrying the marker directory."""
     if not cwd:
         return None
     p = _to_posix(cwd)
@@ -149,124 +166,272 @@ def _walk_up_root(cwd: str):
 
 
 def resolve_root(cwd: str):
-    """Project root, or None when project context is missing/unusable."""
     env = _env_root()
     if env and _has_marker(env):
         return env
-    # CLAUDE_PROJECT_DIR absent, malformed, or not a NOVA checkout.
     return _walk_up_root(cwd)
 
 
 def in_scope(cwd: str, root: str) -> bool:
-    """True only inside the project root or one of its subdirectories.
-
-    The trailing separator matters: it stops a sibling such as
-    ``D.O.N.N.A-copy`` from matching the ``D.O.N.N.A`` prefix.
-    """
+    """Inside the root or a subdirectory. The trailing separator stops a sibling
+    such as ``D.O.N.N.A-copy`` from matching the ``D.O.N.N.A`` prefix."""
     if not cwd or not root:
         return False
     c = canonical(cwd, root)
     return c == root or c.startswith(root + "/")
 
 
-def protected_map(root: str) -> dict:
-    return {canonical(posixpath.join(root, rel), root): rel for rel in PROTECTED_RELATIVE}
+def _tier_maps(root: str):
+    t1 = {canonical(posixpath.join(root, r), root): r for r in TIER1_PROTECTED}
+    t2 = {canonical(posixpath.join(root, r), root): r for r in TIER2_KILLSWITCH}
+    return t1, t2
 
 
 # --------------------------------------------------------------------------
-# Shell command analysis
+# Quote-aware scanning primitives
 # --------------------------------------------------------------------------
 
-# Path-shaped tokens: anything ending in a source extension we guard.
-_PATH_TOKEN = re.compile(r"[A-Za-z0-9_.:/\\~$()-]*\.py\b", re.I)
+def _mask_quoted(s: str) -> str:
+    """Same-length copy with quoted regions replaced by NULs.
 
-# Mutating constructs, keyed by a short label used only for the block message.
-_MUTATORS = (
-    ("shell redirect",            re.compile(r"(?<![0-9<>])>>?(?!&)", re.I)),
-    ("tee",                       re.compile(r"\btee\b", re.I)),
-    ("sed in-place",              re.compile(r"\bsed\b[^|;&]*\s-[a-z]*i\b", re.I)),
-    ("perl in-place",             re.compile(r"\bperl\b[^|;&]*\s-[a-z]*i\b", re.I)),
-    ("patch",                     re.compile(r"\bpatch\b", re.I)),
-    ("git apply",                 re.compile(r"\bgit\s+apply\b", re.I)),
-    ("git restore",               re.compile(r"\bgit\s+restore\b", re.I)),
-    ("git checkout of a path",    re.compile(r"\bgit\s+checkout\b[^|;&]*(--\s|\.py)", re.I)),
-    ("git stash/reset of a path", re.compile(r"\bgit\s+(?:stash|reset)\b[^|;&]*\.py", re.I)),
-    ("file removal",              re.compile(r"(^|[|;&(\s])(rm|del|unlink|shred)\b", re.I)),
-    ("move/copy over target",     re.compile(r"(^|[|;&(\s])(mv|cp|move|copy|install)\b", re.I)),
-    ("truncate/dd",               re.compile(r"\b(truncate|dd)\b", re.I)),
-    ("python file write",         re.compile(
-        r"\bopen\s*\([^)]*['\"][rwax][^'\"]*[wax+]|"
-        r"\.write(?:_text|_bytes|lines)?\s*\(|"
-        r"\bshutil\.(copy|move|copyfile|copy2)\b|"
-        r"\bos\.(remove|unlink|rename|replace|truncate)\b|"
-        r"\bpathlib\b[^|;&]*\bwrite", re.I)),
-    ("node file write",           re.compile(
-        r"\bfs(?:\.promises)?\.(write|append|truncate|unlink|rename|copy|rm)\w*\s*\(|"
-        r"\.(writeFile|appendFile|truncate|unlink|rename|copyFile|rm|rmdir|mkdir)"
-        r"(?:Sync)?\s*\(", re.I)),
-    ("PowerShell content write",  re.compile(
-        r"\b(Set-Content|Add-Content|Clear-Content|Out-File|Set-Item|"
-        r"Remove-Item|Copy-Item|Move-Item|Rename-Item|New-Item)\b", re.I)),
-    ("PowerShell redirect",       re.compile(r"\|\s*Out-File\b", re.I)),
-)
-
-# Constructs that are read-only even though they look adjacent to a mutator.
-_READ_ONLY_HINTS = re.compile(
-    r"\bsed\s+-n\b|\bgit\s+(diff|show|log|status|blame|grep)\b|"
-    r"\bpytest\b|\bpython\s+-m\s+pytest\b|\bast\.parse\b|"
-    r"\bpy_compile\b|\bdiff\b|\bgrep\b|\brg\b|\bcat\b|\bhead\b|\btail\b",
-    re.I,
-)
+    Indices in the result line up with the original, so a regex can be run on the
+    mask to find matches that are *outside* any quoted string, then the text read
+    back from the original at the same offsets.
+    """
+    out = []
+    quote = None
+    for ch in s:
+        if quote:
+            out.append("\x00")
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            out.append("\x00")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
-def mentioned_protected(command: str, cwd: str, protected: dict) -> list:
-    """Protected relative paths this command names, in any path form."""
-    hits = []
-    cmd = command or ""
-    for tok in _PATH_TOKEN.findall(cmd):
-        rel = protected.get(canonical(tok, cwd))
-        if rel and rel not in hits:
-            hits.append(rel)
-    # Also catch quoted paths the token regex splits (spaces in directories).
-    for quoted in re.findall(r"[\"']([^\"']+\.py)[\"']", cmd, re.I):
-        rel = protected.get(canonical(quoted, cwd))
-        if rel and rel not in hits:
-            hits.append(rel)
-    return hits
+def _read_token(s: str, i: int):
+    """Read one shell token from s starting at i. Returns (text, next_index)."""
+    n = len(s)
+    while i < n and s[i] in " \t":
+        i += 1
+    if i >= n:
+        return "", i
+    if s[i] in "\"'":
+        q = s[i]
+        j = s.find(q, i + 1)
+        if j == -1:
+            return s[i + 1:], n
+        return s[i + 1:j], j + 1
+    j = i
+    while j < n and s[j] not in " \t\n;|&<>":
+        j += 1
+    return s[i:j], j
 
 
-def mutating_label(command: str):
-    """Short label for the mutating construct present, else None."""
-    cmd = command or ""
-    for label, rx in _MUTATORS:
-        if not rx.search(cmd):
+_SEPARATOR = re.compile(r"&&|\|\||;|\n|\|")
+
+
+def split_subcommands(cmd: str):
+    """Split on unquoted && || ; | and newline. Returns a list of raw strings."""
+    mask = _mask_quoted(cmd)
+    parts, last = [], 0
+    for m in _SEPARATOR.finditer(mask):
+        # do not split a 2>&1 style redirect
+        if m.group(0) == "|" and m.start() > 0 and mask[m.start() - 1] == ">":
             continue
-        # A redirect to /dev/null or NUL is not a mutation of a real target.
-        if label == "shell redirect" and re.search(r">>?\s*(/dev/null|NUL)\b", cmd, re.I):
-            stripped = re.sub(r">>?\s*(/dev/null|NUL)\b", "", cmd, flags=re.I)
-            if not re.search(r"(?<![0-9<>])>>?(?!&)", stripped):
-                continue
-        return label
+        parts.append(cmd[last:m.start()])
+        last = m.end()
+    parts.append(cmd[last:])
+    return [p.strip() for p in parts if p.strip()]
+
+
+def tokens_of(sub: str):
+    """Tokenise a subcommand, dropping redirect operators and their targets."""
+    toks, i, n = [], 0, len(sub)
+    while i < n:
+        while i < n and sub[i] in " \t":
+            i += 1
+        if i >= n:
+            break
+        if sub[i] in "<>" or (sub[i].isdigit() and i + 1 < n and sub[i + 1] == ">"):
+            while i < n and (sub[i] in "<>&" or sub[i].isdigit()):
+                i += 1
+            _, i = _read_token(sub, i)          # consume the redirect target
+            continue
+        t, i = _read_token(sub, i)
+        if t:
+            toks.append(t)
+    return toks
+
+
+_REDIR = re.compile(r"(?<![0-9<>])(\d?>>?)(?!&)")
+
+
+def redirect_targets(sub: str):
+    """Destinations of > and >> in this subcommand (quoted targets included)."""
+    mask = _mask_quoted(sub)
+    out = []
+    for m in _REDIR.finditer(mask):
+        tgt, _ = _read_token(sub, m.end())
+        tgt = tgt.strip().strip(_QUOTES)
+        if tgt and not tgt.startswith("&"):
+            out.append(tgt)
+    return out
+
+
+# --------------------------------------------------------------------------
+# Directory tracking
+# --------------------------------------------------------------------------
+
+_CD_VERBS = ("cd", "chdir", "pushd", "push-location", "set-location", "sl")
+
+
+def cd_target(toks):
+    """If this subcommand changes directory, return its literal argument."""
+    if not toks:
+        return None
+    if toks[0].lower() not in _CD_VERBS:
+        return None
+    for t in toks[1:]:
+        if t.startswith("-") and t.lower() not in ("-path",):
+            continue
+        if t.lower() == "-path":
+            continue
+        return t
     return None
 
 
-_FLAG_ASSIGN = re.compile(
-    r"(?:\$env:)?(" + "|".join(GUARDED_FLAGS) + r")\s*(?:=|\s-value\s+)\s*"
-    r"[\"']?([A-Za-z0-9_]+)[\"']?",
-    re.I,
-)
-_FLAG_SETX = re.compile(
-    r"\b(?:setx|set)\s+(" + "|".join(GUARDED_FLAGS) + r")\s+[\"']?([A-Za-z0-9_]+)",
-    re.I,
+# --------------------------------------------------------------------------
+# Mutation destinations
+# --------------------------------------------------------------------------
+
+# Verbs where every path argument is a destination.
+_MUTATE_ANY = {
+    "sed", "perl", "patch", "tee", "rm", "del", "unlink", "shred", "truncate",
+    "dd", "shred", "set-content", "add-content", "clear-content", "out-file",
+    "set-item", "remove-item", "rename-item", "new-item", "sc",
+}
+# Verbs where only the LAST path argument is the destination (source survives).
+_COPY_VERBS = {"cp", "copy", "install", "copy-item", "cpi"}
+# Verbs that also destroy their source, so BOTH ends matter.
+_MOVE_VERBS = {"mv", "move", "move-item", "rename-item", "mi", "ren"}
+_MUTATE_LAST = _COPY_VERBS | _MOVE_VERBS
+
+# Verbs that only mutate with an in-place flag.
+_INPLACE_ONLY = {"sed", "perl"}
+_INPLACE_FLAG = re.compile(r"^-[a-z]*i[a-z]*$", re.I)
+
+_GIT_MUTATE = re.compile(r"^(apply|restore|checkout|stash|reset|clean|mv|rm)$", re.I)
+
+# Concrete file-writing APIs. Each yields a literal destination path.
+_CODE_DESTS = (
+    re.compile(r"\bopen\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][^'\"]*[wax+]", re.I),
+    re.compile(r"\bPath\s*\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\.\s*write_(?:text|bytes)", re.I),
+    re.compile(r"\bos\.(?:remove|unlink|truncate)\s*\(\s*['\"]([^'\"]+)['\"]", re.I),
+    re.compile(r"\bos\.(?:rename|replace)\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]([^'\"]+)['\"]", re.I),
+    re.compile(r"\bshutil\.(?:copy|copy2|copyfile|move)\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]([^'\"]+)['\"]", re.I),
+    re.compile(r"\.(?:writeFile|appendFile)(?:Sync)?\s*\(\s*['\"]([^'\"]+)['\"]", re.I),
+    re.compile(r"\.(?:rm|unlink|truncate)(?:Sync)?\s*\(\s*['\"]([^'\"]+)['\"]", re.I),
+    re.compile(r"\.(?:rename|copyFile)(?:Sync)?\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]([^'\"]+)['\"]", re.I),
 )
 
 
-def guarded_flag_enabled(command: str):
-    """Return the flag name if the command sets it to a truthy value, else None."""
-    for rx in (_FLAG_ASSIGN, _FLAG_SETX):
-        for name, value in rx.findall(command or ""):
-            if value.strip().strip(_QUOTES).lower() in TRUTHY:
+def _path_args(toks):
+    """Argument tokens that could name a file."""
+    return [t for t in toks[1:] if t and not t.startswith("-")]
+
+
+def destinations(sub: str, toks):
+    """(destination_path, short_label) pairs this subcommand would write to."""
+    out = []
+    for tgt in redirect_targets(sub):
+        out.append((tgt, "shell redirect"))
+    if not toks:
+        return out
+
+    verb = toks[0].lower()
+    verb = verb.rsplit("/", 1)[-1]
+
+    if verb == "git":
+        rest = [t for t in toks[1:] if not t.startswith("-")]
+        if rest and _GIT_MUTATE.match(rest[0]):
+            for p in rest[1:]:
+                out.append((p, "git " + rest[0].lower()))
+    elif verb in _MUTATE_LAST:
+        args = _path_args(toks)
+        # PowerShell -Destination wins when present
+        dest = None
+        for i, t in enumerate(toks):
+            if t.lower() in ("-destination", "-dest") and i + 1 < len(toks):
+                dest = toks[i + 1]
+        if dest is None and len(args) >= 2:
+            dest = args[-1]
+        elif dest is None and len(args) == 1:
+            dest = args[0]
+        if dest is not None:
+            out.append((dest, verb + " destination"))
+        if verb in _MOVE_VERBS:
+            # a move/rename removes the source too
+            for p_ in args[:-1] if len(args) >= 2 else []:
+                out.append((p_, verb + " source (removed)"))
+    elif verb in _MUTATE_ANY:
+        if verb in _INPLACE_ONLY and not any(_INPLACE_FLAG.match(t) for t in toks[1:]):
+            pass                                  # sed -n / perl -e: read-only
+        else:
+            for p in _path_args(toks):
+                out.append((p, verb + " target"))
+
+    for rx in _CODE_DESTS:
+        for m in rx.finditer(sub):
+            out.append((m.group(1), "file write"))
+
+    return out
+
+
+# --------------------------------------------------------------------------
+# Guarded flag assignment
+# --------------------------------------------------------------------------
+
+_FLAG_ALT = "|".join(GUARDED_FLAGS)
+
+# Explicit API forms. These name the variable inside quotes by design, so they
+# are matched on the raw text rather than the quote-masked text.
+_FLAG_API = (
+    re.compile(r"\[(?:System\.)?Environment\]::SetEnvironmentVariable\(\s*['\"](" +
+               _FLAG_ALT + r")['\"]\s*,\s*['\"]?([^'\",)]*)", re.I),
+    re.compile(r"Set-Item\s+(?:-Path\s+)?Env:\\?(" + _FLAG_ALT +
+               r")\b[^;|]*?-Value\s+['\"]?([^\s'\";]+)", re.I),
+    re.compile(r"\$env:(" + _FLAG_ALT + r")\s*=\s*['\"]?([^\s'\";]+)", re.I),
+    re.compile(r"os\.environ(?:\.setdefault\(|\[)\s*['\"](" + _FLAG_ALT +
+               r")['\"]\s*[\],]\s*=?\s*['\"]?([^'\"),]*)", re.I),
+    re.compile(r"process\.env\.(" + _FLAG_ALT + r")\s*=\s*['\"]?([^\s'\";]+)", re.I),
+    re.compile(r"\bsetx\s+['\"]?(" + _FLAG_ALT + r")['\"]?\s+['\"]?([^\s'\"]+)", re.I),
+)
+
+# Bare shell assignment. Matched on the MASKED text so that a mention inside a
+# quoted string -- documentation, a test fixture, an echo -- does not count.
+_FLAG_BARE = re.compile(r"(?:^|[\s;&|])(?:export\s+|env\s+|set\s+)?(" + _FLAG_ALT + r")=")
+
+
+def _truthy(v: str) -> bool:
+    return v.strip().strip(_QUOTES).strip().lower() in TRUTHY
+
+
+def guarded_flag_enabled(cmd: str):
+    """Flag name if the command sets a guarded flag to an enabling value."""
+    for rx in _FLAG_API:
+        for name, val in rx.findall(cmd):
+            if _truthy(val):
                 return name.upper()
+    mask = _mask_quoted(cmd)
+    for m in _FLAG_BARE.finditer(mask):
+        val, _ = _read_token(cmd, m.end(1) + 1)
+        if _truthy(val):
+            return m.group(1).upper()
     return None
 
 
@@ -274,8 +439,81 @@ def guarded_flag_enabled(command: str):
 # Decision
 # --------------------------------------------------------------------------
 
+def _t1_reason(rel, label):
+    return ("This command would modify %s (%s), a guarded file of the retired NOVA "
+            "trading subsystem. Reading, grepping, diffing, copying *from* it and "
+            "running tests against it are allowed." % (rel, label))
+
+
+def _t2_shell_reason(rel, label):
+    return ("This command would modify %s (%s) from the shell. %s carries the NOVA "
+            "retirement kill switch, and a shell command cannot show which lines it "
+            "changes -- use Edit for ordinary changes to this file." % (rel, label, rel))
+
+
+def decide_shell(command: str, cwd: str, t1: dict, t2: dict):
+    flag = guarded_flag_enabled(command)
+    if flag:
+        return ("This command sets %s to an enabling value. The NOVA trading "
+                "subsystem is retired and must stay disabled." % flag)
+
+    here = cwd
+    for sub in split_subcommands(command):
+        toks = tokens_of(sub)
+        for raw, label in destinations(sub, toks):
+            key = canonical(raw, here)
+            if key in t1:
+                return _t1_reason(t1[key], label)
+            if key in t2:
+                return _t2_shell_reason(t2[key], label)
+        tgt = cd_target(toks)
+        if tgt:
+            here = canonical(tgt, here)
+    return None
+
+
+def decide_edit(tool: str, ti: dict, cwd: str, t1: dict, t2: dict):
+    targets = []
+    for key in ("file_path", "notebook_path", "path"):
+        v = ti.get(key)
+        if isinstance(v, str):
+            targets.append((v, ti))
+    edits = ti.get("edits")
+    if isinstance(edits, list):
+        for e in edits:
+            if isinstance(e, dict) and isinstance(e.get("file_path"), str):
+                targets.append((e["file_path"], e))
+
+    for raw, payload in targets:
+        key = canonical(raw, cwd)
+        if key in t1:
+            return ("%s is a guarded file of the retired NOVA trading subsystem and "
+                    "must not be modified. Reading it is allowed. See "
+                    "nova_knowledge_core/TRADING_SUBSYSTEM_RETIREMENT_AUDIT.md."
+                    % t1[key])
+        if key in t2:
+            rel = t2[key]
+            if tool in ("Write", "NotebookEdit"):
+                return ("%s would be replaced wholesale. It carries the NOVA "
+                        "retirement kill switch, so full-file replacement is blocked "
+                        "-- use Edit for targeted changes." % rel)
+            blob = ""
+            for f in ("old_string", "new_string", "new_source", "content"):
+                v = payload.get(f)
+                if isinstance(v, str):
+                    blob += v + "\n"
+                v2 = ti.get(f)
+                if isinstance(v2, str) and v2 not in blob:
+                    blob += v2 + "\n"
+            for expr in GUARD_EXPRESSIONS:
+                if expr in blob:
+                    return ("This edit touches retirement kill-switch text (%s) in %s. "
+                            "The trading subsystem is retired; unrelated edits to this "
+                            "file are allowed." % (expr, rel))
+    return None
+
+
 def decide(payload: dict):
-    """Return a short reason string to deny, or None to stay silent."""
     tool = payload.get("tool_name") or ""
     ti = payload.get("tool_input") or {}
     if not isinstance(ti, dict):
@@ -286,50 +524,18 @@ def decide(payload: dict):
 
     root = resolve_root(cwd)
     if not root or not in_scope(cwd, root):
-        return None                       # fail open: no usable project context
+        return None                     # fail open: no usable project context
+
+    t1, t2 = _tier_maps(root)
+    base = canonical(cwd, root)
 
     if tool in FILE_EDIT_TOOLS:
-        protected = protected_map(root)
-        candidates = []
-        for key in ("file_path", "notebook_path", "path"):
-            v = ti.get(key)
-            if isinstance(v, str):
-                candidates.append(v)
-        edits = ti.get("edits")
-        if isinstance(edits, list):
-            for e in edits:
-                if isinstance(e, dict) and isinstance(e.get("file_path"), str):
-                    candidates.append(e["file_path"])
-        for c in candidates:
-            rel = protected.get(canonical(c, cwd))
-            if rel:
-                return ("%s is a guarded file of the retired NOVA trading subsystem "
-                        "and must not be modified. Reading it is allowed. See "
-                        "nova_knowledge_core/TRADING_SUBSYSTEM_RETIREMENT_AUDIT.md." % rel)
-        return None
-
+        return decide_edit(tool, ti, base, t1, t2)
     if tool in SHELL_TOOLS:
         command = ti.get("command")
         if not isinstance(command, str):
             return None
-
-        flag = guarded_flag_enabled(command)
-        if flag:
-            return ("This command sets %s to an enabling value. The NOVA trading "
-                    "subsystem is retired and must stay disabled." % flag)
-
-        hits = mentioned_protected(command, cwd, protected_map(root))
-        if not hits:
-            return None
-        label = mutating_label(command)
-        if not label:
-            return None
-        if _READ_ONLY_HINTS.search(command) and label in ("move/copy over target", "file removal"):
-            return None
-        return ("This command would modify %s (%s), a guarded file of the retired "
-                "NOVA trading subsystem. Reading, grepping, diffing and running "
-                "tests against it are allowed." % (hits[0], label))
-
+        return decide_shell(command, base, t1, t2)
     return None
 
 
@@ -343,27 +549,24 @@ def main() -> int:
         if not isinstance(payload, dict):
             raise ValueError
     except Exception:
-        # Unparseable input: scope and tool cannot be established, so the hook
-        # makes no decision and the normal permission flow applies.
         return 0
 
     try:
         reason = decide(payload)
     except Exception:
-        return 0                          # never lock the session on a hook bug
+        return 0                        # never lock the session on a hook bug
     if reason is None:
         return 0
 
-    out = {
+    sys.stdout.write(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }
-    }
-    sys.stdout.write(json.dumps(out))
+    }))
     sys.stdout.flush()
-    sys.stderr.write(reason)              # fallback channel; same short text
+    sys.stderr.write(reason)
     sys.stderr.flush()
     return 2
 

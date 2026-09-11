@@ -25,6 +25,53 @@ showSessions  = input.bool(true,  "Show Session Background")
 showSignals   = input.bool(true,  "Show Signals")
 showBridge    = input.bool(false, "Show NOVA Bridge (debug)")
 
+// Phase 2 — canonical BUY/SELL chart markers (showSignals above now gates them;
+// it was declared but unused prior to this phase).
+showSignalContext = input.bool(true, "Show Signal Context (strategy/liquidity source)", group="Signals")
+signalLabelSizeInput = input.string("Normal", "Signal Label Size", options=["Small", "Normal", "Large"], group="Signals")
+signalLabelSize =
+     signalLabelSizeInput == "Small" ? size.small :
+     signalLabelSizeInput == "Large" ? size.large : size.normal
+
+// Phase 4 — external liquidity level visibility. None of these duplicate an
+// existing input: Asia/London previously had no independent visibility
+// toggle at all (only the shared showSessions background), and PDH/PDL/PWH/
+// PWL were drawn unconditionally with no toggle whatsoever (see the Phase 4
+// audit doc, Part 1).
+showAsiaLevels                   = input.bool(true,  "Show Asia High/Low",          group="External Liquidity Levels")
+showLondonLevels                 = input.bool(true,  "Show London High/Low",        group="External Liquidity Levels")
+showOvernightLevels              = input.bool(true,  "Show Overnight High/Low",     group="External Liquidity Levels")
+showPreviousDayLevels            = input.bool(true,  "Show Previous Day High/Low",  group="External Liquidity Levels")
+showPreviousWeekLevels           = input.bool(true,  "Show Previous Week High/Low", group="External Liquidity Levels")
+// Refinement: current Daily/Weekly High/Low are dynamic reference levels, not
+// major external liquidity — default OFF, kept as an opt-in rather than
+// removed outright. Not part of the "nearest major level" emphasis ranking
+// below (Asia/London/Overnight/PDH/PDL/PWH/PWL only).
+showDailyWeeklyLevels             = input.bool(false, "Show Daily/Weekly High/Low (optional, off by default)", group="External Liquidity Levels")
+externalLiquidityLineWidth       = input.int(2, "External Liquidity Line Width", minval=1, maxval=4, group="External Liquidity Levels")
+externalLiquidityLineStyleInput  = input.string("Solid", "External Liquidity Line Style", options=["Solid", "Dashed", "Dotted"], group="External Liquidity Levels")
+externalLiquidityOpacity         = input.int(20, "External Liquidity Line/Label Transparency", minval=0, maxval=90, group="External Liquidity Levels")
+externalLiquidityLabelSizeInput  = input.string("Normal", "External Liquidity Label Size", options=["Small", "Normal", "Large"], group="External Liquidity Levels")
+extendExternalLiquidityThroughNY = input.bool(true, "Extend External Liquidity Lines Through NY Session", group="External Liquidity Levels")
+
+externalLiquidityLineStyle =
+     externalLiquidityLineStyleInput == "Dashed" ? line.style_dashed :
+     externalLiquidityLineStyleInput == "Dotted" ? line.style_dotted : line.style_solid
+
+externalLiquidityLabelSize =
+     externalLiquidityLabelSizeInput == "Small" ? size.small :
+     externalLiquidityLabelSizeInput == "Large" ? size.large : size.normal
+
+// Phase 5 — liquidity interaction visualization (temporary, expiring context
+// labels only — not the persistent Phase 4 level lines/labels above).
+showLiquidityInteractionLabels = input.bool(true, "Show Liquidity Interaction Labels", group="Liquidity Interaction Context")
+interactionLabelBars           = input.int(6, "Interaction Label Duration (bars)", minval=1, maxval=50, group="Liquidity Interaction Context")
+interactionLabelSizeInput      = input.string("Normal", "Interaction Label Size", options=["Small", "Normal", "Large"], group="Liquidity Interaction Context")
+
+interactionLabelSize =
+     interactionLabelSizeInput == "Small" ? size.small :
+     interactionLabelSizeInput == "Large" ? size.large : size.normal
+
 showHistBoxes = input.bool(true, "Show Historical Session Boxes", group="Historical Memory")
 showHistORB   = input.bool(true, "Show Historical ORB Boxes",     group="Historical Memory")
 histLookback  = input.int(3, "Lookback Days", minval=1, maxval=5, group="Historical Memory")
@@ -62,11 +109,17 @@ isLunch     = hourNow >= 12 and hourNow < 13
 isPowerHour = hourNow >= 15 and hourNow < 16
 isDeadHours = not inAsia and not inLondon and not inNYPre and not inNYCash
 
+// Phase 4 — Overnight session window (NY cash close through NY cash open),
+// display-only, feeds no strategy/threshold logic. Standard futures/equity
+// "overnight range" convention.
+inOvernight = hourNow >= 16 or hourNow < 9 or (hourNow == 9 and minuteNow < 30)
+
 //================ SESSION START FLAGS ================
-newAsia   = inAsia   and not inAsia[1]
-newLondon = inLondon and not inLondon[1]
-newNYPre  = inNYPre  and not inNYPre[1]
-newNYCash = inNYCash and not inNYCash[1]
+newAsia      = inAsia      and not inAsia[1]
+newLondon    = inLondon    and not inLondon[1]
+newNYPre     = inNYPre     and not inNYPre[1]
+newNYCash    = inNYCash    and not inNYCash[1]
+newOvernight = inOvernight and not inOvernight[1]
 
 //================ SESSION BACKGROUNDS ================
 sessionBg =
@@ -578,6 +631,10 @@ var float londonHigh = na
 var float londonLow  = na
 var float nyHigh     = na
 var float nyLow      = na
+// Phase 4 — Overnight range storage, same accumulation pattern as Asia/
+// London/NY above, display-only.
+var float overnightHigh = na
+var float overnightLow  = na
 
 if newAsia
     asiaHigh := high
@@ -597,6 +654,12 @@ if newNYCash
 if inNYCash
     nyHigh := na(nyHigh) ? high : math.max(nyHigh, high)
     nyLow  := na(nyLow)  ? low  : math.min(nyLow,  low)
+if newOvernight
+    overnightHigh := high
+    overnightLow  := low
+if inOvernight
+    overnightHigh := na(overnightHigh) ? high : math.max(overnightHigh, high)
+    overnightLow  := na(overnightLow)  ? low  : math.min(overnightLow,  low)
 
 //================ PREVIOUS SESSION STORAGE ================
 var float prevAsiaHigh   = na
@@ -626,6 +689,13 @@ prevDayHigh  = request.security(syminfo.tickerid, "D", high[1])
 prevDayLow   = request.security(syminfo.tickerid, "D", low[1])
 prevWeekHigh = request.security(syminfo.tickerid, "W", high[1])
 prevWeekLow  = request.security(syminfo.tickerid, "W", low[1])
+// Phase 4 — current (in-progress) day/week high/low, display-only. Same
+// request.security mechanism as prevDayHigh/prevWeekHigh above, just without
+// the [1] historical offset — no new calculation concept, no threshold.
+dailyHigh  = request.security(syminfo.tickerid, "D", high)
+dailyLow   = request.security(syminfo.tickerid, "D", low)
+weeklyHigh = request.security(syminfo.tickerid, "W", high)
+weeklyLow  = request.security(syminfo.tickerid, "W", low)
 
 //================ LIQUIDITY HELPERS ================
 liqThresh = atrValue * 0.25
@@ -926,6 +996,24 @@ sweptPDL = f_swept_low(prevDayLow)
 sweptPWH = f_swept_high(prevWeekHigh)
 sweptPWL = f_swept_low(prevWeekLow)
 
+// Phase 6 — source-specific near/swept for the six levels that previously
+// had no dedicated boolean (only used inline via f_near/f_swept_high/low in
+// Phase 5). Same functions, same liqThresh, extended to Asia/London/
+// Overnight for consistency with the PSH/PDH/PWH naming convention above.
+nearAsiaHigh      = f_near(asiaHigh, liqThresh)
+nearAsiaLow       = f_near(asiaLow,  liqThresh)
+nearLondonHigh    = f_near(londonHigh, liqThresh)
+nearLondonLow     = f_near(londonLow,  liqThresh)
+nearOvernightHigh = f_near(overnightHigh, liqThresh)
+nearOvernightLow  = f_near(overnightLow,  liqThresh)
+
+sweptAsiaHigh      = f_swept_high(asiaHigh)
+sweptAsiaLow       = f_swept_low(asiaLow)
+sweptLondonHigh    = f_swept_high(londonHigh)
+sweptLondonLow     = f_swept_low(londonLow)
+sweptOvernightHigh = f_swept_high(overnightHigh)
+sweptOvernightLow  = f_swept_low(overnightLow)
+
 acceptedAbovePSH = not na(prevSessionHigh) and close > prevSessionHigh and open > prevSessionHigh
 acceptedBelowPSL = not na(prevSessionLow)  and close < prevSessionLow  and open < prevSessionLow
 acceptedAbovePDH = not na(prevDayHigh)     and close > prevDayHigh     and open > prevDayHigh
@@ -962,6 +1050,64 @@ shortTargetLabel = not na(prevDayLow)  and prevDayLow  < close ? "PDL" : not na(
 
 highSweepReject = (nearPSH or nearPDH or nearPWH or sweptPSH or sweptPDH or sweptPWH) and close < open and upperWick > body * 1.10 and close < high[1]
 lowSweepReject  = (nearPSL or nearPDL or nearPWL or sweptPSL or sweptPDL or sweptPWL) and close > open and lowerWick > body * 1.10 and close > low[1]
+
+//====================================================
+// PHASE 6 — SOURCE-SPECIFIC REJECTION DETECTION
+//====================================================
+// highSweepReject/lowSweepReject above are GENERIC — their six-way OR gives
+// no proof of which specific level triggered them (see the Phase 6 audit
+// doc, Part 1, for the concrete false-attribution scenario this fixes).
+// Each xReject below only ever references its OWN level's near/swept
+// boolean and its OWN level's price — never an OR across other levels.
+// Phase 6.1: restored the original generic detector's close < high[1] /
+// close > low[1] confirmation condition to every formula below, for exact
+// parity with highSweepReject/lowSweepReject's own requirements — this is
+// not a new threshold, it closes a Phase 6 omission while preserving the
+// source-specific attribution fix. Same structural components as the
+// generic formula otherwise (touch-or-sweep, close-through-the-exact-level,
+// candle direction, 1.10 wick/body ratio) — no volume/MACD/HTF/displacement
+// requirement added. These are context/detection booleans only — none of
+// them feed canonicalBuy/canonicalSell, buySignal/sellSignal, any score,
+// grade, or alert.
+asiaHighTest   = nearAsiaHigh
+asiaHighSweep  = sweptAsiaHigh
+asiaHighReject = (nearAsiaHigh or sweptAsiaHigh) and close < asiaHigh and close < open and upperWick > body * 1.10 and close < high[1]
+
+asiaLowTest   = nearAsiaLow
+asiaLowSweep  = sweptAsiaLow
+asiaLowReject = (nearAsiaLow or sweptAsiaLow) and close > asiaLow and close > open and lowerWick > body * 1.10 and close > low[1]
+
+londonHighTest   = nearLondonHigh
+londonHighSweep  = sweptLondonHigh
+londonHighReject = (nearLondonHigh or sweptLondonHigh) and close < londonHigh and close < open and upperWick > body * 1.10 and close < high[1]
+
+londonLowTest   = nearLondonLow
+londonLowSweep  = sweptLondonLow
+londonLowReject = (nearLondonLow or sweptLondonLow) and close > londonLow and close > open and lowerWick > body * 1.10 and close > low[1]
+
+overnightHighTest   = nearOvernightHigh
+overnightHighSweep  = sweptOvernightHigh
+overnightHighReject = (nearOvernightHigh or sweptOvernightHigh) and close < overnightHigh and close < open and upperWick > body * 1.10 and close < high[1]
+
+overnightLowTest   = nearOvernightLow
+overnightLowSweep  = sweptOvernightLow
+overnightLowReject = (nearOvernightLow or sweptOvernightLow) and close > overnightLow and close > open and lowerWick > body * 1.10 and close > low[1]
+
+pdhTest   = nearPDH
+pdhSweep  = sweptPDH
+pdhReject = (nearPDH or sweptPDH) and close < prevDayHigh and close < open and upperWick > body * 1.10 and close < high[1]
+
+pdlTest   = nearPDL
+pdlSweep  = sweptPDL
+pdlReject = (nearPDL or sweptPDL) and close > prevDayLow and close > open and lowerWick > body * 1.10 and close > low[1]
+
+pwhTest   = nearPWH
+pwhSweep  = sweptPWH
+pwhReject = (nearPWH or sweptPWH) and close < prevWeekHigh and close < open and upperWick > body * 1.10 and close < high[1]
+
+pwlTest   = nearPWL
+pwlSweep  = sweptPWL
+pwlReject = (nearPWL or sweptPWL) and close > prevWeekLow and close > open and lowerWick > body * 1.10 and close > low[1]
 
 highBreakHold = (acceptedAbovePSH or acceptedAbovePDH or acceptedAbovePWH) and close > emaFast and close > open
 lowBreakHold  = (acceptedBelowPSL or acceptedBelowPDL or acceptedBelowPWL) and close < emaFast and close < open
@@ -1906,7 +2052,7 @@ buyScore  += failedAuctionBull ? 20 : 0
 sellScore += failedAuctionBear ? 20 : 0
 
 // ICT STEP MODEL — adaptive weights
-// ORB score now sourced from orbBuyPass/orbSellPass (new RP-faithful gate layer) — see below
+// ORB score now sourced from orbBuyPass/orbSellPass (structured ORB gate layer) — see below
 // buyScore  += orbLongReady    ? orbWeight  : 0  [replaced — old composite gate]
 // sellScore += orbShortReady   ? orbWeight  : 0  [replaced — old composite gate]
 buyScore  += ictLongReady    ? ictWeight  : 0
@@ -2137,8 +2283,16 @@ analytics_session   = sessionStateText
 analytics_score     = buySignal ? buyScore : sellSignal ? sellScore : 0
 analytics_confidence = 0
 //================ SIGNAL ASSIGNMENT ================
-buySignal  := orbBuySignal  or ictBuySignal  or prosBuySignal
-sellSignal := orbSellSignal or ictSellSignal or prosSellSignal
+// Phase 6.2: ICT removed from canonical trade-signal promotion. ICT is a
+// supporting context/confirmation framework, not an approved NOVA strategy
+// family (approved families: ORB, PROS) — see nova_knowledge_core/
+// INDICATOR_PHASE6_2_ICT_CONTEXT_ALIGNMENT.md. ictBuySignal/ictSellSignal
+// and everything upstream of them (ictLongReady/ictShortReady, the 6-step
+// model, scoring contributions, Donna-engine consumers) are UNCHANGED and
+// keep computing exactly as before — only their promotion into buySignal/
+// sellSignal is removed.
+buySignal  := orbBuySignal  or prosBuySignal
+sellSignal := orbSellSignal or prosSellSignal
 
 if buySignal
     lastSmartBuyBar   := bar_index
@@ -2212,12 +2366,99 @@ riskText := orbFailBull or orbFailBear       ? "INVALIDATION RISK"  :
      nearLiquidityLow  and sellSignal ? "BELOW LIQUIDITY"    :
      isLunch                          ? "LUNCH CONDITIONS"   :
      inAsia                           ? "ASIA CONDITIONS"    : "NORMAL"
-         
+
+//====================================================
+// PHASE 1 — CANONICAL SIGNAL STATE
+//====================================================
+// Single authoritative signal model. The chart dashboard, (future) BUY/SELL
+// markers, alertcondition(), and bridge output all read from these variables
+// instead of each computing their own view of "is there a signal."
+//
+// canonicalBuy/canonicalSell WRAP the existing buySignal/sellSignal composite
+// (orbBuySignal or ictBuySignal or prosBuySignal, and the SELL mirror) —
+// no threshold or gate inside those is changed here.
+//
+// Liquidity-rejection-shaped setups (highSweepReject/lowSweepReject,
+// donnaLiqReversalLong/Short) are intentionally NOT wired into canonicalBuy/
+// canonicalSell — they are a detection/context layer, not a strategy family.
+// Only ORB and PROS are valid strategy families here. donnaCommand/
+// donnaScenario keep displaying this rejection context exactly as before via
+// the existing CMD/SYS_STATE bridge rows — informational, not canonical.
+//
+// canonicalSignalConflict guards against buySignal and sellSignal both being
+// true on the same bar (not observed in practice, but structurally possible
+// since ORB/ICT/PROS are independent evaluators). If both fire, neither side
+// is treated as canonical for that bar rather than risk an ambiguous marker.
+canonicalSignalConflict = buySignal and sellSignal
+
+canonicalBuy  = buySignal  and not canonicalSignalConflict
+canonicalSell = sellSignal and not canonicalSignalConflict
+
+// Phase 2 — new-signal transition guards. canonicalBuy/canonicalSell can stay
+// true for more than one bar depending on which underlying family fired; these
+// fire exactly once per setup (rising edge only) and are the sole source for
+// the chart marker and the canonical alertcondition() calls — never a second,
+// independently-computed signal boolean.
+canonicalBuyNew  = canonicalBuy  and not canonicalBuy[1]
+canonicalSellNew = canonicalSell and not canonicalSell[1]
+
+canonicalDirection =
+     canonicalBuy  ? "LONG"  :
+     canonicalSell ? "SHORT" : "NONE"
+
+// HEADS_UP tier reuses the exact score/threshold logic already in commandText
+// (see buyScore/sellScore >= 58 above) — no new threshold introduced.
+// LOCKED reuses the same donnaTrapRisk/orbFail check novaStateText already
+// applied before this phase.
+canonicalSignalState =
+     (donnaTrapRisk or orbFailBull or orbFailBear) ? "LOCKED"          :
+     canonicalBuy                                   ? "EXECUTION_READY" :
+     canonicalSell                                  ? "EXECUTION_READY" :
+     (buyScore  >= 58 and buyScore  > sellScore)    ? "HEADS_UP"        :
+     (sellScore >= 58 and sellScore > buyScore)     ? "HEADS_UP"        : "WAIT"
+
+canonicalStrategy = (canonicalBuy or canonicalSell) ? strategy_family : "NONE"
+canonicalSetup    = (canonicalBuy or canonicalSell) ? setup_type      : "NONE"
+canonicalGrade    = canonicalBuy ? buyGrade : canonicalSell ? sellGrade : "NA"
+
+// Liquidity source/interaction naming is currently only meaningful for ORB —
+// PROS (fib-zone) and ICT (HTF-swing) have no equivalent named external-
+// liquidity concept yet, so they report "NONE" rather than a fabricated value.
+// The liquidity rejection detectors (highSweepReject/lowSweepReject etc.) are
+// a supporting detection layer, not a separate strategy — see
+// nova_knowledge_core/INDICATOR_PHASE3_REJECTION_ENGINE_CORRECTION.md.
+canonicalLiquiditySourceBull =
+     orbAsiaLowSweepNow    ? "ASIA LOW" :
+     orbSweepTierBull == 3 ? "PWL"      :
+     orbSweepTierBull == 2 ? "PDL"      :
+     orbSweepTierBull == 1 ? "PSL"      : "NONE"
+
+canonicalLiquiditySourceBear =
+     orbAsiaHighSweepNow   ? "ASIA HIGH" :
+     orbSweepTierBear == 3 ? "PWH"       :
+     orbSweepTierBear == 2 ? "PDH"       :
+     orbSweepTierBear == 1 ? "PSH"       : "NONE"
+
+canonicalLiquiditySource =
+     canonicalStrategy != "ORB" ? "NONE" :
+     canonicalBuy                ? canonicalLiquiditySourceBull :
+     canonicalSell               ? canonicalLiquiditySourceBear : "NONE"
+
+canonicalInteraction = canonicalStrategy == "ORB" ? orbEntryType : "NONE"
+
 //================ ALERTS ================
+// Legacy per-family alertconditions kept unchanged (backward-compatible with
+// any TradingView alerts a user may already have configured against these
+// exact names). Canonical alertconditions are ADDED below, not a replacement —
+// they cover the same signals plus the previously-missing ICT family.
 alertcondition(orbBuySignal,   "ORB BUY",   "ORB buy signal")
 alertcondition(orbSellSignal,  "ORB SELL",  "ORB sell signal")
 alertcondition(prosBuySignal,  "PROS BUY",  "PROS continuation long")
 alertcondition(prosSellSignal, "PROS SELL", "PROS continuation short")
+// Phase 2: switched to the edge-triggered variants so the alert fires once per
+// setup, matching the chart marker exactly — same source, same transition.
+alertcondition(canonicalBuyNew,  "NOVA BUY",  "NOVA canonical buy signal (ORB/PROS)")
+alertcondition(canonicalSellNew, "NOVA SELL", "NOVA canonical sell signal (ORB/PROS)")
 
 //================ WEBHOOK JSON ALERTS ================
 // Structured JSON payloads sent to DONNA /webhook on each signal bar.
@@ -2244,44 +2485,269 @@ if orbBuySignal and not orbBuySignal[1]
 if orbSellSignal and not orbSellSignal[1]
     alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ORB","instrument":"ES","tier":"2","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
 
-if ictBuySignal and not ictBuySignal[1]
-    alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+// Phase 6.2: disabled, not deleted. This is the exact payload shape
+// (strategy_family":"ICT") from the documented pre-engagement incident
+// where a live ICT_OB_FVG_ENTRY alert reached the production webhook and
+// executed two real paper trades before execution-side governance existed.
+// ICT is confirmed blocked at the broker today (services/execution.py's
+// check_strategy_and_instrument_allowed()), but this Pine-side alert would
+// still fire an executable-shaped notification to the webhook/Discord layer
+// on every ictBuySignal/ictSellSignal transition. Classified as a legacy
+// execution-capable alert (Part 3, category B) — disabled per instruction
+// rather than left running as an unnecessary duplicate notification path.
+// _j_ict_tier is now unused as a result — left in place, harmless, and
+// available if this block is ever re-enabled by explicit future decision.
+//
+// if ictBuySignal and not ictBuySignal[1]
+//     alert('{"ticker":"' + _j_ticker + '","signal":"LONG","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+//
+// if ictSellSignal and not ictSellSignal[1]
+//     alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
 
-if ictSellSignal and not ictSellSignal[1]
-    alert('{"ticker":"' + _j_ticker + '","signal":"SHORT","price":"' + _j_price + '","timeframe":"' + _j_tf + '","setup_type":"' + setup_type + '","strategy_family":"ICT","instrument":"' + _j_instrument + '","tier":"' + _j_ict_tier + '","score":"' + _j_score + '","trap_risk":"false","session":"' + _j_session + '"}', alert.freq_once_per_bar)
+//====================================================
+// PHASE 2 — CANONICAL BUY / SELL CHART MARKERS
+//====================================================
+// Source of truth is canonicalBuyNew/canonicalSellNew (Phase 1's canonical
+// state, edge-triggered) — no new signal boolean is computed here. Markers
+// are pure Pine-side visuals: no reference to execution/broker/prop state
+// exists anywhere in this script, so they are structurally independent of
+// Auto Execute, paper/live mode, or execution path health.
+//
+// canonicalSignalConflict already forces both canonicalBuy and canonicalSell
+// false (see Phase 1) — canonicalBuyNew/canonicalSellNew inherit that, so a
+// conflicted bar cannot produce a marker without any extra guard here.
+
+// ── context text (shown only when showSignalContext = true) ──────────────
+// Maps the existing setup_type values (unchanged — ORB and PROS only) to
+// readable marker text. Falls back to the raw canonicalStrategy name for any
+// setup_type not explicitly mapped below, so the marker never prints a blank
+// or "UNKNOWN" line for a real signal.
+canonicalMarkerStrategyText =
+     canonicalSetup == "PROS_CONTINUATION"     ? "PROS CONTINUATION"      :
+     canonicalSetup == "ORB_MID_REJECT"        ? "ORB MID REJECTION"      :
+     canonicalSetup == "ORB_LIQ_REJECT"        ? "ORB LIQ REJECTION"      :
+     canonicalSetup == "ORB_EDGE_REJECT"       ? "ORB EDGE REJECTION"     :
+     canonicalSetup == "ORB_FAILURE"           ? "ORB FAILURE"            :
+     canonicalSetup == "ICT_ELITE"             ? "ICT ELITE CONTINUATION" :
+     canonicalSetup == "ICT_SMT_CONFIRMATION"  ? "ICT SMT CONFIRMATION"   :
+     canonicalSetup == "ICT_OB_FVG_ENTRY"      ? "ICT OB/FVG ENTRY"       :
+     canonicalSetup == "ICT_LIQUIDITY_SWEEP"   ? "ICT LIQUIDITY SWEEP"   :
+     canonicalSetup == "FAILED_AUCTION"        ? "FAILED AUCTION"         :
+     canonicalSetup == "MOMENTUM_CONTINUATION" ? "MOMENTUM CONTINUATION"  :
+     canonicalStrategy != "NONE"               ? canonicalStrategy       : "SIGNAL"
+
+// canonicalLiquiditySource is only ever non-"NONE" when canonicalStrategy is
+// "ORB" (Phase 1 scope) — appended as a second context line when present.
+canonicalMarkerContextText =
+     canonicalLiquiditySource != "NONE" ? canonicalMarkerStrategyText + "\n" + canonicalLiquiditySource : canonicalMarkerStrategyText
+
+// ── primary marker: plotshape() carries the BUY/SELL word itself ─────────
+plotshape(showSignals and canonicalBuyNew,
+     title="NOVA BUY", style=shape.labelup, location=location.belowbar,
+     color=color.new(color.lime, 0), text="BUY", textcolor=color.black,
+     size=signalLabelSize)
+
+plotshape(showSignals and canonicalSellNew,
+     title="NOVA SELL", style=shape.labeldown, location=location.abovebar,
+     color=color.new(color.red, 0), text="SELL", textcolor=color.white,
+     size=signalLabelSize)
+
+// ── optional context label: separate object, only when showSignalContext ─
+// Offset by ATR beyond the primary marker so the two objects don't overlap.
+// Uses the existing atrValue (unchanged) purely for visual spacing.
+if showSignals and showSignalContext and canonicalBuyNew
+    label.new(bar_index, low - atrValue * 1.5, canonicalMarkerContextText,
+         style=label.style_label_up, color=color.new(color.lime, 80),
+         textcolor=color.lime, size=signalLabelSize)
+
+if showSignals and showSignalContext and canonicalSellNew
+    label.new(bar_index, high + atrValue * 1.5, canonicalMarkerContextText,
+         style=label.style_label_down, color=color.new(color.red, 80),
+         textcolor=color.red, size=signalLabelSize)
+
 //================ LIQUIDITY MARKERS ================
+// Previous Session High/Low (PSH/PSL) — not part of the Phase 4 target list,
+// left exactly as before: unconditional, delete-and-recreate every redraw.
 var line pshLine = na
 var line pslLine = na
-var line pdhLine = na
-var line pdlLine = na
-var line pwhLine = na
-var line pwlLine = na
 
 if barstate.islast
     if not na(pshLine)
         line.delete(pshLine)
     if not na(pslLine)
         line.delete(pslLine)
-    if not na(pdhLine)
-        line.delete(pdhLine)
-    if not na(pdlLine)
-        line.delete(pdlLine)
-    if not na(pwhLine)
-        line.delete(pwhLine)
-    if not na(pwlLine)
-        line.delete(pwlLine)
     if not na(prevSessionHigh)
         pshLine := line.new(bar_index, prevSessionHigh, bar_index + 12, prevSessionHigh, color=color.new(color.green, 40), width=2)
     if not na(prevSessionLow)
         pslLine := line.new(bar_index, prevSessionLow,  bar_index + 12, prevSessionLow,  color=color.new(color.red,   40), width=2)
-    if not na(prevDayHigh)
-        pdhLine := line.new(bar_index, prevDayHigh,     bar_index + 12, prevDayHigh,     color=color.green, width=2)
-    if not na(prevDayLow)
-        pdlLine := line.new(bar_index, prevDayLow,      bar_index + 12, prevDayLow,      color=color.red,   width=2)
-    if not na(prevWeekHigh)
-        pwhLine := line.new(bar_index, prevWeekHigh,    bar_index + 12, prevWeekHigh,    color=color.new(color.green, 0), width=1, style=line.style_dashed)
-    if not na(prevWeekLow)
-        pwlLine := line.new(bar_index, prevWeekLow,     bar_index + 12, prevWeekLow,     color=color.new(color.red,   0), width=1, style=line.style_dashed)
+
+//====================================================
+// PHASE 4 — EXTERNAL LIQUIDITY LEVEL VISIBILITY
+//====================================================
+// Replaces the old pdhLine/pdlLine/pwhLine/pwlLine (delete-and-recreate every
+// bar, fixed 12-bar segment, no label, no toggle) with persistent objects
+// repositioned in place, plus adds Asia/London/Overnight/Daily/Weekly, which
+// previously had no dedicated High/Low line+label at all (see the Phase 4
+// audit doc, Part 1). No threshold, gate, or strategy logic is read or
+// written here beyond the existing f_near/f_swept_high/f_swept_low helpers
+// and liqThresh, called fresh for display/emphasis only.
+f_liqLevel(showFlag, levelPrice, labelText, baseColor, isEmphasized) =>
+    var line lv = na
+    var label lb = na
+    _w     = isEmphasized ? externalLiquidityLineWidth + 1 : externalLiquidityLineWidth
+    _trans = isEmphasized ? math.max(externalLiquidityOpacity - 15, 0) : externalLiquidityOpacity
+    _ext   = extendExternalLiquidityThroughNY ? extend.right : extend.none
+    // Refinement: "slightly larger label" when emphasized — one size tier up
+    // (Small->Normal->Large), capped at Large. No flashing/animation, no new
+    // size infrastructure — reuses the existing size.* constants.
+    _labelSize =
+         not isEmphasized                             ? externalLiquidityLabelSize :
+         externalLiquidityLabelSize == size.small      ? size.normal :
+         size.large
+    if showFlag and not na(levelPrice) and barstate.islast
+        if na(lv)
+            lv := line.new(bar_index, levelPrice, bar_index + 12, levelPrice, color=color.new(baseColor, _trans), width=_w, style=externalLiquidityLineStyle, extend=_ext)
+        else
+            line.set_xy1(lv, bar_index, levelPrice)
+            line.set_xy2(lv, bar_index + 12, levelPrice)
+            line.set_width(lv, _w)
+            line.set_color(lv, color.new(baseColor, _trans))
+            line.set_extend(lv, _ext)
+        if na(lb)
+            lb := label.new(bar_index + 13, levelPrice, labelText, style=label.style_label_left, color=color.new(color.black, 100), textcolor=baseColor, size=_labelSize)
+        else
+            label.set_xy(lb, bar_index + 13, levelPrice)
+            label.set_text(lb, labelText)
+            label.set_textcolor(lb, baseColor)
+            label.set_size(lb, _labelSize)
+    if not showFlag
+        if not na(lv)
+            line.delete(lv)
+            lv := na
+        if not na(lb)
+            label.delete(lb)
+            lb := na
+
+extLiqGreen = color.new(color.green, 0)
+extLiqRed   = color.new(color.red,   0)
+
+// Refinement: "nearest relevant level" emphasis. Only the single closest
+// major external liquidity level (across Asia/London/Overnight/PDH/PDL/PWH/
+// PWL — Daily/Weekly are excluded, per this refinement, from the "major"
+// ranking since they're an optional, off-by-default reference, not major
+// external liquidity) gets the visual boost, rather than every level that
+// happens to be independently near/swept. 1e10 is a sentinel "not eligible"
+// distance for a disabled or unavailable level so it can never win.
+extLiqDistAsiaHigh      = showAsiaLevels         and not na(asiaHigh)      ? math.abs(close - asiaHigh)      : 1e10
+extLiqDistAsiaLow       = showAsiaLevels         and not na(asiaLow)       ? math.abs(close - asiaLow)       : 1e10
+extLiqDistLondonHigh    = showLondonLevels       and not na(londonHigh)    ? math.abs(close - londonHigh)    : 1e10
+extLiqDistLondonLow     = showLondonLevels       and not na(londonLow)     ? math.abs(close - londonLow)     : 1e10
+extLiqDistOvernightHigh = showOvernightLevels    and not na(overnightHigh) ? math.abs(close - overnightHigh) : 1e10
+extLiqDistOvernightLow  = showOvernightLevels    and not na(overnightLow)  ? math.abs(close - overnightLow)  : 1e10
+extLiqDistPDH           = showPreviousDayLevels  and not na(prevDayHigh)   ? math.abs(close - prevDayHigh)   : 1e10
+extLiqDistPDL           = showPreviousDayLevels  and not na(prevDayLow)    ? math.abs(close - prevDayLow)    : 1e10
+extLiqDistPWH           = showPreviousWeekLevels and not na(prevWeekHigh)  ? math.abs(close - prevWeekHigh)  : 1e10
+extLiqDistPWL           = showPreviousWeekLevels and not na(prevWeekLow)   ? math.abs(close - prevWeekLow)   : 1e10
+
+extLiqNearestDist = math.min(
+     math.min(math.min(extLiqDistAsiaHigh, extLiqDistAsiaLow), math.min(extLiqDistLondonHigh, extLiqDistLondonLow)),
+     math.min(math.min(extLiqDistOvernightHigh, extLiqDistOvernightLow), math.min(math.min(extLiqDistPDH, extLiqDistPDL), math.min(extLiqDistPWH, extLiqDistPWL))))
+
+extLiqAsiaHighNearest      = extLiqDistAsiaHigh      < 1e10 and extLiqDistAsiaHigh      == extLiqNearestDist
+extLiqAsiaLowNearest       = extLiqDistAsiaLow       < 1e10 and extLiqDistAsiaLow       == extLiqNearestDist
+extLiqLondonHighNearest    = extLiqDistLondonHigh    < 1e10 and extLiqDistLondonHigh    == extLiqNearestDist
+extLiqLondonLowNearest     = extLiqDistLondonLow     < 1e10 and extLiqDistLondonLow     == extLiqNearestDist
+extLiqOvernightHighNearest = extLiqDistOvernightHigh < 1e10 and extLiqDistOvernightHigh == extLiqNearestDist
+extLiqOvernightLowNearest  = extLiqDistOvernightLow  < 1e10 and extLiqDistOvernightLow  == extLiqNearestDist
+extLiqPDHNearest           = extLiqDistPDH           < 1e10 and extLiqDistPDH           == extLiqNearestDist
+extLiqPDLNearest           = extLiqDistPDL           < 1e10 and extLiqDistPDL           == extLiqNearestDist
+extLiqPWHNearest           = extLiqDistPWH           < 1e10 and extLiqDistPWH           == extLiqNearestDist
+extLiqPWLNearest           = extLiqDistPWL           < 1e10 and extLiqDistPWL           == extLiqNearestDist
+
+f_liqLevel(showAsiaLevels,        asiaHigh,      "ASIA HIGH",     extLiqGreen, extLiqAsiaHighNearest)
+f_liqLevel(showAsiaLevels,        asiaLow,       "ASIA LOW",      extLiqRed,   extLiqAsiaLowNearest)
+f_liqLevel(showLondonLevels,      londonHigh,    "LONDON HIGH",   extLiqGreen, extLiqLondonHighNearest)
+f_liqLevel(showLondonLevels,      londonLow,     "LONDON LOW",    extLiqRed,   extLiqLondonLowNearest)
+f_liqLevel(showOvernightLevels,   overnightHigh, "OVERNIGHT HIGH",extLiqGreen, extLiqOvernightHighNearest)
+f_liqLevel(showOvernightLevels,   overnightLow,  "OVERNIGHT LOW", extLiqRed,   extLiqOvernightLowNearest)
+f_liqLevel(showPreviousDayLevels, prevDayHigh,   "PDH",           extLiqGreen, extLiqPDHNearest)
+f_liqLevel(showPreviousDayLevels, prevDayLow,    "PDL",           extLiqRed,   extLiqPDLNearest)
+f_liqLevel(showPreviousWeekLevels,prevWeekHigh,  "PWH",           extLiqGreen, extLiqPWHNearest)
+f_liqLevel(showPreviousWeekLevels,prevWeekLow,   "PWL",           extLiqRed,   extLiqPWLNearest)
+// Daily/Weekly: optional, off by default, not part of the "major" nearest-
+// level ranking — keep the simple near/swept emphasis from Phase 4 unchanged.
+f_liqLevel(showDailyWeeklyLevels, dailyHigh,     "DAILY HIGH",    extLiqGreen, f_near(dailyHigh, liqThresh)      or f_swept_high(dailyHigh))
+f_liqLevel(showDailyWeeklyLevels, dailyLow,      "DAILY LOW",     extLiqRed,   f_near(dailyLow,  liqThresh)      or f_swept_low(dailyLow))
+f_liqLevel(showDailyWeeklyLevels, weeklyHigh,    "WEEKLY HIGH",   extLiqGreen, f_near(weeklyHigh, liqThresh)     or f_swept_high(weeklyHigh))
+f_liqLevel(showDailyWeeklyLevels, weeklyLow,     "WEEKLY LOW",    extLiqRed,   f_near(weeklyLow,  liqThresh)     or f_swept_low(weeklyLow))
+
+//====================================================
+// PHASE 5 — LIQUIDITY INTERACTION VISUALIZATION
+//====================================================
+// Temporary, self-expiring context labels — NOT trade signals. Built
+// entirely from existing booleans (f_near/f_swept_high/f_swept_low,
+// highSweepReject/lowSweepReject, nearPDH/sweptPDH etc.), no new interaction
+// logic invented. ORB and IB are excluded — they have their own visual
+// identity (see the Phase 5 audit doc, Part 6). Nothing here reads from or
+// writes to canonicalBuy/canonicalSell/canonicalSignalState/buyScore/
+// sellScore/any grade/any alert/any execution code.
+//
+// Per the Phase 5 audit doc, Part 2: Asia/London/Overnight can only ever
+// show TEST/SWEEP (highSweepReject/lowSweepReject don't check those levels,
+// unchanged from the Phase 3 correction's finding) — not REJECTION. PDH/PDL/
+// PWH/PWL can show TEST/SWEEP/REJECTION. RECLAIM has no non-ORB equivalent
+// anywhere in this script and is not shown for any level here.
+// Phase 6: now source-specific (asiaHighReject etc.) instead of the generic
+// highSweepReject/lowSweepReject ANDed with a nearby-level check — see the
+// Phase 6 audit doc, Parts 1/4, for why the old expression risked naming
+// the wrong source when two levels were clustered close together.
+asiaHighClass      = asiaHighReject      ? "REJECTION" : asiaHighSweep      ? "SWEEP" : asiaHighTest      ? "TEST" : "NONE"
+asiaLowClass       = asiaLowReject       ? "REJECTION" : asiaLowSweep       ? "SWEEP" : asiaLowTest       ? "TEST" : "NONE"
+londonHighClass    = londonHighReject   ? "REJECTION" : londonHighSweep    ? "SWEEP" : londonHighTest    ? "TEST" : "NONE"
+londonLowClass     = londonLowReject    ? "REJECTION" : londonLowSweep     ? "SWEEP" : londonLowTest     ? "TEST" : "NONE"
+overnightHighClass = overnightHighReject? "REJECTION" : overnightHighSweep ? "SWEEP" : overnightHighTest ? "TEST" : "NONE"
+overnightLowClass  = overnightLowReject ? "REJECTION" : overnightLowSweep  ? "SWEEP" : overnightLowTest  ? "TEST" : "NONE"
+pdhClass = pdhReject ? "REJECTION" : pdhSweep ? "SWEEP" : pdhTest ? "TEST" : "NONE"
+pdlClass = pdlReject ? "REJECTION" : pdlSweep ? "SWEEP" : pdlTest ? "TEST" : "NONE"
+pwhClass = pwhReject ? "REJECTION" : pwhSweep ? "SWEEP" : pwhTest ? "TEST" : "NONE"
+pwlClass = pwlReject ? "REJECTION" : pwlSweep ? "SWEEP" : pwlTest ? "TEST" : "NONE"
+
+// Creates a label only when the classification changes to a new, non-"NONE"
+// value (a sustained TEST across many bars fires once; escalating to SWEEP
+// or REJECTION mid-hold fires a fresh label). Expires after
+// interactionLabelBars bars via a stored expiry bar-index — never a
+// permanent object.
+f_interactionLabel(showFlag, classification, levelPrice, levelName, labelColor) =>
+    var label lb          = na
+    var string prevClass  = "NONE"
+    var int    expiryBar  = na
+    if showFlag and not na(levelPrice)
+        if classification != "NONE" and classification != prevClass
+            if not na(lb)
+                label.delete(lb)
+            lb := label.new(bar_index, levelPrice, levelName + " " + classification,
+                 style=label.style_label_down, color=color.new(color.black, 20),
+                 textcolor=labelColor, size=interactionLabelSize)
+            expiryBar := bar_index + interactionLabelBars
+        prevClass := classification
+    if not na(expiryBar) and bar_index >= expiryBar and not na(lb)
+        label.delete(lb)
+        lb := na
+        expiryBar := na
+    if not showFlag and not na(lb)
+        label.delete(lb)
+        lb := na
+
+f_interactionLabel(showLiquidityInteractionLabels and showAsiaLevels,        asiaHighClass,      asiaHigh,      "ASIA HIGH",      extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showAsiaLevels,        asiaLowClass,       asiaLow,       "ASIA LOW",       extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showLondonLevels,      londonHighClass,    londonHigh,    "LONDON HIGH",    extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showLondonLevels,      londonLowClass,     londonLow,     "LONDON LOW",     extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showOvernightLevels,   overnightHighClass, overnightHigh, "OVERNIGHT HIGH", extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showOvernightLevels,   overnightLowClass,  overnightLow,  "OVERNIGHT LOW",  extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousDayLevels, pdhClass,           prevDayHigh,   "PDH",            extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousDayLevels, pdlClass,           prevDayLow,    "PDL",            extLiqRed)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousWeekLevels,pwhClass,           prevWeekHigh,  "PWH",            extLiqGreen)
+f_interactionLabel(showLiquidityInteractionLabels and showPreviousWeekLevels,pwlClass,           prevWeekLow,   "PWL",            extLiqRed)
 
 //====================================================
 // SMART TARGETS ENGINE
@@ -2559,7 +3025,7 @@ dashSessionBg =
 // NOVA STATUS STRIP — minimal one-row status (Layer 1)
 var table novaStrip  = table.new(position.top_right,   7, 1, border_width=0, frame_width=0)
 // NOVA BRIDGE — permanent machine-readable automation interface (Layer 2)
-var table novaBridge = table.new(position.bottom_left, 2, 34, border_width=0)
+var table novaBridge = table.new(position.bottom_left, 2, 43, border_width=0)
 
 // ================ COLOR IDENTITY ================
 orbHdrColor  = color.new(#0a1628, 0)
@@ -2821,10 +3287,12 @@ novaSetupText =
      prosLegValidBull     or prosLegValidBear      ? "PROS" :
      orbIsActive and isESChart                     ? "ORB"  : "NONE"
 
-novaStateText =
-     donnaTrapRisk or orbFailBull or orbFailBear                           ? "LOCKED"          :
-     buySignal or sellSignal                                               ? "EXECUTION_READY" :
-     dashCommandText == "WATCH LONG" or dashCommandText == "WATCH SHORT"  ? "HEADS_UP"        : "WAIT"
+// Phase 1: novaStateText now reads canonicalSignalState directly instead of
+// re-deriving its own view — this is the fix for the chart-vs-bridge
+// disagreement documented in the audit (Part 3 Q23): previously this ternary
+// never checked dashCommandText == "BUY"/"SELL", which allowed the bridge CMD
+// field to say BUY/SELL while this strip simultaneously said WAIT.
+novaStateText = canonicalSignalState
 
 novaIBText =
      isIBWindow                        ? "FORMING" :
@@ -2936,7 +3404,7 @@ if barstate.islast
     table.cell(novaBridge, 1, 20, orbLowText,     text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     // ── v2 rows (rows 21-33) — observation/health fields, no execution gates ──
     table.cell(novaBridge, 0, 21, "BRIDGE_VER",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
-    table.cell(novaBridge, 1, 21, "2",             text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 21, "3",             text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 22, "TICKER",        text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 1, 22, syminfo.ticker,  text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 23, "TF",            text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
@@ -2961,6 +3429,30 @@ if barstate.islast
     table.cell(novaBridge, 1, 32, _brDrawTarget,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 0, 33, "DRAW_DIR",      text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
     table.cell(novaBridge, 1, 33, _brDrawDir,      text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    // ── v3 rows (rows 34-42) — Phase 1 canonical signal state ──────────────
+    // Additive only: CMD (row 1) and SYS_STATE (row 2) above are UNCHANGED —
+    // still donnaCommand/donnaScenario exactly as before. engines/reasoning.py
+    // is not modified in this phase; it keeps reading CMD/SYS_STATE until an
+    // explicit, separately-approved Phase 5 cutover. These rows exist so the
+    // canonical state is observable now, ahead of that cutover.
+    table.cell(novaBridge, 0, 34, "CANON_STATE",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 34, canonicalSignalState, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 35, "CANON_DIR",     text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 35, canonicalDirection,   text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 36, "CANON_STRAT",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 36, canonicalStrategy,    text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 37, "CANON_SETUP",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 37, canonicalSetup,       text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 38, "CANON_GRADE",   text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 38, canonicalGrade,       text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 39, "CANON_LIQ_SRC", text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 39, canonicalLiquiditySource, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 40, "CANON_INTERACT",text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 40, canonicalInteraction, text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 41, "CANON_BUY",     text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 41, canonicalBuy  ? "1" : "0", text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 0, 42, "CANON_SELL",    text_color=_brKey, bgcolor=_brBg, text_size=size.tiny)
+    table.cell(novaBridge, 1, 42, canonicalSell ? "1" : "0", text_color=_brVal, bgcolor=_brBg, text_size=size.tiny)
 
 //====================================================
 // DONNA INTEGRATION — DATA BRIDGE

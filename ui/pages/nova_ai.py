@@ -7,11 +7,10 @@ Three things in here are deliberate and load-bearing, not styling choices:
 
 1.  The rail is headed "Context available when asked", never "used" or
     "held". Eight GET routes prove each source is REACHABLE and seven return
-    `last_updated`, so availability and age are provable. Whether NOVA
-    actually incorporated a source is NOT reported by /assistant/chat, and
-    cannot be inferred from a 200: summarize_system_context() wraps each
-    optional context line in a bare `except`, so a healthy route can still be
-    absent from the prompt. The page therefore claims only what it can prove.
+    `last_updated`, so availability and age are provable. The chat response now
+    also reports which source classes were present in the generated request
+    context. That proves inclusion in the request context, not claim-level use
+    or citation.
 
 2.  Working memory is read from the real `GET /assistant-data` and written by
     the existing POST routes. Nothing here is a mock or a second copy of that

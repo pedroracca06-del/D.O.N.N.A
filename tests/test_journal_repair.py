@@ -121,7 +121,7 @@ def test_merge_is_a_noop_when_nothing_is_split():
     assert find_unlinked_reconstructed_closes(trades) == []
 
 
-def test_stats_are_correct_after_merge_not_double_counted():
+def test_stats_are_correct_after_merge_not_double_counted(frozen_today):
     """
     Regression for the actual production symptom: the unlinked OPEN entry
     used to fall into compute_journal_stats()'s breakeven branch with a
@@ -131,7 +131,12 @@ def test_stats_are_correct_after_merge_not_double_counted():
     entry already contributes 0 even before the merge runs -- the merge's
     job is collapsing the two journal *rows* into one, not fixing the
     stats, which are correct either way now.
+
+    The `this_week` assertions below compare against the fixture's own
+    calendar week, so the date must be pinned. Without that this test passes
+    only during the week of 2026-06-22 and reports 0.0 thereafter.
     """
+    frozen_today('2026-06-25')          # Thursday of the fixture's week
     trades = _split_trade_fixture()
 
     stats_before = compute_journal_stats(trades)

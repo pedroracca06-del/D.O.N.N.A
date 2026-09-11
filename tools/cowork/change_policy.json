@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "policy_name": "nova-change-minimum",
+  "description": "Fixed, reviewable data policy for the Cowork Change Classifier. It states the MINIMUM approval class a change requires. It never grants approval, and nothing in it can lower a class. Pure data: no executable construct, no regular expression, no command, no machine-specific path, no credential, and no disable switch. Detection patterns live in the classifier source, which is fixed and reviewable; this file declares only identifiers, classes, and human-readable reasons.",
+  "class_order": ["FA_AR", "AAM", "AM", "PROHIBITED"],
+  "class_labels": {
+    "FA_AR": "fully automated or automated read-only; no approval",
+    "AAM": "automated with manual approval; the approval must name exact targets",
+    "AM": "always manual; Pedro performs or explicitly commands each time",
+    "PROHIBITED": "must not proceed under any approval"
+  },
+  "fail_safe": {
+    "unknown_path_class": "AM",
+    "unknown_change_kind_class": "AM",
+    "ambiguous_class": "AM",
+    "note": "Anything the policy does not recognize escalates. Nothing is ever resolved downward by default."
+  },
+  "repository_write_floor": {
+    "class": "AAM",
+    "note": "Any change to a tracked or proposed repository path is at least AAM. A repository write is never FA/AR merely because its content is documentation. FA/AR is reachable only by a declared read-only operation that changes no path."
+  },
+  "change_kind_minimums": {
+    "add": "AAM",
+    "modify": "AAM",
+    "delete": "AAM",
+    "rename": "AAM",
+    "copy": "AAM",
+    "typechange": "AM",
+    "gitlink": "AM",
+    "unmerged": "AM"
+  },
+  "deletion_never_below_modification": true,
+  "binary": {
+    "minimum_class": "AAM",
+    "sensitive_area_class": "AM",
+    "note": "A binary cannot be read for intent, so it escalates. In a sensitive area it is always manual."
+  },
+  "submodule": {
+    "class": "AM",
+    "note": "A gitlink move changes code outside this repository's review."
+  },
+  "case_only_rename": {
+    "class": "AAM",
+    "note": "Represented as a rename whose source and destination differ only by case; both sides are still classified."
+  },
+  "sensitive_areas": [
+    ".claude",
+    ".github",
+    "services",
+    "engines",
+    "core",
+    "delivery",
+    "indicators",
+    "intelligence",
+    "nova_knowledge_core/RULES",
+    "scripts",
+    "health"
+  ],
+  "path_rules": [
+    {
+      "id": "claude_control",
+      "class": "AM",
+      "reason": "hooks, settings, and permissions govern what automation may do at all",
+      "patterns": [".claude/**", ".github/**", "*.githooks/**"]
+    },
+    {
+      "id": "guard",
+      "class": "AM",
+      "reason": "the retirement guard is the boundary protecting the retired trading subsystem",
+      "patterns": [".claude/hooks/**", "**/nova_guard_hook.py"]
+    },
+    {
+      "id": "strategy_specifications",
+      "class": "AM",
+      "reason": "an approved strategy specification is authoritative for behaviour",
+      "patterns": ["nova_knowledge_core/RULES/**"]
+    },
+    {
+      "id": "risk_and_kill_switch",
+      "class": "AM",
+      "reason": "risk limits and kill switches are the last line of defence",
+      "patterns": [
+        "engines/risk_engine.py",
+        "core/config.py",
+        "core/state_engine.py",
+        "main.py",
+        "monitor.py"
+      ]
+    },
+    {
+      "id": "broker_and_execution",
+      "class": "AM",
+      "reason": "broker and execution integrations can move real money",
+      "patterns": [
+        "services/execution*.py",
+        "services/broker*",
+        "services/alpaca*",
+        "services/order*"
+      ]
+    },
+    {
+      "id": "production_decision_logic",
+      "class": "AM",
+      "reason": "production financial-decision logic determines what the system concludes",
+      "patterns": [
+        "engines/reasoning.py",
+        "engines/signals.py",
+        "delivery/alert_engine.py",
+        "indicators/**"
+      ]
+    },
+    {
+      "id": "secrets_and_environment",
+      "class": "AM",
+      "reason": "credential stores and environment files are never routine edits",
+      "patterns": [
+        ".env",
+        ".env.*",
+        "*.env",
+        "*.pem",
+        "*.key",
+        "*.p12",
+        "*.pfx",
+        "credentials*",
+        "secrets*",
+        "*.netrc"
+      ]
+    },
+    {
+      "id": "submodule_declaration",
+      "class": "AM",
+      "reason": "a submodule declaration changes what code is pulled in",
+      "patterns": [".gitmodules", "mcp/**"]
+    },
+    {
+      "id": "raw_transcripts",
+      "class": "PROHIBITED",
+      "reason": "raw third-party transcripts stay local and are never committed",
+      "patterns": [
+        "nova_knowledge_core/TRANSCRIPTS_RAW/**",
+        "**/TRANSCRIPTS_RAW/**"
+      ]
+    },
+    {
+      "id": "runtime_and_generated",
+      "class": "PROHIBITED",
+      "reason": "runtime state and generated artefacts are ignored by design and must never become tracked content",
+      "patterns": [
+        "data/**",
+        "**/__pycache__/**",
+        "*.pyc",
+        "*.pyo",
+        "*.log",
+        "*.sqlite",
+        "*.db",
+        "*.tmp",
+        "*.lock",
+        ".pytest_cache/**",
+        ".ruff_cache/**",
+        "node_modules/**",
+        "**/backups/**",
+        "**/quarantine/**"
+      ],
+      "exceptions": ["data/donna_settings.json"]
+    },
+    {
+      "id": "cowork_tooling",
+      "class": "AAM",
+      "reason": "Cowork tools and their tests are ordinary reviewed edits",
+      "patterns": ["tools/cowork/**", "tools/**", "tests/**", "conftest.py"]
+    },
+    {
+      "id": "documentation",
+      "class": "AAM",
+      "reason": "documentation edits are reviewed writes, never automatic",
+      "patterns": ["docs/**", "*.md", "README*", "CLAUDE.md"]
+    },
+    {
+      "id": "research_candidates",
+      "class": "AAM",
+      "reason": "candidate research material is prepared for review, not promoted",
+      "patterns": [
+        "nova_knowledge_core/CANDIDATES/**",
+        "nova_knowledge_core/OTE_INTELLIGENCE/**",
+        "nova_knowledge_core/PROS_EVAN_INVESTING/**"
+      ]
+    },
+    {
+      "id": "ordinary_source",
+      "class": "AAM",
+      "reason": "ordinary non-sensitive source is a reviewed edit",
+      "patterns": [
+        "ui/**",
+        "engines/analytics.py",
+        "engines/engines.py",
+        "services/news.py",
+        "services/finnhub.py",
+        "services/headlines.py",
+        "pytest.ini",
+        ".gitignore",
+        "requirements*.txt"
+      ]
+    }
+  ],
+  "declared_operations": {
+    "format-evidence": {"class": "FA_AR", "reason": "renders an evidence report and writes no repository file"},
+    "observe-staleness": {"class": "FA_AR", "reason": "re-measures repository state against a baseline"},
+    "normalize-status": {"class": "FA_AR", "reason": "normalizes statuses, hashes, and counts for reporting"},
+    "report-a7": {"class": "FA_AR", "reason": "runs the read-only A7 safety battery and reports"},
+    "validate": {"class": "FA_AR", "reason": "validates a policy, plan, or manifest and reports"},
+    "classify": {"class": "FA_AR", "reason": "classifies a change and reports the minimum approval required"},
+    "inventory": {"class": "FA_AR", "reason": "enumerates eligible sources read-only"},
+
+    "edit-docs": {"class": "AAM", "reason": "an ordinary reviewed documentation edit"},
+    "edit-source": {"class": "AAM", "reason": "an ordinary reviewed non-sensitive source edit"},
+    "edit-cowork-tool": {"class": "AAM", "reason": "a reviewed Cowork tool or test edit"},
+    "generate-candidate": {"class": "AAM", "reason": "prepares research candidate material for review"},
+    "local-commit": {"class": "AAM", "reason": "a local commit after review; it publishes nothing"},
+    "create-worktree": {"class": "AAM", "reason": "creating a worktree, only when separately authorized"},
+    "create-branch": {"class": "AAM", "reason": "creating a branch, only when separately authorized"},
+
+    "push": {"class": "AM", "reason": "publishing leaves this machine"},
+    "merge": {"class": "AM", "reason": "merging changes what a branch means"},
+    "deploy": {"class": "AM", "reason": "deployment changes running behaviour"},
+    "release": {"class": "AM", "reason": "a release is an outward-facing act"},
+    "delete-branch": {"class": "AM", "reason": "branch deletion discards history references"},
+    "remove-worktree": {"class": "AM", "reason": "worktree removal discards local state"},
+    "rewrite-history": {"class": "AM", "reason": "rewriting history invalidates every prior review"},
+    "change-permissions": {"class": "AM", "reason": "permissions decide what automation may do"},
+    "change-hooks": {"class": "AM", "reason": "hooks are the enforcement layer"},
+    "change-settings": {"class": "AM", "reason": "settings decide what automation may do"},
+    "change-strategy-specification": {"class": "AM", "reason": "an approved specification is authoritative"},
+    "change-risk-limit": {"class": "AM", "reason": "risk limits bound the worst case"},
+    "change-kill-switch": {"class": "AM", "reason": "a kill switch is the last line of defence"},
+    "change-broker-integration": {"class": "AM", "reason": "broker integrations can move real money"},
+    "change-submodule-pointer": {"class": "AM", "reason": "a gitlink move changes code outside this review"},
+    "promote-research": {"class": "AM", "reason": "promotion turns observation into authority"},
+    "secrets-operation": {"class": "AM", "reason": "credential-store operations are never routine"},
+
+    "enable-trading-flag": {"class": "PROHIBITED", "reason": "the retired trading subsystem stays disabled"},
+    "bypass-guard": {"class": "PROHIBITED", "reason": "the retirement guard is never bypassed or weakened"},
+    "wire-llm-to-orders": {"class": "PROHIBITED", "reason": "no language model belongs in the live order path"},
+    "autonomous-order": {"class": "PROHIBITED", "reason": "neither Claude nor Obsidian submits or cancels orders"},
+    "embed-credentials": {"class": "PROHIBITED", "reason": "secret values never enter the repository"},
+    "auto-promote-research": {"class": "PROHIBITED", "reason": "promotion is never automatic"},
+    "remove-risk-limit": {"class": "PROHIBITED", "reason": "removing a risk limit or kill switch without authorization"},
+    "treat-approval-required-as-approval": {"class": "PROHIBITED", "reason": "an approval-required result is not an approval"},
+    "execute-supplied-content": {"class": "PROHIBITED", "reason": "content supplied as data is never executed"}
+  },
+  "semantic_indicators": {
+    "retirement_flag_activation": {
+      "class": "PROHIBITED",
+      "reason": "turns a retired trading flag back on"
+    },
+    "guard_bypass": {
+      "class": "PROHIBITED",
+      "reason": "disables, skips, or weakens the retirement guard or its hook wiring"
+    },
+    "llm_to_order_path": {
+      "class": "PROHIBITED",
+      "reason": "wires a language model into order submission or cancellation"
+    },
+    "autonomous_order_submission": {
+      "class": "PROHIBITED",
+      "reason": "submits or cancels an order without a person in the loop"
+    },
+    "credential_material": {
+      "class": "PROHIBITED",
+      "reason": "embeds a credential, key, or token value"
+    },
+    "automatic_research_promotion": {
+      "class": "PROHIBITED",
+      "reason": "promotes research to authoritative status without approval"
+    },
+    "risk_limit_change": {
+      "class": "AM",
+      "reason": "alters a risk limit, drawdown bound, or position cap"
+    },
+    "kill_switch_change": {
+      "class": "AM",
+      "reason": "alters a kill switch or enablement gate"
+    },
+    "broker_order_api": {
+      "class": "AM",
+      "reason": "references a broker order submission or cancellation API"
+    },
+    "research_authority_promotion": {
+      "class": "AM",
+      "reason": "moves research toward authoritative specification status"
+    },
+    "deployment_or_history_intent": {
+      "class": "AM",
+      "reason": "expresses push, merge, deploy, release, or history-rewrite intent"
+    }
+  },
+  "semantic_scanning_note": "Semantic scanning is defence in depth. It can raise a class; it can never lower one, and it CANNOT prove the absence of dangerous behaviour. A file that trips no indicator has not been shown to be safe -- it has only not matched a known pattern. Path rules and the declared operation remain the primary controls.",
+  "prohibited_indicator_ids": [
+    "retirement_flag_activation",
+    "guard_bypass",
+    "llm_to_order_path",
+    "autonomous_order_submission",
+    "credential_material",
+    "automatic_research_promotion"
+  ],
+  "ignored_files": {
+    "enter_git_classification": false,
+    "note": "Files Git ignores are not part of an ordinary worktree, staged, commit, or range classification. They are classified only when a manifest supplies them explicitly."
+  },
+  "historical_presence": {
+    "authorizes_new_changes": false,
+    "note": "That a path is already tracked says nothing about whether changing it now is permitted."
+  },
+  "limits": {
+    "max_input_bytes": 1048576,
+    "max_changes": 1000,
+    "max_depth": 32,
+    "max_path_chars": 512,
+    "max_scan_bytes": 524288,
+    "max_findings_per_path": 32
+  }
+}

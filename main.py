@@ -1005,13 +1005,28 @@ async def governance_status():
         return {'error': str(exc)}
 
 
+def _execution_state_disabled_payload() -> dict:
+    """Return a fixed refusal without inspecting legacy execution state."""
+    return {
+        'status': 'TRADING_SUBSYSTEM_DISABLED',
+        'armed': False,
+        'trading_subsystem_enabled': False,
+        'reason': (
+            'The trading/execution subsystem is temporarily disabled. '
+            'It may return only through a separately approved future system change.'
+        ),
+    }
+
+
 @app.get('/api/execution-state')
 async def execution_state():
     """
-    Full execution arming status — answers 'why won't the next trade fire?'
-    Returns armed flag, active blockers, position attribution, and exact conditions
-    required for the next trade to execute.
+    Return a fixed disabled response while the master trading switch is off.
+    Legacy execution-state inspection remains preserved behind that switch.
     """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _execution_state_disabled_payload()
+
     try:
         import os as _os
         from core.state_engine import state as _st
@@ -1028,9 +1043,9 @@ async def execution_state():
 
         # System gates
         if not auto_execute:
-            blockers.append('NOVA_AUTO_EXECUTE is false — set to true to arm execution')
+            blockers.append('Automatic execution flag is disabled')
         else:
-            conditions_met.append('NOVA_AUTO_EXECUTE=true')
+            conditions_met.append('Automatic execution flag is enabled')
 
         if not paper:
             blockers.append('Alpaca is in LIVE mode — bridge is paper-only')
@@ -2879,7 +2894,7 @@ async def journal_signals():
     except Exception:
         entries = []
     # Return last 150 entries (newest first — file is already newest-first)
-    return {'status': 'ok', 'signals': entries[:150], 'total': len(entries)}
+    return {'status': 'ok', 'signals': entries[:150], 'total': len(entries), 'authority_class': 'historical_execution', 'current_prime_authority': False}
 
 
 @app.get('/api/signal-log/session-development')
@@ -2913,6 +2928,8 @@ async def session_development():
         return round(sum(1 for s in bucket if s.get('alert_type') == 'EXECUTION_READY') / len(bucket), 3)
 
     return {
+        'authority_class': 'historical_execution',
+        'current_prime_authority': False,
         'total_ny_open_pros': len(signals),
         'buckets': {
             'pre_945':    {'count': len(pre_945),   'exec_rate': _exec_rate(pre_945),   'grade_dist': _grade_dist(pre_945)},
@@ -2938,7 +2955,10 @@ async def direction_churn():
       instability_ratio: fraction of flips where IB draw did NOT change (0.0=all real, 1.0=all unstable)
     """
     from delivery.signal_log import get_direction_churn as _get_churn
-    return await asyncio.to_thread(_get_churn, 500)
+    result = await asyncio.to_thread(_get_churn, 500)
+    if isinstance(result, dict):
+        return {'authority_class': 'historical_execution', 'current_prime_authority': False, **result}
+    return {'authority_class': 'historical_execution', 'current_prime_authority': False, 'data': result}
 
 
 _JOURNAL_WORKSPACE_SECTIONS = {'plans', 'reflections', 'studies', 'goals'}
@@ -3494,21 +3514,37 @@ async def journal_analyze(request: Request):
     ticker = (trade.get('ticker') or '').upper().replace('1!', '')
     nearby = [s for s in all_sigs if ticker in (s.get('symbol') or '').upper()][:8]
 
-    # Build signal context block
+    # Nearby signal logs are legacy operational history. Feed only neutral
+    # market/session metadata into current PRIME review; do not re-introduce
+    # superseded PROS, grading, confidence, generic OTE, IB, or command fields.
     sig_lines = []
     for s in nearby:
         sig_lines.append(
-            f"  {s.get('timestamp_et','?')} | {s.get('nova_cmd','?')} | "
-            f"Grade {s.get('grade','?')} | Conf {s.get('nova_conf','?')} | "
-            f"PROS {s.get('pros_phase','?')} {s.get('pros_direction','?')} | "
-            f"OTE {s.get('pros_ote','?')} | IB {s.get('ib_draw','?')} | "
-            f"Session Q{s.get('session_quality','?')}"
+            f"  {s.get('timestamp_et','?')} | {s.get('symbol','?')} | "
+            f"Price {s.get('price','?')} | Session {s.get('session','?')} | "
+            f"Macro {s.get('macro_risk','?')} | Regime {s.get('regime','?')}"
         )
     sig_context = '\n'.join(sig_lines) if sig_lines else '  No signal log entries found for this instrument.'
 
     # Curated trade fields only -- never nova_review/nova_review_ts (those are
     # this endpoint's own output, and including them would churn the cache
     # key on every regeneration) and never the full trade/journal dump.
+    from intelligence.current_knowledge import (
+        CurrentKnowledgeIntegrityError as _CurrentKnowledgeIntegrityError,
+        retrieve_current_prime as _retrieve_current_prime,
+    )
+    try:
+        _knowledge = _retrieve_current_prime(
+            f"journal review {trade.get('setup_type') or ''} PRIME execution model",
+            max_docs=4,
+        )
+    except _CurrentKnowledgeIntegrityError:
+        return {
+            'status': 'error',
+            'detail': 'Current PRIME knowledge authority is unavailable; journal review was not generated.',
+            'knowledge_authority': 'unavailable',
+        }
+
     input_data = {
         'trade': {
             'ticker': trade.get('ticker'),
@@ -3530,6 +3566,7 @@ async def journal_analyze(request: Request):
             'reflection': trade.get('reflection'),
         },
         'nearby_signals': sig_context,
+        'current_knowledge': _knowledge.text,
     }
 
     try:
@@ -3549,7 +3586,14 @@ async def journal_analyze(request: Request):
     trades[trade_idx]['nova_review_ts'] = utc_now_iso()
     save_journal(trades)
 
-    return {'status': 'ok', 'analysis': analysis, 'index': trade_idx}
+    return {
+        'status': 'ok', 'analysis': analysis, 'index': trade_idx,
+        'knowledge_sources': list(_knowledge.sources),
+        'knowledge_provenance': [
+            {'source': src, 'sha256': digest}
+            for src, digest in zip(_knowledge.sources, _knowledge.source_hashes)
+        ],
+    }
 
 
 @app.post('/journal/delete')

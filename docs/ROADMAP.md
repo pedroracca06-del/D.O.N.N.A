@@ -1,8 +1,8 @@
 # Roadmap
 
-## Current State — Phase 2E (Operational Validation)
+## Current State - Intelligence / Knowledge Consolidation
 
-The core infrastructure is built and operational. The system reads live TradingView charts, evaluates setups deterministically, calls Claude for grading, and delivers Discord alerts with rendered execution cards. The autonomous execution pipeline routes signals through a multi-gate risk engine to Alpaca. The system is in active paper validation collecting signal quality data before prop-firm deployment.
+NOVA currently operates as a read-only market-intelligence and decision-support platform. Assistant, Journal Review, and Market Summary run through the centralized Intelligence gateway; current PRIME knowledge is Git-authoritative under `nova_knowledge_core/CURRENT/PRIME/`; Obsidian planning is non-executing. Trading/execution infrastructure is preserved but temporarily disabled and requires separate explicit approval before any future return.
 
 ---
 
@@ -24,28 +24,28 @@ The core infrastructure is built and operational. The system reads live TradingV
 ### 2A — TradingView MCP Integration (Complete)
 - Custom MCP server (Node.js) connecting to TradingView Desktop via CDP
 - Live reading of symbol, timeframe, OHLCV, price levels, indicator tables, labels
-- Confirmed reading NOVA indicator output: PROS ENGINE, ORB CONSOLE, NOVA ENGINE tables
+- Historical TradingView/MCP parsing infrastructure is preserved; current indicator direction is the visual-only Market Map evolving toward PRIME-aware context
 
 ### 2B — NOVA Knowledge Core (Complete)
 - Strategy rules encoded in `nova_strategy_core.json`
-- PROS continuation rules, ORB auction rules, invalidation logic, no-trade conditions
-- Session quality classification, IB draw alignment framework
-- Execution quality grading criteria (A/B/C/D)
+- Exactly three current PRIME execution models: Strict OTE, 10AM Key Level Open, and ORB; PROS is superseded historical lineage
+- Research/history/candidates are separated from the current authority layer
+- Deterministic contamination tests prevent legacy doctrine from re-entering current surfaces
 
 ### 2C — Live Reasoning Validation (Complete)
-- Deterministic pre-assessment layer (PROS phase, ORB state, IB alignment, invalidation)
-- Claude evaluation pipeline — grading, alert field generation, HEADS_UP vs EXECUTION_READY classification
-- Multi-tab monitoring — reads all open TradingView tabs per cycle
-- Session launcher with Windows Task Scheduler auto-start at 9:15 AM ET
+- Centralized Intelligence gateway for Assistant, Journal Review, and Market Summary
+- Deterministic read-only CURRENT/PRIME retrieval with explicit source provenance and content hashes
+- Journal Review and Assistant are protected from legacy PROS/IB/grading contamination
+- Obsidian V2 authority namespaces separate CURRENT, RESEARCH, HISTORY, EVIDENCE, PROJECTS, and INBOX
 
-### 2D — Execution Validation (Active)
+### 2D - Historical Execution Validation Infrastructure (Preserved, Disabled)
 - Signal quality correlation against actual trade outcomes
 - HEADS_UP → EXECUTION_READY conversion rate measurement
 - Grade distribution analysis (A/B vs C/D ratio per session)
 - False positive rate measurement and ACCEPTED_CONTINUATION phase recognition
 
-### 2E — Autonomous Execution + Card Renderer (Active)
-- Autonomous paper execution pipeline live on Alpaca (paper mode)
+### 2E - Autonomous Execution + Card Renderer (Preserved, Temporarily Disabled)
+- Historical Alpaca paper-execution pipeline is preserved but not currently authorized or active
 - NOVA execution card renderer — programmatically generated chart visuals replace TradingView screenshots
 - Multi-gate risk engine: state gate, red folder, daily trade limit, daily loss limit, position sizing
 - Execution telemetry and rejection trace with full gate audit per signal
@@ -53,32 +53,33 @@ The core infrastructure is built and operational. The system reads live TradingV
 
 ---
 
-## Phase 2F — NOVA Internal Platform Migration (Next)
+## Phase 2F - NOVA Internal Platform + Brain Integration (Next Active Product Work, Read-Only)
 
-**Goal:** Migrate operational workflows out of Discord and into NOVA's own internal web platform.
+**Goal:** Migrate operational workflows out of Discord and into NOVA's own internal web platform. Phase 2F is Brain/intelligence work and is read-only: it surfaces reasoning, market state, session context, and past review — it does not add execution controls, execution telemetry, or a governance/rejection execution stream. Those surfaces are Phase 2G and require separate owner approval before any of them is built or activated.
 
-Discord currently acts as the alert delivery layer, operational feed, monitoring surface, execution review surface, and reasoning feed. That is a temporary arrangement. NOVA should become the primary operational environment. Discord becomes the notification and lightweight mirror layer.
+Discord currently acts as the alert delivery layer, operational feed, monitoring surface, execution review surface, and reasoning feed. That is a temporary arrangement. NOVA should become the primary environment for intelligence and read-only monitoring. Discord becomes the notification and lightweight mirror layer.
 
-### Targets
+### Targets (read-only / intelligence)
 - Internal NOVA operational feed — live alert stream inside the dashboard
-- Embedded execution cards and AI reasoning feed
-- Session monitoring surfaces with live PROS/ORB/IB state
-- Governance and rejection stream — full gate audit visibility
-- Execution telemetry feed and risk engine panels
+- AI reasoning feed inside the dashboard
+- Session monitoring surfaces with current PRIME-aware context and provenance
 - Market state and regime panels
-- Trade lifecycle visualization
-- Replay and review integration
+- Replay and review integration (journal/decision review, read-only)
 
-**Strategic shift:** Discord remains for mobile push and lightweight external distribution. All operational decision surfaces move inside NOVA.
+**Strategic shift:** Discord remains for mobile push and lightweight external distribution. All read-only intelligence and operational-visibility surfaces move inside NOVA. Execution cards, execution telemetry, risk-engine panels, the governance/rejection execution stream, and execution-specific trade-lifecycle visualization are explicitly out of scope for 2F; they live exclusively in Phase 2G.
 
 ---
 
-## Phase 2G — Autonomous Execution Integration (After 2F)
+## Phase 2G - Future Trading/Execution Reintegration (Separately Approved)
 
-**Goal:** Integrate the autonomous execution infrastructure as a first-class operational surface inside NOVA. The execution bot should not be disconnected backend infrastructure — it should be visible, controllable, and auditable from within the platform.
+**Goal:** If Pedro separately approves the trading subsystem to return, reintegrate the preserved execution infrastructure as a visible, controllable, and auditable NOVA surface. This phase is not currently active and the roadmap itself grants no activation authority.
 
 ### Targets
 - Embedded execution console inside the NOVA dashboard
+- Embedded execution cards and execution reasoning-feed integration (moved from 2F — execution-specific)
+- Execution telemetry feed and risk engine panels (moved from 2F — execution-specific)
+- Governance and rejection stream — full gate audit visibility (moved from 2F — execution-specific)
+- Trade lifecycle visualization — execution/position lifecycle (moved from 2F — execution-specific)
 - Live position monitoring and management
 - Autonomous execution state feed — real-time gate status, active thesis, cooldown state
 - Execution controls — kill switches, mode switching, permission management
@@ -90,13 +91,13 @@ Discord currently acts as the alert delivery layer, operational feed, monitoring
 - Position and event timeline
 - Live execution analytics
 
-**Strategic shift:** The prop-firm autonomous bot infrastructure becomes fully integrated into NOVA instead of existing as a disconnected backend process.
+**Strategic condition:** Preserved bot infrastructure may become fully integrated only after a separate owner-approved system change; until then it remains disabled historical/future infrastructure. Listing these targets here preserves the plan; it does not authorize building or activating any of them.
 
 ---
 
-## Phase 2H — NOVA Interface + Design System Redesign (After 2G)
+## Phase 2H — NOVA Interface + Design System Redesign (After 2F)
 
-**Goal:** Complete the full NOVA visual redesign using the finalized intelligence-first interface direction. This phase happens after Discord workflow migration and execution integration are stable so the interface is designed around validated operational workflows, not invented ahead of them.
+**Goal:** Complete the full NOVA visual redesign using the finalized intelligence-first interface direction. This phase happens after the Discord-to-NOVA workflow migration (Phase 2F) is stable, so the interface is designed around validated intelligence/internal-platform workflows, not invented ahead of them. It does not depend on trading/execution returning: Phase 2G remains separately approved and optional, and redesign work may proceed on validated intelligence/internal-platform workflows alone. If execution is later separately approved and reintegrated, its surfaces adopt this design system rather than gating it.
 
 ### Design direction
 - Bloomberg-inspired, institutional, operational
@@ -131,7 +132,7 @@ The NOVA app is the final consumer layer built on top of a mature operational pl
 The app inherits validated workflows, a finalized interface language, and integrated execution infrastructure. It does not invent these things itself.
 
 - 5-tab architecture: NOVA AI, Market, Risk Engine, Journal, Settings
-- NOVA AI tab as primary screen — live setup status, IB draw, session quality, active alerts
+- NOVA Intelligence as primary assistant surface - current context, provenance, and authority-aware responses
 - Real-time SSE feed from backend
 - Bloomberg-inspired dark interface, color-as-signal design language
 - Mobile is design authority; desktop is mobile expanded
@@ -151,11 +152,11 @@ The app inherits validated workflows, a finalized interface language, and integr
 ## Phase Ordering Summary
 
 ```
-2D  Execution Validation          ← active
-2E  Autonomous Execution          ← active
-2F  Internal Platform Migration   ← next
-2G  Autonomous Execution Integration
-2H  Interface + Design System Redesign
+2B  Current PRIME authority       - implemented / validating
+2C  Brain authority integration   - active
+2F  Internal Platform Migration   ← next (read-only / intelligence)
+2G  Trading/Execution Reintegration - future, separate approval required
+2H  Interface + Design System Redesign - after 2F; does not require 2G
 2I  NOVA App
 3   Commercialisation
 ```

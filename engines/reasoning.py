@@ -506,6 +506,19 @@ def _parse_nova_tables_impl(raw_tables: list[list[str]]) -> dict:
                 f' status={parse_status}'
             )
 
+        # ── BRIDGE v3 extension fields (rows 34-42) — canonical trade state ──
+        # Phase 6.3. Additive only: BRIDGE_VER 1/2 charts never reach this
+        # block in a "detected" state (v3_detected stays False), so their
+        # behavior is byte-for-byte unchanged. ORB and PROS are the only
+        # approved actionable strategy families; ICT is context/confirmation
+        # only and cannot appear here — canonicalStrategy's own Pine-side
+        # priority ordering (PROS checked before ORB checked before ICT)
+        # guarantees this structurally, verified in the Phase 6.2 audit.
+        # Note the actual Pine bridge key is "CANON_STRAT" (not
+        # "CANON_STRATEGY") — matched here to what the indicator emits.
+        parsed['canonical'], parsed['canonical_mismatch'] = _parse_canonical_v3(
+            d, bridge_ver, main_cmd=d.get('CMD', ''), main_sys_state=d.get('SYS_STATE', ''))
+
         return parsed  # NOVA BRIDGE found — skip legacy detection
 
     # ── Priority 2: Legacy three-table fallback ───────────────────────────────
@@ -543,6 +556,186 @@ def _parse_nova_tables_impl(raw_tables: list[list[str]]) -> dict:
         parsed['parse_status'] = 'unreadable'
 
     return parsed
+
+
+# ── BRIDGE v3 canonical state parsing ──────────────────────────────────────────
+# Phase 6.3: ORB and PROS are the only approved actionable strategy families.
+# ICT is context/confirmation only (nova_knowledge_core/
+# INDICATOR_PHASE6_2_ICT_CONTEXT_ALIGNMENT.md) and must never appear as
+# canonical_strategy — enforced here as an explicit validation check in
+# addition to the structural guarantee already proven on the Pine side.
+_CANON_VALID_STATES     = {'WAIT', 'HEADS_UP', 'LOCKED', 'EXECUTION_READY'}
+_CANON_VALID_DIRECTIONS = {'LONG', 'SHORT', 'NONE'}
+_CANON_VALID_STRATEGIES = {'ORB', 'PROS', 'NONE'}
+_CANON_V3_KEYS = [
+    'CANON_STATE', 'CANON_DIR', 'CANON_STRAT', 'CANON_SETUP', 'CANON_GRADE',
+    'CANON_LIQ_SRC', 'CANON_INTERACT', 'CANON_BUY', 'CANON_SELL',
+]
+
+
+def _canon_vbool(val: str):
+    v = (val or '').strip()
+    return True if v == '1' else (False if v == '0' else None)
+
+
+def _parse_canonical_v3(
+    d: dict, bridge_ver: int, main_cmd: str = '', main_sys_state: str = ''
+) -> tuple[dict, Optional[dict]]:
+    """
+    Parse the BRIDGE v3 CANON_* fields (Pine rows 34-42) into a typed,
+    validated dict, and separately compute legacy-vs-canonical mismatch
+    telemetry. Returns (canonical, canonical_mismatch).
+
+    Observation/representation only in this phase — nothing here overrides
+    the existing legacy CMD/SYS_STATE-driven evaluators
+    (_evaluate_price_structure, _evaluate_pros_phase, _evaluate_ib_alignment,
+    _check_invalidation_signals) or _classify_signal's alert routing. Those
+    remain byte-for-byte unchanged; this function only builds the additive
+    canonical/mismatch fields written to the signal log for observability,
+    per the approved Phase 6.3 scope ("representation/source-of-truth
+    migration only").
+    """
+    v3_detected = bridge_ver >= 3
+
+    canon_state    = (d.get('CANON_STATE',    '') or '').strip()
+    canon_dir      = (d.get('CANON_DIR',      '') or '').strip()
+    canon_strategy = (d.get('CANON_STRAT',    '') or '').strip()
+    canon_setup    = (d.get('CANON_SETUP',    '') or '').strip()
+    canon_grade    = (d.get('CANON_GRADE',    '') or '').strip()
+    canon_liq_src  = (d.get('CANON_LIQ_SRC',  '') or '').strip()
+    canon_interact = (d.get('CANON_INTERACT', '') or '').strip()
+    canon_buy      = _canon_vbool(d.get('CANON_BUY',  ''))
+    canon_sell     = _canon_vbool(d.get('CANON_SELL', ''))
+
+    warnings: list[str] = []
+
+    if v3_detected:
+        missing_v3 = [k for k in _CANON_V3_KEYS if (d.get(k, '') or '').strip() in ('', '—')]
+        if missing_v3:
+            warnings.append(f'missing CANON_* fields: {",".join(missing_v3)}')
+
+        if canon_buy is True and canon_sell is True:
+            warnings.append('canonical_buy and canonical_sell both true - malformed')
+
+        if canon_state and canon_state not in _CANON_VALID_STATES:
+            warnings.append(f'canonical_state {canon_state!r} not a recognized value')
+
+        if canon_dir and canon_dir not in _CANON_VALID_DIRECTIONS:
+            warnings.append(f'canonical_direction {canon_dir!r} not a recognized value')
+
+        if canon_strategy and canon_strategy not in _CANON_VALID_STRATEGIES:
+            warnings.append(
+                f'canonical_strategy {canon_strategy!r} is not an approved strategy '
+                f'(ORB/PROS/NONE only) - ICT or unrecognized value found')
+
+        if canon_buy is True and canon_dir and canon_dir != 'LONG':
+            warnings.append(f'canonical_buy=true but canonical_direction={canon_dir!r} (expected LONG)')
+        if canon_sell is True and canon_dir and canon_dir != 'SHORT':
+            warnings.append(f'canonical_sell=true but canonical_direction={canon_dir!r} (expected SHORT)')
+        if canon_state == 'EXECUTION_READY' and canon_dir not in ('LONG', 'SHORT'):
+            warnings.append(
+                f'canonical_state=EXECUTION_READY but canonical_direction={canon_dir!r} '
+                f'(expected LONG or SHORT)')
+
+    degraded = v3_detected and bool(warnings)
+    if degraded:
+        print(f'[nova-bridge-v3] canonical parse degraded: {"; ".join(warnings)}')
+
+    canonical = {
+        'canonical_state':            canon_state or None,
+        'canonical_direction':        canon_dir or None,
+        'canonical_strategy':         canon_strategy or None,
+        'canonical_setup':            canon_setup or None,
+        'canonical_grade':            canon_grade or None,
+        'canonical_liquidity_source': canon_liq_src or None,
+        'canonical_interaction':      canon_interact or None,
+        'canonical_buy':              canon_buy,
+        'canonical_sell':             canon_sell,
+        'canonical_available':        v3_detected,
+        'canonical_degraded':         degraded,
+        'canonical_warnings':         warnings,
+    }
+
+    mismatch = None
+    if v3_detected and not degraded:
+        legacy_cmd_up = (main_cmd or '').strip().upper()
+        legacy_dir = (
+            'LONG'  if legacy_cmd_up in ('BUY', 'LONG') else
+            'SHORT' if legacy_cmd_up in ('SELL', 'SHORT') else
+            'NONE'
+        )
+        sys_state_up = (main_sys_state or '').strip().upper()
+
+        reasons: list[str] = []
+        if legacy_cmd_up in ('BUY', 'SELL') and canon_state != 'EXECUTION_READY':
+            reasons.append(f'legacy CMD={legacy_cmd_up!r} but canonical_state={canon_state!r}')
+        if legacy_dir != 'NONE' and canon_dir not in (None, '', 'NONE') and legacy_dir != canon_dir:
+            reasons.append(f'legacy direction={legacy_dir} vs canonical_direction={canon_dir}')
+        if 'ICT' in sys_state_up and canon_strategy in ('ORB', 'PROS'):
+            reasons.append(
+                f'legacy SYS_STATE mentions ICT ({main_sys_state!r}) while '
+                f'canonical_strategy={canon_strategy!r}')
+
+        mismatch = {
+            'legacy_canonical_mismatch': bool(reasons),
+            'legacy_cmd':                main_cmd or '',
+            'legacy_sys_state':          main_sys_state or '',
+            'canonical_state':           canon_state or None,
+            'canonical_direction':       canon_dir or None,
+            'canonical_strategy':        canon_strategy or None,
+            'mismatch_reason':           '; '.join(reasons),
+        }
+        if mismatch['legacy_canonical_mismatch']:
+            print(f'[nova-bridge-v3] legacy/canonical mismatch: {mismatch["mismatch_reason"]}')
+
+    return canonical, mismatch
+
+
+def derive_actionable_signal(nova_state: dict) -> dict:
+    """
+    The authoritative "what should Python act on" contract for BRIDGE_VER 3.
+
+    When canonical data is available and not degraded (BRIDGE_VER >= 3),
+    actionable direction/strategy/setup/readiness come from the canonical_*
+    fields, per the approved Phase 6.3 design — never from legacy CMD/
+    SYS_STATE, and never from ICT (canonical_strategy is validated to be
+    ORB/PROS/NONE only when parsed; see _parse_canonical_v3).
+
+    When canonical data is unavailable (BRIDGE_VER 1/2) or degraded
+    (malformed v3 payload), this returns source='legacy_unavailable' and
+    every actionable_* field is None — it does NOT fall back to reading
+    legacy CMD/SYS_STATE itself. Falling back to the legacy fields remains
+    the job of the existing, untouched evaluators
+    (_evaluate_price_structure/_evaluate_pros_phase/_evaluate_ib_alignment/
+    _check_invalidation_signals) and _classify_signal — this function is
+    additive, not a replacement for that pipeline, in this phase.
+    """
+    canonical = nova_state.get('canonical') or {}
+    available = bool(canonical.get('canonical_available'))
+    degraded  = bool(canonical.get('canonical_degraded'))
+
+    if not available or degraded:
+        return {
+            'source':                'legacy_unavailable' if not available else 'degraded',
+            'actionable_state':      None,
+            'actionable_direction':  None,
+            'actionable_strategy':   None,
+            'actionable_setup':      None,
+            'actionable_grade':      None,
+            'actionable_buy':        None,
+            'actionable_sell':       None,
+        }
+
+    return {
+        'source':               'canonical',
+        'actionable_state':     canonical.get('canonical_state'),
+        'actionable_direction': canonical.get('canonical_direction'),
+        'actionable_strategy':  canonical.get('canonical_strategy'),
+        'actionable_setup':     canonical.get('canonical_setup'),
+        'actionable_grade':     canonical.get('canonical_grade'),
+        'actionable_buy':       bool(canonical.get('canonical_buy')),
+        'actionable_sell':      bool(canonical.get('canonical_sell')),
+    }
 
 
 # ── MCP health scoring ─────────────────────────────────────────────────────────
@@ -2908,6 +3101,22 @@ def _evaluate_single_chart(chart_ctx: dict, session_ctx: dict) -> list:
             # Session development telemetry
             ny_open_minutes  = _ny_open_minutes,
             ib_window_closed = bool(session_ctx.get('ib_window_closed', False)),
+
+            # Phase 6.3 — BRIDGE v3 canonical state + legacy mismatch
+            # telemetry, observational only (does not affect alert_required
+            # or execution). Empty/None on BRIDGE_VER 1/2 charts, same as
+            # every other optional field above.
+            canonical_state           = (nova_state.get('canonical') or {}).get('canonical_state') or '',
+            canonical_direction       = (nova_state.get('canonical') or {}).get('canonical_direction') or '',
+            canonical_strategy        = (nova_state.get('canonical') or {}).get('canonical_strategy') or '',
+            canonical_setup           = (nova_state.get('canonical') or {}).get('canonical_setup') or '',
+            canonical_grade           = (nova_state.get('canonical') or {}).get('canonical_grade') or '',
+            canonical_buy             = (nova_state.get('canonical') or {}).get('canonical_buy'),
+            canonical_sell            = (nova_state.get('canonical') or {}).get('canonical_sell'),
+            legacy_cmd                = (nova_state.get('canonical_mismatch') or {}).get('legacy_cmd', '') or main_state.get('CMD', ''),
+            legacy_sys_state          = (nova_state.get('canonical_mismatch') or {}).get('legacy_sys_state', '') or main_state.get('STATE', ''),
+            legacy_canonical_mismatch = (nova_state.get('canonical_mismatch') or {}).get('legacy_canonical_mismatch'),
+            mismatch_reason           = (nova_state.get('canonical_mismatch') or {}).get('mismatch_reason', ''),
         )
         # Push to Render — fire-and-forget, never blocks the monitor cycle
         _push_feed_entry(_signal_entry, _snapshot_entry)

@@ -160,7 +160,7 @@ def test_combined_orchestrator_allows_real_pros_signal_with_default_config(monke
 
 # ── execute_signal() end-to-end ─────────────────────────────────────────────
 
-def test_execute_signal_rejects_over_daily_limit_before_alpaca(monkeypatch):
+def test_execute_signal_rejects_over_daily_limit_before_alpaca(monkeypatch, ny_session_clock):
     def _explode():
         raise AssertionError('Alpaca client must never be constructed once the daily limit is hit')
 
@@ -185,7 +185,7 @@ def test_execute_signal_rejects_over_daily_limit_before_alpaca(monkeypatch):
     assert result['code'] == 'DAILY_TRADE_LIMIT_EXCEEDED'
 
 
-def test_execute_signal_rejects_low_grade_before_alpaca(monkeypatch):
+def test_execute_signal_rejects_low_grade_before_alpaca(monkeypatch, ny_session_clock):
     def _explode():
         raise AssertionError('Alpaca client must never be constructed for a below-minimum grade')
 

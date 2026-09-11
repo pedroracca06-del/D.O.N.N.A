@@ -177,7 +177,7 @@ def test_no_active_profile_falls_back_to_safe_default_not_fail_open(monkeypatch)
     assert gate2['code'] == 'STRATEGY_NOT_ALLOWED'
 
 
-def test_execute_signal_rejects_ict_before_reaching_alpaca(monkeypatch):
+def test_execute_signal_rejects_ict_before_reaching_alpaca(monkeypatch, ny_session_clock):
     """
     End-to-end: execute_signal() itself -- not just the standalone gate
     function -- must reject an ICT_OB_FVG_ENTRY signal_result before any
@@ -206,7 +206,7 @@ def test_execute_signal_rejects_ict_before_reaching_alpaca(monkeypatch):
     assert result['code'] == 'STRATEGY_NOT_ALLOWED'
 
 
-def test_gc_is_rejected_before_alpaca_by_the_etf_routing_step(monkeypatch):
+def test_gc_is_rejected_before_alpaca_by_the_etf_routing_step(monkeypatch, ny_session_clock):
     """
     GC (or CL, RTY, YM, BTC) never even reaches the new governance gate --
     execute_signal()'s pre-existing ETF-routing step only recognizes
@@ -237,7 +237,8 @@ def test_gc_is_rejected_before_alpaca_by_the_etf_routing_step(monkeypatch):
     assert result['code'] == 'UNKNOWN_INSTRUMENT'
 
 
-def test_execute_signal_rejects_disallowed_market_via_new_gate_before_alpaca(monkeypatch):
+def test_execute_signal_rejects_disallowed_market_via_new_gate_before_alpaca(
+        monkeypatch, ny_session_clock):
     """
     Requirement 6, exercised through the actual new gate (not the earlier
     routing step): a profile that only allows the NQ market (MNQ) must

@@ -7,6 +7,7 @@ from core.state import (
     load_risk_state, load_assistant_state, save_assistant_state, load_alert_history,
 )
 from intelligence.gateway import request_intelligence
+from intelligence.current_knowledge import CurrentKnowledgeIntegrityError, retrieve_current_prime
 from engines.engines import (
     build_market_driver_engine, build_morning_edge,
     build_session_significance, build_market_movers_engine,
@@ -53,7 +54,7 @@ except Exception:
     _load_mem = None
     _mem_fmt  = None
 
-def summarize_system_context() -> str:
+def _summarize_system_context_parts() -> tuple[str, list[str]]:
     risk      = load_risk_state()
     driver    = build_market_driver_engine(risk)
     morning   = build_morning_edge(risk)
@@ -61,19 +62,26 @@ def summarize_system_context() -> str:
     movers    = build_market_movers_engine()
     assistant = load_assistant_state()
     mr2 = load_market_reality_v2() if load_market_reality_v2 else {}
+    context_sources = ['session_risk', 'working_memory']
 
-    # MR2 ground truth prepended first so Claude reads objective state before any narrative.
+    # Market Reality is included early as one evidence source, never as infallible authority.
     # V1 loaded only as fallback when V2 is unavailable — avoids unconditional dual read.
     if mr2 and _mr2_fmt:
         reality_line = _mr2_fmt(mr2)
+        if reality_line:
+            context_sources.append('market_reality')
     else:
         mr = load_market_reality()
         reality_line = format_reality_for_assistant(mr)
+        if reality_line:
+            context_sources.append('market_reality')
 
     cm_line = ''
     if _load_cm and _cm_fmt:
         try:
             cm_line = _cm_fmt(_load_cm())
+            if cm_line:
+                context_sources.append('cross_market')
         except Exception:
             pass
 
@@ -81,6 +89,8 @@ def summarize_system_context() -> str:
     if _load_ms and _ms_fmt:
         try:
             ms_line = _ms_fmt(_load_ms())
+            if ms_line:
+                context_sources.append('market_structure')
         except Exception:
             pass
 
@@ -88,6 +98,8 @@ def summarize_system_context() -> str:
     if _load_p and _p_fmt:
         try:
             p_line = _p_fmt(_load_p())
+            if p_line:
+                context_sources.append('participation')
         except Exception:
             pass
 
@@ -95,6 +107,8 @@ def summarize_system_context() -> str:
     if _load_liq and _liq_fmt:
         try:
             liq_line = _liq_fmt(_load_liq())
+            if liq_line:
+                context_sources.append('liquidity')
         except Exception:
             pass
 
@@ -102,6 +116,8 @@ def summarize_system_context() -> str:
     if _load_syn and _syn_fmt:
         try:
             syn_line = _syn_fmt(_load_syn())
+            if syn_line:
+                context_sources.append('synthesis')
         except Exception:
             pass
 
@@ -109,6 +125,8 @@ def summarize_system_context() -> str:
     if _load_mem and _mem_fmt:
         try:
             mem_line = _mem_fmt(_load_mem())
+            if mem_line:
+                context_sources.append('session_memory')
         except Exception:
             pass
 
@@ -136,7 +154,18 @@ def summarize_system_context() -> str:
     liq_line_s  = f'\n{liq_line}'  if liq_line  else ''
     mem_line_s  = f'\n{mem_line}'  if mem_line  else ''
     syn_line_s  = f'\n{syn_line}'  if syn_line  else ''
-    return f"{reality_line}{cross_line}{struct_line}{part_line}{liq_line_s}{mem_line_s}{syn_line_s}\n\n{cached_context}"
+    context = f"{reality_line}{cross_line}{struct_line}{part_line}{liq_line_s}{mem_line_s}{syn_line_s}\n\n{cached_context}"
+    return context, context_sources
+
+
+def summarize_system_context() -> str:
+    """Backward-compatible text-only system context."""
+    return _summarize_system_context_parts()[0]
+
+
+def summarize_system_context_with_sources() -> tuple[str, list[str]]:
+    """Return generated context plus source classes present in that context."""
+    return _summarize_system_context_parts()
 
 
 def apply_assistant_action(action, value):
@@ -184,11 +213,43 @@ def call_assistant_llm(message: str) -> dict:
         'unavailable' the gateway failed; `reply` is its user-safe message
                       and `error_code` is the fixed-vocabulary reason
     """
+    system_context, context_sources = summarize_system_context_with_sources()
+    try:
+        current_knowledge = retrieve_current_prime(message)
+    except CurrentKnowledgeIntegrityError:
+        return {
+            'action': 'none',
+            'value': '',
+            'reply': 'Current PRIME knowledge is unavailable because its authority package failed integrity validation.',
+            'outcome': 'unavailable',
+            'error_code': None,
+            'cached': False,
+            'context_sources': context_sources,
+            'knowledge_sources': [],
+            'knowledge_provenance': [],
+            'knowledge_authority': 'unavailable',
+        }
+    # Doctrine travels in its own field, never appended to the generated
+    # context. Sharing a field would have let any headline or user sentence
+    # that types a [CURRENT SOURCE: ...] marker arrive with the same standing
+    # as text NOVA actually read from Git-authoritative files; the prompt
+    # module gives this field its own section and neutralises that marker
+    # everywhere else.
+    if current_knowledge.text:
+        context_sources.append('current_prime_knowledge')
+    knowledge_sources = list(current_knowledge.sources)
+    hashes = list(getattr(current_knowledge, 'source_hashes', ()))
+    knowledge_provenance = [
+        {'source': src, 'sha256': hashes[i] if i < len(hashes) else None}
+        for i, src in enumerate(knowledge_sources)
+    ]
+
     response = request_intelligence(
         'assistant',
         {
             'message': message,
-            'system_context': summarize_system_context(),
+            'system_context': system_context,
+            'current_knowledge': current_knowledge.text,
         },
         user_id='pedro',
         request_id=str(uuid.uuid4()),
@@ -202,6 +263,9 @@ def call_assistant_llm(message: str) -> dict:
             'outcome': 'unavailable',
             'error_code': response.error_code,
             'cached': False,
+            'context_sources': context_sources,
+            'knowledge_sources': knowledge_sources,
+            'knowledge_provenance': knowledge_provenance,
         }
 
     data = response.structured_data
@@ -216,6 +280,9 @@ def call_assistant_llm(message: str) -> dict:
             'outcome': 'malformed',
             'error_code': 'MALFORMED_OUTPUT',
             'cached': bool(response.cached),
+            'context_sources': context_sources,
+            'knowledge_sources': knowledge_sources,
+            'knowledge_provenance': knowledge_provenance,
         }
 
     reply = str(data.get('reply') or '').strip()
@@ -226,4 +293,8 @@ def call_assistant_llm(message: str) -> dict:
         'outcome': 'ok' if reply else 'empty',
         'error_code': None,
         'cached': bool(response.cached),
+        'context_sources': context_sources,
+        'knowledge_sources': knowledge_sources,
+        'knowledge_provenance': knowledge_provenance,
+        'knowledge_authority': 'current',
     }

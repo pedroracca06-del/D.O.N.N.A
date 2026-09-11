@@ -103,10 +103,16 @@ def test_open_trade_with_size_greater_than_one_reproduces_and_fixes_live_inciden
 
 # ── 4. Mixed open + closed journal -- only closed trades count ─────────────
 
-def test_mixed_open_and_closed_journal_only_counts_closed():
+def test_mixed_open_and_closed_journal_only_counts_closed(frozen_today):
     """Reproduces the exact live journal shape: 8 real closed trades summing
     to $271.36, plus the one open SPY position that previously contaminated
-    the total with +$74,190.56. After the fix, only the closed trades count."""
+    the total with +$74,190.56. After the fix, only the closed trades count.
+
+    The date is pinned because `this_week` is measured against the fixture's
+    own calendar week; with a live clock this passes only during the week of
+    2026-06-22 and silently reports 0.0 afterwards.
+    """
+    frozen_today('2026-06-25')          # Thursday of the fixture's week
     closed_trades = [
         _closed_trade(495.0,   '2026-06-22'),
         _closed_trade(514.91,  '2026-06-22'),
