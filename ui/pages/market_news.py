@@ -2,15 +2,14 @@
 unchanged internally so no route, loop or renderer outside this page has to
 change).
 
-The approved composition (artifact 55c387a4, screenshots #1 live and #3
-cached) replaces the previous vertical stack of cards with one analytical
-workspace:
+The live composition restores News as one of NOVA's three core pillars. It is
+an intelligence desk first and an analytical workspace second:
 
   1. Markets identity, freshness and clock
   2. Session and risk rail
-  3. Cross-Asset Pulse          | 4. Volatility & Direction
-     (spans both right rows)    | 5. News & Catalysts
-  6. Market Structure — full width beneath both columns
+  3. Live News Desk — breaking lead, rapid updates, macro calendar and drivers
+  4. Cross-Asset Pulse
+  5. Market Structure          | 6. Volatility & Direction
   7. Sources / provenance
 
 Both marquees are gone. The futures ticker and the five editable index tiles
@@ -31,8 +30,8 @@ MARKET_NEWS_HTML = '''  <!-- ═════════════════
       <!-- 1. IDENTITY / FRESHNESS -->
       <div class="mk-id">
         <div class="mk-id-left">
-          <div class="mk-kicker">Market Intelligence</div>
-          <h1 class="mk-title">Markets</h1>
+          <div class="mk-kicker">NOVA Newsroom · live market intelligence</div>
+          <h1 class="mk-title">Market News</h1>
         </div>
         <div class="mk-id-meta">
           <span class="mk-fresh connecting" id="mkFresh">Connecting&hellip;</span>
@@ -88,47 +87,56 @@ MARKET_NEWS_HTML = '''  <!-- ═════════════════
           </div>
         </div>
 
-        <!-- 3. CROSS-ASSET PULSE -->
-        <section class="mk-panel mk-pulse" aria-labelledby="mkPulseTitle">
-          <div class="mk-ph">
-            <h2 id="mkPulseTitle">Cross-asset pulse</h2>
-            <span class="mk-sub" id="mkPulseMeta">&mdash;</span>
-          </div>
-          <div class="mk-pulse-body" id="mkPulseBody">
-            <div class="mk-skel-rows"><i></i><i></i><i></i><i></i></div>
-          </div>
-          <div class="mk-foot" id="mkPulseFoot"></div>
-        </section>
-
-        <!-- 4. VOLATILITY & DIRECTION -->
-        <section class="mk-panel mk-vol" aria-labelledby="mkVolTitle">
-          <div class="mk-ph">
-            <h2 id="mkVolTitle">Volatility &amp; direction</h2>
-            <span class="mk-sub" id="mkVolMeta">&mdash;</span>
-          </div>
-          <div id="mkVolBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
-        </section>
-
-        <!-- 5. NEWS & CATALYSTS -->
+        <!-- 3. LIVE INTELLIGENCE DESK — the primary Markets surface. -->
         <section class="mk-panel mk-news" aria-labelledby="mkNewsTitle">
+          <div class="mk-breaking-wire" id="mkBreakingWire" aria-live="polite">
+            <span>Breaking</span><strong>Waiting for the latest verified market-moving headline…</strong>
+          </div>
           <div class="mk-ph">
-            <h2 id="mkNewsTitle">News &amp; catalysts</h2>
+            <div>
+              <div class="mk-live-kicker"><span></span> Live financial wire</div>
+              <h2 id="mkNewsTitle">What is moving markets now</h2>
+            </div>
             <span class="mk-sub" id="mkNewsMeta">&mdash;</span>
           </div>
           <div id="mkNewsBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
         </section>
 
-        <!-- 6. MARKET STRUCTURE — full width -->
-        <section class="mk-panel mk-struct" aria-labelledby="mkStructTitle">
-          <div class="mk-ph">
-            <h2 id="mkStructTitle"><span id="mkStructSym">NQ</span> &middot; market structure</h2>
-            <span class="mk-switch" role="group" aria-label="Instrument">
-              <button type="button" data-mk-sym="NQ" aria-pressed="true">NQ</button>
-              <button type="button" data-mk-sym="ES" aria-pressed="false">ES</button>
-            </span>
-          </div>
-          <div id="mkStructBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
-        </section>
+        <!-- 4 + 5. SUPPORTING MARKET CONTEXT -->
+        <div class="mk-left">
+          <section class="mk-panel mk-pulse" aria-labelledby="mkPulseTitle">
+            <div class="mk-ph">
+              <h2 id="mkPulseTitle">Cross-asset pulse</h2>
+              <span class="mk-sub" id="mkPulseMeta">&mdash;</span>
+            </div>
+            <div class="mk-pulse-body" id="mkPulseBody">
+              <div class="mk-skel-rows"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="mk-foot" id="mkPulseFoot"></div>
+          </section>
+
+          <section class="mk-panel mk-struct" aria-labelledby="mkStructTitle">
+            <div class="mk-ph">
+              <h2 id="mkStructTitle"><span id="mkStructSym">NQ</span> &middot; market structure</h2>
+              <span class="mk-switch" role="group" aria-label="Instrument">
+                <button type="button" data-mk-sym="NQ" aria-pressed="true">NQ</button>
+                <button type="button" data-mk-sym="ES" aria-pressed="false">ES</button>
+              </span>
+            </div>
+            <div id="mkStructBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
+          </section>
+        </div>
+
+        <!-- 6. VOLATILITY: supporting context, aligned with structure. -->
+        <div class="mk-side">
+          <section class="mk-panel mk-vol" aria-labelledby="mkVolTitle">
+            <div class="mk-ph">
+              <h2 id="mkVolTitle">Volatility &amp; direction</h2>
+              <span class="mk-sub" id="mkVolMeta">&mdash;</span>
+            </div>
+            <div id="mkVolBody"><div class="mk-skel-rows"><i></i><i></i><i></i></div></div>
+          </section>
+        </div>
 
         <!-- 7. SOURCES / PROVENANCE -->
         <div class="mk-prov" id="mkProv" aria-label="Data sources"></div>

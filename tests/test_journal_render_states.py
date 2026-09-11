@@ -83,25 +83,31 @@ _PARTS = [
     'let _jnSelectedKey = null;', 'let _jnRows = [];',
     'let _journalData = null;', 'let journalFilter = "all";',
     'let _jnInstrument = "all";', 'let _jnPeriod = "all";', 'let _jnRegime = "all";',
-    _fn('setText'),
-    _fn('_jnNum'), _fn('_jnKey'), _fn('_jnPnl'), _fn('_jnOutcome'),
+    'let _jnMode = "LIVE";', 'let _jnAccount = "all";',
+    'let _journalWorkspace = null;',
+    _fn('setText'), _fn('setHtml'),
+    _fn('_jnNum'), _fn('_jnKey'), _fn('_jnPnl'), _fn('_jnOutcome'), _fn('_jnTradeMode'),
     _fn('_jnClosed'), _fn('_jnDir'), _fn('_jnEsc'), _fn('_jnMoney'),
     _fn('_jnPnlClass'), _fn('_jnPnlMark'), _fn('_jnValidDate'),
     _fn('_jnBucketLabel'), _fn('_jnIsAbsentBucket'), _fn('_jnMoneyAxis'),
-    _fn('_jnDistinct'), _fn('_jnFilterGroup'),
+    _fn('_jnDistinct'), _fn('_jnFilterGroup'), _fn('_jnDailyTotals'),
+    _fn('_jnRenderDashboard'),
     _fn('_jnRenderRail'), _fn('_jnRenderLedger'), _fn('_jnRenderReview'),
     _fn('_jnRenderBreakdown'), _fn('_jnRenderDaily'),
     _fn('_jnSelect'), _fn('_jnBindLedger'), _fn('renderJournal'),
 ]
 
 _IDS = [
-    'jnNetPnl', 'jnNetPnlSub', 'jnWeekPnl', 'jnWeekPnlSub',
+    'jnNetPnlLabel', 'jnNetPnl', 'jnNetPnlSub', 'jnWeekPnl', 'jnWeekPnlSub',
     'jnProfitFactor', 'jnProfitFactorSub', 'jnAvgWL', 'jnAvgWLSub',
     'jnWinRate', 'jnWinRateSub', 'jnRailNote',
     'jnLedgerBody', 'jnLedgerFoot', 'jFilterBar',
     'jnByRegime', 'jnBySession', 'jnByDirection', 'jnByDirectionNote',
     'jnBySetup', 'jnBreakdownMeta', 'jnDaily', 'jnDailyMeta', 'jnDailyNote', 'jnDailyCtx',
     'jnReviewInner', 'jTabCount-trades',
+    'jDashboardControls', 'jnEquityMeta', 'jnEquity',
+    'jnDashDailyMeta', 'jnDashDaily', 'jnCalendarMeta', 'jnCalendarSummary',
+    'jnCalendar', 'jnWeeklyMeta', 'jnWeekly', 'jnModels',
 ]
 
 _HARNESS = r'''
@@ -142,6 +148,7 @@ journalFilter = scenario.filter || 'all';
 if (scenario.instrument) _jnInstrument = scenario.instrument;
 if (scenario.period) _jnPeriod = scenario.period;
 if (scenario.regime) _jnRegime = scenario.regime;
+if (scenario.mode) _jnMode = scenario.mode;
 if (scenario.preselect) _jnSelectedKey = scenario.preselect;
 renderJournal(scenario.payload);
 if (scenario.thenPayload) renderJournal(scenario.thenPayload);
@@ -150,7 +157,8 @@ const _dstyle = elements['jnDaily'].style._p || {};
 const out = {selectedKey: _jnSelectedKey, rowCount: _jnRows.length,
              jnDailyDense: elements['jnDaily'].getAttribute('data-dense'),
              jnDailyStyle: {pos: _dstyle['--pos'] || '', neg: _dstyle['--neg'] || '',
-                            slots: _dstyle['--slots'] || '', n: _dstyle['--n'] || ''}};
+                            slots: _dstyle['--slots'] || '', n: _dstyle['--n'] || '',
+                            track: _dstyle['--track-w'] || ''}};
 for (const id of %(ids)s) {
   out[id] = {display: elements[id].style.display,
              text: elements[id].textContent,
@@ -195,6 +203,30 @@ def _payload(trades, **stats):
          'by_setup_type': {}, 'daily_pnl': {'today': 0, 'yesterday': 0, 'this_week': 0}}
     s.update(stats)
     return {'trades': trades, 'stats': s}
+
+
+def test_live_and_paper_books_are_strictly_isolated():
+    trades = [
+        _trade(order_id='live', trade_mode='LIVE', realized_pnl=100.0),
+        _trade(order_id='paper', trade_mode='PAPER', realized_pnl=-50.0, outcome='LOSS'),
+    ]
+
+    live = _run({'payload': _payload(trades)})
+    paper = _run({'payload': _payload(trades), 'mode': 'PAPER'})
+
+    assert live['rowCount'] == 1
+    assert live['jnNetPnl']['text'] == '+$100.00'
+    assert paper['rowCount'] == 1
+    assert paper['jnNetPnl']['text'] == '-$50.00'
+    for out in (live, paper):
+        assert 'Live trades (1)' in out['jFilterBar']['text']
+        assert 'Paper studies (1)' in out['jFilterBar']['text']
+
+
+def test_historical_trades_without_a_mode_remain_in_live_book():
+    out = _run({'payload': _payload([_trade(order_id='legacy')])})
+    assert out['rowCount'] == 1
+    assert out['jnNetPnl']['text'] == '+$10.00'
 
 
 # ── Performance rail ─────────────────────────────────────────────────────
@@ -439,6 +471,41 @@ def test_period_filter_narrows_by_date():
     assert out['rowCount'] == 1
 
 
+def test_period_filter_recomputes_every_performance_region():
+    """The period control is analytical scope, not a ledger-only hide/show."""
+    import datetime
+    today = datetime.date.today().isoformat()
+    old = (datetime.date.today() - datetime.timedelta(days=200)).isoformat()
+    trades = [
+        _trade(trade_date=today, realized_pnl=100.0, outcome='WIN', active_regime='CURRENT'),
+        _trade(trade_date=old, realized_pnl=-900.0, outcome='LOSS', active_regime='OLD'),
+    ]
+    out = _run({'payload': _payload(trades), 'period': 'week'})
+    assert out['jnNetPnl']['text'] == '+$100.00'
+    assert out['jnNetPnlLabel']['text'] == 'Net P&L · This week'
+    assert '1 closed trade' in out['jnNetPnlSub']['text']
+    assert out['jnWinRate']['text'] == '100%'
+    assert 'CURRENT' in out['jnByRegime']['text']
+    assert 'OLD' not in out['jnByRegime']['text']
+    assert today[5:].replace('-', '/') in out['jnDaily']['text']
+    assert old[5:].replace('-', '/') not in out['jnDaily']['text']
+
+
+def test_this_month_uses_calendar_month_not_rolling_thirty_days():
+    import datetime
+    today = datetime.date.today()
+    current = today.replace(day=1).isoformat()
+    prior = (today.replace(day=1) - datetime.timedelta(days=1)).isoformat()
+    trades = [
+        _trade(trade_date=current, realized_pnl=75.0, outcome='WIN'),
+        _trade(trade_date=prior, realized_pnl=-500.0, outcome='LOSS'),
+    ]
+    out = _run({'payload': _payload(trades), 'period': 'month'})
+    assert out['rowCount'] == 1
+    assert out['jnNetPnl']['text'] == '+$75.00'
+    assert out['jnNetPnlLabel']['text'] == 'Net P&L · This month'
+
+
 def test_selection_follows_the_filtered_ledger():
     """Filtering the selected trade out must move selection to a visible row."""
     trades = [_trade(order_id='win-1', outcome='WIN', realized_pnl=10.0),
@@ -518,6 +585,13 @@ def test_daily_column_count_follows_the_real_sessions():
     assert out['jnDaily']['html'].count('class="jn-col-plot"') == 1
 
 
+def test_daily_sparse_sessions_use_a_compact_track():
+    trades = [_trade(order_id='a', trade_date='2026-08-31'),
+              _trade(order_id='b', trade_date='2026-09-01')]
+    out = _run({'payload': _payload(trades)})
+    assert out['jnDailyStyle']['track'] == '192px'
+
+
 def test_daily_sparse_history_says_so_without_an_empty_panel():
     out = _run({'payload': _payload([_trade(trade_date='2026-06-24')])})
     note = out['jnDailyNote']['text']
@@ -546,12 +620,46 @@ def test_daily_colours_follow_the_sign():
     assert 'jn-dbar flat' in html
 
 
+def test_dashboard_daily_pnl_is_a_compact_diverging_chart():
+    trades = [_trade(order_id='w', trade_date='2026-08-31', realized_pnl=617.50, outcome='WIN'),
+              _trade(order_id='b', trade_date='2026-09-01', realized_pnl=1289.00, outcome='WIN'),
+              _trade(order_id='l', trade_date='2026-09-02', realized_pnl=-518.20, outcome='LOSS'),
+              _trade(order_id='f', trade_date='2026-09-03', realized_pnl=0.0, outcome='BREAKEVEN')]
+    out = _run({'payload': _payload(trades)})
+    html = out['jnDashDaily']['html']
+    assert 'class="jn-dash-chart"' in html
+    assert 'class="jn-dash-zero"' in html
+    assert html.count('class="jn-dash-bar ') == 4
+    assert '+$1,289.00' in html
+    assert '-$518.20' in html
+
+
+def test_single_trade_equity_curve_spans_the_full_plot():
+    out = _run({'payload': _payload([
+        _trade(order_id='only', trade_date='2026-09-03', realized_pnl=0.0, outcome='BREAKEVEN')
+    ])})
+    html = out['jnEquity']['html']
+    assert '48.0,109.0 680.0,109.0' in html
+    assert html.count('class="jn-eq-dot"') == 2
+    assert 'Starting balance' in html
+
+
 def test_daily_bar_heights_are_proportional_to_the_largest_absolute_result():
     trades = [_trade(order_id='a', trade_date='2026-06-22', realized_pnl=400.0),
               _trade(order_id='b', trade_date='2026-06-23', realized_pnl=100.0)]
     html = _run({'payload': _payload(trades)})['jnDaily']['html']
     assert '--mag:100.00%' in html, 'largest session anchors the scale'
     assert '--mag:25.00%' in html, '100 of 400 must render at a quarter height'
+
+
+def test_daily_value_labels_live_in_the_same_scale_cell_as_their_bars():
+    trades = [_trade(order_id='w', trade_date='2026-06-22', realized_pnl=300.0, outcome='WIN'),
+              _trade(order_id='l', trade_date='2026-06-23', realized_pnl=-150.0, outcome='LOSS')]
+    html = _run({'payload': _payload(trades)})['jnDaily']['html']
+    assert 'jn-col-pos"><i class="jn-dbar up"' in html
+    assert '+$300.00</span></span><span class="jn-col-neg"></span>' in html
+    assert 'jn-col-pos"></span><span class="jn-col-neg"><i class="jn-dbar down"' in html
+    assert '-$150.00</span></span>' in html
 
 
 def test_daily_baseline_splits_by_the_positive_share_of_the_scale():
@@ -632,6 +740,15 @@ def test_daily_every_session_label_and_value_is_rendered():
     html = _run({'payload': _payload(trades)})['jnDaily']['html']
     for token in ('06/22', '06/23', '+$300.00', '-$100.00'):
         assert token in html, token
+
+
+@pytest.mark.parametrize('period', ['quarter', 'all'])
+def test_quarter_and_all_time_calendars_complete_the_final_week(period):
+    trades = [_trade(order_id='a', trade_date='2026-09-01', realized_pnl=100.0),
+              _trade(order_id='b', trade_date='2026-09-02', realized_pnl=-50.0, outcome='LOSS')]
+    html = _run({'payload': _payload(trades), 'period': period})['jnCalendar']['html']
+    assert html.count('class="jn-cal-day') == 42
+    assert html.count('class="jn-cal-day outside"') == 12
 
 
 if __name__ == '__main__':

@@ -16,7 +16,11 @@ import os
 import requests
 
 from core.state_engine import state as _state
-from core.config import RISK_STATE_FILE as _CONFIG_RISK_STATE_FILE, MACRO_EVENTS_FILE as _CONFIG_MACRO_EVENTS_FILE
+from core.config import (
+    RISK_STATE_FILE as _CONFIG_RISK_STATE_FILE,
+    MACRO_EVENTS_FILE as _CONFIG_MACRO_EVENTS_FILE,
+    cache_delete,
+)
 
 BASE_DIR          = Path(__file__).parent.parent
 MACRO_EVENTS_FILE = _CONFIG_MACRO_EVENTS_FILE   # respects DONNA_DATA_DIR on Render
@@ -27,7 +31,7 @@ FMP_API_KEY = os.getenv('FMP_API_KEY', '').strip()
 
 # Event names that automatically trigger red_folder_week
 _RED_FOLDER_NAMES = {
-    'cpi', 'nonfarm payroll', 'nfp', 'fomc', 'fed rate',
+    'cpi', 'nonfarm payroll', 'non-farm employment', 'nfp', 'fomc', 'fed rate',
     'ppi', 'retail sales', 'federal reserve', 'interest rate decision',
     'unemployment rate', 'core cpi', 'core pce',
 }
@@ -81,7 +85,11 @@ def _safe_get(url: str, params=None, timeout: int = 18):
 
 def _week_bounds() -> tuple[str, str]:
     now    = _now_ny()
-    monday = now - timedelta(days=now.weekday())
+    # ForexFactory rolls its `thisweek` feed forward over the weekend.  Match
+    # that behaviour: on Saturday/Sunday fetch the coming trading week instead
+    # of filtering every returned event against the week that just ended.
+    days_to_monday = (7 - now.weekday()) if now.weekday() >= 5 else -now.weekday()
+    monday = now + timedelta(days=days_to_monday)
     friday = monday + timedelta(days=4)
     return monday.strftime('%Y-%m-%d'), friday.strftime('%Y-%m-%d')
 
@@ -115,7 +123,7 @@ def _category(title: str) -> str:
         return 'fed'
     if any(w in t for w in ['cpi', 'pce', 'inflation', 'ppi']):
         return 'inflation'
-    if any(w in t for w in ['jobs', 'payroll', 'unemployment', 'jobless', 'nfp']):
+    if any(w in t for w in ['jobs', 'payroll', 'non-farm', 'employment change', 'unemployment', 'jobless', 'nfp']):
         return 'employment'
     if any(w in t for w in ['gdp', 'growth', 'recession']):
         return 'growth'
@@ -182,6 +190,7 @@ def _fetch_fmp_calendar(mon_str: str, fri_str: str) -> list[dict]:
             except Exception:
                 pass
 
+        actual   = str(item.get('actual', '') if item.get('actual') is not None else '').strip() or 'Pending'
         forecast = str(item.get('estimate', '') or '').strip() or '—'
         previous = str(item.get('previous', '') or '').strip() or '—'
 
@@ -190,7 +199,10 @@ def _fetch_fmp_calendar(mon_str: str, fri_str: str) -> list[dict]:
             'time_et':    time_et,
             'importance': importance,
             'category':   _category(title),
-            'note':       f'Forecast: {forecast} | Prev: {previous}',
+            'actual':     actual,
+            'forecast':   forecast,
+            'previous':   previous,
+            'note':       f'Actual: {actual} | Forecast: {forecast} | Prev: {previous}',
             'date':       date_str,
             'currency':   'USD',
             'source':     'FMP',
@@ -259,6 +271,7 @@ def _fetch_ff_json_calendar() -> list[dict]:
                 except ValueError:
                     pass
 
+        actual   = str(item.get('actual', '') if item.get('actual') is not None else '').strip() or 'Pending'
         forecast = str(item.get('forecast', '') or '').strip() or '—'
         previous = str(item.get('previous', '') or '').strip() or '—'
 
@@ -267,7 +280,10 @@ def _fetch_ff_json_calendar() -> list[dict]:
             'time_et':    time_et,
             'importance': importance,
             'category':   _category(title),
-            'note':       f'Forecast: {forecast} | Prev: {previous}',
+            'actual':     actual,
+            'forecast':   forecast,
+            'previous':   previous,
+            'note':       f'Actual: {actual} | Forecast: {forecast} | Prev: {previous}',
             'date':       date_str,
             'currency':   'USD',
             'source':     'ForexFactory',
@@ -354,7 +370,7 @@ def is_red_folder_week() -> bool:
 
 # ── public: check_todays_breaking_events (on-demand / startup) ──
 _BREAKING_KEYWORDS = {
-    'cpi', 'core cpi', 'inflation', 'nonfarm payroll', 'nfp',
+    'cpi', 'core cpi', 'inflation', 'nonfarm payroll', 'non-farm employment', 'nfp',
     'fomc', 'fed rate', 'federal reserve', 'interest rate decision',
     'ppi', 'retail sales', 'unemployment rate', 'core pce',
 }
@@ -497,17 +513,42 @@ def process_headlines_cycle():
     source = 'FMP+ForexFactory' if (fmp_events and ff_events) \
         else ('FMP' if fmp_events else ('ForexFactory' if ff_events else 'none'))
 
+    # Both providers occasionally return a transient empty response. Never let
+    # that erase a valid calendar for the same trading week: the browser polls
+    # /dashboard-data every 30 seconds, so replacing the file with [] made the
+    # Macro panel visibly disappear and reappear between provider cycles.
+    # A prior-week payload is not retained because that would present stale
+    # events as current; only a non-empty, exact-week payload is protected.
+    previous = _read_json(MACRO_EVENTS_FILE, {})
+    previous_events = previous.get('events') if isinstance(previous.get('events'), list) else []
+    retained_last_good = (
+        not week_events
+        and source == 'none'
+        and previous.get('week_start') == mon_str
+        and previous.get('week_end') == fri_str
+        and bool(previous_events)
+    )
+    if retained_last_good:
+        week_events = previous_events
+        source = str(previous.get('source') or 'retained')
+        print('[donna_headlines] Both calendar providers returned empty; '
+              'retaining the last good payload for the current week')
+
     print(f'[donna_headlines] {len(week_events)} USD HIGH/MEDIUM events '
           f'({mon_str}→{fri_str}) — source: {source}')
 
-    # 2. Persist full week
-    _write_json(MACRO_EVENTS_FILE, {
-        'source':     source,
-        'fetched_at': _utc_iso(),
-        'week_start': mon_str,
-        'week_end':   fri_str,
-        'events':     week_events,
-    })
+    # 2. Persist full week. When retaining, leave fetched_at and the file bytes
+    # untouched so freshness remains honest. A successful replacement clears
+    # the five-minute API cache immediately.
+    if not retained_last_good:
+        _write_json(MACRO_EVENTS_FILE, {
+            'source':     source,
+            'fetched_at': _utc_iso(),
+            'week_start': mon_str,
+            'week_end':   fri_str,
+            'events':     week_events,
+        })
+        cache_delete('calendar')
 
     # 3. Red-folder detection
     is_red = is_red_folder_week()

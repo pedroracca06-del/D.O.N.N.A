@@ -24,6 +24,7 @@ NY_TZ           = ZoneInfo('America/New_York')
 FINNHUB_API_KEY   = os.getenv('FINNHUB_API_KEY', '').strip()
 FMP_API_KEY       = os.getenv('FMP_API_KEY', '').strip()
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '').strip()
+_news_source_cursor = 0
 
 # ── helpers ──────────────────────────────────────────────────
 def _now_ny():
@@ -198,6 +199,24 @@ def _fetch_fmp_news() -> list[dict]:
             })
     return results
 
+def _fetch_rotating_news() -> list[dict]:
+    """Alternate providers each cycle and fall back without failing the cycle."""
+    global _news_source_cursor
+    sources = (
+        ('finnhub', _fetch_finnhub_news),
+        ('fmp', _fetch_fmp_news),
+    )
+    start = _news_source_cursor % len(sources)
+    _news_source_cursor = (start + 1) % len(sources)
+
+    for offset in range(len(sources)):
+        name, fetch = sources[(start + offset) % len(sources)]
+        items = fetch()
+        if items:
+            print(f'[donna_news] Using {name} news feed')
+            return items
+    return []
+
 def _dedupe(items: list[dict]) -> list[dict]:
     seen, out = set(), []
     for item in items:
@@ -256,9 +275,7 @@ def process_news_guard_cycle():
     print(f'[donna_news] Running cycle at {_now_ny().strftime("%H:%M:%S")} ET')
 
     # 1. Fetch news from available sources
-    items = _fetch_finnhub_news()
-    if not items:
-        items = _fetch_fmp_news()
+    items = _fetch_rotating_news()
     items = _dedupe(items)
 
     if not items:
@@ -376,7 +393,7 @@ def immediate_risk_check() -> dict:
     """
     print(f'[donna_news] immediate_risk_check at {_now_ny().strftime("%H:%M:%S")} ET')
 
-    items = _fetch_finnhub_news()
+    items = _fetch_rotating_news()
     if not items:
         return {'triggered': False, 'matched_words': [], 'top_headline': ''}
 
