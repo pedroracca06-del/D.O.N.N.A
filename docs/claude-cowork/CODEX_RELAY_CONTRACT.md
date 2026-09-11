@@ -271,6 +271,113 @@ deletes an entry, and it has no prune operation. It cannot stop another program.
 
 ---
 
+## Two runners, one boundary
+
+There are two components that may start a model, and they are separate on
+purpose.
+
+`codex_review_runner.py` runs `-s read-only`. It is unchanged by the addition
+of the second one, and several tests assert that: the reviewer does not import
+the implementer, the two do not share a policy file, and the reviewer's fixed
+sandbox flag is still `read-only`.
+
+`codex_implementation_runner.py` runs `-s workspace-write` rooted at one
+assigned worktree, and only for a task recorded in the implementation ledger.
+Its containment is layered, and only the first two layers are containment:
+
+| Layer | Kind | What it does |
+|---|---|---|
+| L1 | operating system | `workspace-write` sandbox rooted at the assigned worktree. Credentials, the session registry, the relay mailbox, the other worktrees, and the real git directory are all outside it. |
+| L2 | operating system | The child runs in a STAGING workspace holding the assigned paths and nothing else, so a protected path is ABSENT rather than read-only. |
+| L3 | coordinator | The diff is confined to the assigned paths; anything outside is reverted and the task is recorded as out of scope. |
+
+**L3 is a bound, not containment**, and the policy validator refuses a policy
+that describes L1 or L2 as anything other than an operating-system control.
+
+An earlier version used the read-only file attribute for L2. That was wrong, and
+measurably so: against it, clear-attribute-then-write, delete and replace were
+all ALLOWED. A same-user process simply clears the attribute, and a Windows DACL
+is no better because the owner keeps implicit `WRITE_DAC`. Absence is the only
+thing on this machine that actually denies the write, so the child now works in
+a staging copy of just the assigned paths and the coordinator applies the result
+back. The attribute pass survives only as defence in depth over the real
+worktree, and it now **fails closed**: a path it cannot stat or cannot mark
+read-only refuses the run rather than proceeding under protection that does not
+exist.
+
+### The attempt is claimed before the child starts
+
+Attempt state used to live in memory until an outcome was recorded, so a crash
+in the window between spawn and the outcome left the task looking untouched — a
+restart would spend a second attempt on it, and two runners could claim the same
+task at once. Both were reproduced.
+
+A claim is now written to the ledger, durably and under an exclusive lock,
+**before** the child exists. A claimed task is never pending again. Recovery
+reports it and refuses; a person closes it out with `settle-claim`, which
+records `abandoned_after_crash`. An outcome whose task was never claimed is
+refused outright, because that would mean an attempt was spent without ever
+being announced.
+
+The property L1 leans on is verified before each run rather than assumed: a
+linked worktree's `.git` is a pointer *file* whose target lives outside the
+worktree, so the child cannot reach objects, refs, the index, hooks, or config.
+The runner refuses to start if the git directory turns out to be inside the
+worktree.
+
+The model never commits and never pushes. A human-directed coordinator runs the
+tests, reviews the diff, and commits. A test asserts the runner builds no
+`git commit`, `git push`, `git merge`, `git reset` or `git update-ref`
+invocation anywhere.
+
+### Writes go through a handle, not a path
+
+Checking a destination path and then copying to it is a race. A Windows
+directory **junction** needs no privilege to create and `os.path.islink`
+reports it as `False`, so a junction planted on an assigned directory
+redirected the copy-back outside the worktree entirely -- measured, with the
+staged content landing in a file outside the repository.
+
+Every apply-back now: refuses any ancestor that is a link or reparse point
+(by file *attribute*, since `islink` lies about junctions); opens the
+destination **without truncating**; asks Windows what that open handle
+actually refers to via `GetFinalPathNameByHandleW`; and only then truncates
+and writes. The check is on the handle being written through, so a path
+swapped after validation cannot redirect it.
+
+The claim is written with `MoveFileEx(..., MOVEFILE_WRITE_THROUGH)` rather
+than a plain rename: atomic is not the same as durable, and a claim the
+machine forgets is a second attempt spent on work that already ran.
+
+The ledger lock is broken only when its owner is **definitively gone** and the
+lock is stale. A live owner keeps its lock however long it holds it, and an
+owner that cannot be identified -- an empty, malformed or unreadable lock, or
+a pid we are not permitted to query -- is treated as live.
+
+### The implementation ledger
+
+Implementation tasks live in their own append-only, hash-chained ledger, not in
+the review mailbox: they are different message types with different lifecycles,
+and the reviewed relay is a protected component this tool does not reshape.
+
+A task that can never run — its bound head or registry revision moved before it
+was executed — is **retired**, not settled. Retirement is its own entry type
+with `attempt_consumed: false`, because an outcome asserts an attempt was spent
+and for an unclaimed task that would be false. A task whose attempt WAS claimed
+is settled with `settle-claim` instead, and the verifier refuses a retirement
+over a claimed task, a claim or an outcome over a retired one, and any
+retirement that claims an attempt was consumed. Nothing is removed: the ledger
+stays append-only and the whole history remains readable.
+
+A task id appears at most twice — once as the assignment, once as its outcome
+or its retirement.
+A task that already has an outcome is never pending again, which is what makes
+recovery safe: re-running after a crash finds nothing to do rather than doing
+the work twice. Every spent attempt records exactly one outcome, from one of a
+fixed set of categories, and a task never gets a second one.
+
+---
+
 ## The one-shot runner
 
 `tools/cowork/codex_review_runner.py`, with the pure-data

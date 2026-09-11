@@ -205,6 +205,31 @@ def test_main_imports_cleanly_with_trading_disabled():
     assert 'MAIN_IMPORT_OK' in result.stdout
 
 
+def test_execution_state_fails_closed_before_legacy_execution_imports():
+    code = (
+        "import asyncio, builtins, json, main\n"
+        "original_import = builtins.__import__\n"
+        "def guarded_import(name, *args, **kwargs):\n"
+        "    if name in {'core.state_engine', 'services.execution_bridge'}:\n"
+        "        raise AssertionError(f'legacy execution import reached: {name}')\n"
+        "    return original_import(name, *args, **kwargs)\n"
+        "builtins.__import__ = guarded_import\n"
+        "result = asyncio.run(main.execution_state())\n"
+        "assert result['status'] == 'TRADING_SUBSYSTEM_DISABLED'\n"
+        "assert result['armed'] is False\n"
+        "assert result['trading_subsystem_enabled'] is False\n"
+        "rendered = json.dumps(result).lower()\n"
+        "assert 'temporarily disabled' in rendered\n"
+        "assert 'separately approved future system change' in rendered\n"
+        "assert 'set to true' not in rendered\n"
+        "assert 'nova_auto_execute' not in rendered\n"
+        "print('DISABLED_RESPONSE_OK')\n"
+    )
+    result = _run(code)
+    assert result.returncode == 0, f'disabled route leaked into legacy execution: {result.stderr}'
+    assert 'DISABLED_RESPONSE_OK' in result.stdout
+
+
 # ── 16. No frontend interaction can invoke a broker-write route ──────────
 
 _BROKER_WRITE_PATHS = (

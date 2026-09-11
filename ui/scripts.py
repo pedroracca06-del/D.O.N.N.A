@@ -17,6 +17,31 @@ const LS_KEY = 'user_index_prefs';
 let _lastDashData = null;
 let _activePicker = null;
 
+// The platform has two deliberate bases: true black and true white. The
+// reader's explicit choice wins; otherwise NOVA follows the OS preference.
+const THEME_KEY = 'nova_color_mode';
+function setNovaTheme(mode, persist) {
+  const chosen = mode === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = chosen;
+  if (persist) localStorage.setItem(THEME_KEY, chosen);
+  const btn = document.getElementById('themeToggle');
+  if (btn) {
+    btn.textContent = chosen === 'dark' ? '◐  Light mode' : '◑  Dark mode';
+    btn.setAttribute('aria-label', 'Switch to ' + (chosen === 'dark' ? 'light' : 'dark') + ' mode');
+  }
+}
+function initNovaTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem(THEME_KEY); } catch (e) {}
+  const preferred = saved === 'light' || saved === 'dark' ? saved
+    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  setNovaTheme(preferred, false);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.addEventListener('click', () => {
+    setNovaTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true);
+  });
+}
+
 function loadIndexPrefs() {
   try {
     const v = JSON.parse(localStorage.getItem(LS_KEY));
@@ -218,6 +243,7 @@ function initTileEditors() {
 }
 
 // ════════ TAB NAVIGATION ════════
+initNovaTheme();
 document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn[data-page]').forEach(b => {
@@ -229,7 +255,7 @@ document.querySelectorAll('.tab-btn[data-page]').forEach(btn => {
     // Keeps the accessible "you are here" state in sync with the visual one.
     btn.setAttribute('aria-current', 'page');
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
-    if (btn.dataset.page === 'journal') { refreshJournal(); switchJTab('trades'); }
+    if (btn.dataset.page === 'journal') { refreshJournal(); refreshJournalWorkspace(); switchJournalView('dashboard'); }
     if (btn.dataset.page === 'settings') { refreshSettings(); }
     if (btn.dataset.page === 'assistant') { refreshNovaIntelligence(); }
   });
@@ -1342,10 +1368,11 @@ function renderNews(d) {
   setText('featureHeadline', featureText);
   setText('featureNote', featureNote);
 
-  // Live feed — tag colors: GEOPOLITICAL red, MARKET blue, MACRO amber, ENERGY gold, CALENDAR gray
+  // Live feed — rich, restrained accents: conflict red, market wine, macro
+  // amber, energy gold and calendar gray. No blue identity treatment.
   const tagStyle = {
     GEOPOLITICAL: 'background:var(--red2);color:var(--red);border:1px solid rgba(192,57,43,.2)',
-    MARKET:       'background:rgba(37,99,235,.08);color:var(--blue);border:1px solid rgba(37,99,235,.15)',
+    MARKET:       'background:rgba(143,33,59,.08);color:var(--wine-text);border:1px solid rgba(143,33,59,.24)',
     MACRO:        'background:rgba(184,134,11,.08);color:var(--yellow);border:1px solid rgba(184,134,11,.2)',
     ENERGY:       'background:rgba(184,134,11,.08);color:var(--gold);border:1px solid rgba(184,134,11,.2)',
     CALENDAR:     'background:var(--panel2);color:var(--muted2);border:1px solid var(--line)',
@@ -1880,6 +1907,19 @@ const NI_SOURCES = [
   ['Session memory',         '/session-memory']
 ];
 
+const NI_CONTEXT_NAMES = {
+  session_risk:     'Session & risk posture',
+  market_reality:   'Market reality',
+  market_structure: 'Market structure',
+  liquidity:        'Liquidity',
+  participation:    'Participation',
+  cross_market:     'Cross-market',
+  synthesis:        'Synthesis',
+  session_memory:   'Session memory',
+  working_memory:   'Working memory',
+  current_prime_knowledge: 'Current PRIME knowledge'
+};
+
 function niEl(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -2070,46 +2110,70 @@ function niAppendPending() {
 }
 
 // The grounding strip states AVAILABILITY, never use. See ui/pages/nova_ai.py
-// for why the distinction is not cosmetic.
-function niGroundStrip() {
+// for why the distinction is not cosmetic. Per-answer grounding further
+// distinguishes request-context inclusion from claim-level citation.
+function niGroundStrip(contextSources) {
   const g = niEl('div', 'ni-ground');
-  g.appendChild(niEl('div', 'ni-ground-k', 'Context available when asked'));
+  const supplied = Array.isArray(contextSources)
+    ? contextSources.filter(k => typeof k === 'string' && NI_CONTEXT_NAMES[k])
+    : [];
   const chips = niEl('div', 'ni-chips');
-  (_niSourceState.length ? _niSourceState : []).forEach(s => {
-    const c = niEl('span', 'ni-chip ' + s.cls);
-    c.appendChild(document.createTextNode(s.name + (s.cls === 'off' ? '' : ' · ' + s.label)));
-    chips.appendChild(c);
-  });
-  if (!_niSourceState.length) chips.appendChild(niEl('span', 'ni-chip off', 'not read'));
-  g.appendChild(chips);
-
   const down  = _niSourceState.filter(s => !s.ok).length;
   const stale = _niSourceState.filter(s => s.cls === 'stale').length;
 
   // The availability-is-not-use sentence is unconditional. It was previously
   // on the healthy branch only, which meant the page dropped its most
   // important caveat in exactly the degraded case where it matters most.
-  if (down || stale) {
+  const appendSourceWarning = () => {
+    if (!down && !stale) return;
     const warn = niEl('div', 'ni-ground-note');
     warn.appendChild(niEl('b', null,
       (down ? down + ' source' + (down > 1 ? 's' : '') + ' did not answer' : '') +
       (down && stale ? ', and ' : '') +
       (stale ? stale + ' ' + (stale > 1 ? 'are' : 'is') + ' stale' : '') + '. '));
     warn.appendChild(document.createTextNode(
-      'NOVA is not told which were missing or old, so treat any claim resting on them as unsupported.'));
+      'Treat claims resting on unavailable or stale context with caution.'));
     g.appendChild(warn);
+  };
+
+  if (supplied.length) {
+    g.appendChild(niEl('div', 'ni-ground-k', 'Context included in this request'));
+    supplied.forEach(key => {
+      const state = _niSourceState.find(s => s.name === NI_CONTEXT_NAMES[key]);
+      const cls = state ? state.cls : 'unknown';
+      const label = NI_CONTEXT_NAMES[key] + (state ? '' : ' \u00b7 status unknown');
+      chips.appendChild(niEl('span', 'ni-chip ' + cls, label));
+    });
+    g.appendChild(chips);
+    appendSourceWarning();
+    const note = niEl('div', 'ni-ground-note');
+    note.appendChild(document.createTextNode(
+      'These source classes were present in the generated request context. '));
+    note.appendChild(niEl('b', null,
+      'This proves context inclusion, not claim-level attribution or citation.'));
+    g.appendChild(note);
+    return g;
   }
 
+  g.appendChild(niEl('div', 'ni-ground-k', 'Context available when asked'));
+  _niSourceState.forEach(s => {
+    const c = niEl('span', 'ni-chip ' + s.cls);
+    c.appendChild(document.createTextNode(s.name + (s.cls === 'off' ? '' : ' \u00b7 ' + s.label)));
+    chips.appendChild(c);
+  });
+  if (!_niSourceState.length) chips.appendChild(niEl('span', 'ni-chip off', 'not read'));
+  g.appendChild(chips);
+  appendSourceWarning();
   const note = niEl('div', 'ni-ground-note');
   note.appendChild(document.createTextNode(
-    'Availability and age are read from each source\u2019s own route. '));
+    'No per-request inclusion metadata was returned, so this fallback shows availability only. '));
   note.appendChild(niEl('b', null,
     'Whether NOVA incorporated each one is not reported by the chat route \u2014 availability is proven, use is not.'));
   g.appendChild(note);
   return g;
 }
 
-function niFillAnswer(card, reply) {
+function niFillAnswer(card, reply, contextSources, knowledgeSources, knowledgeProvenance) {
   card.textContent = '';
   const head = niEl('div', 'ni-a-head');
   head.appendChild(niEl('span', 'ni-a-who', 'NOVA'));
@@ -2120,12 +2184,24 @@ function niFillAnswer(card, reply) {
   body.appendChild(niEl('p', null, String(reply)));
   card.appendChild(body);
 
-  card.appendChild(niGroundStrip());
+  card.appendChild(niGroundStrip(contextSources));
+
+  if (Array.isArray(knowledgeSources) && knowledgeSources.length) {
+    const prov = niEl('div', 'ni-ground-note');
+    prov.appendChild(niEl('b', null, 'Current knowledge files: '));
+    const bySource = new Map((Array.isArray(knowledgeProvenance) ? knowledgeProvenance : []).map(p => [p.source, p.sha256]));
+    prov.appendChild(document.createTextNode(knowledgeSources.map(s => {
+      const name = String(s).split('/').pop();
+      const hash = bySource.get(s);
+      return hash ? name + ' @ ' + String(hash).slice(0, 8) : name;
+    }).join(', ')));
+    card.appendChild(prov);
+  }
 
   const note = niEl('div', 'ni-a-note');
   note.appendChild(niEl('span', 'ni-kind na', 'No citations'));
   note.appendChild(niEl('span', null,
-    'The intelligence layer returns no source references. Nothing above links to a document.'));
+    'The intelligence layer returns no claim-level source references. The context strip shows request inclusion only.'));
   card.appendChild(note);
   niScroll();
 }
@@ -2199,9 +2275,13 @@ async function sendChat(overrideMsg) {
     const reply   = data && typeof data.reply === 'string' ? data.reply.trim() : '';
 
     if (outcome === 'ok' && reply) {
-      niFillAnswer(card, reply);
+      niFillAnswer(card, reply, data.context_sources, data.knowledge_sources, data.knowledge_provenance);
       // Only a real answer may have changed working memory.
       niRefreshMemory();
+    } else if (outcome === 'unavailable' && data && data.knowledge_authority === 'unavailable') {
+      niFillNotice(card, 'warn', 'Current PRIME knowledge unavailable',
+        'NOVA refused to answer from an invalid authority package.',
+        reply || 'Current PRIME knowledge failed integrity validation. No model call was made.');
     } else if (outcome === 'unavailable') {
       niFillNotice(card, 'warn', 'AI unavailable',
         'NOVA did not answer.',
@@ -2244,9 +2324,12 @@ document.querySelectorAll('#page-assistant .ni-sg').forEach(btn => {
 // ══════════════════════════════════════════════════════
 let journalFilter   = 'all';
 let _journalData    = null;
+let _journalWorkspace = null;
 let _signalData     = null;
 let _jDirection     = 'LONG';
 let _jOutcome       = 'WIN';
+let _jTradeMode     = 'LIVE';
+let _jEditingIndex  = null;
 let _jActiveTab     = 'trades';
 let _sigFilter      = 'all';
 
@@ -2261,10 +2344,41 @@ function setOutcome(o) {
   document.getElementById('jOutLoss').className = 'toggle-btn' + (o === 'LOSS'      ? ' active-loss' : '');
   document.getElementById('jOutBE').className   = 'toggle-btn' + (o === 'BREAKEVEN' ? ' active-be'   : '');
 }
+function setTradeMode(mode) {
+  _jTradeMode = mode === 'PAPER' ? 'PAPER' : 'LIVE';
+  document.getElementById('jModeLive').className = 'toggle-btn' + (_jTradeMode === 'LIVE' ? ' active-live' : '');
+  document.getElementById('jModePaper').className = 'toggle-btn' + (_jTradeMode === 'PAPER' ? ' active-paper' : '');
+  const setup = document.getElementById('jSetup');
+  if (setup) {
+    const experimental = Array.from(setup.options).find(o => o.value === 'EXPERIMENTAL');
+    if (experimental) experimental.disabled = _jTradeMode === 'LIVE';
+    if (_jTradeMode === 'LIVE' && setup.value === 'EXPERIMENTAL') setup.value = '';
+  }
+}
 
 function openJModal()  { document.getElementById('jModalBackdrop').style.display = 'flex'; }
 function closeJModal() { document.getElementById('jModalBackdrop').style.display = 'none'; }
-document.getElementById('jOpenModal').addEventListener('click', openJModal);
+document.getElementById('jOpenModal').addEventListener('click', () => {
+  _jEditingIndex = null;
+  setText('jModalTitle','LOG TRADE'); setText('jSubmitBtn','LOG TRADE');
+  openJModal();
+});
+
+function editTrade(index) {
+  const all = (_journalData && _journalData.trades) || [];
+  const t = all.find(row => Number(row._journal_index) === Number(index));
+  if (!t) return;
+  _jEditingIndex = Number(index);
+  const set = (id,v) => { const el=document.getElementById(id); if(el)el.value=v==null?'':v; };
+  set('jAccount',t.account);set('jTicker',t.ticker);set('jDate',t.trade_date);set('jEntryTime',t.entry_time);set('jExitTime',t.exit_time);
+  set('jRealizedPnl',_jnPnl(t));set('jEntry',t.entry_price);set('jExit',t.exit_price);set('jSize',t.size);set('jStop',t.stop);set('jTp1',t.tp1);
+  set('jCommission',t.commission);set('jPerformanceRating',t.performance_rating);set('jSetup',t.setup_type);set('jProtocol',t.protocol);set('jSession',t.session);
+  set('jPremarketPlan',t.premarket_plan_id);set('jConfluences',(t.confluences||[]).join(', '));set('jTradeManagement',t.trade_management);set('jNotes',t.notes);set('jEmotionalState',t.emotional_state);set('jReflection',t.reflection);
+  setTradeMode(_jnTradeMode(t));setDir(String(t.direction||'LONG').toUpperCase());setOutcome(_jnOutcome(t));
+  const checked = new Set([...(t.behavioral_flags||[]),...(t.risk_checklist||[]),...(t.trade_checklist||[])]);
+  ['jFlagEarlyExit','jFlagLateEntry','jFlagHesitation','jFlagOversized','jFlagFomo','jFlagRevenge','jRiskSize','jRiskTrades','jRiskLosses','jRiskSession','jPrimePosition','jPrimeLevel','jPrimeInteraction','jPrimeConfirmation','jPrimeExecution'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=checked.has(el.value);});
+  setText('jModalTitle','EDIT TRADE');setText('jSubmitBtn','SAVE CHANGES');openJModal();
+}
 
 function switchJTab(tab) {
   _jActiveTab = tab;
@@ -2280,6 +2394,17 @@ function switchJTab(tab) {
   });
   if (tab === 'signals' && !_signalData) refreshSignals();
 }
+
+function switchJournalView(view) {
+  const next = ['dashboard','plans','trades','reflections','studies','goals'].indexOf(view) >= 0 ? view : 'dashboard';
+  document.querySelectorAll('[data-jview-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.jviewPanel === next));
+  document.querySelectorAll('.jn-work-tabs [data-jview]').forEach(btn => btn.classList.toggle('active', btn.dataset.jview === next));
+  if (next !== 'dashboard') window.scrollTo({top:0, behavior:'smooth'});
+}
+
+document.querySelectorAll('.jn-work-tabs [data-jview]').forEach(btn => {
+  btn.addEventListener('click', () => switchJournalView(btn.dataset.jview));
+});
 
 function fmtTimeET(isoStr) {
   if (!isoStr) return '—';
@@ -2366,9 +2491,50 @@ function _jnDir(t) {
   return (d === 'LONG' || d === 'SHORT') ? d : null;
 }
 
+function _jnTradeMode(t) {
+  return String(t.trade_mode || 'LIVE').toUpperCase() === 'PAPER' ? 'PAPER' : 'LIVE';
+}
+
 function _jnEsc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function _jnUploadFile(index, file) {
+  if (!Number.isInteger(Number(index)) || Number(index) < 0) throw new Error('This trade cannot be updated yet.');
+  if (!file) throw new Error('Choose a screenshot first.');
+  const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+  if (allowed.indexOf(file.type) === -1) throw new Error('Use a PNG, JPEG, or WebP image.');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Screenshot must be 8 MB or smaller.');
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Could not read that image.'));
+    reader.readAsDataURL(file);
+  });
+  const encoded = dataUrl.split(',')[1] || '';
+  const res = await fetch('/journal/screenshot/upload', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({index:Number(index), filename:file.name, mime_type:file.type, data_base64:encoded}),
+  });
+  const data = await res.json();
+  if (!res.ok || data.status !== 'ok') throw new Error(data.detail || 'Screenshot upload failed.');
+  return data;
+}
+
+async function uploadJournalScreenshot(input, index) {
+  const status = document.getElementById('jnShotStatus');
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) return;
+  if (status) { status.textContent = 'Uploading…'; status.className = 'jn-shot-status'; }
+  try {
+    await _jnUploadFile(index, file);
+    if (status) { status.textContent = 'Screenshot attached.'; status.className = 'jn-shot-status up'; }
+    await refreshJournal();
+  } catch (e) {
+    if (status) { status.textContent = e.message || 'Upload failed.'; status.className = 'jn-shot-status down'; }
+    input.value = '';
+  }
 }
 
 function _jnMoney(v) {
@@ -2427,6 +2593,10 @@ function _jnRenderRail(stats, closed) {
   const wins = closed.filter(t => _jnOutcome(t) === 'WIN').length;
   const losses = closed.filter(t => _jnOutcome(t) === 'LOSS').length;
   const net = closed.reduce((s, t) => s + _jnPnl(t), 0);
+  const winPnls = closed.filter(t => _jnOutcome(t) === 'WIN').map(_jnPnl);
+  const lossPnls = closed.filter(t => _jnOutcome(t) === 'LOSS').map(_jnPnl);
+  const grossWins = winPnls.reduce((s, p) => s + Math.max(0, p), 0);
+  const grossLosses = lossPnls.reduce((s, p) => s + Math.abs(Math.min(0, p)), 0);
 
   const setCell = (id, val, sub, cls) => {
     const v = document.getElementById(id), s = document.getElementById(id + 'Sub');
@@ -2434,23 +2604,36 @@ function _jnRenderRail(stats, closed) {
     if (s) s.textContent = sub;
   };
 
+  const netLabel = document.getElementById('jnNetPnlLabel');
+  if (netLabel) netLabel.textContent = 'Net P&L · ' + _JN_PERIODS[_jnPeriod];
+
   setCell('jnNetPnl', total ? _jnMoney(net) : '—',
     total ? `${total} closed trade${total === 1 ? '' : 's'}` : 'No closed trades yet',
     total ? _jnPnlClass(net) : '');
 
-  const week = _jnNum((stats.daily_pnl || {}).this_week);
+  // This-week P&L is also computed from the selected population. Instrument,
+  // outcome, regime and period filters therefore cannot leave an all-time
+  // number behind in an otherwise filtered rail.
+  const todayNY = new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York'}).format(new Date());
+  const td = todayNY.split('-').map(Number);
+  const monday = new Date(Date.UTC(td[0], td[1] - 1, td[2]));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const weekStart = monday.toISOString().slice(0, 10);
+  const week = closed.filter(t => _jnValidDate(t.trade_date) && t.trade_date >= weekStart)
+    .reduce((s, t) => s + _jnPnl(t), 0);
   setCell('jnWeekPnl', week === null ? '—' : _jnMoney(week),
     week === null ? 'Not available' : 'Week to date', week === null ? '' : _jnPnlClass(week));
 
   // compute_journal_stats() returns profit_factor 0.0 when there are no
   // losing trades. Rendering "0.00" would read as catastrophic rather than
   // "not yet meaningful", so that case is stated in words instead.
-  const pf = _jnNum(stats.profit_factor);
+  const pf = grossLosses > 0 ? grossWins / grossLosses : null;
   if (!total) setCell('jnProfitFactor', '—', 'No closed trades yet');
   else if (losses === 0) setCell('jnProfitFactor', '—', `No losing trades yet (${wins} win${wins === 1 ? '' : 's'})`);
   else setCell('jnProfitFactor', pf === null ? '—' : pf.toFixed(2), `gross wins ÷ gross losses · ${total} trades`);
 
-  const aw = _jnNum(stats.avg_win), al = _jnNum(stats.avg_loss);
+  const aw = winPnls.length ? grossWins / winPnls.length : null;
+  const al = lossPnls.length ? grossLosses / lossPnls.length : null;
   if (!total) setCell('jnAvgWL', '—', 'No closed trades yet');
   else setCell('jnAvgWL',
     (aw ? _jnMoney(aw) : '—') + ' / ' + (al ? '-$' + Math.abs(al).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'),
@@ -2529,23 +2712,38 @@ function _jnRenderReview(row) {
   // Optional narrative fields render only when the record genuinely has them.
   const timeline = Array.isArray(t.reasoning_timeline) ? t.reasoning_timeline : [];
   const review = t.nova_review || t.review || '';
-  const snapshot = t.chart_snapshot || t.screenshot || '';
+  const snapshot = String(t.chart_snapshot || t.screenshot || '').trim();
+  const snapshotUrl = !snapshot ? ''
+    : (/^(https?:|data:|blob:)/i.test(snapshot) || snapshot.startsWith('/journal/screenshot')) ? snapshot
+    : '/journal/screenshot?file=' + encodeURIComponent(snapshot.split('/').pop().split(String.fromCharCode(92)).pop());
   const notes = t.notes || '';
+  const linkedPlan = (_journalWorkspace && _journalWorkspace.plans || []).find(plan => String(plan.id) === String(t.premarket_plan_id || ''));
+  const riskChecks = Array.isArray(t.risk_checklist) ? t.risk_checklist : [];
+  const tradeChecks = Array.isArray(t.trade_checklist) ? t.trade_checklist : [];
+  const confluences = Array.isArray(t.confluences) ? t.confluences : [];
 
   host.innerHTML = `
     <div class="jn-rv-head">
       <div class="jn-rv-title">${_jnEsc(t.ticker || '—')}${dir ? ` <span class="jn-dir ${dir.toLowerCase()}">${dir}</span>` : ''}</div>
       <div class="jn-rv-pnl ${_jnPnlClass(p)}"><span class="jn-mark">${_jnPnlMark(p)}</span>${_jnMoney(p)}</div>
     </div>
-    <div class="jn-rv-sub">${_jnEsc(t.trade_date || '—')}${t.exit_time ? ' · ' + _jnEsc(t.exit_time) : ''}${t.size != null ? ' · ' + _jnEsc(t.size) + ' unit' + (Number(t.size) === 1 ? '' : 's') : ''}</div>
+    <div class="jn-rv-sub"><span class="jn-mode ${_jnTradeMode(t).toLowerCase()}">${_jnTradeMode(t)}</span> · ${_jnEsc(t.trade_date || '—')}${t.exit_time ? ' · ' + _jnEsc(t.exit_time) : ''}${t.size != null ? ' · ' + _jnEsc(t.size) + ' unit' + (Number(t.size) === 1 ? '' : 's') : ''}</div>
     <div class="jn-kv-grid">
       ${kv('Entry', or(t.entry_price, 'Not recorded'))}
       ${kv('Exit', or(t.exit_price, 'Not recorded'))}
       ${kv('Size', or(t.size, 'Not recorded'))}
-      ${kv('Setup', or(t.setup_type, 'Not recorded'))}
+      ${kv('Model', or(t.setup_type, 'Not recorded'))}
+      ${kv('Account', or(t.account, 'Not recorded'))}
+      ${kv('Commission', t.commission != null ? _jnMoney(-Math.abs(Number(t.commission)||0)) : '<span class="jn-dim">Not recorded</span>')}
+      ${kv('Execution rating', t.performance_rating != null ? _jnEsc(t.performance_rating) + ' / 10' : '<span class="jn-dim">Not recorded</span>')}
       ${kv('Regime at entry', or(t.active_regime, 'Not recorded'))}
       ${kv('Session', or(t.session, 'Not recorded'))}
     </div>
+    ${linkedPlan ? `<div class="jn-rv-block"><h3>Linked Pre-Market Plan</h3><p>${_jnEsc(linkedPlan.date || '')} · ${_jnEsc(linkedPlan.bias || '')}<br>${_jnEsc(linkedPlan.game_plan || 'No game plan recorded.')}</p></div>` : ''}
+    ${t.protocol ? `<div class="jn-rv-block"><h3>Daily Protocol</h3><p>${_jnEsc(t.protocol)}</p></div>` : ''}
+    ${(riskChecks.length || tradeChecks.length) ? `<div class="jn-rv-block"><h3>Checklist Evidence</h3><p>${riskChecks.map(x=>'✓ '+_jnEsc(x.replace(/_/g,' '))).join('<br>')}${riskChecks.length&&tradeChecks.length?'<br>':''}${tradeChecks.map(x=>'✓ '+_jnEsc(x.replace(/_/g,' '))).join('<br>')}</p></div>` : ''}
+    ${confluences.length ? `<div class="jn-rv-block"><h3>Confluences</h3><p>${confluences.map(x=>'• '+_jnEsc(x)).join('<br>')}</p></div>` : ''}
+    ${t.trade_management ? `<div class="jn-rv-block"><h3>Trade Management</h3><p>${_jnEsc(t.trade_management)}</p></div>` : ''}
     ${notes ? `<div class="jn-rv-block"><h3>Notes</h3><p>${_jnEsc(notes)}</p></div>` : ''}
     <div class="jn-rv-block">
       <h3>Reasoning Timeline</h3>
@@ -2559,12 +2757,46 @@ function _jnRenderReview(row) {
     </div>
     <div class="jn-rv-block">
       <h3>Chart Snapshot</h3>
-      ${snapshot ? `<img class="jn-shot" src="${_jnEsc(snapshot)}" alt="Chart snapshot for this trade">`
-        : '<div class="jn-empty-box">No chart image attached to this trade.<span>Trades taken through the execution path attach the live chart automatically.</span></div>'}
+      ${snapshotUrl ? `<img class="jn-shot" src="${_jnEsc(snapshotUrl)}" alt="Chart snapshot for this trade">`
+        : '<div class="jn-empty-box">No chart image attached to this trade.<span>Add your own screenshot below, or let the execution path attach one automatically.</span></div>'}
+      <div class="jn-shot-actions">
+        <button class="jn-shot-btn" type="button" onclick="document.getElementById('jnShotInput').click()">${snapshotUrl ? 'Replace screenshot' : 'Attach screenshot'}</button>
+        <input class="jn-file-input" id="jnShotInput" type="file" accept="image/png,image/jpeg,image/webp" onchange="uploadJournalScreenshot(this, ${Number(t._journal_index)})">
+        <span class="jn-shot-status" id="jnShotStatus">PNG, JPEG, or WebP · up to 8 MB</span>
+      </div>
+    </div>
+    <div class="jn-rv-actions">
+      <span>This permanently removes the selected ${_jnTradeMode(t) === 'PAPER' ? 'paper study' : 'live trade'} record.</span>
+      <div class="jn-record-actions"><button type="button" onclick="editTrade(${Number(t._journal_index)})">Edit Trade</button><button class="jn-delete-btn" type="button" onclick="deleteTrade(${Number(t._journal_index)})">Delete Trade</button></div>
     </div>`;
 }
 
 function _jnRenderBreakdown(stats, closed) {
+  // Rebuild every bucket from the selected records. Backend all-time buckets
+  // are deliberately not reused here because they would contradict the
+  // active week/month/instrument/regime/outcome filters.
+  const bucket = (pick, missing) => {
+    const out = {};
+    closed.forEach(t => {
+      const key = String(pick(t) || missing);
+      const row = out[key] || (out[key] = {wins:0, losses:0, breakevens:0, pnl:0, win_rate:0});
+      const oc = _jnOutcome(t);
+      if (oc === 'WIN') row.wins++;
+      else if (oc === 'LOSS') row.losses++;
+      else row.breakevens++;
+      row.pnl += _jnPnl(t);
+    });
+    Object.keys(out).forEach(k => {
+      const r = out[k], n = r.wins + r.losses + r.breakevens;
+      r.win_rate = n ? r.wins / n * 100 : 0;
+    });
+    return out;
+  };
+  stats = {
+    by_regime: bucket(t => t.active_regime, 'UNKNOWN'),
+    by_session: bucket(t => t.session, 'UNKNOWN'),
+    by_setup_type: bucket(t => t.setup_type, 'Untagged'),
+  };
   const bars = (host, items, fmt, emptyMsg) => {
     const el = document.getElementById(host);
     if (!el) return;
@@ -2626,7 +2858,7 @@ function _jnRenderBreakdown(stats, closed) {
 
   const meta = document.getElementById('jnBreakdownMeta');
   if (meta) meta.textContent = closed.length
-    ? `${closed.length} closed trade${closed.length === 1 ? '' : 's'} · all-time`
+    ? `${closed.length} closed trade${closed.length === 1 ? '' : 's'} · ${_JN_PERIODS[_jnPeriod].toLowerCase()}`
     : 'No closed trades yet';
 }
 
@@ -2685,6 +2917,7 @@ function _jnRenderDaily(closed) {
   // width is capped so a sparse chart reads as deliberate, not stretched.
   host.style.setProperty('--n', String(days.length));
   host.style.setProperty('--rows', String(days.length));
+  host.style.setProperty('--track-w', (days.length * 96) + 'px');
 
   // ── Y axis: only the values the scale actually reaches ───────────────────
   const yTicks = [];
@@ -2708,15 +2941,16 @@ function _jnRenderDaily(closed) {
     // A breakeven session is neither a gain nor a loss, so it carries no sign.
     const money = flat(v) ? '$0.00' : _jnMoney(v);
     const a11y = d + ', net ' + money + ', ' + n + ' closed trade' + (n === 1 ? '' : 's');
-    const mag = flat(v) ? '' : ' style="--mag:' +
-      (v > 0 ? (v / maxPos * 100) : (-v / maxNeg * 100)).toFixed(2) + '%"';
+    const magPct = flat(v) ? '0%' :
+      (v > 0 ? (v / maxPos * 100) : (-v / maxNeg * 100)).toFixed(2) + '%';
+    const mag = ' style="--mag:' + magPct + '"';
     const fill = '<i class="jn-dbar ' + cls + '"' + mag + '></i>';
+    const value = '<span class="jn-dp-v ' + cls + '">' + _jnEsc(money) + '</span>';
     const posCell = '<span class="jn-col-pos">' +
-      ((v > 0 || (flat(v) && flatSide === 'pos')) ? fill : '') +
-      '<span class="jn-dp-v ' + cls + '">' + _jnEsc(money) + '</span></span>';
+      ((v > 0 || (flat(v) && flatSide === 'pos')) ? fill + value : '') + '</span>';
     const negCell = '<span class="jn-col-neg">' +
-      ((v < 0 || (flat(v) && flatSide === 'neg')) ? fill : '') + '</span>';
-    return '<button type="button" class="jn-dp-bar" style="--i:' + (i + 1) + '"' +
+      ((v < 0 || (flat(v) && flatSide === 'neg')) ? fill + value : '') + '</span>';
+    return '<button type="button" class="jn-dp-bar" style="--i:' + (i + 1) + ';--mag:' + magPct + '"' +
       ' aria-label="' + _jnEsc(a11y) + '">' +
       '<span class="jn-dp-d" aria-hidden="true">' + _jnEsc(label) + '</span>' +
       '<span class="jn-col-plot">' + posCell + negCell + '</span>' +
@@ -2816,10 +3050,12 @@ function _jnBindLedger() {
 // with no usable recorded values renders disabled with a stated reason rather
 // than being hidden silently or filled with invented entries.
 const _JN_OUTCOMES = {all: 'All', wins: 'Wins', losses: 'Losses'};
-const _JN_PERIODS = {all: 'All time', week: 'This week', month: 'This month'};
+const _JN_PERIODS = {today: 'Today', week: 'This week', month: 'This month', quarter: 'This quarter', all: 'All time'};
 let _jnInstrument = 'all';
 let _jnPeriod = 'all';
 let _jnRegime = 'all';
+let _jnMode = 'LIVE';
+let _jnAccount = 'all';
 
 function _jnDistinct(rows, pick) {
   const seen = [];
@@ -2845,17 +3081,273 @@ function _jnFilterGroup(label, name, options, active, disabledReason) {
     '</div>';
 }
 
+function _jnDailyTotals(rows) {
+  const out = {};
+  (rows || []).forEach(t => {
+    if (!_jnValidDate(t.trade_date)) return;
+    out[t.trade_date] = (out[t.trade_date] || 0) + _jnPnl(t);
+  });
+  return out;
+}
+
+function _jnBindEquityInteraction(host, points) {
+  if (!host || typeof host.querySelector !== 'function') return;
+  const svg = host.querySelector('svg');
+  const guide = svg && svg.querySelector('.jn-eq-guide');
+  const tooltip = host && host.querySelector('.jn-eq-tooltip');
+  if (!svg || !guide || !tooltip || !points.length) return;
+
+  const tooltipDate = tooltip.querySelector('.jn-eq-tooltip-date');
+  const tooltipSession = tooltip.querySelector('[data-eq-session]');
+  const tooltipCumulative = tooltip.querySelector('[data-eq-cumulative]');
+  const tooltipTrades = tooltip.querySelector('[data-eq-trades]');
+  let activeDot = null;
+
+  function showPoint(index) {
+    const point = points[index];
+    const dot = svg.querySelector('[data-eq-index="' + index + '"]');
+    if (!point || !dot) return;
+    if (activeDot) activeDot.classList.remove('is-active');
+    activeDot = dot;
+    activeDot.classList.add('is-active');
+
+    const cx = parseFloat(dot.getAttribute('cx'));
+    const cy = parseFloat(dot.getAttribute('cy'));
+    guide.setAttribute('x1', cx);
+    guide.setAttribute('x2', cx);
+    guide.hidden = false;
+    tooltipDate.textContent = point.date;
+    tooltipSession.textContent = _jnMoney(point.sessionPnl);
+    tooltipSession.className = point.sessionPnl > 0 ? 'up' : (point.sessionPnl < 0 ? 'down' : '');
+    tooltipCumulative.textContent = _jnMoney(point.value);
+    tooltipCumulative.className = point.value > 0 ? 'up' : (point.value < 0 ? 'down' : '');
+    tooltipTrades.textContent = point.tradeCount + (point.tradeCount === 1 ? ' trade' : ' trades');
+    tooltip.hidden = false;
+
+    const svgBox = svg.getBoundingClientRect();
+    const hostBox = host.getBoundingClientRect();
+    const rawLeft = svgBox.left - hostBox.left + (cx / 700) * svgBox.width;
+    const rawTop = svgBox.top - hostBox.top + (cy / 205) * svgBox.height;
+    tooltip.classList.toggle('is-below', rawTop < 95);
+    tooltip.style.left = Math.max(105, Math.min(host.clientWidth - 105, rawLeft)) + 'px';
+    tooltip.style.top = rawTop + 'px';
+  }
+
+  function hidePoint() {
+    if (activeDot) activeDot.classList.remove('is-active');
+    activeDot = null;
+    guide.hidden = true;
+    tooltip.hidden = true;
+  }
+
+  svg.addEventListener('pointermove', event => {
+    if (event.pointerType === 'touch') return;
+    const box = svg.getBoundingClientRect();
+    const svgX = ((event.clientX - box.left) / box.width) * 700;
+    let nearest = 0;
+    let distance = Infinity;
+    points.forEach((point, index) => {
+      const d = Math.abs(point.x - svgX);
+      if (d < distance) { distance = d; nearest = index; }
+    });
+    showPoint(nearest);
+  });
+  svg.addEventListener('pointerleave', event => {
+    if (event.pointerType !== 'touch') hidePoint();
+  });
+  svg.querySelectorAll('.jn-eq-dot[data-eq-index]').forEach(dot => {
+    const index = Number(dot.dataset.eqIndex);
+    dot.addEventListener('click', event => { event.stopPropagation(); showPoint(index); });
+    dot.addEventListener('focus', () => showPoint(index));
+    dot.addEventListener('blur', hidePoint);
+  });
+}
+
+function _jnRenderDashboard(rows, allTrades, accounts) {
+  const controls = document.getElementById('jDashboardControls');
+  if (controls) {
+    const bookCounts = {
+      LIVE: allTrades.filter(t => _jnTradeMode(t) === 'LIVE').length,
+      PAPER: allTrades.filter(t => _jnTradeMode(t) === 'PAPER').length,
+    };
+    const accountOptions = ['<button class="jn-chip' + (_jnAccount === 'all' ? ' active' : '') + '" data-jdash="account" data-value="all" type="button">All accounts</button>']
+      .concat(accounts.map(a => '<button class="jn-chip' + (_jnAccount === a ? ' active' : '') + '" data-jdash="account" data-value="' + _jnEsc(a) + '" type="button">' + _jnEsc(a) + '</button>')).join('');
+    controls.innerHTML = '<div class="jn-dash-controls"><span class="jn-dash-label">Book</span>' +
+      '<button class="jn-chip' + (_jnMode === 'LIVE' ? ' active' : '') + '" data-jdash="mode" data-value="LIVE" type="button">Live · ' + bookCounts.LIVE + '</button>' +
+      '<button class="jn-chip' + (_jnMode === 'PAPER' ? ' active' : '') + '" data-jdash="mode" data-value="PAPER" type="button">Paper · ' + bookCounts.PAPER + '</button>' +
+      '<span class="jn-dash-sep"></span><span class="jn-dash-label">Account</span>' + accountOptions + '</div>' +
+      '<div class="jn-dash-controls"><span class="jn-dash-label">Period</span>' +
+      Object.keys(_JN_PERIODS).map(k => '<button class="jn-chip' + (_jnPeriod === k ? ' active' : '') + '" data-jdash="period" data-value="' + k + '" type="button">' + _JN_PERIODS[k] + '</button>').join('') + '</div>' +
+      '<div class="jn-reset-wrap"><button class="jn-reset-trades" type="button" onclick="resetJournalTrades()"' +
+      ((_journalData && _journalData.trades || []).length ? '' : ' disabled') + '>Reset all trades</button>' +
+      '<span class="jn-reset-status" id="jnResetStatus" role="status" aria-live="polite"></span></div>';
+    if (controls.dataset.bound !== '1') {
+      controls.dataset.bound = '1';
+      controls.addEventListener('click', e => {
+        const b = e.target.closest ? e.target.closest('[data-jdash]') : null;
+        if (!b) return;
+        if (b.dataset.jdash === 'mode') { _jnMode = b.dataset.value === 'PAPER' ? 'PAPER' : 'LIVE'; _jnAccount = 'all'; }
+        else if (b.dataset.jdash === 'account') _jnAccount = b.dataset.value;
+        else if (b.dataset.jdash === 'period') _jnPeriod = b.dataset.value;
+        _jnSelectedKey = null;
+        if (_journalData) renderJournal(_journalData);
+      });
+    }
+  }
+
+  const daily = _jnDailyTotals(rows);
+  const days = Object.keys(daily).sort();
+  const total = days.reduce((s, d) => s + daily[d], 0);
+  setText('jnEquityMeta', rows.length ? _jnMoney(total) + ' · ' + rows.length + ' trades' : 'No closed trades');
+  const equity = document.getElementById('jnEquity');
+  if (equity) {
+    if (!days.length) equity.innerHTML = '<div class="jn-none">No dated closed trades in this book.</div>';
+    else {
+      let running = 0;
+      // Anchor every equity curve at a genuine zero starting balance. A
+      // one-session population otherwise collapses to a lone midpoint dot
+      // and leaves the entire plotting surface visually unused.
+      const counts = {};
+      rows.forEach(t => {
+        if (_jnValidDate(t.trade_date)) counts[t.trade_date] = (counts[t.trade_date] || 0) + 1;
+      });
+      const values = [{date:'Starting balance', value:0, sessionPnl:0, tradeCount:0}].concat(
+        days.map(d => ({date:d, value:(running += daily[d]), sessionPnl:daily[d], tradeCount:counts[d] || 0})));
+      const min = Math.min(0, ...values.map(v => v.value));
+      const max = Math.max(0, ...values.map(v => v.value));
+      const flatRange = Math.abs(max - min) < .005;
+      const span = Math.max(1, max - min);
+      const x = i => 48 + i * (632 / (values.length - 1));
+      const y = v => flatRange ? 109 : 184 - ((v - min) / span) * 150;
+      const points = values.map((v, i) => x(i).toFixed(1) + ',' + y(v.value).toFixed(1)).join(' ');
+      const zeroY = y(0).toFixed(1);
+      const area = '48,' + zeroY + ' ' + points + ' ' + x(values.length - 1).toFixed(1) + ',' + zeroY;
+      const interactivePoints = values.slice(1).map((v, index) => ({...v, x:x(index + 1)}));
+      equity.innerHTML = '<svg viewBox="0 0 700 205" role="img" aria-label="Interactive cumulative P and L from ' + _jnEsc(days[0]) + ' through ' + _jnEsc(days[days.length-1]) + '">' +
+        '<line class="jn-eq-grid" x1="48" y1="34" x2="680" y2="34"></line><line class="jn-eq-grid" x1="48" y1="109" x2="680" y2="109"></line><line class="jn-eq-grid" x1="48" y1="184" x2="680" y2="184"></line>' +
+        '<text class="jn-eq-axis" x="2" y="38">' + _jnEsc(_jnMoney(max)) + '</text><text class="jn-eq-axis" x="18" y="188">' + _jnEsc(_jnMoney(min)) + '</text>' +
+        '<polygon class="jn-eq-area" points="' + area + '"></polygon><polyline class="jn-eq-line" points="' + points + '"></polyline>' +
+        '<line class="jn-eq-guide" x1="48" y1="28" x2="48" y2="184" hidden></line>' +
+        '<rect class="jn-eq-hit" x="48" y="28" width="632" height="156"></rect>' +
+        values.map((v,i) => '<circle class="jn-eq-dot" cx="' + x(i).toFixed(1) + '" cy="' + y(v.value).toFixed(1) + '" r="3"' + (i ? ' data-eq-index="' + (i - 1) + '" tabindex="0" role="button" aria-label="' + _jnEsc(v.date + ', session P and L ' + _jnMoney(v.sessionPnl) + ', cumulative P and L ' + _jnMoney(v.value)) + '"' : '') + '><title>' + _jnEsc(v.date + ' · ' + _jnMoney(v.value)) + '</title></circle>').join('') + '</svg>' +
+        '<div class="jn-eq-tooltip" role="status" aria-live="polite" hidden><span class="jn-eq-tooltip-date"></span>' +
+        '<span class="jn-eq-tooltip-row">Session P&amp;L <b data-eq-session></b></span>' +
+        '<span class="jn-eq-tooltip-row">Cumulative P&amp;L <b data-eq-cumulative></b></span>' +
+        '<span class="jn-eq-tooltip-row">Closed <b data-eq-trades></b></span></div>';
+      if (typeof _jnBindEquityInteraction === 'function') {
+        _jnBindEquityInteraction(equity, interactivePoints);
+      }
+    }
+  }
+
+  const recentDays = days.slice(-9);
+  setText('jnDashDailyMeta', recentDays.length ? recentDays.length + ' sessions' : 'No sessions');
+  const dashDaily = document.getElementById('jnDashDaily');
+  if (dashDaily) {
+    if (!recentDays.length) dashDaily.innerHTML = '<div class="jn-none">No daily results in this book.</div>';
+    else {
+      const vals = recentDays.map(d => daily[d]);
+      const maxPos = Math.max(0, ...vals);
+      const maxNeg = Math.max(0, ...vals.map(v => -v));
+      const left = 58, right = 682, top = 25, bottom = 190, plotH = bottom - top;
+      const zeroY = maxPos && maxNeg ? top + (maxPos / (maxPos + maxNeg)) * plotH : (maxPos ? bottom : top);
+      const trackW = Math.min(right - left, recentDays.length * 94);
+      const startX = (left + right - trackW) / 2;
+      const step = trackW / recentDays.length;
+      const barW = Math.min(40, step * .48);
+      const bars = recentDays.map((d, i) => {
+        const p = daily[d], cls = _jnPnlClass(p), x = startX + step * i + (step - barW) / 2;
+        const flat = Math.abs(p) < .005;
+        const h = flat ? 3 : (p > 0 ? (p / maxPos) * (zeroY - top) : (-p / maxNeg) * (bottom - zeroY));
+        const y = flat ? zeroY - 1.5 : (p > 0 ? zeroY - h : zeroY);
+        const labelY = p > 0 ? Math.max(14, y - 7) : (p < 0 ? Math.min(207, y + h + 14) : zeroY - 7);
+        const fill = cls === 'up' ? 'var(--green)' : (cls === 'down' ? 'var(--red)' : 'var(--gold)');
+        return '<g class="jn-dash-bar ' + cls + '"><rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + Math.max(3, h).toFixed(1) + '" rx="3" fill="' + fill + '"><title>' + _jnEsc(d + ' · ' + _jnMoney(p)) + '</title></rect>' +
+          '<text class="jn-dash-val ' + cls + '" x="' + (x + barW / 2).toFixed(1) + '" y="' + labelY.toFixed(1) + '">' + _jnEsc(_jnMoney(p)) + '</text>' +
+          '<text class="jn-dash-date" x="' + (x + barW / 2).toFixed(1) + '" y="218">' + _jnEsc(d.slice(5).replace('-', '/')) + '</text></g>';
+      }).join('');
+      const topLabel = maxPos ? _jnMoneyAxis(maxPos) : '$0';
+      const bottomLabel = maxNeg ? _jnMoneyAxis(-maxNeg) : '$0';
+      dashDaily.innerHTML = '<svg class="jn-dash-chart" viewBox="0 0 740 228" role="img" aria-label="Daily profit and loss chart for the latest ' + recentDays.length + ' sessions">' +
+        '<line class="jn-dash-grid" x1="' + left + '" y1="' + top + '" x2="' + right + '" y2="' + top + '"></line>' +
+        '<line class="jn-dash-grid" x1="' + left + '" y1="' + ((top + bottom) / 2).toFixed(1) + '" x2="' + right + '" y2="' + ((top + bottom) / 2).toFixed(1) + '"></line>' +
+        '<line class="jn-dash-grid" x1="' + left + '" y1="' + bottom + '" x2="' + right + '" y2="' + bottom + '"></line>' +
+        '<line class="jn-dash-zero" x1="' + left + '" y1="' + zeroY.toFixed(1) + '" x2="' + right + '" y2="' + zeroY.toFixed(1) + '"></line>' +
+        '<text class="jn-dash-axis" x="4" y="' + (top + 4) + '">' + _jnEsc(topLabel) + '</text>' +
+        '<text class="jn-dash-axis" x="4" y="' + Math.min(205, bottom + 4) + '">' + _jnEsc(bottomLabel) + '</text>' + bars + '</svg>';
+    }
+  }
+
+  const anchor = days.length ? days[days.length - 1] : new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York'}).format(new Date());
+  const ay = Number(anchor.slice(0,4)), am = Number(anchor.slice(5,7));
+  const first = new Date(Date.UTC(ay, am - 1, 1));
+  const count = new Date(Date.UTC(ay, am, 0)).getUTCDate();
+  const calDays = [];
+  const leading = first.getUTCDay();
+  const prevCount = new Date(Date.UTC(ay, am - 1, 0)).getUTCDate();
+  for (let i=0;i<leading;i++) calDays.push('<div class="jn-cal-day outside">' + (prevCount - leading + i + 1) + '</div>');
+  let green=0, red=0, flat=0;
+  for (let day=1;day<=count;day++) {
+    const date = ay + '-' + String(am).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+    const has = Object.prototype.hasOwnProperty.call(daily, date), p = has ? daily[date] : 0;
+    if (has) { if (p>0) green++; else if (p<0) red++; else flat++; }
+    calDays.push('<div class="jn-cal-day' + (has ? ' ' + _jnPnlClass(p) : '') + '">' + day + (has ? '<b class="' + _jnPnlClass(p) + '">' + _jnEsc(_jnMoney(p)) + '</b>' : '') + '</div>');
+  }
+  // Always render six complete weeks. Adjacent-month dates fill the calendar
+  // naturally instead of leaving blank cells or an empty lower panel.
+  let nextDay = 1;
+  while (calDays.length < 42) calDays.push('<div class="jn-cal-day outside">' + nextDay++ + '</div>');
+  setText('jnCalendarMeta', new Date(Date.UTC(ay, am - 1, 1)).toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'}));
+  setHtml('jnCalendarSummary','<div class="jn-cal-stat"><b class="up">' + green + '</b><span>Profit days</span></div><div class="jn-cal-stat"><b class="down">' + red + '</b><span>Loss days</span></div><div class="jn-cal-stat"><b class="flat">' + flat + '</b><span>Break even</span></div><div class="jn-cal-stat"><b>' + rows.length + '</b><span>Trades</span></div>');
+  setHtml('jnCalendar','<span class="jn-cal-dow">Sun</span><span class="jn-cal-dow">Mon</span><span class="jn-cal-dow">Tue</span><span class="jn-cal-dow">Wed</span><span class="jn-cal-dow">Thu</span><span class="jn-cal-dow">Fri</span><span class="jn-cal-dow">Sat</span>' + calDays.join(''));
+
+  const weeks = {};
+  days.forEach(d => { const dt=new Date(d+'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7)); const k=dt.toISOString().slice(0,10); weeks[k]=(weeks[k]||0)+daily[d]; });
+  const weekKeys = Object.keys(weeks).sort().slice(-5), weekMax = Math.max(1,...weekKeys.map(k=>Math.abs(weeks[k])));
+  setText('jnWeeklyMeta', weekKeys.length ? weekKeys.length + ' weeks' : 'No weeks');
+  setHtml('jnWeekly', weekKeys.length ? weekKeys.map(k => '<div class="jn-week-row"><span>Week of ' + k.slice(5).replace('-','/') + '</span><b class="' + _jnPnlClass(weeks[k]) + '">' + _jnEsc(_jnMoney(weeks[k])) + '</b><div class="jn-week-track"><div class="jn-week-fill ' + _jnPnlClass(weeks[k]) + '" style="width:' + (Math.abs(weeks[k])/weekMax*100).toFixed(1) + '%"></div></div></div>').join('') : '<div class="jn-none">No weekly results yet.</div>');
+
+  const models = ['KLR','OTE','ORB','POWELL_10AM'];
+  const modelTotals = {}, modelCounts = {};
+  rows.forEach(t => { const m=String(t.setup_type||'').toUpperCase(); if(models.indexOf(m)>=0){modelTotals[m]=(modelTotals[m]||0)+_jnPnl(t);modelCounts[m]=(modelCounts[m]||0)+1;} });
+  const modelMax = Math.max(1,...models.map(m=>Math.abs(modelTotals[m]||0)));
+  setHtml('jnModels', models.map(m => '<div class="jn-model-row"><span>' + (m==='POWELL_10AM'?'Powell 10AM':m) + ' · n=' + (modelCounts[m]||0) + '</span><b class="' + _jnPnlClass(modelTotals[m]||0) + '">' + (modelCounts[m] ? _jnEsc(_jnMoney(modelTotals[m])) : '—') + '</b><div class="jn-model-track"><div class="jn-model-fill" style="width:' + (modelCounts[m] ? Math.abs(modelTotals[m])/modelMax*100 : 0).toFixed(1) + '%"></div></div></div>').join(''));
+}
+
 function renderJournal(data) {
   _journalData = data;
-  const stats = data.stats || {};
-  const trades = data.trades || [];
-  const closed = _jnClosed(trades);
+  // Personal records are the default performance population. Entries emitted
+  // by the retired execution subsystem remain available as a labelled archive
+  // but can no longer silently alter the user's performance figures.
+  const scope = data._activeScope || 'personal';
+  const hasProvenance = Array.isArray(data.personal_trades) && Array.isArray(data.legacy_system_trades);
+  const trades = hasProvenance
+    ? (scope === 'legacy_system' ? data.legacy_system_trades : data.personal_trades)
+    : (data.trades || []);
+  const stats = hasProvenance
+    ? (scope === 'legacy_system' ? data.legacy_system_stats : data.personal_stats) || {}
+    : (data.stats || {});
+  // Live performance and paper-study data are two separate books. Historical
+  // records without an explicit mode are treated as LIVE for compatibility.
+  const bookTrades = trades.filter(t => _jnTradeMode(t) === _jnMode);
+  const accounts = _jnDistinct(bookTrades, t => String(t.account || 'Unassigned').trim());
+  if (_jnAccount !== 'all' && accounts.indexOf(_jnAccount) === -1) _jnAccount = 'all';
+  const modeTrades = bookTrades.filter(t => _jnAccount === 'all' || String(t.account || 'Unassigned').trim() === _jnAccount);
+  const closed = _jnClosed(modeTrades);
 
-  setText('jTabCount-trades', trades.length);
-
-  _jnRenderRail(stats, closed);
-  _jnRenderBreakdown(stats, closed);
-  _jnRenderDaily(closed);
+  // One selected population drives the ledger and every analytical region.
+  // “This week” means Monday-to-today in New York; “This month” means the
+  // current NY calendar month. Rolling 7/30-day windows would make those
+  // labels inaccurate around week and month boundaries.
+  const todayNY = new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York'}).format(new Date());
+  const td = todayNY.split('-').map(Number);
+  const monday = new Date(Date.UTC(td[0], td[1] - 1, td[2]));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const weekStart = monday.toISOString().slice(0, 10);
+  const monthStart = todayNY.slice(0, 7) + '-01';
+  const quarterMonth = Math.floor((td[1] - 1) / 3) * 3 + 1;
+  const quarterStart = td[0] + '-' + String(quarterMonth).padStart(2, '0') + '-01';
+  setText('jTabCount-trades', modeTrades.length);
 
   // Instrument and regime options come from the real records, never a literal.
   const instruments = _jnDistinct(closed, t => String(t.ticker || '').trim().toUpperCase());
@@ -2866,13 +3358,50 @@ function renderJournal(data) {
   if (_jnInstrument !== 'all' && instruments.indexOf(_jnInstrument) === -1) _jnInstrument = 'all';
   if (_jnRegime !== 'all' && regimes.indexOf(_jnRegime) === -1) _jnRegime = 'all';
 
+  const dashboardClosed = closed.filter(t => {
+    if (_jnPeriod === 'today' && t.trade_date !== todayNY) return false;
+    if (_jnPeriod === 'week' && !(_jnValidDate(t.trade_date) && t.trade_date >= weekStart)) return false;
+    if (_jnPeriod === 'month' && !(_jnValidDate(t.trade_date) && t.trade_date >= monthStart)) return false;
+    if (_jnPeriod === 'quarter' && !(_jnValidDate(t.trade_date) && t.trade_date >= quarterStart)) return false;
+    return true;
+  });
+  const filteredClosed = closed.filter(t => {
+    const outcome = _jnOutcome(t);
+    if (journalFilter === 'wins' && outcome !== 'WIN') return false;
+    if (journalFilter === 'losses' && outcome !== 'LOSS') return false;
+    if (_jnInstrument !== 'all' && String(t.ticker || '').trim().toUpperCase() !== _jnInstrument) return false;
+    if (_jnPeriod === 'today' && t.trade_date !== todayNY) return false;
+    if (_jnPeriod === 'week' && !(_jnValidDate(t.trade_date) && t.trade_date >= weekStart)) return false;
+    if (_jnPeriod === 'month' && !(_jnValidDate(t.trade_date) && t.trade_date >= monthStart)) return false;
+    if (_jnPeriod === 'quarter' && !(_jnValidDate(t.trade_date) && t.trade_date >= quarterStart)) return false;
+    if (_jnRegime !== 'all' && String(t.active_regime || '').trim() !== _jnRegime) return false;
+    return true;
+  });
+
+  _jnRenderRail(stats, dashboardClosed);
+  _jnRenderBreakdown(stats, filteredClosed);
+  _jnRenderDaily(filteredClosed);
+  _jnRenderDashboard(dashboardClosed, trades, accounts);
+
   const bar = document.getElementById('jFilterBar');
   if (bar) {
     const instOpts = {all: 'All'};
     instruments.forEach(i => { instOpts[i] = i; });
     const regOpts = {all: 'All regimes'};
     regimes.forEach(r => { regOpts[r] = _jnBucketLabel(r, 'regime'); });
-    bar.innerHTML =
+    const scopeHtml = hasProvenance ? _jnFilterGroup('Records', 'records', {
+      personal: 'Personal journal (' + data.personal_trades.length + ')',
+      legacy_system: 'Legacy system archive (' + data.legacy_system_trades.length + ')',
+    }, scope, '') : '';
+    const modeOpts = {
+      LIVE: 'Live trades (' + trades.filter(t => _jnTradeMode(t) === 'LIVE').length + ')',
+      PAPER: 'Paper studies (' + trades.filter(t => _jnTradeMode(t) === 'PAPER').length + ')',
+    };
+    const accountOpts = {all: 'All accounts'};
+    accounts.forEach(a => { accountOpts[a] = a; });
+    bar.innerHTML = scopeHtml +
+      _jnFilterGroup('Book', 'mode', modeOpts, _jnMode, '') +
+      _jnFilterGroup('Account', 'account', accountOpts, _jnAccount, '') +
       _jnFilterGroup('Outcome', 'outcome', _JN_OUTCOMES, journalFilter, '') +
       _jnFilterGroup('Instrument', 'instrument', instOpts, _jnInstrument,
         instruments.length ? '' : 'No instrument recorded') +
@@ -2885,7 +3414,17 @@ function renderJournal(data) {
         const b = e.target.closest ? e.target.closest('[data-fdim]') : null;
         if (!b) return;
         const dim = b.dataset.fdim, val = b.dataset.fval;
-        if (dim === 'outcome') journalFilter = val;
+        if (dim === 'records') {
+          _journalData._activeScope = val;
+          _jnSelectedKey = null;
+        } else if (dim === 'mode') {
+          _jnMode = val === 'PAPER' ? 'PAPER' : 'LIVE';
+          _jnAccount = 'all';
+          _jnSelectedKey = null;
+        } else if (dim === 'account') {
+          _jnAccount = val;
+          _jnSelectedKey = null;
+        } else if (dim === 'outcome') journalFilter = val;
         else if (dim === 'instrument') _jnInstrument = val;
         else if (dim === 'period') _jnPeriod = val;
         else if (dim === 'regime') _jnRegime = val;
@@ -2894,22 +3433,8 @@ function renderJournal(data) {
     }
   }
 
-  // Build ledger rows newest-first, applying the active filter.
-  const since = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const weekAgo = since(7), monthAgo = since(30);
-  _jnRows = closed.map((t, i) => ({key: _jnKey(t, i), trade: t, pnl: _jnPnl(t), outcome: _jnOutcome(t)}))
-    .filter(r => {
-      if (journalFilter === 'wins' && r.outcome !== 'WIN') return false;
-      if (journalFilter === 'losses' && r.outcome !== 'LOSS') return false;
-      if (_jnInstrument !== 'all' &&
-          String(r.trade.ticker || '').trim().toUpperCase() !== _jnInstrument) return false;
-      if (_jnPeriod === 'week' &&
-          !(_jnValidDate(r.trade.trade_date) && r.trade.trade_date >= weekAgo)) return false;
-      if (_jnPeriod === 'month' &&
-          !(_jnValidDate(r.trade.trade_date) && r.trade.trade_date >= monthAgo)) return false;
-      if (_jnRegime !== 'all' && String(r.trade.active_regime || '').trim() !== _jnRegime) return false;
-      return true;
-    })
+  // Build the ledger from that exact same selected population.
+  _jnRows = filteredClosed.map((t, i) => ({key: _jnKey(t, i), trade: t, pnl: _jnPnl(t), outcome: _jnOutcome(t)}))
     .sort((a, b) => String(b.trade.trade_date || '').localeCompare(String(a.trade.trade_date || '')));
 
   // Selection survives a refresh when the trade still exists; otherwise it
@@ -3276,8 +3801,8 @@ function nyTodayDateStr() {
 }
 
 function renderOverviewAccountSummary(data) {
-  const stats  = data.stats  || {};
-  const trades = data.trades || [];
+  const stats  = data.personal_stats  || data.stats  || {};
+  const trades = (data.personal_trades || data.trades || []).filter(t => _jnTradeMode(t) === 'LIVE');
   const todayStr = nyTodayDateStr();
 
   const todayTrades = trades.filter(t => t.trade_date === todayStr && t.outcome !== 'REJECTED');
@@ -3313,7 +3838,7 @@ function renderOverviewAccountSummary(data) {
 }
 
 function renderOverviewRecentActivity(data) {
-  const trades = data.trades || [];
+  const trades = (data.personal_trades || data.trades || []).filter(t => _jnTradeMode(t) === 'LIVE');
   if (!trades.length) {
     setHtml('ovRecentTrades', 'No trades logged yet.');
     return;
@@ -3343,6 +3868,153 @@ function renderOverviewRecentActivity(data) {
   setHtml('ovRecentTrades', rows);
 }
 
+async function _jwUpload(section, id, file) {
+  if (!file) return;
+  if (['image/png','image/jpeg','image/webp'].indexOf(file.type) < 0) throw new Error('Use a PNG, JPEG, or WebP image.');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Screenshot must be 8 MB or smaller.');
+  const dataUrl = await new Promise((resolve,reject) => { const reader=new FileReader(); reader.onload=()=>resolve(String(reader.result||'')); reader.onerror=()=>reject(new Error('Could not read that image.')); reader.readAsDataURL(file); });
+  const res = await fetch('/journal/workspace/screenshot/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({section,id,mime_type:file.type,data_base64:(dataUrl.split(',')[1]||'')})});
+  const data = await res.json();
+  if (!res.ok || data.status !== 'ok') throw new Error(data.detail || 'Screenshot upload failed.');
+}
+
+function _jwVal(id) { const el=document.getElementById(id); return el ? el.value.trim() : ''; }
+function _jwStatus(id, text, ok) { const el=document.getElementById(id); if(el){el.textContent=text;el.style.color=ok?'var(--green)':'var(--red)';} }
+function _jwParagraph(label, value) { return value ? '<p><b>' + _jnEsc(label) + '</b><br>' + _jnEsc(value) + '</p>' : ''; }
+
+function _jwRecord(section, r) {
+  let title = r.title || r.date || 'Untitled record';
+  let meta = [r.period || r.scope || r.bias, r.date || r.target_date, r.book, r.instrument, r.model].filter(Boolean).join(' · ');
+  let body = '';
+  if (section === 'plans') body = _jwParagraph('Events',r.events)+_jwParagraph('Key levels',r.levels)+_jwParagraph('Game plan',r.game_plan)+_jwParagraph('Invalidation',r.invalidation);
+  if (section === 'reflections') body = _jwParagraph('What happened',r.summary)+_jwParagraph('What went well',r.went_well)+_jwParagraph('Lessons',r.lessons)+_jwParagraph('Next improvement',r.improvement);
+  if (section === 'studies') body = _jwParagraph('Study',r.description)+_jwParagraph('Hypothesis',r.hypothesis)+_jwParagraph('Conclusion',r.conclusion);
+  if (section === 'goals') { const items=Array.isArray(r.checklist)?r.checklist:[]; body=(items.length?'<p><b>Checklist</b><br>'+items.map(x=>'□ '+_jnEsc(x)).join('<br>')+'</p>':'')+_jwParagraph('Notes',r.notes); }
+  return '<article class="jn-record"><div class="jn-record-head"><div><h3>'+_jnEsc(title)+'</h3><div class="jn-record-meta">'+_jnEsc(meta||'Saved Journal record')+'</div></div><div class="jn-record-actions">'+
+    (section==='goals'?'<button type="button" onclick="toggleJournalGoal(&quot;'+_jnEsc(r.id)+'&quot;)">'+(r.status==='COMPLETE'?'Reopen':'Complete')+'</button>':'')+
+    '<button class="danger" type="button" onclick="deleteJournalWorkspaceRecord(&quot;'+section+'&quot;,&quot;'+_jnEsc(r.id)+'&quot;)">Delete</button></div></div>'+body+(r.chart_snapshot?'<img class="jn-record-shot" src="'+_jnEsc(r.chart_snapshot)+'" alt="Attached '+_jnEsc(section.slice(0,-1))+' chart screenshot">':'')+'</article>';
+}
+
+let _jwSystemEditing = false;
+
+function _jwSystemCheckbox(name, value, label, selected) {
+  return '<label class="jn-system-check"><input type="checkbox" name="' + name + '" value="' +
+    _jnEsc(value) + '"' + (selected ? ' checked' : '') + '> ' + _jnEsc(label) + '</label>';
+}
+
+function _jwRenderSystem(system) {
+  const editBtn = document.getElementById('jSystemEditBtn');
+  if (editBtn) editBtn.hidden = _jwSystemEditing;
+  if (!_jwSystemEditing) {
+    setHtml('jSystemSummary','<div class="jn-system-list"><div class="jn-system-row"><span>Approved live models</span><b>'+_jnEsc((system.approved_models||[]).join(' · '))+'</b></div><div class="jn-system-row"><span>Risk rules</span><b>'+_jnEsc((system.daily_risk_pct||1)+'% daily · '+(system.max_trades_per_day||2)+' trades max · '+(system.max_losses_per_day||2)+' losses then done')+'</b></div><div class="jn-system-row"><span>Funded sessions</span><b>'+_jnEsc((system.live_sessions||[]).join(' · '))+'</b></div><div class="jn-system-row"><span>PRIME</span><b>'+_jnEsc((system.prime_steps||[]).join(' → '))+'</b></div></div>');
+    return;
+  }
+  const models = system.approved_models || [];
+  const sessions = system.live_sessions || [];
+  setHtml('jSystemSummary','<form class="jn-system-form" id="jSystemForm">' +
+    '<fieldset class="jn-system-fieldset"><legend>Approved live models</legend><div class="jn-system-checks">' +
+    _jwSystemCheckbox('jSystemModel','KLR','KLR',models.includes('KLR')) +
+    _jwSystemCheckbox('jSystemModel','OTE','OTE',models.includes('OTE')) +
+    _jwSystemCheckbox('jSystemModel','ORB','ORB',models.includes('ORB')) +
+    _jwSystemCheckbox('jSystemModel','POWELL_10AM','Powell 10AM',models.includes('POWELL_10AM')) + '</div></fieldset>' +
+    '<div class="jn-system-numbers"><label class="jn-system-field"><span>Daily risk %</span><input id="jSystemRisk" type="number" min="0.1" max="5" step="0.1" value="'+_jnEsc(system.daily_risk_pct == null ? 1 : system.daily_risk_pct)+'" required></label>' +
+    '<label class="jn-system-field"><span>Max trades</span><input id="jSystemMaxTrades" type="number" min="1" max="20" value="'+_jnEsc(system.max_trades_per_day || 2)+'" required></label>' +
+    '<label class="jn-system-field"><span>Max losses</span><input id="jSystemMaxLosses" type="number" min="1" max="20" value="'+_jnEsc(system.max_losses_per_day || 2)+'" required></label></div>' +
+    '<fieldset class="jn-system-fieldset"><legend>Funded sessions</legend><div class="jn-system-checks">' +
+    _jwSystemCheckbox('jSystemSession','NY_AM','NY AM',sessions.includes('NY_AM')) +
+    _jwSystemCheckbox('jSystemSession','NY_PM','NY PM',sessions.includes('NY_PM')) + '</div></fieldset>' +
+    '<label class="jn-system-field"><span>PRIME steps · one per line</span><textarea id="jSystemPrime" required>'+_jnEsc((system.prime_steps||[]).join('\\n'))+'</textarea></label>' +
+    '<div class="jn-system-actions"><button class="jn-action" type="submit">Save changes</button><button class="jn-system-cancel" type="button" onclick="cancelJournalSystemEdit()">Cancel</button></div></form>');
+  const form = document.getElementById('jSystemForm');
+  if (form) form.addEventListener('submit', saveJournalSystem);
+}
+
+function editJournalSystem() {
+  _jwSystemEditing = true;
+  _jwStatus('jSystemStatus','',true);
+  _jwRenderSystem((_journalWorkspace && _journalWorkspace.system) || {});
+}
+
+function cancelJournalSystemEdit() {
+  _jwSystemEditing = false;
+  _jwStatus('jSystemStatus','',true);
+  _jwRenderSystem((_journalWorkspace && _journalWorkspace.system) || {});
+}
+
+async function saveJournalSystem(event) {
+  event.preventDefault();
+  const checked = name => Array.from(document.querySelectorAll('input[name="'+name+'"]:checked')).map(el => el.value);
+  const payload = {
+    approved_models: checked('jSystemModel'),
+    daily_risk_pct: Number(_jwVal('jSystemRisk')),
+    max_trades_per_day: Number(_jwVal('jSystemMaxTrades')),
+    max_losses_per_day: Number(_jwVal('jSystemMaxLosses')),
+    live_sessions: checked('jSystemSession'),
+    prime_steps: _jwVal('jSystemPrime').split('\\n').map(v => v.trim()).filter(Boolean),
+  };
+  _jwStatus('jSystemStatus','Saving…',true);
+  try {
+    const res = await fetch('/journal/workspace/'+'system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') throw new Error(data.detail || 'Rules could not be saved.');
+    _journalWorkspace.system = data.system;
+    _jwSystemEditing = false;
+    _jwRenderSystem(data.system);
+    _jwStatus('jSystemStatus','Rules saved to NOVA.',true);
+  } catch (e) {
+    _jwStatus('jSystemStatus',e.message || 'Rules could not be saved.',false);
+  }
+}
+
+function renderJournalWorkspace(data) {
+  _journalWorkspace = data;
+  const sections = [['plans','jPlanList'],['reflections','jReflectionList'],['studies','jStudyList'],['goals','jGoalList']];
+  sections.forEach(([section,id]) => {
+    const records = Array.isArray(data[section]) ? data[section].slice().reverse() : [];
+    setHtml(id, records.length ? records.map(r=>_jwRecord(section,r)).join('') : '<div class="jn-empty-records">No '+section+' saved yet.</div>');
+  });
+  const system = data.system || {};
+  _jwRenderSystem(system);
+  const planSelect=document.getElementById('jPremarketPlan');
+  if(planSelect){const current=planSelect.value;planSelect.innerHTML='<option value="">— No linked plan —</option>'+(data.plans||[]).slice().reverse().map(p=>'<option value="'+_jnEsc(p.id)+'">'+_jnEsc((p.date||'')+' · '+(p.bias||'PLAN')+' · '+(p.account||p.book||''))+'</option>').join('');planSelect.value=current;}
+}
+
+async function refreshJournalWorkspace() {
+  try { const res=await fetch('/journal/workspace'); if(!res.ok) throw new Error('HTTP '+res.status); renderJournalWorkspace(await res.json()); }
+  catch(e){ console.error('Journal workspace error:',e); ['jPlanList','jReflectionList','jStudyList','jGoalList'].forEach(id=>setHtml(id,'<div class="jn-empty-records down">Workspace unavailable.</div>')); }
+}
+
+async function _jwSave(section, payload, file, statusId) {
+  _jwStatus(statusId,'Saving…',true);
+  const res=await fetch('/journal/workspace/'+section,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await res.json();
+  if(!res.ok||data.status!=='ok') throw new Error(data.detail||'Save failed.');
+  if(file) await _jwUpload(section,data.record.id,file);
+  _jwStatus(statusId,'Saved to NOVA.',true);
+  await refreshJournalWorkspace();
+}
+
+async function deleteJournalWorkspaceRecord(section,id) {
+  if(!confirm('Delete this Journal record?')) return;
+  const res=await fetch('/journal/workspace/'+section+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(res.ok) refreshJournalWorkspace();
+}
+
+async function toggleJournalGoal(id) {
+  const goal=(_journalWorkspace&&_journalWorkspace.goals||[]).find(g=>String(g.id)===String(id)); if(!goal)return;
+  const updated={...goal,status:goal.status==='COMPLETE'?'ACTIVE':'COMPLETE'};
+  const res=await fetch('/journal/workspace/'+'goals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updated)}); if(res.ok)refreshJournalWorkspace();
+}
+
+function _jwBindForm(id, handler) { const form=document.getElementById(id); if(form)form.addEventListener('submit',e=>{e.preventDefault();handler(form);}); }
+_jwBindForm('jPlanForm', async form=>{try{const file=document.getElementById('jPlanScreenshot').files[0];await _jwSave('plans',{date:_jwVal('jPlanDate'),book:_jwVal('jPlanBook'),account:_jwVal('jPlanAccount'),bias:_jwVal('jPlanBias'),events:_jwVal('jPlanEvents'),levels:_jwVal('jPlanLevels'),game_plan:_jwVal('jPlanGame'),invalidation:_jwVal('jPlanInvalidation'),risk_limit:_jwVal('jPlanRisk')},file,'jPlanStatus');form.reset();document.getElementById('jPlanDate').value=todayDateStr();}catch(e){_jwStatus('jPlanStatus',e.message||'Save failed.',false);}});
+_jwBindForm('jReflectionForm', async form=>{try{await _jwSave('reflections',{period:_jwVal('jReflectionPeriod'),date:_jwVal('jReflectionDate'),rating:_jwVal('jReflectionRating'),title:_jwVal('jReflectionTitle'),summary:_jwVal('jReflectionSummary'),went_well:_jwVal('jReflectionWentWell'),lessons:_jwVal('jReflectionLessons'),improvement:_jwVal('jReflectionImprovement')},null,'jReflectionStatus');form.reset();document.getElementById('jReflectionDate').value=todayDateStr();}catch(e){_jwStatus('jReflectionStatus',e.message||'Save failed.',false);}});
+_jwBindForm('jStudyForm', async form=>{try{const file=document.getElementById('jStudyScreenshot').files[0];await _jwSave('studies',{date:_jwVal('jStudyDate'),scope:_jwVal('jStudyScope'),instrument:_jwVal('jStudyInstrument'),model:_jwVal('jStudyModel'),title:_jwVal('jStudyTitle'),description:_jwVal('jStudyDescription'),hypothesis:_jwVal('jStudyHypothesis'),conclusion:_jwVal('jStudyConclusion'),book:'PAPER'},file,'jStudyStatus');form.reset();document.getElementById('jStudyDate').value=todayDateStr();document.getElementById('jStudyInstrument').value='NQ';}catch(e){_jwStatus('jStudyStatus',e.message||'Save failed.',false);}});
+_jwBindForm('jGoalForm', async form=>{try{await _jwSave('goals',{period:_jwVal('jGoalPeriod'),target_date:_jwVal('jGoalDate'),title:_jwVal('jGoalTitle'),checklist:_jwVal('jGoalChecklist').split('\\n').map(x=>x.trim()).filter(Boolean),status:'ACTIVE'},null,'jGoalStatus');form.reset();}catch(e){_jwStatus('jGoalStatus',e.message||'Save failed.',false);}});
+
+['jPlanDate','jReflectionDate','jStudyDate'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=todayDateStr();});
+[['jPlanScreenshot','jPlanScreenshotName'],['jStudyScreenshot','jStudyScreenshotName']].forEach(([inputId,labelId])=>{const input=document.getElementById(inputId);if(input)input.addEventListener('change',()=>{const f=input.files&&input.files[0];setText(labelId,f?f.name+' · '+(f.size/1024/1024).toFixed(1)+' MB':'PNG, JPEG, or WebP · up to 8 MB');});});
+
 async function refreshJournal() {
   // A failed request must not leave the previous cycle's figures on screen
   // looking current -- every Journal region states that it is unavailable.
@@ -3370,6 +4042,15 @@ async function refreshJournal() {
   try { renderJournal(data); } catch(e) { console.error('renderJournal failed:', e); }
   try { renderOverviewAccountSummary(data); } catch(e) { console.error('renderOverviewAccountSummary failed:', e); }
   try { renderOverviewRecentActivity(data); } catch(e) { console.error('renderOverviewRecentActivity failed:', e); }
+
+  // Keep an untouched form date current across midnight, while preserving a
+  // date the user deliberately changed for a historical backfill.
+  const dateEl = document.getElementById('jDate');
+  if (dateEl) {
+    const today = todayDateStr();
+    if (!dateEl.value || dateEl.value === dateEl.dataset.autoDate) dateEl.value = today;
+    dateEl.dataset.autoDate = today;
+  }
 }
 
 async function refreshSignals() {
@@ -3390,7 +4071,35 @@ async function deleteTrade(index) {
   } catch(e) { console.error(e); }
 }
 
+async function resetJournalTrades() {
+  const total = (_journalData && Array.isArray(_journalData.trades)) ? _journalData.trades.length : 0;
+  if (!total) return;
+  const warning = 'Permanently delete all ' + total + ' trade record' + (total === 1 ? '' : 's') +
+    '? This clears live, paper, every account, and all-time P&L history. This cannot be undone.';
+  if (!confirm(warning)) return;
+  if (prompt('Final confirmation: type RESET to delete every trade.') !== 'RESET') {
+    const status = document.getElementById('jnResetStatus');
+    if (status) { status.textContent = 'Reset cancelled — confirmation did not match.'; status.className = 'jn-reset-status down'; }
+    return;
+  }
+  const status = document.getElementById('jnResetStatus');
+  if (status) { status.textContent = 'Clearing trade history…'; status.className = 'jn-reset-status'; }
+  try {
+    const res = await fetch('/journal/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({confirmation:'RESET_ALL_TRADES'})});
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') throw new Error(data.detail || 'Trade history could not be reset.');
+    _jnSelectedKey = null;
+    _jnAccount = 'all';
+    await refreshJournal();
+    const refreshed = document.getElementById('jnResetStatus');
+    if (refreshed) { refreshed.textContent = data.removed + ' trade record' + (data.removed === 1 ? '' : 's') + ' removed.'; refreshed.className = 'jn-reset-status'; }
+  } catch (e) {
+    if (status) { status.textContent = e.message || 'Trade history could not be reset.'; status.className = 'jn-reset-status down'; }
+  }
+}
+
 document.getElementById('jSubmitBtn').addEventListener('click', async () => {
+  const account      = (document.getElementById('jAccount').value || '').trim();
   const ticker       = (document.getElementById('jTicker').value || '').trim().toUpperCase();
   const direction    = _jDirection;
   const outcome      = _jOutcome;
@@ -3407,6 +4116,15 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   const session      = document.getElementById('jSession').value;
   const notes        = (document.getElementById('jNotes').value || '').trim();
   const trade_date   = document.getElementById('jDate').value || '';
+  const trade_mode   = _jTradeMode;
+  const entry_time   = document.getElementById('jEntryTime').value || '';
+  const exit_time    = document.getElementById('jExitTime').value || '';
+  const commission   = document.getElementById('jCommission').value !== '' ? parseFloat(document.getElementById('jCommission').value) : 0;
+  const performance_rating = document.getElementById('jPerformanceRating').value !== '' ? parseFloat(document.getElementById('jPerformanceRating').value) : null;
+  const protocol     = (document.getElementById('jProtocol').value || '').trim();
+  const premarket_plan_id = document.getElementById('jPremarketPlan').value || '';
+  const confluences  = (document.getElementById('jConfluences').value || '').split(',').map(x => x.trim()).filter(Boolean);
+  const trade_management = (document.getElementById('jTradeManagement').value || '').trim();
 
   const msgEl = document.getElementById('jFormMsg');
   function showMsg(text, color) { msgEl.style.display='block'; msgEl.style.color=color; msgEl.textContent=text; }
@@ -3417,7 +4135,7 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
   }
 
   const btn = document.getElementById('jSubmitBtn');
-  btn.disabled = true; btn.textContent = 'LOGGING...';
+  btn.disabled = true; btn.textContent = _jEditingIndex === null ? 'LOGGING...' : 'SAVING...';
   msgEl.style.display = 'none';
 
   try {
@@ -3426,8 +4144,10 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
       .filter(id => document.getElementById(id).checked)
       .map(id => document.getElementById(id).value);
     const reflection = (document.getElementById('jReflection').value || '').trim();
+    const risk_checklist = ['jRiskSize','jRiskTrades','jRiskLosses','jRiskSession'].filter(id => document.getElementById(id).checked).map(id => document.getElementById(id).value);
+    const trade_checklist = ['jPrimePosition','jPrimeLevel','jPrimeInteraction','jPrimeConfirmation','jPrimeExecution'].filter(id => document.getElementById(id).checked).map(id => document.getElementById(id).value);
 
-    const payload = {ticker, direction, outcome, size, setup_type, session, notes, trade_date};
+    const payload = {account, ticker, direction, outcome, size, setup_type, session, notes, trade_date, trade_mode, entry_time, exit_time, commission, performance_rating, protocol, premarket_plan_id, confluences, trade_management, risk_checklist, trade_checklist};
     if (realized_pnl !== null) payload.realized_pnl = realized_pnl;
     if (entry_price  !== null) payload.entry_price   = entry_price;
     if (exit_price   !== null) payload.exit_price    = exit_price;
@@ -3436,23 +4156,45 @@ document.getElementById('jSubmitBtn').addEventListener('click', async () => {
     if (emotional_state)         payload.emotional_state  = emotional_state;
     if (behavioral_flags.length) payload.behavioral_flags = behavioral_flags;
     if (reflection)              payload.reflection        = reflection;
-    const res  = await fetch('/journal/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const screenshotInput = document.getElementById('jScreenshot');
+    const screenshotFile = screenshotInput && screenshotInput.files ? screenshotInput.files[0] : null;
+    if (_jEditingIndex !== null) payload.index = _jEditingIndex;
+    const res  = await fetch(_jEditingIndex === null ? '/journal/add' : '/journal/trade/update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     const data = await res.json();
     if (data.status === 'ok') {
-      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes','jReflection'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+      let screenshotError = '';
+      if (screenshotFile) {
+        try { await _jnUploadFile(data.index, screenshotFile); }
+        catch (e) { screenshotError = e.message || 'Screenshot upload failed.'; }
+      }
+      ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes','jReflection','jEntryTime','jExitTime','jCommission','jPerformanceRating','jProtocol','jPremarketPlan','jConfluences','jTradeManagement'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+      if (screenshotInput) screenshotInput.value = '';
+      const screenshotName = document.getElementById('jScreenshotName');
+      if (screenshotName) screenshotName.textContent = 'PNG, JPEG, or WebP · up to 8 MB';
       document.getElementById('jDate').value = todayDateStr();
+      document.getElementById('jDate').dataset.autoDate = todayDateStr();
       document.getElementById('jSession').value = '';
       document.getElementById('jEmotionalState').value = '';
       ['jFlagEarlyExit','jFlagLateEntry','jFlagHesitation','jFlagOversized','jFlagFomo','jFlagRevenge'].forEach(id => { const el = document.getElementById(id); if(el) el.checked = false; });
-      setDir('LONG'); setOutcome('WIN');
-      showMsg('Trade logged.', 'var(--green)');
-      setTimeout(() => { msgEl.style.display='none'; closeJModal(); }, 1200);
+      ['jRiskSize','jRiskTrades','jRiskLosses','jRiskSession','jPrimePosition','jPrimeLevel','jPrimeInteraction','jPrimeConfirmation','jPrimeExecution'].forEach(id => { const el = document.getElementById(id); if(el) el.checked = false; });
+      setDir('LONG'); setOutcome('WIN'); setTradeMode('LIVE');
+      const wasEditing = _jEditingIndex !== null;
+      _jEditingIndex = null; setText('jModalTitle','LOG TRADE');
+      showMsg(screenshotError ? `Trade saved, but ${screenshotError}` : (wasEditing ? 'Trade updated.' : (screenshotFile ? 'Trade and screenshot logged.' : 'Trade logged.')), screenshotError ? 'var(--gold)' : 'var(--green)');
+      setTimeout(() => { msgEl.style.display='none'; closeJModal(); }, screenshotError ? 2600 : 1200);
       refreshJournal();
     } else {
       showMsg('Error: ' + (data.detail || 'Unknown'), 'var(--red)');
     }
   } catch(e) { showMsg('Connection error.', 'var(--red)'); }
-  btn.disabled = false; btn.textContent = 'LOG TRADE';
+  btn.disabled = false; btn.textContent = _jEditingIndex === null ? 'LOG TRADE' : 'SAVE CHANGES';
+});
+
+const _jnNewShotInput = document.getElementById('jScreenshot');
+if (_jnNewShotInput) _jnNewShotInput.addEventListener('change', () => {
+  const label = document.getElementById('jScreenshotName');
+  const file = _jnNewShotInput.files && _jnNewShotInput.files[0];
+  if (label) label.textContent = file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB` : 'PNG, JPEG, or WebP · up to 8 MB';
 });
 
 ['jTicker','jRealizedPnl','jEntry','jExit','jSize','jStop','jTp1','jSetup','jNotes'].forEach(id => {
@@ -3721,6 +4463,7 @@ function _mkRenderVol() {
 function _mkRenderNews(dash) {
   const body = document.getElementById('mkNewsBody');
   const meta = document.getElementById('mkNewsMeta');
+  const wire = document.getElementById('mkBreakingWire');
   if (!body) return;
   if (!dash) {
     body.innerHTML = '<div class="mk-skel-rows"><i></i><i></i><i></i></div>';
@@ -3729,34 +4472,129 @@ function _mkRenderNews(dash) {
   }
   const news = dash.news || [];
   const events = ((dash.calendar || {}).events) || [];
+  const riskDate = String(((dash.risk || {}).donna_time_ny) || '').slice(0, 10);
+  const todayEt = riskDate || (() => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date()).reduce((out, p) => { out[p.type] = p.value; return out; }, {});
+    return parts.year + '-' + parts.month + '-' + parts.day;
+  })();
+  const byEventTime = (a, b) => String(a.date || '').localeCompare(String(b.date || '')) ||
+    String(a.time_et || '').localeCompare(String(b.time_et || ''));
+  const currentEvents = events.filter(e => String(e.date || '') >= todayEt).sort(byEventTime);
+  const recentEvents = events.filter(e => String(e.date || '') < todayEt).sort(byEventTime).reverse();
+  const displayedEvents = currentEvents.concat(recentEvents).slice(0, 6);
+  const severityWeight = {high: 3, medium: 2, low: 1};
+  const ranked = news.slice().sort((a, b) => {
+    const score = (n) => {
+      const age = n.published_at ? Math.max(0, Date.now() / 1000 - Number(n.published_at)) : Infinity;
+      const sev = String(n.severity || '').toLowerCase();
+      const liveBoost = sev === 'high' && age <= 7200 ? 100 : age <= 21600 ? 25 : 0;
+      return liveBoost + Number(n.market_score || 0) * 10 + (severityWeight[sev] || 0);
+    };
+    return score(b) - score(a) || Number(b.published_at || 0) - Number(a.published_at || 0);
+  });
+  const safeUrl = (n) => /^https?:[/][/]/i.test(String((n || {}).url || '')) ? String(n.url) : '';
+  const stamp = (n, includeDate) => {
+    const raw = Number((n || {}).published_at || 0);
+    if (!raw) return 'Time unavailable';
+    const d = new Date(raw * 1000);
+    if (isNaN(d.getTime())) return 'Time unavailable';
+    try {
+      return d.toLocaleString('en-US', {
+        timeZone: 'America/New_York', month: includeDate ? 'short' : undefined,
+        day: includeDate ? 'numeric' : undefined, year: includeDate ? 'numeric' : undefined,
+        hour: 'numeric', minute: '2-digit',
+        hour12: true,
+      }).replace(',', '') + ' ET';
+    } catch (e) { return 'Time unavailable'; }
+  };
+  const linkedTitle = (n, cls) => {
+    const title = _mkEsc(n.headline || 'Untitled headline');
+    const url = safeUrl(n);
+    return url ? '<a class="' + (cls || '') + '" href="' + _mkEsc(url) +
+      '" target="_blank" rel="noopener noreferrer">' + title + '</a>' : title;
+  };
+  const row = (n) => {
+    const sev = String(n.severity || 'low').toLowerCase();
+    return '<div class="mk-news-row"><span class="mk-cat-t">' + _mkEsc(stamp(n, true)) + '</span>' +
+      '<span class="mk-imp ' + _mkEsc(sev) + '" aria-hidden="true"></span>' +
+      '<span>' + linkedTitle(n) + '<small>' + _mkEsc([n.category || 'Markets', n.source || 'Source unavailable'].join(' · ')) +
+      '</small></span></div>';
+  };
+
   if (meta) {
-    meta.textContent = events.length
-      ? events.length + ' event' + (events.length === 1 ? '' : 's')
-      : (news.length ? news.length + ' headline' + (news.length === 1 ? '' : 's') : 'nothing scheduled');
+    const newest = ranked.reduce((v, n) => Math.max(v, Number(n.published_at || 0)), 0);
+    meta.textContent = news.length + ' live headlines · ' + events.length + ' macro events' +
+      (newest ? ' · latest ' + stamp({published_at: newest}, false) : '');
   }
+
+  if (wire) {
+    if (ranked.length) {
+      const top = ranked[0];
+      wire.innerHTML = '<span>Breaking</span><strong>' + linkedTitle(top) +
+        '<small>' + _mkEsc(stamp(top, true)) + '</small></strong>';
+    } else {
+      wire.innerHTML = '<span>Live wire</span><strong>No verified headline is available right now.</strong>';
+    }
+  }
+
   let html = '';
-  events.slice(0, 4).forEach(e => {
+  if (ranked.length) {
+    const lead = ranked[0];
+    const ageSec = lead.published_at ? Math.max(0, Date.now() / 1000 - Number(lead.published_at)) : Infinity;
+    const sev = String(lead.severity || 'low').toLowerCase();
+    const breaking = sev === 'high' && ageSec <= 7200;
+    html += '<div class="mk-news-desk"><article class="mk-news-lead">' +
+      '<div class="mk-news-lead-meta"><span class="mk-breaking' + (breaking ? '' : ' medium') + '">' +
+      (breaking ? 'Breaking' : 'Top market driver') + '</span><span class="mk-news-stamp">' +
+      _mkEsc([lead.category || 'Markets', stamp(lead, true), lead.source || 'Source unavailable'].join(' · ')) +
+      '</span></div><h3>' + linkedTitle(lead) + '</h3>' +
+      (lead.summary ? '<p class="mk-news-summary">' + _mkEsc(String(lead.summary).slice(0, 420)) + '</p>' : '') +
+      (safeUrl(lead) ? '<a class="mk-news-open" href="' + _mkEsc(safeUrl(lead)) +
+        '" target="_blank" rel="noopener noreferrer">Open full article ↗</a>' : '') +
+      '</article><section class="mk-news-rapid"><div class="mk-news-label">Latest market-moving updates</div>' +
+      ranked.slice(1, 6).map(row).join('') + '</section></div>';
+  } else {
+    html += '<div class="mk-note"><b>No headlines in the feed</b>The news service returned zero live articles. ' +
+      'Nothing is repeated as if it had just broken.</div>';
+  }
+
+  html += '<div class="mk-news-lower"><section class="mk-news-section"><div class="mk-news-label">Why NQ is moving</div>';
+  const nq = (_mkQuotes || []).filter(r => _mkNorm(r.symbol) === 'NQ')[0] || null;
+  const es = (_mkQuotes || []).filter(r => _mkNorm(r.symbol) === 'ES')[0] || null;
+  const nqTerms = /\b(nq|nasdaq|tech|semiconductor|nvidia|fed|rate|yield|inflation|cpi|ppi|jobs|payroll|oil|iran|war|tariff|treasury)\b/i;
+  const drivers = ranked.filter(n => String(n.severity || '').toLowerCase() !== 'low' &&
+    nqTerms.test([n.headline, n.summary, n.category].filter(Boolean).join(' '))).slice(0, 3);
+  const renderIndexDriver = (quote, symbol, related) => {
+    if (!quote) return '<div class="mk-note"><b>' + symbol + ' move unavailable</b>The quote service has not returned a current ' + symbol + ' move.</div>';
+    const dir = _mkDir(quote.chg);
+    const move = quote.chg == null ? (quote.pct || '—') : _mkSigned(quote.chg, 2) + ' pts (' + (quote.pct || '—') + ')';
+    return '<div class="mk-driver-box"><div class="mk-driver-move ' + dir + '">' + symbol + ' ' + _mkEsc(move) + '</div>' +
+      '<div class="mk-driver-note">Potential live drivers for the current move. These headlines are correlated context, not verified causation.</div>' +
+      (related.length ? '<ul class="mk-driver-list">' + related.map(n => '<li>' + linkedTitle(n) + '</li>').join('') + '</ul>' :
+        '<div class="mk-driver-note" style="margin-top:10px">No high-confidence headline catalyst is present. NOVA will not invent a reason for the move.</div>') + '</div>';
+  };
+  html += renderIndexDriver(nq, 'NQ', drivers);
+  const esTerms = /\b(es|s&p|s&p 500|sp500|stocks|equities|fed|rate|yield|inflation|cpi|ppi|jobs|payroll|oil|iran|war|tariff|treasury)\b/i;
+  const esDrivers = ranked.filter(n => String(n.severity || '').toLowerCase() !== 'low' &&
+    esTerms.test([n.headline, n.summary, n.category].filter(Boolean).join(' '))).slice(0, 2);
+  html += '<div class="mk-driver-subhead">Why ES is moving</div>' + renderIndexDriver(es, 'ES', esDrivers);
+  html += '</section><section class="mk-news-section"><div class="mk-news-label">Upcoming macro · date &amp; time ET</div>';
+  displayedEvents.forEach(e => {
     const imp = String(e.importance || 'low').toLowerCase();
-    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(e.time_et || '—') + '</span>' +
+    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc((e.date ? e.date + ' · ' : '') + (e.time_et || '—') + ' ET') + '</span>' +
       '<span class="mk-imp ' + _mkEsc(imp) + '" aria-hidden="true"></span>' +
       '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(e.title || 'Untitled event') + '</span>' +
-      '<span class="mk-cat-m">' + _mkEsc([e.category, e.currency, imp, e.source].filter(Boolean).join(' · ')) +
+      '<span class="mk-cat-m">' + _mkEsc([imp.toUpperCase() + ' IMPACT', e.currency, e.note, e.source].filter(Boolean).join(' · ')) +
       '</span></span></div>';
   });
-  news.slice(0, 4).forEach(n => {
-    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc(n.time || '') + '</span>' +
-      '<span class="mk-imp ' + _mkEsc(String(n.severity || 'low').toLowerCase()) + '" aria-hidden="true"></span>' +
-      '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(n.headline || '') + '</span>' +
-      '<span class="mk-cat-m">' + _mkEsc(n.source || '') + '</span></span></div>';
-  });
-  if (!news.length) {
-    html += '<div class="mk-note"' + (events.length ? ' style="margin-top:11px"' : '') + '>' +
-      '<b>No headlines in the feed</b>The news service returned zero articles. Nothing is shown ' +
-      'rather than repeating an older headline as if it had just broken.</div>';
-  }
+  if (!events.length) html += '<div class="mk-note"><b>No scheduled events loaded</b>The calendar source returned no events. NOVA will not invent an economic release.</div>';
+  html += '</section><section class="mk-news-section"><div class="mk-news-label">Full live coverage · war, macro, policy &amp; finance</div>' +
+    '<div class="mk-all-news">' + (ranked.length ? ranked.map(row).join('') :
+      '<div class="mk-note"><b>Coverage unavailable</b>No current articles were returned.</div>') + '</div></section></div>';
   if (!events.length && !news.length) {
-    html = '<div class="mk-note"><b>Nothing scheduled and no headlines</b>' +
-      'Both sources answered and both were empty. This is a quiet tape, not a failure.</div>';
+    html += '<div class="mk-note"><b>Nothing live right now</b>Both collections are empty — quiet tape, not a failure.</div>';
   }
   body.innerHTML = html;
 }
@@ -3971,10 +4809,10 @@ if (_jSignalsTab) _jSignalsTab.addEventListener('click', () => refreshSignals())
 
 // ════════ BOOT ════════
 function todayDateStr() {
-  const t = new Date();
-  return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  return nyTodayDateStr();
 }
 document.getElementById('jDate').value = todayDateStr();
+document.getElementById('jDate').dataset.autoDate = todayDateStr();
 
 // First-load fade-in — applies once, removed after animation completes
 document.body.classList.add('donna-first-load');
@@ -3985,6 +4823,7 @@ refresh();
 setInterval(refresh, 30000);
 refreshJournal();
 setInterval(refreshJournal, 60000);
+refreshJournalWorkspace();
 refreshNewsFuturesStrip();
 setInterval(refreshNewsFuturesStrip, 30000);
 refreshTrendingMovers();

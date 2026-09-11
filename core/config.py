@@ -74,6 +74,7 @@ SETTINGS_FILE      = _data_file('nova_settings.json',             'donna_setting
 MACRO_EVENTS_FILE  = _data_file('nova_macro_events.json',         'donna_macro_events.json')
 MORNING_BRIEF_FILE = _data_file('nova_morning_brief_state.json',  'donna_morning_brief_state.json')
 JOURNAL_FILE       = _data_file('nova_journal.json',              'donna_journal.json')
+JOURNAL_WORKSPACE_FILE = _data_file('nova_journal_workspace.json', 'donna_journal_workspace.json')
 REJECTIONS_FILE    = _data_file('nova_rejections.json',           'donna_rejections.json')
 SIGNAL_LOG_FILE        = _data_file('nova_signal_log.json',           'donna_signal_log.json')
 TRACE_FILE             = _data_file('nova_execution_trace.json',       'donna_execution_trace.json')
@@ -145,7 +146,7 @@ NOVA_EXECUTION_SAFETY_ALERT_COOLDOWN_SECONDS = _env_int('NOVA_EXECUTION_SAFETY_A
 NOVA_TRADING_SUBSYSTEM_ENABLED = os.getenv('NOVA_TRADING_SUBSYSTEM_ENABLED', 'false').strip().lower() == 'true'
 
 # ── Feed sync (local → Render replication) ────────────────────
-# NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://donna.onrender.com)
+# NOVA_RENDER_URL:    full base URL of the Render deployment (e.g. https://d-o-n-n-a.onrender.com)
 # NOVA_INGEST_SECRET: shared secret for POST /api/feed/ingest — set in both local .env and Render env vars
 NOVA_RENDER_URL    = os.getenv('NOVA_RENDER_URL', '').strip().rstrip('/')
 NOVA_INGEST_SECRET = os.getenv('NOVA_INGEST_SECRET', '').strip()
@@ -265,6 +266,11 @@ def cache_get(key):
 
 def cache_set(key, value, ttl):
     CACHE[key] = {'value': value, 'expires_at': datetime.now(timezone.utc).timestamp() + ttl}
+
+
+def cache_delete(key):
+    """Remove one cached payload after its persisted source is replaced."""
+    CACHE.pop(key, None)
 
 
 # ── Telegram ──────────────────────────────────────────────────

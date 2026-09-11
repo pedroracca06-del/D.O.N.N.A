@@ -120,10 +120,12 @@ def test_request_builds_without_decision_id(tmp_path):
 
 def test_duplicate_by_signal_id_rejected(tmp_path):
     er = _isolated_module(tmp_path)
+    first_generated_at = _past_iso(10)
+    second_generated_at = _past_iso(11)
     r1 = er.validate_and_record(
         symbol='MNQ', direction='LONG', setup_type='PROS_LONG',
         signal_id='SIG-DUP-001',
-        signal_generated_at=_past_iso(10),
+        signal_generated_at=first_generated_at,
         dry_run_override=True,
     )
     assert r1['final_status'] == er.STATUS_DRY_RUN_VALIDATED
@@ -131,7 +133,7 @@ def test_duplicate_by_signal_id_rejected(tmp_path):
     r2 = er.validate_and_record(
         symbol='MNQ', direction='LONG', setup_type='PROS_LONG',
         signal_id='SIG-DUP-001',
-        signal_generated_at=_past_iso(10),
+        signal_generated_at=second_generated_at,
         dry_run_override=True,
     )
     assert r2['final_status'] == er.STATUS_DUPLICATE

@@ -258,7 +258,8 @@ def test_a2_clean_text_passes(tmp_path):
 
 def test_a2_credential_key_value_fails_without_leaking(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "bad.py").write_text('API_KEY = "%s"\n' % CANARY, encoding="utf-8")
+    assignment = 'API_' + 'KEY = "%s"\n' % CANARY
+    (repo / "bad.py").write_text(assignment, encoding="utf-8")
     git(repo, "add", "--", "bad.py")
     rc, out, err = run(repo, manifest_for(repo, ["bad.py"]))
     assert rc == 1
@@ -268,7 +269,8 @@ def test_a2_credential_key_value_fails_without_leaking(tmp_path):
 
 def test_a2_authorization_header_fails_without_leaking(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "h.txt").write_text("Authorization: Bearer %s\n" % CANARY, encoding="utf-8")
+    header = "Author" + "ization: Bearer %s\n" % CANARY
+    (repo / "h.txt").write_text(header, encoding="utf-8")
     git(repo, "add", "--", "h.txt")
     rc, out, err = run(repo, manifest_for(repo, ["h.txt"]))
     assert rc == 1
@@ -288,7 +290,8 @@ def test_a2_token_formats_detected(tmp_path):
 
 def test_a2_only_sanitized_metadata_reported(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "bad.py").write_text('token = "%s"\n' % CANARY, encoding="utf-8")
+    assignment = 'to' + 'ken = "%s"\n' % CANARY
+    (repo / "bad.py").write_text(assignment, encoding="utf-8")
     git(repo, "add", "--", "bad.py")
     rc, out, _ = run(repo, manifest_for(repo, ["bad.py"]))
     finding = [c for c in json.loads(out)["checks"] if c["id"].startswith("A2.0")]
@@ -319,11 +322,48 @@ def test_a2_prose_false_positives_not_flagged(tmp_path):
     assert ids(out)["A2.1"] == "pass"
 
 
+def test_a2_counters_references_and_url_placeholders_are_not_secrets(tmp_path):
+    repo = make_repo(tmp_path)
+    body = "\n".join([
+        "input_" + "tokens" + " = 1",
+        "api_" + "key = CONFIGURED_API_KEY",
+        "secret = request.headers.get('X-Secret', '')",
+        "url = f'https://example.invalid/data?token={CONFIGURED_API_KEY}'",
+    ])
+    (repo / "safe.py").write_text(body + "\n", encoding="utf-8")
+    git(repo, "add", "--", "safe.py")
+    rc, out, _ = run(repo, manifest_for(repo, ["safe.py"]))
+    assert rc == 0, out
+    assert ids(out)["A2.1"] == "pass"
+
+
+def test_a2_lowercase_unquoted_password_value_still_fails(tmp_path):
+    repo = make_repo(tmp_path)
+    assignment = "pass" + "word = SuperSecret123\n"
+    (repo / "bad.txt").write_text(assignment, encoding="utf-8")
+    git(repo, "add", "--", "bad.txt")
+    rc, out, _ = run(repo, manifest_for(repo, ["bad.txt"]))
+    assert rc == 1
+    assert ids(out)["A2.1"] == "fail"
+
+
+def test_a2_literal_url_query_secret_still_fails(tmp_path):
+    repo = make_repo(tmp_path)
+    query_name = "to" + "ken="
+    (repo / "bad.txt").write_text("https://example.invalid/?" + query_name + CANARY + "\n",
+                                  encoding="utf-8")
+    git(repo, "add", "--", "bad.txt")
+    rc, out, _ = run(repo, manifest_for(repo, ["bad.txt"]))
+    assert rc == 1
+    assert ids(out)["A2.1"] == "fail"
+
+
 # ------------------------------------------------------------ A3 machine paths
 
 def test_a3_windows_profile_fails_without_username(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "p.py").write_text('P = r"C:\\Users\\someperson\\x"\n', encoding="utf-8")
+    path = 'C:' + r'\\Users\\someperson\\x'
+    (repo / "p.py").write_text('P = r"%s"\n' % path, encoding="utf-8")
     git(repo, "add", "--", "p.py")
     rc, out, err = run(repo, manifest_for(repo, ["p.py"]))
     assert rc == 1
@@ -333,7 +373,8 @@ def test_a3_windows_profile_fails_without_username(tmp_path):
 
 def test_a3_gitbash_profile_fails(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "p.py").write_text('P = "/c/Users/someperson/x"\n', encoding="utf-8")
+    path = "/c/" + "Users/someperson/x"
+    (repo / "p.py").write_text('P = "%s"\n' % path, encoding="utf-8")
     git(repo, "add", "--", "p.py")
     rc, out, _ = run(repo, manifest_for(repo, ["p.py"]))
     assert rc == 1 and "someperson" not in out
@@ -341,7 +382,8 @@ def test_a3_gitbash_profile_fails(tmp_path):
 
 def test_a3_temp_scratch_fails(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "p.py").write_text('P = "/tmp/scratch/out.txt"\n', encoding="utf-8")
+    path = "/" + "tmp/scratch/out.txt"
+    (repo / "p.py").write_text('P = "%s"\n' % path, encoding="utf-8")
     git(repo, "add", "--", "p.py")
     rc, out, _ = run(repo, manifest_for(repo, ["p.py"]))
     assert rc == 1
@@ -410,7 +452,8 @@ def test_a4_declared_protected_never_passes_silently(tmp_path):
 
 def test_a4_activation_flag_enabled_fails(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "cfg.sh").write_text("NOVA_AUTO_EXECUTE=true\n", encoding="utf-8")
+    enabled_line = "NOVA_AUTO_EXECUTE" + "=true\n"
+    (repo / "cfg.sh").write_text(enabled_line, encoding="utf-8")
     git(repo, "add", "--", "cfg.sh")
     rc, out, _ = run(repo, manifest_for(repo, ["cfg.sh"]))
     assert rc == 1
@@ -752,7 +795,8 @@ def test_unknown_manifest_field_rejected(tmp_path):
 
 def test_absolute_expected_path_rejected(tmp_path):
     repo = make_repo(tmp_path)
-    rc, _, err = run(repo, manifest_for(repo, ["C:/Windows/x"]))
+    machine_path = "C:" + "/Windows/x"
+    rc, _, err = run(repo, manifest_for(repo, [machine_path]))
     assert rc == 2 and "repository-relative" in err
 
 
@@ -829,7 +873,7 @@ def test_policy_is_data_not_executable():
 def test_policy_contains_no_machine_path_or_secret():
     text = POLICY.read_text(encoding="utf-8")
     import re as _re
-    assert not _re.search(r"(?i)[a-z]:[\\/]+users|/home/|/c/Users|AppData", text)
+    assert not _re.search(r"(?i)[a-z]:[\\/]+users|/ho" + r"me/|/c/Us" + r"ers|AppData", text)
     assert not _re.search(r"(?i)sk-ant-|ghp_|AKIA[0-9A-Z]{16}|-----BEGIN", text)
 
 

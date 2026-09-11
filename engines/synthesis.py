@@ -40,11 +40,11 @@ from __future__ import annotations
 
 import json
 import math
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 from zoneinfo import ZoneInfo
-
 from core.config import (
     SYNTHESIS_FILE         as _SYN_FILE,
     INTELLIGENCE_LOG_FILE  as _INTEL_FILE,
@@ -59,6 +59,11 @@ from core.config import (
 _NY_TZ       = ZoneInfo('America/New_York')
 _INTEL_MAX   = 500
 _INTEL_LOCK  = __import__('threading').Lock()
+
+
+def _short_label(label: str, width: int = 55) -> str:
+    """Compact a thesis label without cutting the final word in half."""
+    return textwrap.shorten(str(label), width=width, placeholder='…')
 
 
 def _emit_intelligence_event(subtype: str, payload: dict, event_type: str = 'INTELLIGENCE') -> None:
@@ -633,8 +638,8 @@ def _generate_thesis(
                 f'internal structure and macro backdrop are directly opposed'
             )
         # Generic
-        b_lbl = bull_major[0].label[:55] if bull_major else 'bullish price action'
-        r_lbl = bear_major[0].label[:55] if bear_major else 'bearish signals'
+        b_lbl = _short_label(bull_major[0].label) if bull_major else 'bullish price action'
+        r_lbl = _short_label(bear_major[0].label) if bear_major else 'bearish signals'
         return f'Market is contested -- {b_lbl} conflicts directly with {r_lbl}'
 
     if state == 'LIQUIDITY_SEEKING':

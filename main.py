@@ -29,6 +29,8 @@ from core.state import (
     load_settings,
     load_macro_events,
     load_journal, save_journal, compute_journal_stats,
+    load_journal_workspace, save_journal_workspace,
+    journal_trading_date, with_journal_trading_dates,
     read_json_file, write_json_file,
 )
 from engines.engines import (
@@ -294,6 +296,9 @@ async def headline_loop():
 
 
 async def finnhub_loop():
+    # The startup warmup performs the first cycle. Avoid immediately making
+    # the same provider calls twice, which wastes quota during deploys.
+    await asyncio.sleep(300)
     while True:
         try:
             await asyncio.to_thread(process_finnhub_cycle)
@@ -373,6 +378,18 @@ async def execution_safety_loop():
 
 # ── Startup ────────────────────────────────────────────────────
 
+async def _initial_data_warmup() -> None:
+    """Refresh external data after the web server has become available."""
+    try:
+        await asyncio.to_thread(check_todays_breaking_events)
+    except Exception as e:
+        print(f'[startup] Initial breaking-events check failed: {e}')
+    try:
+        await asyncio.to_thread(process_finnhub_cycle)
+        print('[startup] Initial finnhub cycle complete')
+    except Exception as e:
+        print(f'[startup] Initial finnhub cycle failed: {e}')
+
 def _init_settings_from_bundle() -> None:
     """
     On Render, DONNA_DATA_DIR=/data so SETTINGS_FILE lives on the persistent disk.
@@ -415,12 +432,10 @@ async def startup():
         await asyncio.to_thread(reconcile_execution_audit)
     except Exception as e:
         print(f'[startup] audit reconciliation error: {e}')
-    await asyncio.to_thread(check_todays_breaking_events)
-    try:
-        await asyncio.to_thread(process_finnhub_cycle)
-        print('[startup] Initial finnhub cycle complete')
-    except Exception as e:
-        print(f'[startup] Initial finnhub cycle failed: {e}')
+    # Provider availability must never determine application availability.
+    # Warm external data in the background so Render can mark the service
+    # healthy even when a market-data provider is slow or rate-limiting us.
+    asyncio.create_task(_initial_data_warmup())
     asyncio.create_task(news_loop())
     asyncio.create_task(headline_loop())
     asyncio.create_task(finnhub_loop())
@@ -990,13 +1005,28 @@ async def governance_status():
         return {'error': str(exc)}
 
 
+def _execution_state_disabled_payload() -> dict:
+    """Return a fixed refusal without inspecting legacy execution state."""
+    return {
+        'status': 'TRADING_SUBSYSTEM_DISABLED',
+        'armed': False,
+        'trading_subsystem_enabled': False,
+        'reason': (
+            'The trading/execution subsystem is temporarily disabled. '
+            'It may return only through a separately approved future system change.'
+        ),
+    }
+
+
 @app.get('/api/execution-state')
 async def execution_state():
     """
-    Full execution arming status — answers 'why won't the next trade fire?'
-    Returns armed flag, active blockers, position attribution, and exact conditions
-    required for the next trade to execute.
+    Return a fixed disabled response while the master trading switch is off.
+    Legacy execution-state inspection remains preserved behind that switch.
     """
+    if not NOVA_TRADING_SUBSYSTEM_ENABLED:
+        return _execution_state_disabled_payload()
+
     try:
         import os as _os
         from core.state_engine import state as _st
@@ -1013,9 +1043,9 @@ async def execution_state():
 
         # System gates
         if not auto_execute:
-            blockers.append('NOVA_AUTO_EXECUTE is false — set to true to arm execution')
+            blockers.append('Automatic execution flag is disabled')
         else:
-            conditions_met.append('NOVA_AUTO_EXECUTE=true')
+            conditions_met.append('Automatic execution flag is enabled')
 
         if not paper:
             blockers.append('Alpaca is in LIVE mode — bridge is paper-only')
@@ -2787,15 +2817,26 @@ async def assistant_chat(request: Request):
 
 @app.get('/journal/data')
 async def journal_data():
-    trades    = load_journal()
+    trades    = with_journal_trading_dates(load_journal())
     stats     = compute_journal_stats(trades)
+    from core.state import journal_record_origin
+    personal_trades = [t for t in trades if journal_record_origin(t) == 'personal']
+    legacy_system_trades = [t for t in trades if journal_record_origin(t) == 'legacy_system']
+    # Overview is a live-account surface. Paper studies remain available in
+    # Journal, but can never alter live P&L, win rate, or recent activity.
+    personal_live_trades = [
+        t for t in personal_trades
+        if str(t.get('trade_mode') or 'LIVE').upper() == 'LIVE'
+    ]
+    personal_stats = compute_journal_stats(personal_live_trades)
+    legacy_system_stats = compute_journal_stats(legacy_system_trades)
     today_str = now_ny().strftime('%Y-%m-%d')
 
     _closed_outcomes = ('WIN', 'LOSS', 'EOD_CLOSE', 'BREAKEVEN')
     today_pnl = sum(
         float(t.get('realized_pnl', 0) or 0)
         for t in trades
-        if t.get('trade_date') == today_str
+        if journal_trading_date(t) == today_str
         and t.get('outcome') in _closed_outcomes
         and t.get('realized_pnl') is not None
         and t.get('outcome') != 'REJECTED'
@@ -2807,7 +2848,40 @@ async def journal_data():
 
     stats['today_pnl'] = round(today_pnl, 2)
 
-    return {'status': 'ok', 'trades': trades, 'stats': stats}
+    personal_stats['today_pnl'] = round(sum(
+        float(t.get('realized_pnl', 0) or 0)
+        for t in personal_live_trades
+        if journal_trading_date(t) == today_str
+        and t.get('outcome') in _closed_outcomes
+        and t.get('realized_pnl') is not None
+        and t.get('outcome') != 'REJECTED'
+    ), 2)
+    legacy_system_stats['today_pnl'] = round(sum(
+        float(t.get('realized_pnl', 0) or 0)
+        for t in legacy_system_trades
+        if journal_trading_date(t) == today_str
+        and t.get('outcome') in _closed_outcomes
+        and t.get('realized_pnl') is not None
+        and t.get('outcome') != 'REJECTED'
+    ), 2)
+
+    # Expose the source index on response copies so review actions can update
+    # the exact stored record even after the browser filters or sorts it.
+    indexed_trades = [dict(t, _journal_index=i) for i, t in enumerate(trades)]
+    indexed_personal = [t for t in indexed_trades if journal_record_origin(t) == 'personal']
+    indexed_legacy = [t for t in indexed_trades if journal_record_origin(t) == 'legacy_system']
+
+    return {
+        'status': 'ok', 'trades': indexed_trades, 'stats': stats,
+        'personal_trades': indexed_personal, 'personal_stats': personal_stats,
+        'legacy_system_trades': indexed_legacy,
+        'legacy_system_stats': legacy_system_stats,
+        'record_scope': {
+            'default': 'personal',
+            'personal': len(personal_trades),
+            'legacy_system': len(legacy_system_trades),
+        },
+    }
 
 
 @app.get('/journal/signals')
@@ -2820,7 +2894,7 @@ async def journal_signals():
     except Exception:
         entries = []
     # Return last 150 entries (newest first — file is already newest-first)
-    return {'status': 'ok', 'signals': entries[:150], 'total': len(entries)}
+    return {'status': 'ok', 'signals': entries[:150], 'total': len(entries), 'authority_class': 'historical_execution', 'current_prime_authority': False}
 
 
 @app.get('/api/signal-log/session-development')
@@ -2854,6 +2928,8 @@ async def session_development():
         return round(sum(1 for s in bucket if s.get('alert_type') == 'EXECUTION_READY') / len(bucket), 3)
 
     return {
+        'authority_class': 'historical_execution',
+        'current_prime_authority': False,
         'total_ny_open_pros': len(signals),
         'buckets': {
             'pre_945':    {'count': len(pre_945),   'exec_rate': _exec_rate(pre_945),   'grade_dist': _grade_dist(pre_945)},
@@ -2879,7 +2955,259 @@ async def direction_churn():
       instability_ratio: fraction of flips where IB draw did NOT change (0.0=all real, 1.0=all unstable)
     """
     from delivery.signal_log import get_direction_churn as _get_churn
-    return await asyncio.to_thread(_get_churn, 500)
+    result = await asyncio.to_thread(_get_churn, 500)
+    if isinstance(result, dict):
+        return {'authority_class': 'historical_execution', 'current_prime_authority': False, **result}
+    return {'authority_class': 'historical_execution', 'current_prime_authority': False, 'data': result}
+
+
+_JOURNAL_WORKSPACE_SECTIONS = {'plans', 'reflections', 'studies', 'goals'}
+
+
+def _journal_workspace_record(section: str, body: dict) -> dict:
+    """Build one bounded, server-owned Journal workspace record."""
+    import uuid
+
+    if section not in _JOURNAL_WORKSPACE_SECTIONS:
+        raise HTTPException(status_code=404, detail='Unknown Journal section')
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='Record must be an object')
+
+    allowed = {
+        'plans': ('date', 'bias', 'events', 'levels', 'game_plan', 'invalidation',
+                  'risk_limit', 'notes', 'account', 'book'),
+        'reflections': ('period', 'date', 'rating', 'title', 'summary', 'went_well',
+                        'lessons', 'improvement', 'pnl', 'book'),
+        'studies': ('date', 'scope', 'title', 'description', 'hypothesis', 'conclusion',
+                    'instrument', 'session', 'model', 'book'),
+        'goals': ('period', 'title', 'target_date', 'checklist', 'status', 'notes'),
+    }[section]
+    record = {'id': str(body.get('id') or uuid.uuid4().hex), 'updated_at': utc_now_iso()}
+    for key in allowed:
+        value = body.get(key)
+        if isinstance(value, str):
+            value = value.strip()[:12000]
+        elif key == 'rating':
+            try:
+                value = max(0, min(10, float(value)))
+            except (TypeError, ValueError):
+                value = None
+        elif key == 'checklist' and not isinstance(value, list):
+            value = []
+        record[key] = value
+    if section in ('plans', 'studies'):
+        record['book'] = 'PAPER' if str(record.get('book', '')).upper() == 'PAPER' else 'LIVE'
+    return record
+
+
+@app.get('/journal/workspace')
+async def journal_workspace_get():
+    return {'status': 'ok', **load_journal_workspace()}
+
+
+@app.post('/journal/workspace/{section}')
+async def journal_workspace_upsert(section: str, request: Request):
+    if section == 'system':
+        return await _journal_system_update(request)
+    body = await request.json()
+    workspace = load_journal_workspace()
+    record = _journal_workspace_record(section, body)
+    records = workspace[section]
+    existing = next((i for i, item in enumerate(records) if str(item.get('id')) == record['id']), None)
+    if existing is None:
+        record['created_at'] = utc_now_iso()
+        records.append(record)
+    else:
+        record['created_at'] = records[existing].get('created_at', utc_now_iso())
+        for preserved in ('chart_snapshot', 'screenshot_filename'):
+            if records[existing].get(preserved):
+                record[preserved] = records[existing][preserved]
+        records[existing] = record
+    save_journal_workspace(workspace)
+    return {'status': 'ok', 'section': section, 'record': record}
+
+
+@app.post('/journal/workspace/{section}/delete')
+async def journal_workspace_delete(section: str, request: Request):
+    if section not in _JOURNAL_WORKSPACE_SECTIONS:
+        raise HTTPException(status_code=404, detail='Unknown Journal section')
+    body = await request.json()
+    record_id = str(body.get('id', '')).strip()
+    if not record_id:
+        raise HTTPException(status_code=400, detail='id is required')
+    workspace = load_journal_workspace()
+    before = len(workspace[section])
+    workspace[section] = [r for r in workspace[section] if str(r.get('id')) != record_id]
+    if len(workspace[section]) == before:
+        raise HTTPException(status_code=404, detail='Journal record not found')
+    save_journal_workspace(workspace)
+    return {'status': 'ok', 'section': section, 'id': record_id}
+
+
+@app.post('/journal/workspace/system')
+async def journal_workspace_system_update(request: Request):
+    return await _journal_system_update(request)
+
+
+async def _journal_system_update(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='System settings must be an object')
+    allowed = {'approved_models', 'max_trades_per_day', 'daily_risk_pct',
+               'max_losses_per_day', 'live_sessions', 'prime_steps'}
+    unknown = set(body) - allowed
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'Unknown system field: {sorted(unknown)[0]}')
+
+    valid_models = {'KLR', 'OTE', 'ORB', 'POWELL_10AM'}
+    models = body.get('approved_models')
+    if not isinstance(models, list) or not models:
+        raise HTTPException(status_code=400, detail='Select at least one approved model')
+    models = list(dict.fromkeys(str(v).strip().upper() for v in models))
+    if any(v not in valid_models for v in models):
+        raise HTTPException(status_code=400, detail='Approved models contain an unsupported value')
+
+    valid_sessions = {'NY_AM', 'NY_PM'}
+    sessions = body.get('live_sessions')
+    if not isinstance(sessions, list) or not sessions:
+        raise HTTPException(status_code=400, detail='Select at least one funded session')
+    sessions = list(dict.fromkeys(str(v).strip().upper() for v in sessions))
+    if any(v not in valid_sessions for v in sessions):
+        raise HTTPException(status_code=400, detail='Funded sessions must be NY_AM or NY_PM')
+
+    raw_max_trades = body.get('max_trades_per_day')
+    raw_max_losses = body.get('max_losses_per_day')
+    if (isinstance(raw_max_trades, bool) or isinstance(raw_max_losses, bool) or
+            not isinstance(raw_max_trades, int) or not isinstance(raw_max_losses, int)):
+        raise HTTPException(status_code=400, detail='Maximum trades and losses must be whole numbers')
+    max_trades = raw_max_trades
+    max_losses = raw_max_losses
+    daily_risk = _require_finite('Daily risk', body.get('daily_risk_pct'), 0.1, 5)
+    if not 1 <= max_trades <= 20:
+        raise HTTPException(status_code=400, detail='Maximum trades must be between 1 and 20')
+    if not 1 <= max_losses <= max_trades:
+        raise HTTPException(status_code=400, detail='Maximum losses must be between 1 and maximum trades')
+    steps = body.get('prime_steps')
+    if not isinstance(steps, list):
+        raise HTTPException(status_code=400, detail='PRIME steps must be a list')
+    steps = [str(v).strip()[:80] for v in steps if str(v).strip()]
+    if not 1 <= len(steps) <= 10:
+        raise HTTPException(status_code=400, detail='Enter between 1 and 10 PRIME steps')
+
+    workspace = load_journal_workspace()
+    workspace['system'] = {
+        **workspace['system'],
+        'approved_models': models,
+        'max_trades_per_day': max_trades,
+        'daily_risk_pct': daily_risk,
+        'max_losses_per_day': max_losses,
+        'live_sessions': sessions,
+        'prime_steps': steps,
+    }
+    save_journal_workspace(workspace)
+    return {'status': 'ok', 'system': workspace['system']}
+
+
+@app.post('/journal/trade/update')
+async def journal_trade_update(request: Request):
+    body = await request.json()
+    try:
+        idx = int(body.get('index', -1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='Invalid trade index')
+    trades = load_journal()
+    if idx < 0 or idx >= len(trades):
+        raise HTTPException(status_code=400, detail='Invalid trade index')
+    allowed = ('account', 'trade_mode', 'ticker', 'direction', 'trade_date', 'entry_time',
+               'exit_time', 'entry_price', 'exit_price', 'size', 'realized_pnl', 'commission',
+               'setup_type', 'protocol', 'session', 'premarket_plan_id', 'performance_rating',
+               'risk_checklist', 'trade_checklist', 'confluences', 'trade_management', 'notes',
+               'emotional_state', 'behavioral_flags', 'reflection')
+    updated = dict(trades[idx])
+    for key in allowed:
+        if key in body:
+            updated[key] = body[key]
+    mode = str(updated.get('trade_mode', 'LIVE')).upper()
+    if mode not in ('LIVE', 'PAPER'):
+        raise HTTPException(status_code=400, detail='trade_mode must be LIVE or PAPER')
+    updated['trade_mode'] = mode
+    if 'realized_pnl' in body:
+        try:
+            pnl = float(body['realized_pnl'])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail='realized_pnl must be a number')
+        outcome = str(body.get('outcome', updated.get('outcome', ''))).upper()
+        if outcome == 'WIN':
+            pnl = abs(pnl)
+        elif outcome == 'LOSS':
+            pnl = -abs(pnl)
+        elif outcome == 'BREAKEVEN':
+            pnl = 0.0
+        pnl = round(pnl, 2)
+        updated['realized_pnl'] = pnl
+        updated['pnl'] = pnl
+        updated['outcome'] = 'WIN' if pnl > 0 else ('LOSS' if pnl < 0 else 'BREAKEVEN')
+    setup = str(updated.get('setup_type', '')).upper().strip()
+    if mode == 'LIVE' and setup and setup not in {'KLR', 'OTE', 'ORB', 'POWELL_10AM'}:
+        raise HTTPException(status_code=400, detail='Live model must be KLR, OTE, ORB, or POWELL_10AM')
+    updated['setup_type'] = setup
+    updated['updated_at'] = utc_now_iso()
+    updated['trade_date'] = journal_trading_date(updated)
+    trades[idx] = updated
+    save_journal(trades)
+    return {'status': 'ok', 'trade': updated, 'index': idx, 'stats': compute_journal_stats(trades)}
+
+
+@app.post('/journal/workspace/screenshot/upload')
+async def journal_workspace_screenshot_upload(request: Request):
+    """Attach a validated screenshot to a plan or study record."""
+    import base64
+    import binascii
+    import uuid
+
+    body = await request.json()
+    section = str(body.get('section', ''))
+    record_id = str(body.get('id', ''))
+    if section not in ('plans', 'studies') or not record_id:
+        raise HTTPException(status_code=400, detail='A plan or study record is required')
+    mime = str(body.get('mime_type', '')).lower().strip()
+    ext_by_mime = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp'}
+    if mime not in ext_by_mime:
+        raise HTTPException(status_code=400, detail='Screenshot must be PNG, JPEG, or WebP')
+    encoded = str(body.get('data_base64', ''))
+    if not encoded or len(encoded) > 11_200_000:
+        raise HTTPException(status_code=400, detail='Screenshot must be 8 MB or smaller')
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail='Invalid screenshot data')
+    valid_signature = (
+        (mime == 'image/png' and image_bytes.startswith(b'\x89PNG\r\n\x1a\n'))
+        or (mime == 'image/jpeg' and image_bytes.startswith(b'\xff\xd8\xff'))
+        or (mime == 'image/webp' and len(image_bytes) >= 12
+            and image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP')
+    )
+    if not valid_signature or len(image_bytes) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail='File contents do not match the image type')
+    workspace = load_journal_workspace()
+    record = next((r for r in workspace[section] if str(r.get('id')) == record_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail='Journal record not found')
+    screenshots_dir = Path(__file__).parent / 'mcp' / 'tradingview' / 'screenshots'
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+    filename = f'journal_workspace_{uuid.uuid4().hex}{ext_by_mime[mime]}'
+    target = screenshots_dir / filename
+    temp_target = screenshots_dir / f'.{filename}.tmp'
+    try:
+        temp_target.write_bytes(image_bytes)
+        temp_target.replace(target)
+    finally:
+        if temp_target.exists():
+            temp_target.unlink()
+    record['chart_snapshot'] = f'/journal/screenshot?file={filename}'
+    record['screenshot_filename'] = filename
+    save_journal_workspace(workspace)
+    return {'status': 'ok', 'section': section, 'id': record_id, 'url': record['chart_snapshot']}
 
 
 @app.post('/journal/add')
@@ -2892,6 +3220,10 @@ async def journal_add(request: Request):
     direction = str(body.get('direction', 'LONG')).upper()
     if direction not in ('LONG', 'SHORT'):
         raise HTTPException(status_code=400, detail='direction must be LONG or SHORT')
+
+    trade_mode = str(body.get('trade_mode', 'LIVE')).upper().strip()
+    if trade_mode not in ('LIVE', 'PAPER'):
+        raise HTTPException(status_code=400, detail='trade_mode must be LIVE or PAPER')
 
     # realized_pnl takes priority; entry/exit/size are optional when it's provided
     realized_pnl_raw = None
@@ -2963,9 +3295,34 @@ async def journal_add(request: Request):
 
     # Session: use provided value if given, else auto-detect
     session_val = str(body.get('session', '')).strip() or session_label()
+    setup_type = str(body.get('setup_type', '')).strip().upper()
+    approved_live_models = {'KLR', 'OTE', 'ORB', 'POWELL_10AM'}
+    if trade_mode == 'LIVE' and setup_type and setup_type not in approved_live_models:
+        raise HTTPException(status_code=400, detail='Live model must be KLR, OTE, ORB, or POWELL_10AM')
+
+    def _bounded_text(key: str, limit: int = 12000) -> str:
+        return str(body.get(key, '') or '').strip()[:limit]
+
+    def _bounded_list(key: str) -> list:
+        value = body.get(key, [])
+        return value[:50] if isinstance(value, list) else []
+
+    try:
+        commission = max(0.0, float(body.get('commission') or 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='commission must be a number')
+
+    try:
+        performance_rating = float(body.get('performance_rating')) if body.get('performance_rating') not in (None, '') else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='performance_rating must be a number')
+    if performance_rating is not None and not 0 <= performance_rating <= 10:
+        raise HTTPException(status_code=400, detail='performance_rating must be between 0 and 10')
 
     trade = {
         'ticker':           str(body.get('ticker', '')).upper(),
+        'account':          _bounded_text('account', 120),
+        'trade_mode':       trade_mode,
         'direction':        direction,
         'entry_price':      entry,
         'exit_price':       exit_,
@@ -2973,8 +3330,18 @@ async def journal_add(request: Request):
         'stop':             stop_val,
         'tp1':              tp1_val,
         'realized_pnl':     pnl,
-        'setup_type':       str(body.get('setup_type', '')),
-        'notes':            str(body.get('notes', '')),
+        'commission':       round(commission, 2),
+        'setup_type':       setup_type,
+        'protocol':         _bounded_text('protocol', 240),
+        'entry_time':       _bounded_text('entry_time', 16),
+        'exit_time':        _bounded_text('exit_time', 16),
+        'premarket_plan_id': _bounded_text('premarket_plan_id', 80),
+        'performance_rating': performance_rating,
+        'risk_checklist':   _bounded_list('risk_checklist'),
+        'trade_checklist':  _bounded_list('trade_checklist'),
+        'confluences':      _bounded_list('confluences'),
+        'trade_management': _bounded_text('trade_management'),
+        'notes':            _bounded_text('notes'),
         'outcome':          outcome,
         'pnl':              pnl,
         'trade_date':       trade_date,
@@ -2989,12 +3356,80 @@ async def journal_add(request: Request):
         'behavioral_flags': behavioral_flags,
         'reflection':       reflection,
     }
+    trade['trade_date'] = journal_trading_date(trade)
 
     trades = load_journal()
     trades.append(trade)
     save_journal(trades)
     stats = compute_journal_stats(trades)
-    return {'status': 'ok', 'trade': trade, 'stats': stats}
+    return {'status': 'ok', 'trade': trade, 'index': len(trades) - 1, 'stats': stats}
+
+
+@app.post('/journal/screenshot/upload')
+async def journal_screenshot_upload(request: Request):
+    """Attach a validated chart image to one exact journal record."""
+    import base64
+    import binascii
+    import uuid
+
+    body = await request.json()
+    try:
+        trade_idx = int(body.get('index', -1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='Invalid trade index')
+
+    mime = str(body.get('mime_type', '')).lower().strip()
+    ext_by_mime = {
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/webp': '.webp',
+    }
+    if mime not in ext_by_mime:
+        raise HTTPException(status_code=400, detail='Screenshot must be PNG, JPEG, or WebP')
+
+    encoded = str(body.get('data_base64', ''))
+    # 8 MiB expands to roughly 11.2 million base64 characters. Refuse larger
+    # request bodies before decoding them into a second in-memory copy.
+    if not encoded or len(encoded) > 11_200_000:
+        raise HTTPException(status_code=400, detail='Screenshot must be 8 MB or smaller')
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail='Invalid screenshot data')
+    if not image_bytes or len(image_bytes) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail='Screenshot must be 8 MB or smaller')
+
+    # Verify the file signature as well as the browser-provided MIME type.
+    valid_signature = (
+        (mime == 'image/png' and image_bytes.startswith(b'\x89PNG\r\n\x1a\n'))
+        or (mime == 'image/jpeg' and image_bytes.startswith(b'\xff\xd8\xff'))
+        or (mime == 'image/webp' and len(image_bytes) >= 12
+            and image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP')
+    )
+    if not valid_signature:
+        raise HTTPException(status_code=400, detail='File contents do not match the image type')
+
+    trades = load_journal()
+    if trade_idx < 0 or trade_idx >= len(trades):
+        raise HTTPException(status_code=400, detail='Invalid trade index')
+
+    screenshots_dir = Path(__file__).parent / 'mcp' / 'tradingview' / 'screenshots'
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+    filename = f'journal_{uuid.uuid4().hex}{ext_by_mime[mime]}'
+    target = screenshots_dir / filename
+    temp_target = screenshots_dir / f'.{filename}.tmp'
+    try:
+        temp_target.write_bytes(image_bytes)
+        temp_target.replace(target)
+    finally:
+        if temp_target.exists():
+            temp_target.unlink()
+
+    url = f'/journal/screenshot?file={filename}'
+    trades[trade_idx]['chart_snapshot'] = url
+    trades[trade_idx]['screenshot_filename'] = filename
+    save_journal(trades)
+    return {'status': 'ok', 'index': trade_idx, 'url': url}
 
 
 @app.get('/journal/screenshot')
@@ -3008,7 +3443,11 @@ async def journal_screenshot(file: str):
     target = screenshots_dir / file
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail='Screenshot not found')
-    return FileResponse(str(target), media_type='image/png')
+    media_types = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+    media_type = media_types.get(target.suffix.lower())
+    if not media_type:
+        raise HTTPException(status_code=400, detail='Unsupported screenshot type')
+    return FileResponse(str(target), media_type=media_type)
 
 
 @app.post('/journal/trade-detail')
@@ -3075,21 +3514,37 @@ async def journal_analyze(request: Request):
     ticker = (trade.get('ticker') or '').upper().replace('1!', '')
     nearby = [s for s in all_sigs if ticker in (s.get('symbol') or '').upper()][:8]
 
-    # Build signal context block
+    # Nearby signal logs are legacy operational history. Feed only neutral
+    # market/session metadata into current PRIME review; do not re-introduce
+    # superseded PROS, grading, confidence, generic OTE, IB, or command fields.
     sig_lines = []
     for s in nearby:
         sig_lines.append(
-            f"  {s.get('timestamp_et','?')} | {s.get('nova_cmd','?')} | "
-            f"Grade {s.get('grade','?')} | Conf {s.get('nova_conf','?')} | "
-            f"PROS {s.get('pros_phase','?')} {s.get('pros_direction','?')} | "
-            f"OTE {s.get('pros_ote','?')} | IB {s.get('ib_draw','?')} | "
-            f"Session Q{s.get('session_quality','?')}"
+            f"  {s.get('timestamp_et','?')} | {s.get('symbol','?')} | "
+            f"Price {s.get('price','?')} | Session {s.get('session','?')} | "
+            f"Macro {s.get('macro_risk','?')} | Regime {s.get('regime','?')}"
         )
     sig_context = '\n'.join(sig_lines) if sig_lines else '  No signal log entries found for this instrument.'
 
     # Curated trade fields only -- never nova_review/nova_review_ts (those are
     # this endpoint's own output, and including them would churn the cache
     # key on every regeneration) and never the full trade/journal dump.
+    from intelligence.current_knowledge import (
+        CurrentKnowledgeIntegrityError as _CurrentKnowledgeIntegrityError,
+        retrieve_current_prime as _retrieve_current_prime,
+    )
+    try:
+        _knowledge = _retrieve_current_prime(
+            f"journal review {trade.get('setup_type') or ''} PRIME execution model",
+            max_docs=4,
+        )
+    except _CurrentKnowledgeIntegrityError:
+        return {
+            'status': 'error',
+            'detail': 'Current PRIME knowledge authority is unavailable; journal review was not generated.',
+            'knowledge_authority': 'unavailable',
+        }
+
     input_data = {
         'trade': {
             'ticker': trade.get('ticker'),
@@ -3111,6 +3566,7 @@ async def journal_analyze(request: Request):
             'reflection': trade.get('reflection'),
         },
         'nearby_signals': sig_context,
+        'current_knowledge': _knowledge.text,
     }
 
     try:
@@ -3130,7 +3586,14 @@ async def journal_analyze(request: Request):
     trades[trade_idx]['nova_review_ts'] = utc_now_iso()
     save_journal(trades)
 
-    return {'status': 'ok', 'analysis': analysis, 'index': trade_idx}
+    return {
+        'status': 'ok', 'analysis': analysis, 'index': trade_idx,
+        'knowledge_sources': list(_knowledge.sources),
+        'knowledge_provenance': [
+            {'source': src, 'sha256': digest}
+            for src, digest in zip(_knowledge.sources, _knowledge.source_hashes)
+        ],
+    }
 
 
 @app.post('/journal/delete')
@@ -3150,3 +3613,19 @@ async def journal_delete(request: Request):
     save_journal(trades)
     stats = compute_journal_stats(trades)
     return {'status': 'ok', 'stats': stats}
+
+
+@app.post('/journal/reset')
+async def journal_reset(request: Request):
+    """Permanently clear every stored trade after explicit confirmation."""
+    body = await request.json()
+    if not isinstance(body, dict) or body.get('confirmation') != 'RESET_ALL_TRADES':
+        raise HTTPException(status_code=400, detail='Exact reset confirmation is required')
+    unknown = set(body) - {'confirmation'}
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'Unknown reset field: {sorted(unknown)[0]}')
+
+    trades = load_journal()
+    removed = len(trades)
+    save_journal([])
+    return {'status': 'ok', 'removed': removed, 'stats': compute_journal_stats([])}

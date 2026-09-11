@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "policy_name": "nova-codex-implementation-runner-v1",
+  "description": "Fixed contract for the write-capable Codex implementation runner. It is a SEPARATE component from the read-only review runner, which it does not modify and does not replace. Writes are contained by the operating system first and validated by the trusted coordinator second; a prompt is never a containment mechanism.",
+  "contract": {
+    "one_attempt_per_task": true,
+    "attempt_consumed_on_spawn": true,
+    "retry": false,
+    "model_may_commit": false,
+    "model_may_push": false,
+    "model_reaches_git_metadata": false,
+    "coordinator_commits": true,
+    "independent_review_required": true,
+    "read_only_reviewer_preserved": true,
+    "attempt_claimed_before_spawn": true,
+    "concurrent_runs": false
+  },
+  "operations": [
+    "validate-policy",
+    "inspect",
+    "submit-task",
+    "implement-once",
+    "settle-claim",
+    "retire-task"
+  ],
+  "fixed_flags": {
+    "sandbox": "workspace-write",
+    "ask_for_approval": "never",
+    "windows_sandbox": "elevated",
+    "model": "gpt-5.6-luna",
+    "model_reasoning_effort": "low",
+    "ephemeral": true,
+    "ignore_user_config": true,
+    "output_schema_required": true,
+    "json_event_stream": false
+  },
+  "forbidden_flags": [
+    "--add-dir",
+    "--approve-for-me",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--skip-git-repo-check",
+    "--full-auto",
+    "--yolo"
+  ],
+  "forbidden_subcommands": [
+    "fork",
+    "resume",
+    "review"
+  ],
+  "containment": {
+    "layers": [
+      {
+        "id": "L1",
+        "kind": "operating-system",
+        "mechanism": "workspace-write sandbox rooted at the assigned worktree",
+        "protects": [
+          "provider credentials outside the worktree",
+          "the shared session registry",
+          "the shared relay mailbox",
+          "every other git worktree",
+          "the real git directory, which for a linked worktree lives outside the worktree"
+        ]
+      },
+      {
+        "id": "L2",
+        "kind": "operating-system",
+        "mechanism": "the child runs in a staging workspace holding the assigned paths and nothing else, so a protected path is absent rather than merely read-only",
+        "protects": [
+          "every path in the worktree that the task was not assigned",
+          "the retired trading and execution subsystem",
+          "the guard hook and its settings",
+          "the coordination tooling itself",
+          "the worktree's .git pointer file"
+        ],
+        "note": "A read-only file attribute is NOT a boundary: a same-user process clears it, and a Windows DACL is no better because the owner keeps implicit WRITE_DAC. The attribute pass survives only as defence in depth over the real worktree, and it fails closed."
+      },
+      {
+        "id": "L3",
+        "kind": "coordinator-validation",
+        "mechanism": "post-run diff confined to the assigned task paths; an out-of-scope change is a failure and is reverted, never committed",
+        "protects": [
+          "task-path boundaries inside the assigned worktree"
+        ],
+        "note": "This layer alone is NOT containment. It bounds task paths within a tree the operating system has already contained."
+      }
+    ],
+    "always_protected_paths": [
+      ".git",
+      ".claude/**",
+      "services/execution.py",
+      "services/execution_bridge.py",
+      "services/execution_trace.py",
+      "engines/risk_engine.py",
+      "core/state_engine.py",
+      "indicators/**",
+      "tools/cowork/codex_review_runner.py",
+      "tools/cowork/codex_implementation_runner.py",
+      "tools/cowork/codex_runner_policy.json",
+      "tools/cowork/codex_implementation_policy.json",
+      "tools/cowork/relay_policy.json",
+      "tools/cowork/session_registry.py"
+    ]
+  },
+  "limits": {
+    "max_task_bytes": 262144,
+    "max_prompt_bytes": 131072,
+    "max_response_bytes": 262144,
+    "max_captured_stream_bytes": 65536,
+    "max_runtime_seconds": 1800,
+    "max_assigned_paths": 64,
+    "max_changed_files": 64,
+    "max_changed_bytes": 1048576
+  },
+  "accounting": {
+    "unit": "attempt",
+    "spent_on": "child process start",
+    "record": "every spent attempt records exactly one terminal outcome",
+    "duplicate_execution": "a task with a recorded outcome is never re-run",
+    "claim": "an attempt is claimed durably in the ledger BEFORE the child starts, under an exclusive lock",
+    "recovery": "a claimed but unsettled task is never re-run automatically; a person settles it with settle-claim",
+    "retirement": "a task that can never run -- its head or registry revision moved -- is retired without spending an attempt; a task whose attempt was claimed is settled instead"
+  },
+  "non_authorization_sentence": "This implementation grants no permission to modify, commit, push, merge, deploy, trade, alter risk, or enable execution."
+}

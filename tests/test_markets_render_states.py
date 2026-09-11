@@ -83,7 +83,7 @@ _PARTS = [
 _IDS = [
     'mkFresh', 'mkClock', 'mkSession', 'mkMacroRisk', 'mkHeadlineRisk',
     'mkMarketRisk', 'mkEventPhase', 'mkPulseBody', 'mkPulseMeta', 'mkPulseFoot',
-    'mkVolBody', 'mkVolMeta', 'mkNewsBody', 'mkNewsMeta', 'mkStructBody',
+    'mkVolBody', 'mkVolMeta', 'mkBreakingWire', 'mkNewsBody', 'mkNewsMeta', 'mkStructBody',
     'mkStructSym', 'mkProv',
 ]
 
@@ -191,6 +191,7 @@ DASH = {'risk': {'macro_risk': 'low', 'headline_risk': 'high',
                  'next_event': 'No scheduled event', 'donna_session': 'LONDON'},
         'news': [], 'calendar': {'source': 'ForexFactory', 'events': [
             {'title': 'President Trump Speaks', 'time_et': '15:00',
+             'date': '2026-09-01',
              'importance': 'medium', 'category': 'macro', 'currency': 'USD',
              'source': 'ForexFactory'}]}}
 STRUCTURE = {'nq': {'onh': 29282.25, 'onl': 28831.75, 'daily_open': 29234.25,
@@ -353,6 +354,44 @@ def test_news_empty_feed_is_stated_not_padded():
     assert 'No headlines in the feed' in out['mkNewsBody']['text']
     assert 'as if it had just broken' in out['mkNewsBody']['text']
     assert 'President Trump Speaks' in out['mkNewsBody']['text']
+    assert '09-01 · 15:00' in out['mkNewsBody']['text']
+
+
+def test_news_headline_links_to_its_real_source_article():
+    dash = dict(DASH, news=[{
+        'headline': 'Powell signals rates may stay higher',
+        'source': 'Reuters', 'severity': 'high', 'category': 'Fed & rates',
+        'url': 'https://example.test/powell-rates',
+    }])
+    out = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY}, 'dash': dash})
+    html = out['mkNewsBody']['html']
+    assert 'href="https://example.test/powell-rates"' in html
+    assert 'target="_blank"' in html
+    assert 'rel="noopener noreferrer"' in html
+    assert 'Powell signals rates may stay higher' in out['mkBreakingWire']['text']
+    assert 'href="https://example.test/powell-rates"' in out['mkBreakingWire']['html']
+
+
+def test_news_is_a_live_desk_with_timestamp_and_nq_and_es_driver_context():
+    dash = dict(DASH, news=[{
+        'headline': 'Iran escalation sends oil and index futures sharply higher',
+        'summary': 'Energy prices and equity futures moved after the latest conflict update.',
+        'source': 'Reuters', 'severity': 'high', 'category': 'Geopolitics',
+        'market_score': 12, 'published_at': 1788271200,
+        'url': 'https://example.test/iran-market-update',
+    }])
+    out = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY}, 'dash': dash})
+    text = out['mkNewsBody']['text']
+    html = out['mkNewsBody']['html']
+    assert 'Top market driver' in text or 'Breaking' in text
+    assert 'ET' in text
+    assert 'Why NQ is moving' in text
+    assert '+498.00 pts (+1.72%)' in text
+    assert 'Why ES is moving' in text
+    assert '+40.50 pts (+0.53%)' in text
+    assert 'not verified causation' in text
+    assert 'Open full article' in text
+    assert 'href="https://example.test/iran-market-update"' in html
 
 
 def test_news_quiet_tape_is_distinct_from_failure():
@@ -447,6 +486,31 @@ def test_rail_says_not_available_rather_than_inventing_a_level():
     out = _run({'merge': {'pulse': PULSE, 'indexes': INDEXES, 'btcVix': BTC_EMPTY},
                 'dash': {'risk': {}, 'news': [], 'calendar': {'events': []}}})
     assert 'Not available' in out['mkMacroRisk']['text']
+
+
+def test_upcoming_macro_prioritizes_today_over_six_expired_events():
+    old = [
+        {'title': f'Expired event {i}', 'date': f'2026-09-0{1 + (i // 3)}',
+         'time_et': '10:00', 'importance': 'medium', 'currency': 'USD'}
+        for i in range(7)
+    ]
+    jobs = [
+        {'title': 'Average Hourly Earnings m/m', 'date': '2026-09-04', 'time_et': '08:30',
+         'importance': 'high', 'currency': 'USD', 'note': 'Actual: 0.3% | Forecast: 0.3% | Prev: 0.2%'},
+        {'title': 'Non-Farm Employment Change', 'date': '2026-09-04', 'time_et': '08:30',
+         'importance': 'high', 'currency': 'USD', 'note': 'Actual: 162K | Forecast: 55K | Prev: 21K'},
+        {'title': 'Unemployment Rate', 'date': '2026-09-04', 'time_et': '08:30',
+         'importance': 'high', 'currency': 'USD', 'note': 'Actual: 4.1% | Forecast: 4.1% | Prev: 4.1%'},
+    ]
+    dash = {'risk': {'donna_time_ny': '2026-09-04T08:39:00-04:00'},
+            'news': [], 'calendar': {'events': old + jobs}}
+    text = _run({'dash': dash})['mkNewsBody']['text']
+
+    assert 'Non-Farm Employment Change' in text
+    assert 'Unemployment Rate' in text
+    assert 'Average Hourly Earnings m/m' in text
+    assert 'Actual: 162K' in text
+    assert 'Expired event 0' not in text
 
 
 def test_provenance_names_each_source_and_its_age():

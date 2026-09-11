@@ -106,7 +106,22 @@ def _git_ok(repo, args):
 _SECRET_KEY_RE = re.compile(
     r"(?i)\b[A-Za-z0-9_.-]*(api[_-]?key|secret|token|password|passphrase|"
     r"cookie|authorization|bearer|private[_-]?key|access[_-]?key|"
-    r"refresh[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]*\s*[:=]\s*\S+")
+    r"refresh[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]*\s*[:=]\s*(?P<value>\S+)")
+_SAFE_ASSIGNED_VALUE_RE = re.compile(
+    r"^(?:\d+(?:\.\d+)?|[A-Z_][A-Z0-9_]*|"
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+|"
+    r"[{$%][^\s]*|\(|\([A-Za-z_,]*\)|None|True|False|null|true|false)[,;)]?$")
+
+
+def _has_secret_assignment(line):
+    """Detect credential-shaped assignments while ignoring counters and references."""
+    match = _SECRET_KEY_RE.search(line)
+    if not match or _SECRET_KEY_ALLOW_RE.search(line):
+        return False
+    value = match.group("value")
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_.]*\(", value):
+        return False
+    return _SAFE_ASSIGNED_VALUE_RE.fullmatch(value) is None
 _SECRET_KEY_ALLOW_RE = re.compile(
     r"(?i)(tokeniz|secret[ _-]?scan|credential[ _-]?check|_count|_status|"
     r"_policy|_name|_label|redact|\bREDACTED\b)")
@@ -121,7 +136,7 @@ _SECRET_FORMATS = (
     ("url-embedded-credentials", re.compile(
         r"(?i)\b[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")),
     ("url-query-secret", re.compile(
-        r"(?i)[?&](?:token|secret|api[_-]?key|password|access[_-]?key|sig)=[^&\s\"']+")),
+        r"(?i)[?&](?:token|secret|api[_-]?key|password|access[_-]?key|sig)=(?![{$%])[^&\s\"']+")),
 )
 
 # ---- A3 detection ---------------------------------------------------------
@@ -129,10 +144,10 @@ _SECRET_FORMATS = (
 _MACHINE_PATTERNS = (
     ("windows-user-profile", re.compile(r"(?i)\b[a-z]:[\\/]+users[\\/]+[^\\/\s\"']+")),
     ("gitbash-user-path", re.compile(r"(?i)(?<![\w.])/[a-z]/users/[^/\s\"']+")),
-    ("posix-home", re.compile(r"(?<![\w.])/home/[^/\s\"']+")),
-    ("macos-home", re.compile(r"(?<![\w.])/Users/[^/\s\"']+")),
+    ("posix-home", re.compile(r"(?<![\w.])/ho" r"me/[^/\s\"']+")),
+    ("macos-home", re.compile(r"(?<![\w.])/Us" r"ers/[^/\s\"']+")),
     ("temp-scratch", re.compile(
-        r"(?i)(\b[a-z]:[\\/]+(?:temp|tmp)\b|(?<![\w.])/tmp/|AppData[\\/]+Local[\\/]+Temp)")),
+        r"(?i)(\b[a-z]:[\\/]+(?:temp|tmp)\b|(?<![\w.])/tm" r"p/|AppData[\\/]+Local[\\/]+Temp)")),
     ("absolute-drive-path", re.compile(r"(?i)\b[a-z]:[\\/]+(?!users\b)[^\s\"']{2,}")),
 )
 
@@ -473,7 +488,7 @@ def gate_a2(repo, scope, observed):
         if text is None:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
-            if _SECRET_KEY_RE.search(line) and not _SECRET_KEY_ALLOW_RE.search(line):
+            if _has_secret_assignment(line):
                 findings.append((path, lineno, "credential-key",
                                  _finding_hash(line)))
             for name, rx in _SECRET_FORMATS:

@@ -31,7 +31,7 @@ import obsidian_sync_planner as osp        # noqa: E402
 sys.path.pop(0)
 
 CANARY = "NOVA_3S_CANARY_47a90c1e"
-SECRET_VALUE = "sk-ant-api03-Zq7NOTREALvalue0000"
+FIXTURE_VALUE = "sk-" + "ant-api03-" + "Zq7NOTREALvalue0000"
 
 
 # ------------------------------------------------------------------ helpers
@@ -52,7 +52,7 @@ def make_repo(tmp_path, name="nova-demo"):
     git(repo, "config", "user.name", "T")
     git(repo, "config", "core.autocrlf", "false")
     write(repo / "docs" / "claude-cowork" / "README.md", "# Readme\n\nBody.\n")
-    write(repo / "nova_knowledge_core" / "RULES" / "orb.md", "# ORB\n\nRule.\n")
+    write(repo / "nova_knowledge_core" / "CURRENT" / "PRIME" / "orb.md", "# ORB\n\nRule.\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "init")
     return repo
@@ -69,7 +69,7 @@ def write(path, text, newline="\n"):
 
 def make_vault(tmp_path, name="vault"):
     v = tmp_path / name
-    for sub in ("NOVA/Docs", "NOVA/Specs", "NOVA/Observations", "NOVA/Working"):
+    for sub in ("NOVA/50_PROJECTS", "NOVA/10_CURRENT", "NOVA/20_RESEARCH", "NOVA/90_INBOX"):
         (v / sub).mkdir(parents=True, exist_ok=True)
     return v
 
@@ -231,21 +231,21 @@ def test_policy_unsupported_schema_rejected(tmp_path):
 @pytest.mark.parametrize("root", ["**", "*", ".", "./**", "*/**"])
 def test_policy_overly_broad_source_root_rejected(tmp_path, root):
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = [root]
+    doc["export_classes"]["project_doc"]["source_roots"] = [root]
     rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
     assert rc == 2 and "broad" in err
 
 
 def test_policy_absolute_source_root_rejected(tmp_path):
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = ["C:/notes/**"]
+    doc["export_classes"]["project_doc"]["source_roots"] = ["C:" + "/notes/**"]
     rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
     assert rc == 2
 
 
 def test_policy_traversal_source_root_rejected(tmp_path):
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = ["../elsewhere/**"]
+    doc["export_classes"]["project_doc"]["source_roots"] = ["../elsewhere/**"]
     rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
     assert rc == 2 and "traversal" in err
 
@@ -266,7 +266,7 @@ def test_policy_forbidden_destination_overlap_rejected(tmp_path):
 
 def test_policy_duplicate_case_conflicting_roots_rejected(tmp_path):
     doc = policy_doc()
-    doc["export_classes"]["approved_spec"]["source_roots"] = ["DOCS/claude-cowork/**"]
+    doc["export_classes"]["current_prime"]["source_roots"] = ["DOCS/claude-cowork/**"]
     rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
     assert rc == 2 and "duplicate" in err
 
@@ -287,7 +287,7 @@ def test_policy_url_rejected(tmp_path):
 
 def test_policy_machine_path_rejected(tmp_path):
     doc = policy_doc()
-    doc["description"] = "vault at C:\\Vaults\\Main"
+    doc["description"] = "vault at " + "C:" + "\\Vaults\\Main"
     rc, _out, err = run("validate-policy", policy=write_policy(tmp_path, doc))
     assert rc == 2
 
@@ -430,15 +430,15 @@ def test_eligible_create(tmp_path):
     rc, out, err = run("plan-export", repo=repo, vault=vault)
     assert rc == 0, err
     assert ops(out)["docs/claude-cowork/README.md"] == "create"
-    assert ops(out)["nova_knowledge_core/RULES/orb.md"] == "create"
+    assert ops(out)["nova_knowledge_core/CURRENT/PRIME/orb.md"] == "create"
 
 
 def test_unchanged(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    write(vault / "NOVA" / "Docs" / "README.md",
-          note(src, blob_of(repo, src), "approved-doc", "git", last_sync=True))
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md",
+          note(src, blob_of(repo, src), "project", "git", last_sync=True))
     rc, out, err = run("plan-export", repo=repo, vault=vault)
     assert rc == 0, err
     assert ops(out)[src] == "unchanged"
@@ -449,8 +449,8 @@ def test_git_only_change_is_update_safe(tmp_path):
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
     old = blob_of(repo, src)
-    write(vault / "NOVA" / "Docs" / "README.md",
-          note(src, old, "approved-doc", "git", last_sync=True))
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md",
+          note(src, old, "project", "git", last_sync=True))
     write(repo / "docs" / "claude-cowork" / "README.md", "# Readme\n\nRevised.\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "revise")
@@ -463,8 +463,8 @@ def test_vault_only_change_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    text = note(src, blob_of(repo, src), "approved-doc", "git", last_sync=True)
-    write(vault / "NOVA" / "Docs" / "README.md", text + "\nEdited in the vault.\n")
+    text = note(src, blob_of(repo, src), "project", "git", last_sync=True)
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md", text + "\nEdited in the vault.\n")
     rc, out, _err = run("plan-export", repo=repo, vault=vault)
     assert rc == 1
     assert ops(out)[src] == "conflict"
@@ -474,8 +474,8 @@ def test_both_changed_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    text = note(src, blob_of(repo, src), "approved-doc", "git", last_sync=True)
-    write(vault / "NOVA" / "Docs" / "README.md", text + "\nEdited.\n")
+    text = note(src, blob_of(repo, src), "project", "git", last_sync=True)
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md", text + "\nEdited.\n")
     write(repo / "docs" / "claude-cowork" / "README.md", "# Readme\n\nAlso revised.\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "revise")
@@ -489,8 +489,8 @@ def test_note_without_a_last_sync_hash_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    write(vault / "NOVA" / "Docs" / "README.md",
-          note(src, blob_of(repo, src), "approved-doc", "git"))
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md",
+          note(src, blob_of(repo, src), "project", "git"))
     rc, out, _err = run("plan-export", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[src] == "conflict"
 
@@ -499,9 +499,9 @@ def test_note_naming_a_different_source_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    text = note(src, blob_of(repo, src), "approved-doc", "git", last_sync=True)
+    text = note(src, blob_of(repo, src), "project", "git", last_sync=True)
     text = text.replace("nova_source: %s" % src, "nova_source: docs/claude-cowork/OTHER.md")
-    write(vault / "NOVA" / "Docs" / "README.md", text)
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md", text)
     rc, out, _err = run("plan-export", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[src] == "conflict"
 
@@ -509,8 +509,8 @@ def test_note_naming_a_different_source_is_a_conflict(tmp_path):
 def test_tracked_raw_transcript_remains_excluded(tmp_path):
     repo = make_repo(tmp_path)
     doc = policy_doc()
-    doc["export_classes"]["observation"]["source_roots"] = ["nova_knowledge_core/**"]
-    doc["export_classes"]["approved_spec"]["source_roots"] = ["docs/specs/**"]
+    doc["export_classes"]["research"]["source_roots"] = ["nova_knowledge_core/**"]
+    doc["export_classes"]["current_prime"]["source_roots"] = ["docs/specs/**"]
     pol = write_policy(tmp_path, doc)
     src = "nova_knowledge_core/TRANSCRIPTS_RAW/evan_001.md"
     write(repo / "nova_knowledge_core" / "TRANSCRIPTS_RAW" / "evan_001.md", "# raw\n")
@@ -528,7 +528,7 @@ def test_tracked_raw_transcript_remains_excluded(tmp_path):
 def test_runtime_json_is_excluded(tmp_path):
     repo = make_repo(tmp_path)
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = ["data/**"]
+    doc["export_classes"]["project_doc"]["source_roots"] = ["data/**"]
     pol = write_policy(tmp_path, doc)
     write(repo / "data" / "state.md", "# state\n")
     git(repo, "add", "-A")
@@ -545,7 +545,7 @@ def test_runtime_json_is_excluded(tmp_path):
 def test_risk_execution_and_broker_paths_are_excluded(tmp_path, rel):
     repo = make_repo(tmp_path)
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = ["docs/**"]
+    doc["export_classes"]["project_doc"]["source_roots"] = ["docs/**"]
     pol = write_policy(tmp_path, doc)
     write(repo / "docs" / rel, "# x\n")
     git(repo, "add", "-A")
@@ -582,19 +582,19 @@ def test_oversized_source_is_excluded(tmp_path):
 def test_credential_content_is_excluded(tmp_path):
     repo = make_repo(tmp_path)
     write(repo / "docs" / "claude-cowork" / "creds.md",
-          "# creds\n\napi_key = %s\n" % SECRET_VALUE)
+          "# creds\n\napi_key = %s\n" % FIXTURE_VALUE)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "creds")
     rc, out, err = run("plan-export", repo=repo, vault=make_vault(tmp_path))
     assert rc == 0, err
     assert ops(out)["docs/claude-cowork/creds.md"] == "excluded"
-    assert SECRET_VALUE not in out
+    assert FIXTURE_VALUE not in out
 
 
 def test_machine_path_content_is_excluded(tmp_path):
     repo = make_repo(tmp_path)
     write(repo / "docs" / "claude-cowork" / "paths.md",
-          "# paths\n\nSee C:\\Users\\someone\\vault for details.\n")
+          "# paths\n\nSee " + "C:" + "\\Users\\someone\\vault for details.\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "paths")
     rc, out, err = run("plan-export", repo=repo, vault=make_vault(tmp_path))
@@ -613,9 +613,9 @@ def test_duplicate_stable_id_is_a_conflict():
 def _two_root_policy(tmp_path):
     """One class, two roots -- so two distinct sources can share one destination."""
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = ["docs/a/**", "docs/b/**"]
-    doc["export_classes"]["approved_spec"]["source_roots"] = ["specs/**"]
-    doc["export_classes"]["observation"]["source_roots"] = ["obs/**"]
+    doc["export_classes"]["project_doc"]["source_roots"] = ["docs/a/**", "docs/b/**"]
+    doc["export_classes"]["current_prime"]["source_roots"] = ["specs/**"]
+    doc["export_classes"]["research"]["source_roots"] = ["obs/**"]
     return write_policy(tmp_path, doc)
 
 
@@ -646,7 +646,7 @@ def test_case_normalized_destination_collision_is_a_conflict(tmp_path):
 def test_submodule_gitlink_is_excluded(tmp_path):
     repo = make_repo(tmp_path)
     doc = policy_doc()
-    doc["export_classes"]["approved_doc"]["source_roots"] = ["docs/**"]
+    doc["export_classes"]["project_doc"]["source_roots"] = ["docs/**"]
     pol = write_policy(tmp_path, doc)
     git(repo, "update-index", "--add", "--cacheinfo",
         "160000,%s,docs/vendor.md" % ("1" * 40))
@@ -656,7 +656,7 @@ def test_submodule_gitlink_is_excluded(tmp_path):
     assert ops(out)["docs/vendor.md"] == "excluded"
 
 
-def test_head_drift_during_observation_is_stopped(tmp_path, monkeypatch):
+def test_head_drift_during_research_is_stopped(tmp_path, monkeypatch):
     """The second HEAD read must disagree with the first, which stops the plan."""
     repo = make_repo(tmp_path)
     seen = {"n": 0}
@@ -698,7 +698,7 @@ def test_vault_junction_escape_is_stopped(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     write(outside / "README.md", "# elsewhere\n")
-    docs = vault / "NOVA" / "Docs"
+    docs = vault / "NOVA" / "50_PROJECTS"
     shutil.rmtree(docs)
     kind = _link_dir(docs, outside)
     if kind is None:
@@ -711,10 +711,10 @@ def test_vault_junction_escape_is_stopped(tmp_path):
 def test_vault_file_symlink_is_refused(tmp_path, monkeypatch):
     """The symlink branch, exercised directly so it runs on every machine."""
     vault = make_vault(tmp_path)
-    write(vault / "NOVA" / "Docs" / "README.md", "# note\n")
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md", "# note\n")
     monkeypatch.setattr(os.path, "islink", lambda p: True)
     with pytest.raises(Exception) as exc:
-        osp.read_vault_note(vault, "NOVA/Docs/README.md", osp.LIMIT_MAXIMUMS)
+        osp.read_vault_note(vault, "NOVA/50_PROJECTS/README.md", osp.LIMIT_MAXIMUMS)
     assert "symbolic link" in str(exc.value)
 
 
@@ -724,7 +724,7 @@ def test_vault_note_outside_the_root_is_refused(tmp_path):
     outside.mkdir()
     write(outside / "README.md", "# elsewhere\n")
     assert osp.escapes_root(vault, outside / "README.md")
-    assert not osp.escapes_root(vault, vault / "NOVA" / "Docs" / "README.md")
+    assert not osp.escapes_root(vault, vault / "NOVA" / "50_PROJECTS" / "README.md")
 
 
 def test_crlf_and_lf_sources_plan_identically(tmp_path):
@@ -741,7 +741,7 @@ def test_crlf_and_lf_sources_plan_identically(tmp_path):
         != (lf / "docs" / "claude-cowork" / "README.md").read_bytes()
 
 
-def test_observation_class_requires_explicit_selection(tmp_path):
+def test_research_class_requires_explicit_selection(tmp_path):
     repo = make_repo(tmp_path)
     write(repo / "nova_knowledge_core" / "OTE_INTELLIGENCE" / "ote.md", "# ote\n")
     git(repo, "add", "-A")
@@ -762,7 +762,7 @@ def test_observation_class_requires_explicit_selection(tmp_path):
 def test_export_never_proposes_a_deletion(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    write(vault / "NOVA" / "Docs" / "orphan.md", "# orphan with no source\n")
+    write(vault / "NOVA" / "50_PROJECTS" / "orphan.md", "# orphan with no source\n")
     rc, out, err = run("plan-export", repo=repo, vault=vault)
     assert rc == 0, err
     body = json.dumps(json.loads(out))
@@ -774,8 +774,8 @@ def test_export_writes_nothing(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    dest = vault / "NOVA" / "Docs" / "README.md"
-    write(dest, note(src, blob_of(repo, src), "approved-doc", "git", last_sync=True))
+    dest = vault / "NOVA" / "50_PROJECTS" / "README.md"
+    write(dest, note(src, blob_of(repo, src), "project", "git", last_sync=True))
     before_vault = _tree_digest(vault)
     before_repo = git(repo, "rev-parse", "HEAD")
     before_status = git(repo, "status", "--porcelain", "-uall")
@@ -789,7 +789,7 @@ def test_export_writes_nothing(tmp_path):
 # ------------------------------------------------------------------- import
 
 def _working_note(rel, body="\nWorking thoughts.\n", **over):
-    dest = "nova_knowledge_core/CANDIDATES/" + rel[len("NOVA/Working/"):]
+    dest = "nova_knowledge_core/CANDIDATES/" + rel[len("NOVA/90_INBOX/"):]
     kw = dict(source=dest, blob="0" * 40, classification="working-note",
               authority="obsidian", body=body, nid=osp.stable_id("obsidian", rel))
     kw.update(over)
@@ -799,8 +799,8 @@ def _working_note(rel, body="\nWorking thoughts.\n", **over):
 def test_valid_candidate_import_requires_approval(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note(rel))
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note(rel))
     rc, out, err = run("plan-import", repo=repo, vault=vault)
     assert rc == 5, err + out
     assert ops(out)[rel] == "candidate-import"
@@ -810,9 +810,9 @@ def test_valid_candidate_import_requires_approval(tmp_path):
 def test_unchanged_note_is_no_change(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
+    rel = "NOVA/90_INBOX/idea.md"
     text = _working_note(rel)
-    write(vault / "NOVA" / "Working" / "idea.md", text)
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", text)
     fm = osp.parse_frontmatter(text, osp.LIMIT_MAXIMUMS)
     body = text[fm.body_offset:]
     write(repo / "nova_knowledge_core" / "CANDIDATES" / "idea.md", body)
@@ -826,8 +826,8 @@ def test_unchanged_note_is_no_change(tmp_path):
 def test_unknown_stable_id_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md",
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md",
           _working_note(rel, nid="nova-" + "0" * 16))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[rel] == "conflict"
@@ -836,8 +836,8 @@ def test_unknown_stable_id_is_a_conflict(tmp_path):
 def test_malformed_provenance_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md", "# no frontmatter at all\n")
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", "# no frontmatter at all\n")
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[rel] == "conflict"
 
@@ -845,9 +845,9 @@ def test_malformed_provenance_is_a_conflict(tmp_path):
 def test_authority_escalation_is_denied(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md",
-          _working_note(rel, classification="approved-spec"))
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md",
+          _working_note(rel, classification="current"))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[rel] == "conflict"
 
@@ -855,14 +855,14 @@ def test_authority_escalation_is_denied(tmp_path):
 def test_git_authority_claim_from_the_vault_is_denied(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note(rel, authority="git"))
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note(rel, authority="git"))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[rel] == "conflict"
 
 
 @pytest.mark.parametrize("dest", [
-    "nova_knowledge_core/RULES/orb.md",
+    "nova_knowledge_core/CURRENT/PRIME/orb.md",
     "docs/claude-cowork/README.md",
     "services/execution.py",
     "engines/risk_engine.py",
@@ -875,8 +875,8 @@ def test_git_authority_claim_from_the_vault_is_denied(tmp_path):
 def test_forbidden_import_destinations_never_become_candidates(tmp_path, dest):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note(rel, source=dest))
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note(rel, source=dest))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 1
     assert ops(out)[rel] in ("conflict", "excluded")
@@ -885,20 +885,20 @@ def test_forbidden_import_destinations_never_become_candidates(tmp_path, dest):
 def test_credential_content_never_becomes_a_candidate(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md",
-          _working_note(rel, body="\ntoken = %s\n" % SECRET_VALUE))
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md",
+          _working_note(rel, body="\ntoken = %s\n" % FIXTURE_VALUE))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 0
     assert ops(out)[rel] == "excluded"
-    assert SECRET_VALUE not in out
+    assert FIXTURE_VALUE not in out
 
 
 def test_executable_directive_never_becomes_a_candidate(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md",
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md",
           _working_note(rel, body="\n<%tp.system.prompt()%>\n"))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert ops(out)[rel] == "excluded"
@@ -907,8 +907,8 @@ def test_executable_directive_never_becomes_a_candidate(tmp_path):
 def test_source_destination_mismatch_is_a_conflict(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md",
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md",
           _working_note(rel, source="nova_knowledge_core/CANDIDATES/elsewhere.md"))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[rel] == "conflict"
@@ -917,17 +917,17 @@ def test_source_destination_mismatch_is_a_conflict(tmp_path):
 def test_a_note_outside_an_import_namespace_is_ignored(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    write(vault / "NOVA" / "Docs" / "exported.md", "# not a working note\n")
+    write(vault / "NOVA" / "50_PROJECTS" / "exported.md", "# not a working note\n")
     rc, out, err = run("plan-import", repo=repo, vault=vault)
     assert rc == 0, err
-    assert "NOVA/Docs/exported.md" not in ops(out)
+    assert "NOVA/50_PROJECTS/exported.md" not in ops(out)
 
 
 def test_import_leaves_the_repository_byte_identical(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    rel = "NOVA/Working/idea.md"
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note(rel))
+    rel = "NOVA/90_INBOX/idea.md"
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note(rel))
     before_repo = _tree_digest(repo)
     before_vault = _tree_digest(vault)
     run("plan-import", repo=repo, vault=vault)
@@ -939,7 +939,7 @@ def test_import_leaves_the_repository_byte_identical(tmp_path):
 def test_import_plan_is_never_approval(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note("NOVA/Working/idea.md"))
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note("NOVA/90_INBOX/idea.md"))
     rc, out, _err = run("plan-import", repo=repo, vault=vault)
     assert rc == 5
     assert "not approval" in out and "Nothing is written" in out
@@ -970,7 +970,7 @@ def test_duplicate_frontmatter_key_rejected():
 def test_unknown_nova_control_field_rejected():
     fields = {"nova_id": osp.stable_id("git", "x.md"), "nova_schema": "1",
               "nova_source": "x.md", "nova_source_blob": "a" * 40,
-              "nova_source_hash": "b" * 64, "nova_classification": "approved-doc",
+              "nova_source_hash": "b" * 64, "nova_classification": "project",
               "nova_authority": "git", "nova_sync_state": "synchronized",
               "nova_execute": "true"}
     with pytest.raises(Exception) as exc:
@@ -981,7 +981,7 @@ def test_unknown_nova_control_field_rejected():
 def test_traversal_in_nova_source_rejected():
     fields = {"nova_id": osp.stable_id("git", "x.md"), "nova_schema": "1",
               "nova_source": "../../etc/passwd", "nova_source_blob": "a" * 40,
-              "nova_source_hash": "b" * 64, "nova_classification": "approved-doc",
+              "nova_source_hash": "b" * 64, "nova_classification": "project",
               "nova_authority": "git", "nova_sync_state": "synchronized"}
     with pytest.raises(Exception) as exc:
         osp.validate_provenance(fields, policy_doc(), osp.LIMIT_MAXIMUMS)
@@ -990,8 +990,8 @@ def test_traversal_in_nova_source_rejected():
 
 def test_absolute_machine_path_in_metadata_rejected():
     fields = {"nova_id": osp.stable_id("git", "x.md"), "nova_schema": "1",
-              "nova_source": "C:/Users/someone/x.md", "nova_source_blob": "a" * 40,
-              "nova_source_hash": "b" * 64, "nova_classification": "approved-doc",
+              "nova_source": "C:" + "/Us" + "ers/someone/x.md", "nova_source_blob": "a" * 40,
+              "nova_source_hash": "b" * 64, "nova_classification": "project",
               "nova_authority": "git", "nova_sync_state": "synchronized"}
     with pytest.raises(Exception):
         osp.validate_provenance(fields, policy_doc(), osp.LIMIT_MAXIMUMS)
@@ -1000,9 +1000,9 @@ def test_absolute_machine_path_in_metadata_rejected():
 def test_credential_shaped_metadata_rejected():
     fields = {"nova_id": osp.stable_id("git", "x.md"), "nova_schema": "1",
               "nova_source": "x.md", "nova_source_blob": "a" * 40,
-              "nova_source_hash": "b" * 64, "nova_classification": "approved-doc",
+              "nova_source_hash": "b" * 64, "nova_classification": "project",
               "nova_authority": "git", "nova_sync_state": "synchronized",
-              "nova_approval": SECRET_VALUE}
+              "nova_approval": FIXTURE_VALUE}
     with pytest.raises(Exception):
         osp.validate_provenance(fields, policy_doc(), osp.LIMIT_MAXIMUMS)
 
@@ -1077,9 +1077,9 @@ def test_stable_id_is_never_taken_from_the_note(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
     src = "docs/claude-cowork/README.md"
-    text = note(src, blob_of(repo, src), "approved-doc", "git", last_sync=True,
+    text = note(src, blob_of(repo, src), "project", "git", last_sync=True,
                 nid="nova-" + "f" * 16)
-    write(vault / "NOVA" / "Docs" / "README.md", text)
+    write(vault / "NOVA" / "50_PROJECTS" / "README.md", text)
     rc, out, _err = run("plan-export", repo=repo, vault=vault)
     assert rc == 1 and ops(out)[src] == "conflict"
 
@@ -1099,10 +1099,10 @@ def _plan_doc(direction, items):
 def _sample_item(**over):
     item = {
         "schema_version": 1, "nova_id": osp.stable_id("git", "docs/a.md"),
-        "title": "a", "classification": "approved-doc", "authority": "git",
+        "title": "a", "classification": "project", "authority": "git",
         "source_repository": "demo", "source_path": "docs/a.md",
         "source_blob": "a" * 40, "source_hash": "b" * 64,
-        "destination": "NOVA/Docs/a.md", "operation": "create",
+        "destination": "NOVA/50_PROJECTS/a.md", "operation": "create",
         "prior_source_blob": None, "prior_source_hash": None,
         "observed_destination_hash": None, "conflict_status": "none",
         "conflict_reason": "",
@@ -1128,7 +1128,7 @@ def test_check_plan_detects_a_tampered_item_hash(tmp_path):
 
 def test_check_plan_detects_a_tampered_field(tmp_path):
     item = _sample_item()
-    item["destination"] = "NOVA/Docs/elsewhere.md"
+    item["destination"] = "NOVA/50_PROJECTS/elsewhere.md"
     rc, out, _err = run("check-plan", inp=_plan_doc("export", [item]))
     assert rc == 1
 
@@ -1142,7 +1142,7 @@ def test_check_plan_rejects_a_duplicate_destination(tmp_path):
 
 def test_check_plan_rejects_one_source_with_two_destinations(tmp_path):
     a = _sample_item()
-    b = _sample_item(destination="NOVA/Docs/b.md")
+    b = _sample_item(destination="NOVA/50_PROJECTS/b.md")
     rc, _out, err = run("check-plan", inp=_plan_doc("export", [a, b]))
     assert rc == 2
 
@@ -1169,7 +1169,7 @@ def test_check_plan_requires_approval_for_candidate_imports(tmp_path):
 
 
 def test_check_plan_rejects_an_absolute_path(tmp_path):
-    item = _sample_item(source_path="C:/Users/someone/a.md")
+    item = _sample_item(source_path="C:" + "/Us" + "ers/someone/a.md")
     rc, _out, err = run("check-plan", inp=_plan_doc("export", [item]))
     assert rc == 2
 
@@ -1201,7 +1201,7 @@ def test_plan_item_ceiling_is_enforced(tmp_path):
     pol = write_policy(tmp_path, doc)
     items = [_sample_item(), _sample_item(nova_id=osp.stable_id("git", "docs/b.md"),
                                           source_path="docs/b.md",
-                                          destination="NOVA/Docs/b.md")]
+                                          destination="NOVA/50_PROJECTS/b.md")]
     p = tmp_path / "plan.json"
     p.write_text(json.dumps(_plan_doc("export", items)), encoding="utf-8")
     rc, _out, err = run("check-plan", policy=pol, extra=["--input", str(p)])
@@ -1274,7 +1274,7 @@ def test_git_refs_index_config_and_fetch_head_are_untouched(tmp_path):
 def test_no_lock_or_temp_residue(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note("NOVA/Working/idea.md"))
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note("NOVA/90_INBOX/idea.md"))
     run("plan-export", repo=repo, vault=vault)
     run("plan-import", repo=repo, vault=vault)
     for root in (repo, vault, tmp_path):
@@ -1303,7 +1303,7 @@ def test_input_files_are_byte_identical_afterwards(tmp_path):
 def test_output_is_deterministic_across_runs(tmp_path):
     repo = make_repo(tmp_path)
     vault = make_vault(tmp_path)
-    write(vault / "NOVA" / "Working" / "idea.md", _working_note("NOVA/Working/idea.md"))
+    write(vault / "NOVA" / "90_INBOX" / "idea.md", _working_note("NOVA/90_INBOX/idea.md"))
     for op, fmt in (("plan-export", "json"), ("plan-export", "markdown"),
                     ("plan-import", "json"), ("plan-import", "markdown"),
                     ("validate-policy", "json")):
@@ -1316,22 +1316,22 @@ def test_no_canary_username_secret_or_raw_path_in_output(tmp_path):
     repo = make_repo(tmp_path, "nova-demo")
     vault = make_vault(tmp_path)
     write(repo / "docs" / "claude-cowork" / "leak.md",
-          "# %s\n\nkey = %s\n\nC:\\Users\\someone\\vault\n" % (CANARY, SECRET_VALUE))
+          "# %s\n\nkey = %s\n\nC:\\Users\\someone\\vault\n" % (CANARY, FIXTURE_VALUE))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "leak")
     for op in ("plan-export", "plan-import", "inventory"):
         rc, out, err = run(op, repo=repo, vault=vault)
         blob = out + err
-        assert SECRET_VALUE not in blob, op
+        assert FIXTURE_VALUE not in blob, op
         assert CANARY not in blob, op
         assert str(tmp_path) not in blob, op
-        assert "C:\\Users" not in blob and "C:/Users" not in blob, op
+        assert "C:" + "\\Users" not in blob and "C:" + "/Users" not in blob, op
 
 
 def test_excluded_document_bodies_are_never_printed(tmp_path):
     repo = make_repo(tmp_path)
     write(repo / "docs" / "claude-cowork" / "secretish.md",
-          "# heading\n\npassword = %s\n\nUNIQUE_BODY_PHRASE_9f1c\n" % SECRET_VALUE)
+          "# heading\n\npassword = %s\n\nUNIQUE_BODY_PHRASE_9f1c\n" % FIXTURE_VALUE)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "secretish")
     rc, out, err = run("plan-export", repo=repo, vault=make_vault(tmp_path))

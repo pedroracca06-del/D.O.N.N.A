@@ -3,9 +3,8 @@
 AI-native **market intelligence** system for MES/ES and MNQ/NQ futures.
 FastAPI backend + Claude AI + TradingView MCP.
 
-> **The legacy trading/execution subsystem is RETIRED.** NOVA currently observes,
-> reasons, and reports. It does not trade. Read *Retirement boundary* below before
-> touching anything execution-related.
+> **The trading/execution subsystem is TEMPORARILY DISABLED.** NOVA currently observes,
+> reasons, and reports. It does not trade today. The preserved subsystem may return only through a separately approved future system change. Read *Disablement boundary* below before touching anything execution-related.
 
 ---
 
@@ -14,7 +13,7 @@ FastAPI backend + Claude AI + TradingView MCP.
 **Active surfaces** — Overview, Markets/News, Journal, Settings, and the NOVA
 Assistant.
 
-**Retired surfaces** — the legacy H.A.R.V.E.Y / Market Reality trading tab, the
+**Disabled surfaces** — the legacy H.A.R.V.E.Y / Market Reality trading tab, the
 legacy strategy-alert pipeline, and the legacy execution/broker surfaces. That
 code is archived, not deleted; see
 `nova_knowledge_core/TRADING_SUBSYSTEM_RETIREMENT_AUDIT.md`,
@@ -35,9 +34,9 @@ Beware the historical fragility of Python triple-quoted strings containing JS: u
 
 ---
 
-## Retirement boundary
+## Disablement boundary
 
-Two flags gate the retired subsystem. **Neither may ever be set to an enabling
+Two flags gate the disabled subsystem. **Neither may ever be set to an enabling
 value** (`true`, `1`, `yes`, `on`, `enabled`):
 
 - `NOVA_TRADING_SUBSYSTEM_ENABLED` — master kill switch (`core/config.py`, default false)
@@ -54,7 +53,7 @@ it.** For a Tier 2 file it will direct you to the Edit tool instead of a shell
 mutation; that is the sanctioned path.
 
 The guard is one mechanical layer, not a complete guarantee. It enforces the
-retired-subsystem boundary, the protected file list, and the activation flags. It
+disabled-subsystem boundary, the protected file list, and the activation flags. It
 does **not** by itself prevent every possible form of influence on trading — that
 also depends on approval policy, worktree separation, ownership boundaries, and
 deterministic risk/execution design.
@@ -87,7 +86,7 @@ uvicorn main:app --reload --port 8000
 | `main.py` | FastAPI entry point — routes, background loops, market data |
 | `intelligence/` | Provider-independent AI gateway — `gateway.py`, `registry.py`, `model_registry.py`, `budget.py`, `cache.py`, `audit.py`, `envelope.py`, `providers/`, `prompts/` |
 | `engines/` | `reasoning.py` (intelligence pipeline), `engines.py`, `analytics.py`, `risk_engine.py`, `signals.py`, `native_shadow.py`, market-context engines |
-| `services/` | `assistant.py`, `news.py`, `finnhub.py`, `headlines.py`; plus retired `execution*.py` (Tier 1 — guarded) |
+| `services/` | `assistant.py`, `news.py`, `finnhub.py`, `headlines.py`; plus disabled `execution*.py` (Tier 1 — guarded) |
 | `core/` | `config.py` (constants, env, kill switch), `state.py`, `state_engine.py` |
 | `delivery/` | `alert_engine.py`, `macro_discord.py`, `signal_log.py` |
 | `health/` | `health.py` — subsystem health checks |
@@ -175,9 +174,7 @@ change is wrong or the test needs a deliberate, separately approved update.
   "clean up" — it is live state and validation evidence.
 - **Research does not become an active NOVA rule without Pedro's explicit
   approval.** Ingested material stays in a quarantined layer.
-- Archived **Execution Bot Phase 8** is preserved but **not approved and not
-  active**. Do not activate it, merge it into retirement work, or treat it as
-  sanctioned trading-bot development.
+- Archived **Execution Bot Phase 8** is preserved but **not approved and not active**. It is historical implementation lineage for a possible future, separately approved return; do not activate it or treat its presence as current authorization.
 
 ---
 

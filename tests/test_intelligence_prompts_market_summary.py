@@ -241,7 +241,7 @@ def _mock_adapter_result(text, input_tokens=60, output_tokens=40, model='claude-
     return AdapterResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens, model=model)
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_success_through_real_gateway_and_prompt_module(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -259,7 +259,7 @@ def test_end_to_end_success_through_real_gateway_and_prompt_module(mock_adapter_
     assert 'Mega-cap leadership' in sent_prompt
 
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_end_to_end_empty_output_produces_malformed_output(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 
@@ -294,7 +294,7 @@ def test_missing_api_key_returns_provider_not_configured():
 # 3. Cache-hit behavior
 # ═══════════════════════════════════════════════════════════════════════
 
-@patch('intelligence.gateway.AnthropicAdapter')
+@patch('intelligence.providers.anthropic_adapter.AnthropicAdapter')
 def test_cache_hit_on_identical_curated_input(mock_adapter_cls):
     from intelligence.gateway import request_intelligence
 

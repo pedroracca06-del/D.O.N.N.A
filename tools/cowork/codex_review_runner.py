@@ -214,8 +214,16 @@ APPROVAL_DELIVERY = "config-override"
 APPROVAL_CONFIG_KEY = "approval_policy"
 APPROVAL_FORBIDDEN_ARGUMENTS = ("-a", "--ask-for-approval")
 
+# USERNAME and USERDOMAIN are here for a specific reason: the Windows sandbox
+# setup helper resolves the invoking user's SID from them. Strip them and it
+# writes the setup marker with an ACL that excludes the very user who launched
+# it, so the next run cannot read the marker, re-runs setup, and fails with
+# `orchestrator_helper_incomplete` forever. That is openai/codex#41135, closed
+# not-planned precisely because the launcher -- not Codex -- was at fault.
+# Neither is a secret: the account name is already visible in USERPROFILE.
 ENVIRONMENT_ALLOWLIST = ("APPDATA", "CODEX_HOME", "HOME", "LOCALAPPDATA", "PATH",
-                         "SystemRoot", "TEMP", "TMP", "TMPDIR", "USERPROFILE")
+                         "SystemRoot", "TEMP", "TMP", "TMPDIR", "USERDOMAIN",
+                         "USERNAME", "USERPROFILE")
 
 RESPONSE_DIRNAME = "runner-tmp"
 

@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta
 
 from core.config import (
     RISK_STATE_FILE, ALERTS_FILE, ASSISTANT_FILE, SETTINGS_FILE,
-    MACRO_EVENTS_FILE, JOURNAL_FILE, REJECTIONS_FILE,
-    DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS,
+    MACRO_EVENTS_FILE, JOURNAL_FILE, JOURNAL_WORKSPACE_FILE, REJECTIONS_FILE,
+    DEFAULT_RISK_STATE, DEFAULT_ASSISTANT_STATE, DEFAULT_SETTINGS, DEFAULT_MACRO_EVENTS, NY_TZ,
     now_ny, now_utc, utc_now_iso, day_name, session_label,
 )
 
@@ -51,6 +52,8 @@ def ensure_files():
         write_json_file(MACRO_EVENTS_FILE, DEFAULT_MACRO_EVENTS)
     if not JOURNAL_FILE.exists():
         write_json_file(JOURNAL_FILE, [])
+    if not JOURNAL_WORKSPACE_FILE.exists():
+        write_json_file(JOURNAL_WORKSPACE_FILE, default_journal_workspace())
     if not REJECTIONS_FILE.exists():
         write_json_file(REJECTIONS_FILE, [])
 
@@ -145,8 +148,110 @@ def load_journal() -> list:
     return data if isinstance(data, list) else []
 
 
+def journal_trading_date(trade: dict) -> str:
+    """Return the NY trading date, rolling evening Asia into the next day.
+
+    The Asia session opens at 19:00 ET. A record created from 19:00 onward
+    therefore belongs to the following trading day; an after-midnight Asia
+    record already carries that following calendar date and is not advanced
+    again. Records without a trustworthy timestamp retain their explicit
+    date so manual historical backfills are never guessed at.
+    """
+    stored = str((trade or {}).get('trade_date', '') or '')
+    session = str((trade or {}).get('session', '') or '').upper()
+
+    raw_ts = str((trade or {}).get('timestamp', '') or '')
+    if not raw_ts:
+        return stored
+    try:
+        instant = datetime.fromisoformat(raw_ts.replace('Z', '+00:00'))
+        if instant.tzinfo is None:
+            return stored
+        ny = instant.astimezone(NY_TZ)
+    except (TypeError, ValueError):
+        return stored
+
+    calendar_date = ny.date().isoformat()
+    previous_date = (ny.date() - timedelta(days=1)).isoformat()
+    if session == 'ASIA' and ny.hour >= 19 and stored == calendar_date:
+        return (ny.date() + timedelta(days=1)).isoformat()
+    if session == 'ASIA' and ny.hour < 3 and stored != calendar_date:
+        return calendar_date
+
+    # The manual form can remain open across midnight. If its untouched date
+    # is exactly one day stale and the submission timestamp falls inside the
+    # selected NY session, use the submission's NY calendar date. A record
+    # backfilled by two or more days remains explicit and is never rewritten.
+    minute = ny.hour * 60 + ny.minute
+    ny_sessions = {'NY_AM', 'NY_OPEN', 'NEW_YORK_CASH', 'NEW_YORK_CLOSE'}
+    if (session in ny_sessions and 9 * 60 + 30 <= minute < 16 * 60
+            and stored == previous_date):
+        return calendar_date
+    return stored
+
+
+def with_journal_trading_dates(trades: list) -> list:
+    """Copy journal records with their effective trading dates for display."""
+    return [{**t, 'trade_date': journal_trading_date(t)} for t in trades]
+
+
+_LEGACY_EXECUTION_NOTE_MARKERS = (
+    'donna autonomous trade',
+    'nova autonomous trade',
+    'eod forced close',
+    'closed via nova_execution_tab',
+    'reconstructed by audit.py from execution_trace',
+)
+
+
+def journal_record_origin(trade: dict) -> str:
+    """Classify provenance without mutating historical journal evidence.
+
+    The retired execution subsystem wrote distinctive audit text into every
+    record it created.  Strong markers are intentionally required: an older
+    record with incomplete metadata remains personal rather than being hidden
+    on a guess.
+    """
+    notes = str((trade or {}).get('notes', '')).lower()
+    return 'legacy_system' if any(marker in notes for marker in _LEGACY_EXECUTION_NOTE_MARKERS) else 'personal'
+
+
 def save_journal(trades: list):
     write_json_file(JOURNAL_FILE, trades)
+
+
+def default_journal_workspace() -> dict:
+    return {
+        'plans': [],
+        'reflections': [],
+        'studies': [],
+        'goals': [],
+        'system': {
+            'approved_models': ['KLR', 'OTE', 'ORB', 'POWELL_10AM'],
+            'max_trades_per_day': 2,
+            'daily_risk_pct': 1.0,
+            'max_losses_per_day': 2,
+            'live_sessions': ['NY_AM', 'NY_PM'],
+            'prime_steps': ['Position', 'Relevant Level', 'Interaction', 'Market Confirmation', 'Execution'],
+        },
+    }
+
+
+def load_journal_workspace() -> dict:
+    raw = read_json_file(JOURNAL_WORKSPACE_FILE, {})
+    default = default_journal_workspace()
+    if not isinstance(raw, dict):
+        return default
+    out = dict(default)
+    for key in ('plans', 'reflections', 'studies', 'goals'):
+        out[key] = raw.get(key) if isinstance(raw.get(key), list) else []
+    if isinstance(raw.get('system'), dict):
+        out['system'] = {**default['system'], **raw['system']}
+    return out
+
+
+def save_journal_workspace(workspace: dict):
+    write_json_file(JOURNAL_WORKSPACE_FILE, workspace)
 
 
 def update_trade_thesis_analysis(order_id: str, analysis: dict) -> bool:
@@ -244,7 +349,7 @@ def compute_journal_stats(trades: list) -> dict:
         else:
             breakevens += 1
 
-        trade_date = str(t.get('trade_date', ''))
+        trade_date = journal_trading_date(t)
         if trade_date == today_str:
             daily_today += pnl
         elif trade_date == yesterday_str:

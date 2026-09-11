@@ -44,14 +44,44 @@ class AuditRecord:
 
 
 def _load(path: Path) -> list:
+    """Read the log, preserving anything unreadable instead of dropping it.
+
+    Returning an empty list for content that could not be parsed meant the very
+    next write replaced the file, and whatever it held was gone. An audit log
+    that quietly discards its own contents when they look wrong is the one that
+    matters least when something has gone wrong. Unreadable content is moved
+    aside under a timestamped name so it survives for inspection.
+    """
+    if not path.exists():
+        return []
     try:
-        if path.exists():
-            data = json.loads(path.read_text(encoding='utf-8'))
-            if isinstance(data, list):
-                return data
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if isinstance(data, list):
+            return data
     except Exception:
         pass
+    if not _quarantine(path):
+        # The content could not be preserved. The write MUST NOT go ahead:
+        # _save replaces the file via os.replace, which would succeed and
+        # destroy the very evidence that could not be moved aside.
+        raise _EvidenceAtRisk(
+            'unreadable audit content could not be preserved; refusing to '
+            'overwrite it')
     return []
+
+
+class _EvidenceAtRisk(Exception):
+    """Raised when writing would destroy content that could not be preserved."""
+
+
+def _quarantine(path: Path) -> bool:
+    """Move unreadable log content aside. True when it is safely preserved."""
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')
+    try:
+        os.replace(path, path.with_name(path.name + '.unreadable-' + stamp))
+        return True
+    except OSError:
+        return False
 
 
 def _save(path: Path, entries: list) -> None:
@@ -74,11 +104,19 @@ def write_record(record: AuditRecord, path: Optional[Path] = None) -> None:
             entries = _load(path)
             entries.append(asdict(record))
             if len(entries) > _MAX_ENTRIES:
+                # A bounded ring buffer is deliberate -- this is an
+                # observability log, not the execution trace -- but the
+                # overflow is recorded so a reader can tell truncation from an
+                # empty history.
+                dropped = len(entries) - _MAX_ENTRIES
                 entries = entries[-_MAX_ENTRIES:]
+                entries[0] = dict(entries[0], _truncated_before=dropped)
             _save(path, entries)
     except Exception:
         # Never let an audit-log failure surface as an unhandled exception or
-        # take down the request it is trying to record.
+        # take down the request it is trying to record. Losing THIS record is
+        # the accepted cost; losing records already written is not, which is
+        # why the path above refuses to write rather than overwrite.
         pass
 
 
