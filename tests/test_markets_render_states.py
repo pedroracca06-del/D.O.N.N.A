@@ -353,8 +353,8 @@ def test_news_empty_feed_is_stated_not_padded():
     out = _run(LIVE)
     assert 'No headlines in the feed' in out['mkNewsBody']['text']
     assert 'as if it had just broken' in out['mkNewsBody']['text']
-    assert 'President Trump Speaks' in out['mkNewsBody']['text']
-    assert '09-01 · 15:00' in out['mkNewsBody']['text']
+    assert 'Upcoming macro' not in out['mkNewsBody']['text'].lower()
+    assert 'Economic calendar' in out['mkNewsBody']['text']
 
 
 def test_news_headline_links_to_its_real_source_article():
@@ -488,7 +488,7 @@ def test_rail_says_not_available_rather_than_inventing_a_level():
     assert 'Not available' in out['mkMacroRisk']['text']
 
 
-def test_upcoming_macro_prioritizes_today_over_six_expired_events():
+def test_full_calendar_shows_current_events_without_upcoming_macro_panel():
     old = [
         {'title': f'Expired event {i}', 'date': f'2026-09-0{1 + (i // 3)}',
          'time_et': '10:00', 'importance': 'medium', 'currency': 'USD'}
@@ -509,8 +509,9 @@ def test_upcoming_macro_prioritizes_today_over_six_expired_events():
     assert 'Non-Farm Employment Change' in text
     assert 'Unemployment Rate' in text
     assert 'Average Hourly Earnings m/m' in text
-    assert 'Actual: 162K' in text
     assert 'Expired event 0' not in text
+    assert 'Upcoming macro' not in text.lower()
+    assert 'Economic calendar' in text
 
 
 def test_provenance_names_each_source_and_its_age():
