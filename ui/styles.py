@@ -2184,6 +2184,37 @@ table.mk-xa tbody tr:last-child td{border-bottom:0}
 .mk-cat-b{min-width:0}
 .mk-cat-h{font-size:13px;line-height:1.45;color:var(--text);display:block}
 .mk-cat-link{color:inherit;text-decoration:none}
+
+/* Forex Factory-style weekly macro calendar */
+.mk-calendar-section{border-top:1px solid var(--line);padding-top:18px;margin-top:4px}
+.mk-calendar-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:10px}
+.mk-calendar-sub{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted2);line-height:1.5}
+.mk-calendar-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.mk-cal-weekflag{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.6px;font-weight:700;white-space:nowrap}
+.mk-cal-weekflag:before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%}
+.mk-cal-weekflag.red{color:var(--red-text);border-color:rgba(192,57,43,.35);background:rgba(192,57,43,.08)}
+.mk-cal-weekflag.red:before{background:var(--red)}
+.mk-cal-weekflag.unconfirmed{color:var(--muted2)}
+.mk-cal-weekflag.unconfirmed:before{background:var(--muted2)}
+.mk-calendar-scroll{max-height:440px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--bg2);overscroll-behavior:contain}
+.mk-calendar-scroll:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.mk-calendar-scroll::-webkit-scrollbar{width:7px;height:7px}
+.mk-calendar-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:7px}
+.mk-calendar-table{width:100%;min-width:820px;border-collapse:separate;border-spacing:0;font-size:11px;font-variant-numeric:tabular-nums}
+.mk-calendar-table th,.mk-calendar-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line2);white-space:nowrap}
+.mk-calendar-table thead th{position:sticky;top:0;z-index:2;background:var(--panel2);font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted2);border-bottom:1px solid var(--line)}
+.mk-calendar-table .mk-calendar-day th{position:sticky;top:30px;z-index:1;background:var(--blue);color:#fff;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.6px}
+.mk-calendar-table .mk-calendar-event:hover{background:var(--panel2)}
+.mk-calendar-table .mk-cal-time{font-family:'Space Mono',monospace;color:var(--muted2)}
+.mk-calendar-table .mk-cal-title{min-width:210px;white-space:normal;color:var(--text);font-weight:600}
+.mk-calendar-table .impact-high .mk-cal-title{color:var(--text)}
+.mk-cal-impact{display:inline-flex;align-items:center;gap:5px;font-family:'Space Mono',monospace;font-size:9px;font-weight:700}
+.mk-cal-impact i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--muted2)}
+.mk-cal-impact.high{color:var(--red-text)}.mk-cal-impact.high i{background:var(--red)}
+.mk-cal-impact.medium{color:var(--gold)}.mk-cal-impact.medium i{background:var(--gold)}
+.mk-cal-impact.low{color:var(--muted2)}
+.mk-calendar-empty{padding:18px!important;color:var(--muted2);white-space:normal!important}
+
 .mk-cat-link:hover{text-decoration:underline;text-underline-offset:2px}
 .mk-cat-link:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:2px}
 .mk-cat-m{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2);margin-top:3px;display:block}

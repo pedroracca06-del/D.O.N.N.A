@@ -76,22 +76,48 @@ def _write_json(path: Path, data: dict):
 
 def _safe_get(url: str, params=None, timeout: int = 18):
     try:
-        r = requests.get(url, params=params, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
+        # Some public calendar CDNs rate-limit Python's default requests user
+        # agent. Identify NOVA clearly and make one bounded retry on 429/5xx.
+        headers = {'User-Agent': 'NOVA-MacroCalendar/1.0 (+calendar client)'}
+        last_response = None
+        for attempt in range(2):
+            r = requests.get(url, params=params, timeout=timeout, headers=headers)
+            last_response = r
+            if r.status_code == 429 or r.status_code >= 500:
+                if attempt == 0:
+                    import time
+                    time.sleep(1.0)
+                    continue
+            r.raise_for_status()
+            return r.json()
+        if last_response is not None:
+            last_response.raise_for_status()
     except Exception as e:
         print(f'[donna_headlines] GET {url} failed: {e}')
         return None
 
 def _week_bounds() -> tuple[str, str]:
-    now    = _now_ny()
-    # ForexFactory rolls its `thisweek` feed forward over the weekend.  Match
-    # that behaviour: on Saturday/Sunday fetch the coming trading week instead
-    # of filtering every returned event against the week that just ended.
+    """Monday-Friday trading week used by macro-risk governance."""
+    now = _now_ny()
+    # ForexFactory rolls its `thisweek` feed forward over the weekend. Keep
+    # governance anchored to the next/current Mon-Fri trading window.
     days_to_monday = (7 - now.weekday()) if now.weekday() >= 5 else -now.weekday()
     monday = now + timedelta(days=days_to_monday)
     friday = monday + timedelta(days=4)
     return monday.strftime('%Y-%m-%d'), friday.strftime('%Y-%m-%d')
+
+
+def _calendar_bounds() -> tuple[str, str]:
+    """Sunday-Saturday window shown by the Forex Factory-style calendar."""
+    now = _now_ny()
+    if now.weekday() == 6:       # Sunday: current FF week has just rolled over
+        sunday = now
+    elif now.weekday() == 5:     # Saturday: preview the week starting tomorrow
+        sunday = now + timedelta(days=1)
+    else:                        # Monday-Friday: include this week's Sunday
+        sunday = now - timedelta(days=(now.weekday() + 1) % 7)
+    saturday = sunday + timedelta(days=6)
+    return sunday.strftime('%Y-%m-%d'), saturday.strftime('%Y-%m-%d')
 
 def _phase_from_mins(mins: int | None) -> str:
     if mins is None:
@@ -139,6 +165,37 @@ def _normalize_impact(raw: str) -> str:
         return 'medium'
     return 'low'
 
+def _classify_speaker_event(title: str) -> dict:
+    """Tag scheduled Trump/Fed speaking events for visibility, never execution governance."""
+    text = " ".join(str(title or "").split())
+    low = text.lower()
+    speaking_terms = (
+        "speaks", "speech", "speaking", "remarks", "address", "testifies",
+        "testimony", "press conference", "interview",
+    )
+    if not any(term in low for term in speaking_terms):
+        return {"event_type": "macro", "speaker_alert": False, "speaker_kind": "", "speaker_name": ""}
+
+    if "trump" in low or "president" in low:
+        return {
+            "event_type": "speaker", "speaker_alert": True,
+            "speaker_kind": "political", "speaker_name": "President Trump",
+        }
+
+    fed_terms = (
+        "fomc", "fed ", "federal reserve", "powell", "waller", "williams",
+        "bostic", "daly", "kashkari", "bowman", "cook", "jefferson",
+        "barr", "goolsbee", "hammack", "schmid", "miran",
+    )
+    if not any(term in low for term in fed_terms):
+        return {"event_type": "macro", "speaker_alert": False, "speaker_kind": "", "speaker_name": ""}
+
+    name = text if text else "Fed/FOMC speaker"
+    return {
+        "event_type": "speaker", "speaker_alert": True,
+        "speaker_kind": "fed", "speaker_name": name,
+    }
+
 def _is_financial(event: dict) -> bool:
     t = event.get('title', '').lower()
     if any(w in t for w in _NON_FINANCIAL):
@@ -174,8 +231,9 @@ def _fetch_fmp_calendar(mon_str: str, fri_str: str) -> list[dict]:
 
         imp_raw    = str(item.get('impact', '') or item.get('importance', '')).strip()
         importance = _normalize_impact(imp_raw)
-        if importance == 'low':
-            continue
+        # Retain low-impact USD events for calendar display. Governance filters
+        # them separately through _is_financial(), so visibility cannot itself
+        # create an execution lock.
 
         # Date/time — FMP delivers "YYYY-MM-DD HH:MM:SS" in ET
         raw_date = str(item.get('date', '')).strip()
@@ -196,6 +254,7 @@ def _fetch_fmp_calendar(mon_str: str, fri_str: str) -> list[dict]:
 
         events.append({
             'title':      title,
+            **_classify_speaker_event(title),
             'time_et':    time_et,
             'importance': importance,
             'category':   _category(title),
@@ -221,14 +280,17 @@ def _fetch_ff_json_calendar() -> list[dict]:
     events: list[dict] = []
 
     for item in data:
-        country = str(item.get('country', '') or item.get('currency', '')).upper()
-        if country != 'USD':
+        country = str(item.get('country', '') or item.get('currency', '')).strip().upper()
+        # Keep USD plus Forex Factory's ALL-currency/all-day context rows in the
+        # visible calendar. Non-USD individual events remain outside this desk.
+        if country not in ('USD', 'US', 'ALL'):
             continue
+        currency = 'USD' if country in ('USD', 'US') else 'ALL'
 
         imp_raw    = str(item.get('impact', '')).strip()
         importance = _normalize_impact(imp_raw)
-        if importance == 'low':
-            continue
+        # Low-impact speakers and meeting notices are visible for context, but
+        # remain excluded from intraday governance by _is_financial().
 
         title = str(item.get('title', '') or item.get('name', '')).strip()
         if not title:
@@ -237,7 +299,8 @@ def _fetch_ff_json_calendar() -> list[dict]:
         # Date: try ISO first, then "Jan 15, 2024" / "Jan 15"
         raw_date = str(item.get('date', '')).strip()
         date_str = ''
-        time_et  = '08:30'
+        time_et  = ''
+        display_time = ''
 
         if 'T' in raw_date or (len(raw_date) > 10 and ' ' in raw_date):
             try:
@@ -261,32 +324,48 @@ def _fetch_ff_json_calendar() -> list[dict]:
         if not date_str:
             continue
 
-        # Separate time field
+        # Preserve untimed events as untimed; do not silently assign a guessed
+        # release time that could create an inaccurate intraday risk window.
         raw_time = str(item.get('time', '')).strip().lower()
-        if raw_time and raw_time not in ('all day', 'tentative', ''):
+        if raw_time in ('all day', 'tentative'):
+            display_time = 'All Day' if raw_time == 'all day' else 'Tentative'
+            time_et = ''
+        elif raw_time:
+            parsed_time = ''
             for fmt in ('%I:%M%p', '%I%p', '%H:%M'):
                 try:
-                    time_et = datetime.strptime(raw_time, fmt).strftime('%H:%M')
+                    parsed_time = datetime.strptime(raw_time, fmt).strftime('%H:%M')
                     break
                 except ValueError:
                     pass
+            if parsed_time:
+                time_et = parsed_time
+                display_time = parsed_time
+            elif not time_et:
+                display_time = raw_time.title()
+        elif time_et:
+            display_time = time_et
+        else:
+            display_time = 'Time TBA'
 
         actual   = str(item.get('actual', '') if item.get('actual') is not None else '').strip() or 'Pending'
         forecast = str(item.get('forecast', '') or '').strip() or '—'
         previous = str(item.get('previous', '') or '').strip() or '—'
 
         events.append({
-            'title':      title,
-            'time_et':    time_et,
-            'importance': importance,
-            'category':   _category(title),
-            'actual':     actual,
-            'forecast':   forecast,
-            'previous':   previous,
-            'note':       f'Actual: {actual} | Forecast: {forecast} | Prev: {previous}',
-            'date':       date_str,
-            'currency':   'USD',
-            'source':     'ForexFactory',
+            'title':        title,
+            **_classify_speaker_event(title),
+            'time_et':      time_et,
+            'display_time': display_time or time_et or 'Time TBA',
+            'importance':   importance,
+            'category':     _category(title),
+            'actual':       actual,
+            'forecast':     forecast,
+            'previous':     previous,
+            'note':         f'Actual: {actual} | Forecast: {forecast} | Prev: {previous}',
+            'date':         date_str,
+            'currency':     currency,
+            'source':       'ForexFactory',
         })
     return events
 
@@ -492,21 +571,22 @@ def check_todays_events():
 def process_headlines_cycle():
     """
     Full fetch + persist cycle called by headline_loop() every 15 minutes.
-    1. Fetches Mon–Fri from FMP (primary) and ForexFactory JSON (secondary).
-    2. Merges, deduplicates, filters to USD HIGH/MEDIUM only.
-    3. Persists to donna_macro_events.json.
-    4. Detects red-folder week (name-based and count-based).
-    5. Writes weekly_summary, morning_brief_lead, and timing to risk state.
+    1. Fetches Mon-Fri USD data from FMP and Sunday-Saturday context from Forex Factory.
+    2. Merges/deduplicates all USD and ALL-context impact levels for the calendar.
+    3. Uses separate Mon-Fri/high-medium filters for intraday risk governance.
+    4. Persists the full display week and updates the red-folder-week state.
     """
     print(f'[donna_headlines] Running cycle at {_now_ny().strftime("%H:%M:%S")} ET')
 
     mon_str, fri_str = _week_bounds()
+    calendar_start, calendar_end = _calendar_bounds()
 
-    # 1. Fetch both sources
+    # FMP is queried for the trading week; Forex Factory supplies the full
+    # Sunday-Saturday view, including low-impact speakers and ALL-day notices.
     fmp_events = _fetch_fmp_calendar(mon_str, fri_str)
-    ff_events  = [
+    ff_events = [
         e for e in _fetch_ff_json_calendar()
-        if mon_str <= e.get('date', '') <= fri_str
+        if calendar_start <= e.get('date', '') <= calendar_end
     ]
     week_events = _merge_events(fmp_events, ff_events)
 
@@ -532,10 +612,18 @@ def process_headlines_cycle():
         week_events = previous_events
         source = str(previous.get('source') or 'retained')
         print('[donna_headlines] Both calendar providers returned empty; '
-              'retaining the last good payload for the current week')
+              'retaining the last good payload for the current week and preserving risk state')
+        return
+    elif not week_events and source == 'none':
+        # Fail closed on missing calendar data. An empty provider response is
+        # not evidence of a quiet week: preserve existing risk/lock state and
+        # do not replace the calendar payload with an empty schedule.
+        print('[donna_headlines] ERROR: calendar providers unavailable; '
+              'preserving current calendar, macro risk, and red-folder lock')
+        return
 
-    print(f'[donna_headlines] {len(week_events)} USD HIGH/MEDIUM events '
-          f'({mon_str}→{fri_str}) — source: {source}')
+    print(f'[donna_headlines] {len(week_events)} calendar events '
+          f'({calendar_start}->{calendar_end}; risk week {mon_str}->{fri_str}) - source: {source}')
 
     # 2. Persist full week. When retaining, leave fetched_at and the file bytes
     # untouched so freshness remains honest. A successful replacement clears
@@ -543,10 +631,13 @@ def process_headlines_cycle():
     if not retained_last_good:
         _write_json(MACRO_EVENTS_FILE, {
             'source':     source,
+            'data_status': 'live',
             'fetched_at': _utc_iso(),
-            'week_start': mon_str,
-            'week_end':   fri_str,
-            'events':     week_events,
+            'week_start':     mon_str,
+            'week_end':       fri_str,
+            'calendar_start': calendar_start,
+            'calendar_end':   calendar_end,
+            'events':         week_events,
         })
         cache_delete('calendar')
 
