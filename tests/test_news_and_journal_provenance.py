@@ -71,8 +71,8 @@ def test_calendar_cycle_retains_last_good_current_week_on_provider_dropout(tmp_p
 
     assert macro_path.read_bytes() == before
     delete_cache.assert_not_called()
-    risk = json.loads(risk_path.read_text(encoding='utf-8'))
-    assert risk['next_event'] == 'ISM Manufacturing PMI'
+    # Provider outage must not mutate risk state based on a potentially stale calendar.
+    assert json.loads(risk_path.read_text(encoding='utf-8')) == {}
 
 
 def test_calendar_cycle_replaces_payload_and_invalidates_cache_on_recovery(tmp_path):

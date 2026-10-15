@@ -1223,7 +1223,7 @@ function renderEconCalendar(events) {
   }
 
   function _countdown(evMin, hasActual, isToday) {
-    if (!isToday) return null;
+    if (!isToday || !Number.isFinite(evMin)) return null;
     const diff = evMin - nowMin;
     if (hasActual || diff < -45) return { label: 'RELEASED', cls: 'released' };
     if (diff < 0)               return { label: 'POST EVENT', cls: 'released' };
@@ -1239,9 +1239,11 @@ function renderEconCalendar(events) {
     const imp      = (ev.importance || 'low').toLowerCase();
     const isHigh   = imp === 'high';
     const isMedium = imp === 'medium';
-    const [hh, mm] = (ev.time_et || '00:00').split(':').map(Number);
-    const evMin    = hh * 60 + mm;
-    const hasActual = ev.actual != null && ev.actual !== '' && ev.actual !== '—';
+    const timeParts = String(ev.time_et || '').split(':').map(Number);
+    const evMin = timeParts.length === 2 && timeParts.every(Number.isFinite)
+      ? timeParts[0] * 60 + timeParts[1] : NaN;
+    const hasActualLabel = ev.actual != null && ev.actual !== '' && ev.actual !== '—';
+    const hasActual = hasActualLabel && String(ev.actual).trim().toLowerCase() !== 'pending';
     const cd       = _countdown(evMin, hasActual, isToday);
     const isLive   = cd && cd.cls === 'live';
     const isRel    = cd && cd.cls === 'released';
@@ -1250,20 +1252,24 @@ function renderEconCalendar(events) {
 
     // Data values row
     const valParts = [];
-    if (hasActual)            valParts.push(`A: ${ev.actual}`);
+    if (hasActualLabel)       valParts.push(`A: ${ev.actual}`);
     if (ev.forecast != null)  valParts.push(`F: ${ev.forecast}`);
     if (ev.previous != null && !hasActual) valParts.push(`P: ${ev.previous}`);
     const valsHtml    = valParts.length ? `<span class="mre-vals">${valParts.join(' · ')}</span>` : '';
     const verdictHtml = hasActual ? _verdictHtml(ev) : '';
 
     const cdHtml = cd ? `<span class="mre-countdown ${cd.cls}">${cd.label}</span>` : '';
+    const speakerTag = ev.speaker_alert
+      ? `<span class="mre-speaker-tag" style="display:inline-block;border:1px solid var(--accent);border-radius:3px;padding:1px 5px;margin-right:5px;font-size:9px;font-weight:700;letter-spacing:.04em;color:var(--accent)" title="${ev.speaker_name || ev.title}">${ev.speaker_kind === 'political' ? 'POLITICAL SPEAKER' : 'FED SPEAKER'}</span>`
+      : '';
 
     // LOW — compact inline row
     if (!isHigh && !isMedium) {
       return `<div class="macro-radar-event impact-low${displayRel?' released':''}">
   <div class="mre-compact">
     <span class="mre-compact-dot"></span>
-    <span class="mre-time">${ev.time_et || '?'}</span>
+    <span class="mre-time">${ev.display_time || ev.time_et || '?'}</span>
+    ${speakerTag}
     <span class="mre-compact-title">${ev.title || '—'}</span>
     ${valsHtml}
     ${cdHtml}
@@ -1285,9 +1291,9 @@ function renderEconCalendar(events) {
     ${cdHtml}
   </div>
   <div class="mre-body">
-    <div class="${isHigh ? 'mre-title-high' : 'mre-title-med'}">${ev.title || '—'}</div>
+    <div class="${isHigh ? 'mre-title-high' : 'mre-title-med'}">${speakerTag} ${ev.title || '—'}</div>
     <div class="mre-meta-row">
-      <span class="mre-time">${ev.time_et || '?'} ET</span>
+      <span class="mre-time">${ev.display_time || ev.time_et || 'Time TBA'} ET</span>
       ${valsHtml}${verdictHtml}
     </div>
   </div>
@@ -4471,8 +4477,10 @@ function _mkRenderNews(dash) {
     return;
   }
   const news = dash.news || [];
-  const events = ((dash.calendar || {}).events) || [];
-  const riskDate = String(((dash.risk || {}).donna_time_ny) || '').slice(0, 10);
+  const calendarData = dash.calendar || {};
+  const events = Array.isArray(calendarData.events) ? calendarData.events : [];
+  const riskState = dash.risk || {};
+  const riskDate = String((riskState.donna_time_ny) || '').slice(0, 10);
   const todayEt = riskDate || (() => {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -4483,6 +4491,8 @@ function _mkRenderNews(dash) {
     String(a.time_et || '').localeCompare(String(b.time_et || ''));
   const currentEvents = events.filter(e => String(e.date || '') >= todayEt).sort(byEventTime);
   const recentEvents = events.filter(e => String(e.date || '') < todayEt).sort(byEventTime).reverse();
+  // Keep the compact headline cards focused, while the full calendar below
+  // exposes the complete feed in a scrollable Forex Factory-style table.
   const displayedEvents = currentEvents.concat(recentEvents).slice(0, 6);
   const severityWeight = {high: 3, medium: 2, low: 1};
   const ranked = news.slice().sort((a, b) => {
@@ -4596,6 +4606,63 @@ function _mkRenderNews(dash) {
   if (!events.length && !news.length) {
     html += '<div class="mk-note"><b>Nothing live right now</b>Both collections are empty — quiet tape, not a failure.</div>';
   }
+  // Full weekly economic calendar: Forex Factory-inspired and independently scrollable.
+  const calendarRows = events.filter(e => !e.date || String(e.date) >= todayEt).slice().sort(byEventTime);
+  const dayGroups = [];
+  calendarRows.forEach(e => {
+    const ds = String(e.date || todayEt).slice(0, 10);
+    let group = dayGroups[dayGroups.length - 1];
+    if (!group || group.date !== ds) {
+      group = {date: ds, events: []};
+      dayGroups.push(group);
+    }
+    group.events.push(e);
+  });
+  const dayName = ds => {
+    const parts = ds.split('-').map(Number);
+    const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+    return new Intl.DateTimeFormat('en-US', {weekday:'short', month:'short', day:'numeric', timeZone:'America/New_York'}).format(dt);
+  };
+  const redWeek = riskState.red_folder_week === true;
+  const weekFlagHtml = '<span class="mk-cal-weekflag ' + (redWeek ? 'red' : 'unconfirmed') + '">' +
+    (redWeek ? 'RED-FOLDER WEEK' : 'WEEKLY FLAG NOT ACTIVE') + '</span>';
+  const calendarFetchedAt = calendarData.fetched_at ? Date.parse(calendarData.fetched_at) : NaN;
+  const calendarAgeMins = Number.isFinite(calendarFetchedAt) ? Math.max(0, (Date.now() - calendarFetchedAt) / 60000) : null;
+  let calendarStatus = 'FRESHNESS UNKNOWN';
+  if (calendarData.data_status === 'recovered_snapshot') calendarStatus = 'RECOVERED SNAPSHOT · LIVE REFRESH UNVERIFIED';
+  else if (calendarAgeMins !== null && calendarAgeMins >= 30) calendarStatus = 'STALE · ' + Math.floor(calendarAgeMins) + ' MIN OLD';
+  else if (calendarAgeMins !== null && calendarAgeMins >= 15) calendarStatus = 'AGING · ' + Math.floor(calendarAgeMins) + ' MIN OLD';
+  else if (calendarAgeMins !== null) calendarStatus = 'UPDATED ' + Math.floor(calendarAgeMins) + ' MIN AGO';
+  const calendarSource = String(calendarData.source || 'source unavailable');
+  html += '<section class="mk-news-section mk-calendar-section" aria-label="Economic calendar">' +
+    '<div class="mk-calendar-head"><div><div class="mk-news-label">Economic calendar</div>' +
+    '<div class="mk-calendar-sub">USD + ALL-context events · times ET · source: ' + _mkEsc(calendarSource) + ' · ' + _mkEsc(calendarStatus) + '</div></div>' +
+    '<div class="mk-calendar-meta">' + weekFlagHtml + '<span class="mk-sub">' + calendarRows.length + ' events</span></div></div>' +
+    '<div class="mk-calendar-scroll" tabindex="0" aria-label="Scrollable weekly economic calendar">' +
+    '<table class="mk-calendar-table"><thead><tr><th>Date / time ET</th><th>Impact</th><th>Currency</th><th>Event</th><th>Actual</th><th>Forecast</th><th>Previous</th></tr></thead><tbody>';
+  dayGroups.forEach(group => {
+    html += '<tr class="mk-calendar-day"><th colspan="7">' + _mkEsc(dayName(group.date)) +
+      (group.date === todayEt ? ' · TODAY' : '') + '</th></tr>';
+    group.events.forEach(e => {
+      const imp = String(e.importance || 'low').toLowerCase();
+      const actual = String(e.actual == null || e.actual === '' ? 'Pending' : e.actual);
+      const speakerTag = e.speaker_alert
+        ? '<span class="mre-speaker-tag" title="' + _mkEsc(e.speaker_name || e.title || 'Scheduled speaker event') + '">' +
+          (e.speaker_kind === 'political' ? 'POLITICAL SPEAKER' : 'FED SPEAKER') + '</span> '
+        : '';
+      html += '<tr class="mk-calendar-event impact-' + _mkEsc(imp) + '">' +
+        '<td class="mk-cal-time">' + _mkEsc((e.display_time || e.time_et || 'Time TBA') + ((e.display_time && e.display_time.match(/^[0-9]{2}:[0-9]{2}$/)) || (!e.display_time && e.time_et) ? ' ET' : '')) + '</td>' +
+        '<td><span class="mk-cal-impact ' + _mkEsc(imp) + '"><i></i>' + _mkEsc(imp.toUpperCase()) + '</span></td>' +
+        '<td>' + _mkEsc(e.currency || 'USD') + '</td>' +
+        '<td class="mk-cal-title">' + speakerTag + _mkEsc(e.title || 'Untitled event') + '</td>' +
+        '<td>' + _mkEsc(actual) + '</td><td>' + _mkEsc(e.forecast || '—') + '</td><td>' + _mkEsc(e.previous || '—') + '</td>' +
+        '</tr>';
+    });
+  });
+  if (!calendarRows.length) {
+    html += '<tr><td colspan="7" class="mk-calendar-empty">No scheduled macro events loaded. NOVA will not invent releases.</td></tr>';
+  }
+  html += '</tbody></table></div></section>';
   body.innerHTML = html;
 }
 
