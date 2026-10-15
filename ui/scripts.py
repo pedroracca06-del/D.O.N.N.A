@@ -4590,16 +4590,6 @@ function _mkRenderNews(dash) {
   const esDrivers = ranked.filter(n => String(n.severity || '').toLowerCase() !== 'low' &&
     esTerms.test([n.headline, n.summary, n.category].filter(Boolean).join(' '))).slice(0, 2);
   html += '<div class="mk-driver-subhead">Why ES is moving</div>' + renderIndexDriver(es, 'ES', esDrivers);
-  html += '</section><section class="mk-news-section"><div class="mk-news-label">Upcoming macro · date &amp; time ET</div>';
-  displayedEvents.forEach(e => {
-    const imp = String(e.importance || 'low').toLowerCase();
-    html += '<div class="mk-cat"><span class="mk-cat-t">' + _mkEsc((e.date ? e.date + ' · ' : '') + (e.time_et || '—') + ' ET') + '</span>' +
-      '<span class="mk-imp ' + _mkEsc(imp) + '" aria-hidden="true"></span>' +
-      '<span class="mk-cat-b"><span class="mk-cat-h">' + _mkEsc(e.title || 'Untitled event') + '</span>' +
-      '<span class="mk-cat-m">' + _mkEsc([imp.toUpperCase() + ' IMPACT', e.currency, e.note, e.source].filter(Boolean).join(' · ')) +
-      '</span></span></div>';
-  });
-  if (!events.length) html += '<div class="mk-note"><b>No scheduled events loaded</b>The calendar source returned no events. NOVA will not invent an economic release.</div>';
   html += '</section><section class="mk-news-section"><div class="mk-news-label">Full live coverage · war, macro, policy &amp; finance</div>' +
     '<div class="mk-all-news">' + (ranked.length ? ranked.map(row).join('') :
       '<div class="mk-note"><b>Coverage unavailable</b>No current articles were returned.</div>') + '</div></section></div>';
