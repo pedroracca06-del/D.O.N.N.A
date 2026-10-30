@@ -2006,8 +2006,12 @@ async def purge_test_events(request: Request):
     Body: { "ids": ["id1", "id2", ...] }
     """
     from core.config import NOVA_INGEST_SECRET, INTELLIGENCE_LOG_FILE, SIGNAL_LOG_FILE, TRACE_FILE
+    # Fail closed: an unset server secret must never authenticate an empty
+    # or missing request header. Keep this endpoint disabled until configured.
+    if not NOVA_INGEST_SECRET:
+        raise HTTPException(status_code=503, detail='Purge endpoint is not configured.')
     secret = request.headers.get('X-Nova-Ingest-Secret', '')
-    if secret != NOVA_INGEST_SECRET:
+    if not secret or secret != NOVA_INGEST_SECRET:
         raise HTTPException(status_code=401, detail='Invalid ingest secret.')
     try:
         body = await request.json()
