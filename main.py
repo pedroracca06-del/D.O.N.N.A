@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import os
+import secrets
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -183,6 +188,137 @@ except Exception as _se_err:
 
 app = FastAPI(title='NOVA v5.0 Live Market Core', version='5.0')
 _sse_clients: list[asyncio.Queue] = []
+
+# ── Browser access authentication ─────────────────────────────
+# All application routes require a signed server-side session cookie.
+# Integrations with their own authentication remain explicitly exempt.
+NOVA_ACCESS_PASSWORD = os.getenv('NOVA_ACCESS_PASSWORD', '')
+NOVA_AUTH_SECRET = os.getenv('NOVA_AUTH_SECRET', '')
+_NOVA_SESSION_COOKIE = 'nova_session'
+_NOVA_SESSION_TTL_SECONDS = 12 * 60 * 60
+_NOVA_AUTH_EXEMPT_PATHS = {
+    '/', '/login', '/auth/login', '/healthz',
+    '/api/feed/ingest', '/webhook',
+}
+
+
+def _nova_session_token(expiry: int, csrf: str) -> str:
+    payload = f'{expiry}:{csrf}'
+    signature = hmac.new(
+        NOVA_AUTH_SECRET.encode('utf-8'), payload.encode('utf-8'), hashlib.sha256
+    ).hexdigest()
+    encoded = base64.urlsafe_b64encode(payload.encode('utf-8')).decode('ascii').rstrip('=')
+    return f'{encoded}.{signature}'
+
+
+def _nova_valid_session(token: str) -> bool:
+    if not NOVA_AUTH_SECRET or not token or '.' not in token:
+        return False
+    encoded, supplied_signature = token.rsplit('.', 1)
+    try:
+        payload = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)).decode('utf-8')
+        expiry_raw, csrf = payload.split(':', 1)
+        expiry = int(expiry_raw)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    expected = hmac.new(
+        NOVA_AUTH_SECRET.encode('utf-8'), payload.encode('utf-8'), hashlib.sha256
+    ).hexdigest()
+    return bool(csrf) and expiry > int(time.time()) and hmac.compare_digest(
+        supplied_signature, expected
+    )
+
+
+def _nova_login_page(error: str = '') -> str:
+    message = (
+        '<p role="alert" style="color:#b91c1c">Invalid login or access is not configured.</p>'
+        if error else ''
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOVA Login</title><style>
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#090b10;color:#eee;font:16px system-ui}}
+main{{width:min(92vw,380px);padding:32px;border:1px solid #30333b;border-radius:14px;background:#12151c}}
+h1{{margin:0 0 8px;letter-spacing:.12em}}p{{color:#aab0bc}}input,button{{width:100%;padding:13px;margin-top:12px;border-radius:8px;font:inherit}}
+input{{background:#090b10;color:#fff;border:1px solid #414653}}button{{background:#c59b51;color:#111;border:0;font-weight:700;cursor:pointer}}
+</style></head><body><main><h1>NOVA</h1><p>Sign in to your private trading workspace.</p>{message}
+<form method="post" action="/auth/login"><input type="password" name="password" autocomplete="current-password" placeholder="Access password" required autofocus>
+<input type="hidden" name="next" value="/dashboard"><button type="submit">Sign in</button></form></main></body></html>"""
+
+
+@app.middleware('http')
+async def nova_access_middleware(request: Request, call_next):
+    path = request.url.path
+    if path in _NOVA_AUTH_EXEMPT_PATHS or path.startswith('/login/'):
+        return await call_next(request)
+
+    token = request.cookies.get(_NOVA_SESSION_COOKIE, '')
+    if not _nova_valid_session(token):
+        if path == '/dashboard' or path.startswith('/dashboard/'):
+            return Response(
+                content=_nova_login_page(), status_code=401, media_type='text/html',
+                headers={'Cache-Control': 'no-store'},
+            )
+        return Response(
+            content=json.dumps({'detail': 'Authentication required'}),
+            status_code=401, media_type='application/json',
+            headers={'Cache-Control': 'no-store'},
+        )
+
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        origin = request.headers.get('origin')
+        if origin:
+            expected = f'{request.url.scheme}://{request.headers.get("host", request.url.netloc)}'
+            if not hmac.compare_digest(origin.rstrip('/'), expected.rstrip('/')):
+                return Response(
+                    content=json.dumps({'detail': 'Cross-origin request rejected'}),
+                    status_code=403, media_type='application/json',
+                )
+    return await call_next(request)
+
+
+@app.get('/login', response_class=HTMLResponse)
+async def nova_login_page():
+    return HTMLResponse(_nova_login_page(), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/auth/login')
+async def nova_login(request: Request):
+    if not NOVA_ACCESS_PASSWORD or not NOVA_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail='NOVA access authentication is not configured.')
+    content_type = request.headers.get('content-type', '')
+    if 'application/x-www-form-urlencoded' in content_type:
+        form = await request.form()
+        supplied = str(form.get('password', ''))
+        next_path = str(form.get('next', '/dashboard'))
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail='Invalid login request.')
+        supplied = str(body.get('password', ''))
+        next_path = str(body.get('next', '/dashboard'))
+    if not hmac.compare_digest(supplied.encode('utf-8'), NOVA_ACCESS_PASSWORD.encode('utf-8')):
+        return HTMLResponse(_nova_login_page(error='1'), status_code=401, headers={'Cache-Control': 'no-store'})
+    if not next_path.startswith('/') or next_path.startswith('//') or '\\\\' in next_path:
+        next_path = '/dashboard'
+    expiry = int(time.time()) + _NOVA_SESSION_TTL_SECONDS
+    csrf = secrets.token_urlsafe(24)
+    response = Response(status_code=303, headers={'Location': next_path, 'Cache-Control': 'no-store'})
+    response.set_cookie(
+        _NOVA_SESSION_COOKIE, _nova_session_token(expiry, csrf),
+        max_age=_NOVA_SESSION_TTL_SECONDS, httponly=True, secure=request.url.scheme == 'https',
+        samesite='strict', path='/',
+    )
+    return response
+
+
+@app.post('/auth/logout')
+async def nova_logout():
+    response = Response(status_code=303, headers={'Location': '/login', 'Cache-Control': 'no-store'})
+    response.delete_cookie(_NOVA_SESSION_COOKIE, path='/', httponly=True, samesite='strict')
+    return response
+
 
 # ── Background loops ───────────────────────────────────────────
 
