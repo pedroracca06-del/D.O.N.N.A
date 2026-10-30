@@ -5,8 +5,8 @@ mutations must reject requests without authentication. The purge endpoint must
 fail closed when its shared secret is missing.
 
 The tests intentionally do not call production services or use real journal
-files. They are expected to fail against the currently inspected route
-handlers until the corresponding authentication protections are implemented.
+files. They exercise the login boundary, signed session lifecycle, and
+fail-closed purge behavior.
 """
 from __future__ import annotations
 
@@ -119,3 +119,12 @@ def test_logout_revokes_browser_session(monkeypatch):
 
     assert response.status_code == 303
     assert client.get('/state-engine').status_code == 401
+
+
+
+def test_dashboard_requires_login_and_returns_login_form():
+    response = TestClient(main.app).get('/dashboard')
+
+    assert response.status_code == 401
+    assert 'NOVA' in response.text
+    assert 'action="/auth/login"' in response.text
