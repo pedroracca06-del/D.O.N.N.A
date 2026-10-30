@@ -288,9 +288,10 @@ async def nova_login(request: Request):
         raise HTTPException(status_code=503, detail='NOVA access authentication is not configured.')
     content_type = request.headers.get('content-type', '')
     if 'application/x-www-form-urlencoded' in content_type:
-        form = await request.form()
-        supplied = str(form.get('password', ''))
-        next_path = str(form.get('next', '/dashboard'))
+        from urllib.parse import parse_qs
+        form = parse_qs((await request.body()).decode('utf-8', errors='replace'))
+        supplied = str((form.get('password') or [''])[0])
+        next_path = str((form.get('next') or ['/dashboard'])[0])
     else:
         try:
             body = await request.json()
